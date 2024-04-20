@@ -9,7 +9,7 @@ using System.Collections.Concurrent;
 using System.Threading;
 using TransactionHelpers;
 
-namespace Infrastructure.SignalR.Client.Connection.Services;
+namespace Infrastructure.SignalR.Edge.Connection.Services;
 
 internal class SignalRStreamProxyService
 {

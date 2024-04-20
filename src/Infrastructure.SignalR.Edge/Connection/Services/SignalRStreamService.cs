@@ -10,7 +10,7 @@ using System.Threading;
 using TransactionHelpers;
 using System;
 
-namespace Infrastructure.SignalR.Client.Connection.Services;
+namespace Infrastructure.SignalR.Edge.Connection.Services;
 
 public class SignalRStreamService(IServiceProvider serviceProvider)
 {

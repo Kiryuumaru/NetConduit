@@ -1,12 +1,12 @@
-﻿using Application.Client;
+﻿using Application.Edge;
 using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
 
-namespace Presentation.Client;
+namespace Presentation.Edge;
 
-internal class PresentationClient : ApplicationClient
+internal class PresentationEdge : ApplicationEdge
 {
 }

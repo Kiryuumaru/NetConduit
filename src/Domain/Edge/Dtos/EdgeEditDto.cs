@@ -4,9 +4,9 @@ using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
 
-namespace Domain.Client.Dtos;
+namespace Domain.Edge.Dtos;
 
-public class ClientEditDto
+public class EdgeEditDto
 {
     public string? NewName { get; init; }
 

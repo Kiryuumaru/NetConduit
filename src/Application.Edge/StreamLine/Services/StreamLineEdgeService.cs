@@ -5,11 +5,11 @@ using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
 
-namespace Application.Client.StreamLine.Services;
+namespace Application.Edge.StreamLine.Services;
 
-public class StreamLineClientService(ILogger<StreamLineClientService> logger, IServiceProvider serviceProvider)
+public class StreamLineEdgeService(ILogger<StreamLineEdgeService> logger, IServiceProvider serviceProvider)
 {
-    private readonly ILogger<StreamLineClientService> _logger = logger;
+    private readonly ILogger<StreamLineEdgeService> _logger = logger;
     private readonly IServiceProvider _serviceProvider = serviceProvider;
 
     private void Start()

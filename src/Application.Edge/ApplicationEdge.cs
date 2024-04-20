@@ -1,10 +1,10 @@
-﻿using Application.Client.StreamLine.Workers;
+﻿using Application.Edge.StreamLine.Workers;
 using ApplicationBuilderHelpers;
 using Microsoft.Extensions.DependencyInjection;
 
-namespace Application.Client;
+namespace Application.Edge;
 
-public class ApplicationClient : Application
+public class ApplicationEdge : Application
 {
     public override void AddServices(ApplicationDependencyBuilder builder, IServiceCollection services)
     {

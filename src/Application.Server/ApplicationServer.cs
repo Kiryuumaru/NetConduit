@@ -1,5 +1,5 @@
-﻿using Application.Client.StreamLine.Workers;
-using Application.Server.Client.Services;
+﻿using Application.Edge.StreamLine.Workers;
+using Application.Server.Edge.Services;
 using ApplicationBuilderHelpers;
 using Microsoft.Extensions.DependencyInjection;
 
@@ -11,6 +11,6 @@ public class ApplicationServer : Application
     {
         base.AddServices(builder, services);
 
-        services.AddScoped<ClientService>();
+        services.AddScoped<EdgeService>();
     }
 }

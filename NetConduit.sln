@@ -15,23 +15,23 @@ Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "src", "src", "{EADA31C2-F8A
 EndProject
 Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "Application", "src\Application\Application.csproj", "{4A7E5B32-5CE9-4204-AD46-12F87BC38567}"
 EndProject
-Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "Application.Client", "src\Application.Client\Application.Client.csproj", "{E4C2C849-1DC6-4CCD-866E-341E86282D6B}"
+Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "Application.Edge", "src\Application.Edge\Application.Edge.csproj", "{E4C2C849-1DC6-4CCD-866E-341E86282D6B}"
 EndProject
 Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "Application.Server", "src\Application.Server\Application.Server.csproj", "{C31880C5-DEBD-4F34-8EE8-CAA343196063}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Presentation.Client", "src\Presentation.Client\Presentation.Client.csproj", "{50FB3117-C893-4A69-98E0-6680BA219D22}"
+Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "Presentation.Edge", "src\Presentation.Edge\Presentation.Edge.csproj", "{50FB3117-C893-4A69-98E0-6680BA219D22}"
 EndProject
 Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "Presentation.Server", "src\Presentation.Server\Presentation.Server.csproj", "{6F6F7851-8574-4E7F-88E0-86ACE735D6A9}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Domain", "src\Domain\Domain.csproj", "{FED001AB-F732-43B4-BCF7-98FA585BCC44}"
+Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "Domain", "src\Domain\Domain.csproj", "{FED001AB-F732-43B4-BCF7-98FA585BCC44}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Infrastructure.SQLite", "src\Infrastructure.SQLite\Infrastructure.SQLite.csproj", "{8C938622-4221-4FBF-9DB0-BF9B4763CD50}"
+Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "Infrastructure.SQLite", "src\Infrastructure.SQLite\Infrastructure.SQLite.csproj", "{8C938622-4221-4FBF-9DB0-BF9B4763CD50}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Infrastructure.SignalR", "src\Infrastructure.SignalR\Infrastructure.SignalR.csproj", "{A8F4049B-4CB4-49E2-A743-EF2C87F27DBF}"
+Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "Infrastructure.SignalR", "src\Infrastructure.SignalR\Infrastructure.SignalR.csproj", "{A8F4049B-4CB4-49E2-A743-EF2C87F27DBF}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Infrastructure.SignalR.Client", "src\Infrastructure.SignalR.Client\Infrastructure.SignalR.Client.csproj", "{9BF2E5F4-34CC-4FC6-A4CB-BA1C63D1AD6D}"
+Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "Infrastructure.SignalR.Edge", "src\Infrastructure.SignalR.Edge\Infrastructure.SignalR.Edge.csproj", "{9BF2E5F4-34CC-4FC6-A4CB-BA1C63D1AD6D}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Infrastructure.SignalR.Server", "src\Infrastructure.SignalR.Server\Infrastructure.SignalR.Server.csproj", "{5510E7D0-C7D7-46CE-86D2-D70D85703736}"
+Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "Infrastructure.SignalR.Server", "src\Infrastructure.SignalR.Server\Infrastructure.SignalR.Server.csproj", "{5510E7D0-C7D7-46CE-86D2-D70D85703736}"
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution

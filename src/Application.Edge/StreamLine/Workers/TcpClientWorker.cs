@@ -8,7 +8,7 @@ using System.Net.Sockets;
 using System.Text;
 using System.Threading.Tasks;
 
-namespace Application.Client.StreamLine.Workers;
+namespace Application.Edge.StreamLine.Workers;
 
 internal class TcpClientWorker(ILogger<TcpClientWorker> logger, IServiceProvider serviceProvider) : BackgroundService
 {

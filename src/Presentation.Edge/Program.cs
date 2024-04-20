@@ -1,11 +1,11 @@
 ﻿using ApplicationBuilderHelpers;
 using Infrastructure.SQLite;
 using Microsoft.Extensions.Hosting;
-using Presentation.Client;
+using Presentation.Edge;
 
 var builder = ApplicationDependencyBuilder.FromBuilder(Host.CreateApplicationBuilder(args));
 
-builder.Add<PresentationClient>();
+builder.Add<PresentationEdge>();
 builder.Add<SQLiteApplication>();
 
 builder.Run();

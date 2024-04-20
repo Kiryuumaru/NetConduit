@@ -9,7 +9,7 @@ using System.Net.Sockets;
 using System.Text;
 using System.Threading.Tasks;
 
-namespace Application.Client.StreamLine.Workers;
+namespace Application.Edge.StreamLine.Workers;
 
 internal class TcpServerWorker(ILogger<TcpServerWorker> logger, IServiceProvider serviceProvider) : BackgroundService
 {
@@ -45,7 +45,7 @@ internal class TcpServerWorker(ILogger<TcpServerWorker> logger, IServiceProvider
                     {
                         // Accept incoming connection
                         TcpClient client = listener.AcceptTcpClient();
-                        Console.WriteLine("Client connected.");
+                        Console.WriteLine("Edge connected.");
 
                         // Get the network stream
                         NetworkStream stream = client.GetStream();
@@ -63,7 +63,7 @@ internal class TcpServerWorker(ILogger<TcpServerWorker> logger, IServiceProvider
 
                         // Close the connection
                         client.Close();
-                        Console.WriteLine("Client disconnected.");
+                        Console.WriteLine("Edge disconnected.");
                     }
                 }
                 catch (Exception ex)

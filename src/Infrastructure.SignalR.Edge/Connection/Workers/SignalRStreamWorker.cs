@@ -1,6 +1,6 @@
 ﻿using Application.Common;
 using DisposableHelpers;
-using Infrastructure.SignalR.Client.Connection.Services;
+using Infrastructure.SignalR.Edge.Connection.Services;
 using Microsoft.AspNetCore.SignalR.Client;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
@@ -10,7 +10,7 @@ using System.Collections.Concurrent;
 using System.Threading;
 using TransactionHelpers;
 
-namespace Infrastructure.SignalR.Client.Connection.Workers;
+namespace Infrastructure.SignalR.Edge.Connection.Workers;
 
 internal class SignalRStreamWorker(ILogger<SignalRStreamWorker> logger, IConfiguration configuration, IServiceProvider serviceProvider) : BackgroundService
 {
@@ -61,7 +61,7 @@ internal class SignalRStreamWorker(ILogger<SignalRStreamWorker> logger, IConfigu
             {
                 if (_hubConnection == null || _hubConnection.State != HubConnectionState.Connected)
                 {
-                    _logger.LogWarning("SignalR client disconnected");
+                    _logger.LogWarning("SignalR edge disconnected");
                     await Start(stoppingToken);
                 }
                 await Task.Delay(5000, stoppingToken);
@@ -72,7 +72,7 @@ internal class SignalRStreamWorker(ILogger<SignalRStreamWorker> logger, IConfigu
 
     private async Task Start(CancellationToken stoppingToken)
     {
-        _logger.LogInformation("SignalR client connecting...");
+        _logger.LogInformation("SignalR edge connecting...");
 
         while (!stoppingToken.IsCancellationRequested)
         {
@@ -94,11 +94,11 @@ internal class SignalRStreamWorker(ILogger<SignalRStreamWorker> logger, IConfigu
                 {
                     await _hubConnection.DisposeAsync();
                 }
-                _logger.LogError("SignalR client connect error: {}. Retrying...", ex);
+                _logger.LogError("SignalR edge connect error: {}. Retrying...", ex);
                 await Task.Delay(5000, stoppingToken);
             }
         }
 
-        _logger.LogInformation("SignalR client connected");
+        _logger.LogInformation("SignalR edge connected");
     }
 }

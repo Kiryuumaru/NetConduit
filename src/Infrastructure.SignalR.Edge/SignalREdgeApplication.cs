@@ -1,11 +1,11 @@
 ﻿using ApplicationBuilderHelpers;
-using Infrastructure.SignalR.Client.Connection.Services;
-using Infrastructure.SignalR.Client.Connection.Workers;
+using Infrastructure.SignalR.Edge.Connection.Services;
+using Infrastructure.SignalR.Edge.Connection.Workers;
 using Microsoft.Extensions.DependencyInjection;
 
-namespace Infrastructure.SignalR.Client;
+namespace Infrastructure.SignalR.Edge;
 
-public class SignalRClientApplication : ApplicationDependency
+public class SignalREdgeApplication : ApplicationDependency
 {
     public override void AddServices(ApplicationDependencyBuilder builder, IServiceCollection services)
     {

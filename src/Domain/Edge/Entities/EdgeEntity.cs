@@ -4,9 +4,13 @@ using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
 
-namespace Domain.Client.Dtos;
+namespace Domain.Edge.Entities;
 
-public class ClientAddDto
+public class EdgeEntity
 {
+    public required string Id { get; init; }
+
     public required string Name { get; init; }
+
+    public required string Token { get; init; }
 }

@@ -13,7 +13,7 @@
   </ItemGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\..\src\Presentation.Client\Presentation.Client.csproj" />
+    <ProjectReference Include="..\..\src\Presentation.Edge\Presentation.Edge.csproj" />
     <ProjectReference Include="..\..\src\Presentation.Server\Presentation.Server.csproj" />
   </ItemGroup>
 

@@ -8,11 +8,11 @@ namespace Domain.Route.Entities;
 
 public class PortRouteEntity
 {
-    public required string FromClientId { get; init; }
+    public required string FromEdgeId { get; init; }
 
-    public required int FromClientPort { get; init; }
+    public required int FromEdgePort { get; init; }
 
-    public required string ToClientId { get; init; }
+    public required string ToEdgeId { get; init; }
 
-    public required int ToClientPort { get; init; }
+    public required int ToEdgePort { get; init; }
 }
