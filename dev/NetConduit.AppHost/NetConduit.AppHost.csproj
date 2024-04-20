@@ -9,12 +9,12 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <PackageReference Include="Aspire.Hosting" Version="8.0.0-preview.3.24105.21" />
+    <PackageReference Include="Aspire.Hosting.AppHost" Version="8.0.0-preview.5.24201.12" />
   </ItemGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\..\src\NetConduit.Client\NetConduit.Client.csproj" />
-    <ProjectReference Include="..\..\src\NetConduit.Server\NetConduit.Server.csproj" />
+    <ProjectReference Include="..\..\src\Presentation.Client\Presentation.Client.csproj" />
+    <ProjectReference Include="..\..\src\Presentation.Server\Presentation.Server.csproj" />
   </ItemGroup>
 
 </Project>
