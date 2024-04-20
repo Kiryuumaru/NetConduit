@@ -2,8 +2,9 @@
 using Domain.Edge.Dtos;
 using Domain.Edge.Entities;
 using Microsoft.AspNetCore.Mvc;
-
 using RestfulHelpers.Common;
+
+namespace Presentation.Server.Controllers;
 
 /// <summary>
 /// Controller for managing Edge entities.
