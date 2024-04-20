@@ -1,5 +1,7 @@
 ﻿using Application.Server;
 using ApplicationBuilderHelpers;
+using Microsoft.OpenApi.Models;
+using System.Reflection;
 
 namespace Presentation.Server;
 
@@ -19,8 +21,23 @@ internal class PresentationServer : ApplicationServer
 
         services.AddControllers();
         services.AddEndpointsApiExplorer();
-        services.AddSwaggerGen();
+        services.AddSwaggerGen(options =>
+        {
+            options.SwaggerDoc("v1", new OpenApiInfo
+            {
+                Version = "v1",
+                Title = "NetConduit API",
+                Description = "Just another edge tunnel solution",
+                Contact = new OpenApiContact
+                {
+                    Name = "Kiryuumaru",
+                    Url = new Uri("https://github.com/Kiryuumaru")
+                }
+            });
 
+            var xmlFilename = $"{Assembly.GetExecutingAssembly().GetName().Name}.xml";
+            options.IncludeXmlComments(Path.Combine(AppContext.BaseDirectory, xmlFilename));
+        });
     }
 
     public override void AddMiddlewares(ApplicationDependencyBuilder builder, IHost host)
