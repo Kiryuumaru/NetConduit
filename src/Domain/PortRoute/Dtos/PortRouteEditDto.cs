@@ -4,9 +4,9 @@ using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
 
-namespace Domain.Route.Entities;
+namespace Domain.PortRoute.Dtos;
 
-public class PortRouteEntity
+public class PortRouteEditDto
 {
     public required string FromEdgeId { get; init; }
 

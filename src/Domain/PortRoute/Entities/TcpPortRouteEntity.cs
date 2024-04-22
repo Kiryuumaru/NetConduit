@@ -4,7 +4,7 @@ using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
 
-namespace Domain.Route.Entities;
+namespace Domain.PortRoute.Entities;
 
 public class TcpPortRouteEntity : PortRouteEntity
 {
