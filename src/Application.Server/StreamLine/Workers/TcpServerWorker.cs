@@ -49,7 +49,6 @@ internal class TcpServerWorker(ILogger<TcpServerWorker> logger, IServiceProvider
 
                         // Get the network stream
                         NetworkStream stream = client.GetStream();
-
                         // Receive data from client
                         byte[] buffer = new byte[1024];
                         int bytesRead = stream.Read(buffer, 0, buffer.Length);

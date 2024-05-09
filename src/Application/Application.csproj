@@ -7,22 +7,24 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <Compile Remove="StreamLine\Interfaces\**" />
+    <EmbeddedResource Remove="StreamLine\Interfaces\**" />
+    <None Remove="StreamLine\Interfaces\**" />
+  </ItemGroup>
+
+  <ItemGroup>
     <PackageReference Include="ApplicationBuilderHelpers" Version="0.1.0" />
     <PackageReference Include="Hardware.Info" Version="100.1.0" />
     <PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions" Version="8.0.1" />
     <PackageReference Include="Microsoft.Extensions.Hosting.Abstractions" Version="8.0.0" />
-    <PackageReference Include="RestfulHelpers" Version="1.0.20" />
+    <PackageReference Include="RestfulHelpers" Version="1.7.0" />
     <PackageReference Include="SingletonSessionHelpers" Version="2.0.6" />
     <PackageReference Include="System.Management" Version="8.0.0" />
-    <PackageReference Include="TransactionHelpers" Version="2.1.1" />
+    <PackageReference Include="TransactionHelpers" Version="2.4.0" />
   </ItemGroup>
 
   <ItemGroup>
     <ProjectReference Include="..\Domain\Domain.csproj" />
-  </ItemGroup>
-
-  <ItemGroup>
-    <Folder Include="StreamLine\Interfaces\" />
   </ItemGroup>
 
 </Project>

@@ -18,7 +18,7 @@ public class SignalRStreamService(IServiceProvider serviceProvider)
 
     public Task<Result<HubConnection>> GetHubConnectionAsync(CancellationToken cancellationToken)
     {
-        var signalRStreamProxy = _serviceProvider.GetRequiredService<SignalRStreamService>();
+        var signalRStreamProxy = _serviceProvider.GetRequiredService<SignalRStreamProxyService>();
 
         return signalRStreamProxy.GetHubConnectionAsync(cancellationToken);
     }

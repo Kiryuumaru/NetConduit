@@ -7,11 +7,18 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <Compile Remove="StreamLine\Interfaces\**" />
+    <EmbeddedResource Remove="StreamLine\Interfaces\**" />
+    <None Remove="StreamLine\Interfaces\**" />
+  </ItemGroup>
+
+  <ItemGroup>
     <ProjectReference Include="..\Application\Application.csproj" />
   </ItemGroup>
 
   <ItemGroup>
-    <Folder Include="StreamLine\Interfaces\" />
+    <Folder Include="PortRoute\" />
+    <Folder Include="StreamLine\Services\" />
   </ItemGroup>
 
 </Project>

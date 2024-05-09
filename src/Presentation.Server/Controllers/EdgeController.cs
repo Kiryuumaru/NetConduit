@@ -1,6 +1,7 @@
 ﻿using Application.Server.Edge.Services;
 using Domain.Edge.Dtos;
 using Domain.Edge.Entities;
+using Domain.Edge.Models;
 using Microsoft.AspNetCore.Mvc;
 using RestfulHelpers.Common;
 
@@ -34,12 +35,12 @@ public class EdgeController(EdgeService edgeService) : ControllerBase
     /// <returns>An HTTP result containing the EdgeEntity.</returns>
     /// <response code="200">Returns when the operation is successful.</response>
     /// <response code="400">Returns when the provided ID is invalid.</response>
-    /// <response code="404">Returns when the Edge entity with the given ID is not found.</response>
+    /// <response code="404">Returns when the provided ID is not found.</response>
     /// <response code="500">Returns when an unexpected error occurs.</response>
     [HttpGet("{id}")]
-    public Task<HttpResult<EdgeEntity>> Get(string id)
+    public Task<HttpResult<EdgeConnectionEntity>> Get(string id)
     {
-        return _edgeService.Get(id);
+        return _edgeService.GetHandshake(id);
     }
 
     /// <summary>

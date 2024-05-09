@@ -1,4 +1,5 @@
-﻿using Application.LocalStore.Services;
+﻿using Application.EventHub.Services;
+using Application.LocalStore.Services;
 using Application.StreamLine.Services;
 using ApplicationBuilderHelpers;
 using Microsoft.Extensions.DependencyInjection;
@@ -11,7 +12,8 @@ public class Application : ApplicationDependency
     {
         base.AddServices(builder, services);
 
-        services.AddScoped<LocalStoreService>();
-        services.AddScoped<StreamLineService>();
+        services.AddTransient<LocalStoreService>();
+        services.AddSingleton<EventHubService>();
+        services.AddSingleton<StreamLineService>();
     }
 }

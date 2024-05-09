@@ -13,6 +13,8 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.AspNetCore.SignalR.Client;
 using System;
 using DisposableHelpers.Attributes;
+using Domain.Edge.Models;
+using Infrastructure.SignalR.Server.Handshake.Services;
 
 namespace Infrastructure.SignalR.Server;
 
@@ -20,6 +22,18 @@ public class SignalRStreamHub(ILogger<SignalRStreamHub> logger, IServiceProvider
 {
     protected readonly ILogger<SignalRStreamHub> _logger = logger;
     protected readonly IServiceProvider ServiceProvider = serviceProvider;
+
+    [HubMethodName(Defaults.HandshakeMethod)]
+    public ChannelReader<EdgeRoutingTable> Handshake(string handshakeToken)
+    {
+        var channel = Channel.CreateUnbounded<EdgeRoutingTable>();
+
+        var handshakeStreamHub = ServiceProvider.GetRequiredService<HandshakeStreamHub>();
+
+        handshakeStreamHub.Routine(this, handshakeToken, channel);
+
+        return channel;
+    }
 
     [HubMethodName(Defaults.ListenMethod)]
     public ChannelReader<byte> Listen()

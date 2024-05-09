@@ -1,7 +1,10 @@
 ﻿using Application.Common;
+using Application.Edge.Common;
 using Application.LocalStore.Services;
+using Application.Server.PortRoute.Services;
 using Domain.Edge.Dtos;
 using Domain.Edge.Entities;
+using Domain.Edge.Models;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using RestfulHelpers.Common;
@@ -10,6 +13,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Net;
 using System.Text;
+using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 using TransactionHelpers;
@@ -17,20 +21,10 @@ using TransactionHelpers.Interface;
 
 namespace Application.Server.Edge.Services;
 
-public class EdgeService(ILogger<EdgeService> logger, IServiceProvider serviceProvider)
+public class EdgeService(ILogger<EdgeService> logger, EdgeStoreService edgeStoreService)
 {
     private readonly ILogger<EdgeService> _logger = logger;
-    private readonly IServiceProvider _serviceProvider = serviceProvider;
-
-    private const string _edgeGroupStore = "edge_group_store";
-
-    private LocalStoreService? _localStoreService = null;
-
-    private LocalStoreService GetStore()
-    {
-        _localStoreService ??= _serviceProvider.GetRequiredService<LocalStoreService>();
-        return _localStoreService;
-    }
+    private readonly EdgeStoreService _edgeStoreService = edgeStoreService;
 
     private static string GenerateToken()
     {
@@ -41,9 +35,9 @@ public class EdgeService(ILogger<EdgeService> logger, IServiceProvider servicePr
     {
         HttpResult<EdgeEntity[]> result = new();
 
-        var store = GetStore();
+        var store = _edgeStoreService.GetStore();
 
-        if (!result.SuccessAndHasValue(await store.GetIds(group: _edgeGroupStore, cancellationToken: cancellationToken), out string[]? edgeIds))
+        if (!result.SuccessAndHasValue(await store.GetIds(cancellationToken: cancellationToken), out string[]? edgeIds))
         {
             _logger.LogError("Error edge GetAll: {}", result.Error);
             result.WithStatusCode(HttpStatusCode.InternalServerError);
@@ -54,7 +48,7 @@ public class EdgeService(ILogger<EdgeService> logger, IServiceProvider servicePr
 
         foreach (var id in edgeIds)
         {
-            if (!result.SuccessAndHasValue(await store.Get<EdgeEntity>(id, group: _edgeGroupStore, cancellationToken: cancellationToken), out EdgeEntity? edge))
+            if (!result.SuccessAndHasValue(await store.Get<EdgeEntity>(id, cancellationToken: cancellationToken), out EdgeEntity? edge))
             {
                 _logger.LogError("Error edge GetAll: {}", result.Error);
                 result.WithStatusCode(HttpStatusCode.InternalServerError);
@@ -80,9 +74,9 @@ public class EdgeService(ILogger<EdgeService> logger, IServiceProvider servicePr
             return result;
         }
 
-        var store = GetStore();
+        var store = _edgeStoreService.GetStore();
 
-        if (!result.Success(await store.Get<EdgeEntity>(id, group: _edgeGroupStore, cancellationToken: cancellationToken), out EdgeEntity? edge))
+        if (!result.Success(await store.Get<EdgeEntity>(id, cancellationToken: cancellationToken), out EdgeEntity? edge))
         {
             _logger.LogError("Error edge Get: {}", result.Error);
             result.WithStatusCode(HttpStatusCode.InternalServerError);
@@ -102,6 +96,39 @@ public class EdgeService(ILogger<EdgeService> logger, IServiceProvider servicePr
         return result;
     }
 
+    public async Task<HttpResult<EdgeConnectionEntity>> GetHandshake(string id, CancellationToken cancellationToken = default)
+    {
+        HttpResult<EdgeConnectionEntity> result = new();
+
+        if (string.IsNullOrEmpty(id))
+        {
+            result.WithError(new ArgumentException("Id is empty"));
+            result.WithStatusCode(HttpStatusCode.BadRequest);
+            return result;
+        }
+
+        var store = _edgeStoreService.GetStore();
+
+        if (!result.Success(await store.Get<EdgeEntity>(id, cancellationToken: cancellationToken), out EdgeEntity? edge))
+        {
+            _logger.LogError("Error edge Get: {}", result.Error);
+            result.WithStatusCode(HttpStatusCode.InternalServerError);
+            return result;
+        }
+
+        if (edge == null)
+        {
+            result.WithError(new Exception("Edge not found"));
+            result.WithStatusCode(HttpStatusCode.NotFound);
+            return result;
+        }
+
+        result.WithValue(EdgeEntityHelpers.Encode(edge));
+        result.WithStatusCode(HttpStatusCode.OK);
+
+        return result;
+    }
+
     public async Task<HttpResult<EdgeEntity>> Create(EdgeAddDto edgeAddDto, CancellationToken cancellationToken = default)
     {
         HttpResult<EdgeEntity> result = new();
@@ -113,18 +140,16 @@ public class EdgeService(ILogger<EdgeService> logger, IServiceProvider servicePr
             return result;
         }
 
-        var store = GetStore();
-
-        var newId = Guid.NewGuid().Encode();
+        var store = _edgeStoreService.GetStore();
 
         EdgeEntity newEdge = new()
         {
-            Id = newId,
+            Id = Guid.NewGuid().Encode(),
             Name = edgeAddDto.Name,
             Token = GenerateToken()
         };
 
-        if (!result.Success(await store.Set(newId, newEdge, group: _edgeGroupStore, cancellationToken: cancellationToken)))
+        if (!result.Success(await store.Set(newEdge.Id, newEdge, cancellationToken: cancellationToken)))
         {
             _logger.LogError("Error edge Create: {}", result.Error);
             result.WithStatusCode(HttpStatusCode.InternalServerError);
@@ -157,9 +182,9 @@ public class EdgeService(ILogger<EdgeService> logger, IServiceProvider servicePr
             return result;
         }
 
-        var store = GetStore();
+        var store = _edgeStoreService.GetStore();
 
-        if (!result.Success(await store.Get<EdgeEntity>(id, group: _edgeGroupStore, cancellationToken: cancellationToken), out EdgeEntity? edge))
+        if (!result.Success(await store.Get<EdgeEntity>(id, cancellationToken: cancellationToken), false, out EdgeEntity? edge))
         {
             _logger.LogError("Error edge Edit: {}", result.Error);
             result.WithStatusCode(HttpStatusCode.InternalServerError);
@@ -188,7 +213,7 @@ public class EdgeService(ILogger<EdgeService> logger, IServiceProvider servicePr
             Token = edgeEditDto.RenewToken ? GenerateToken() : edge.Token
         };
 
-        if (!result.Success(await store.Set(id, newEdge, group: _edgeGroupStore, cancellationToken: cancellationToken)))
+        if (!result.Success(await store.Set(id, newEdge, cancellationToken: cancellationToken)))
         {
             _logger.LogError("Error edge Edit: {}", result.Error);
             result.WithStatusCode(HttpStatusCode.InternalServerError);
@@ -214,9 +239,9 @@ public class EdgeService(ILogger<EdgeService> logger, IServiceProvider servicePr
             return result;
         }
 
-        var store = GetStore();
+        var store = _edgeStoreService.GetStore();
 
-        if (!result.Success(await store.Contains(id, group: _edgeGroupStore, cancellationToken: cancellationToken), out bool contains))
+        if (!result.Success(await store.Contains(id, cancellationToken: cancellationToken), out bool contains))
         {
             _logger.LogError("Error edge Delete: {}", result.Error);
             result.WithStatusCode(HttpStatusCode.InternalServerError);
@@ -230,7 +255,7 @@ public class EdgeService(ILogger<EdgeService> logger, IServiceProvider servicePr
             return result;
         }
 
-        if (!result.Success(await store.Delete(id, group: _edgeGroupStore, cancellationToken: cancellationToken)))
+        if (!result.Success(await store.Delete(id, cancellationToken: cancellationToken)))
         {
             _logger.LogError("Error edge Delete: {}", result.Error);
             result.WithStatusCode(HttpStatusCode.InternalServerError);

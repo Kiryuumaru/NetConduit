@@ -7,6 +7,7 @@ using System.Text;
 using System.Text.Json;
 using System.Threading.Tasks;
 using TransactionHelpers;
+using TransactionHelpers.Exceptions;
 
 namespace Application.LocalStore.Services;
 
@@ -14,11 +15,16 @@ public class LocalStoreService(ILocalStore localStore)
 {
     private readonly ILocalStore _localStore = localStore;
 
-    private const string _CommonGroup = "common_store";
+    public string CommonGroup { get; set; } = "common_store";
 
-    public async Task<Result<bool>> Contains(string id, string group = _CommonGroup, CancellationToken cancellationToken = default)
+    public async Task<Result<bool>> Contains(string id, string? group = null, CancellationToken cancellationToken = default)
     {
         Result<bool> result = new();
+
+        if (string.IsNullOrEmpty(group))
+        {
+            group = CommonGroup;
+        }
 
         if (!result.Success(await _localStore.Get(group, id, cancellationToken), out string? value))
         {
@@ -30,10 +36,37 @@ public class LocalStoreService(ILocalStore localStore)
         return result;
     }
 
-    public async Task<Result<T>> Get<T>(string id, string group = _CommonGroup, CancellationToken cancellationToken = default)
+    public async Task<Result> ContainsOrError(string id, string? group = null, CancellationToken cancellationToken = default)
+    {
+        Result result = new();
+
+        if (string.IsNullOrEmpty(group))
+        {
+            group = CommonGroup;
+        }
+
+        if (!result.Success(await _localStore.Get(group, id, cancellationToken), out string? value))
+        {
+            return result;
+        }
+
+        if (string.IsNullOrEmpty(value))
+        {
+            result.WithError(new Exception(id + " does not exists"));
+        }
+
+        return result;
+    }
+
+    public async Task<Result<T>> Get<T>(string id, string? group = null, CancellationToken cancellationToken = default)
         where T : class
     {
         Result<T> result = new();
+
+        if (string.IsNullOrEmpty(group))
+        {
+            group = CommonGroup;
+        }
 
         if (!result.Success(await _localStore.Get(group, id, cancellationToken), out string? value))
         {
@@ -60,9 +93,14 @@ public class LocalStoreService(ILocalStore localStore)
         return result;
     }
 
-    public async Task<Result<string[]>> GetIds(string group = _CommonGroup, CancellationToken cancellationToken = default)
+    public async Task<Result<string[]>> GetIds(string? group = null, CancellationToken cancellationToken = default)
     {
         Result<string[]> result = new();
+
+        if (string.IsNullOrEmpty(group))
+        {
+            group = CommonGroup;
+        }
 
         if (!result.Success(await _localStore.GetIds(group, cancellationToken), out string[]? ids))
         {
@@ -74,10 +112,15 @@ public class LocalStoreService(ILocalStore localStore)
         return result;
     }
 
-    public async Task<Result> Set<T>(string id, T? obj, string group = _CommonGroup, CancellationToken cancellationToken = default)
+    public async Task<Result> Set<T>(string id, T? obj, string? group = null, CancellationToken cancellationToken = default)
         where T : class
     {
         Result result = new();
+
+        if (string.IsNullOrEmpty(group))
+        {
+            group = CommonGroup;
+        }
 
         string data;
         try
@@ -98,9 +141,14 @@ public class LocalStoreService(ILocalStore localStore)
         return result;
     }
 
-    public async Task<Result<bool>> Delete(string id, string group = _CommonGroup, CancellationToken cancellationToken = default)
+    public async Task<Result<bool>> Delete(string id, string? group = null, CancellationToken cancellationToken = default)
     {
         Result<bool> result = new();
+
+        if (string.IsNullOrEmpty(group))
+        {
+            group = CommonGroup;
+        }
 
         if (!result.Success(await _localStore.Get(group, id, cancellationToken), out string? value))
         {

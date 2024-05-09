@@ -82,6 +82,7 @@ internal class SignalRStreamWorker(ILogger<SignalRStreamWorker> logger, IConfigu
 
                 _hubConnection = new HubConnectionBuilder()
                     .WithUrl(apiEndpoint.Trim('/') + '/' + Defaults.DefaultStream.Trim('/'))
+                    .WithServerTimeout(TimeSpan.FromSeconds(10))
                     .Build();
 
                 await _hubConnection.StartAsync(stoppingToken.WithTimeout(TimeSpan.FromSeconds(10)));

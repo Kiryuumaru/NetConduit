@@ -12,6 +12,7 @@ using Application.Common;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.Extensions.Options;
 using ApplicationBuilderHelpers;
+using Infrastructure.SignalR.Server.Handshake.Services;
 
 namespace Infrastructure.SignalR.Server;
 
@@ -22,12 +23,14 @@ public class SignalRServerApplication : ApplicationDependency
         services.AddSignalR(hubOptions =>
         {
             hubOptions.EnableDetailedErrors = true;
-            hubOptions.KeepAliveInterval = TimeSpan.FromSeconds(30);
+            hubOptions.KeepAliveInterval = TimeSpan.FromSeconds(5);
         });
         services.AddResponseCompression(opts =>
         {
             opts.MimeTypes = ResponseCompressionDefaults.MimeTypes.Concat(["application/octet-stream"]);
         });
+        services.AddTransient<HandshakeStreamHub>();
+        services.AddSingleton<HandshakeLockerService>();
     }
 
     public override void AddMiddlewares(ApplicationDependencyBuilder builder, IHost host)

@@ -1,4 +1,5 @@
 ﻿using ApplicationBuilderHelpers;
+using Infrastructure.SignalR.Client.Edge.Applet.Workers;
 using Infrastructure.SignalR.Edge.Connection.Services;
 using Infrastructure.SignalR.Edge.Connection.Workers;
 using Microsoft.Extensions.DependencyInjection;
@@ -12,5 +13,7 @@ public class SignalREdgeApplication : ApplicationDependency
         services.AddScoped<SignalRStreamService>();
         services.AddSingleton<SignalRStreamProxyService>();
         services.AddHostedService<SignalRStreamWorker>();
+
+        services.AddHostedService<HandshakeWorker>();
     }
 }

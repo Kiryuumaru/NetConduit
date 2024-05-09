@@ -11,12 +11,6 @@ internal class SQLiteLocalStore
     //private readonly SQLiteAsyncConnection _db = new(AbsolutePath.Parse(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData)) / "netconduit.dat");
     private readonly SQLiteAsyncConnection _db = new(AbsolutePath.Parse(Environment.CurrentDirectory) / "netconduit.dat");
 
-    public class Val
-    {
-        public decimal Money { get; set; }
-        public DateTime Date { get; set; }
-    }
-
     private async Task Bootstrap()
     {
         await _db.CreateTableAsync<SQLiteDataHolder>();
