@@ -56,7 +56,7 @@ public class HandshakeWorker(ILogger<HandshakeWorker> logger, IServiceProvider s
                     if (!hasFirstPayload)
                     {
                         hasFirstPayload = true;
-                        _logger.LogInformation("Handshake stream attached ({})", edgeInvoke.Name);
+                        _logger.LogInformation("Handshake stream attached ({}, {})", edgeInvoke.Name, edgeInvoke.Id);
                     }
                     _logger.LogInformation("Handshake received updates");
                     portRouteEventHubService.OnHandshakeChanges(edgeInvoke);
