@@ -40,7 +40,7 @@ public class EdgeController(EdgeService edgeService) : ControllerBase
     [HttpGet("{id}")]
     public Task<HttpResult<EdgeConnectionEntity>> Get(string id)
     {
-        return _edgeService.GetHandshake(id);
+        return _edgeService.Get(id);
     }
 
     /// <summary>

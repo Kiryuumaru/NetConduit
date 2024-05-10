@@ -1,5 +1,6 @@
 ﻿using Application.Edge.StreamLine.Workers;
 using Application.Server.Edge.Services;
+using Application.Server.Edge.Workers;
 using Application.Server.PortRoute.Services;
 using ApplicationBuilderHelpers;
 using Microsoft.Extensions.DependencyInjection;
@@ -17,5 +18,7 @@ public class ApplicationServer : Application
         services.AddSingleton<PortRouteEventHubService>();
         services.AddScoped<PortRouteService>();
         services.AddScoped<PortRouteStoreService>();
+
+        services.AddHostedService<EdgeWorker>();
     }
 }

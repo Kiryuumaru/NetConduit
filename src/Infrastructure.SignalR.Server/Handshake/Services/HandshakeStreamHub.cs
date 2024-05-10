@@ -38,7 +38,7 @@ public class HandshakeStreamHub(
             try
             {
                 var fromPayloadEdgeEntity = EdgeEntityHelpers.Decode(handshakeToken);
-                edgeEntity = (await edgeService.GetHandshake(fromPayloadEdgeEntity.Id, hub.Context.ConnectionAborted)).GetValueOrThrow();
+                edgeEntity = (await edgeService.Get(fromPayloadEdgeEntity.Id, hub.Context.ConnectionAborted)).GetValueOrThrow();
             }
             catch
             {

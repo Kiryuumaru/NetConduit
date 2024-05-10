@@ -14,6 +14,17 @@ public static class EdgeEntityHelpers
 {
     public static EdgeConnectionEntity Encode(EdgeEntity edgeEntity)
     {
+        if (string.IsNullOrEmpty(edgeEntity.Token))
+        {
+            return new EdgeConnectionEntity()
+            {
+                Id = edgeEntity.Id,
+                Name = edgeEntity.Name,
+                Token = edgeEntity.Token,
+                HandshakeToken = ""
+            };
+        }
+
         return new EdgeConnectionEntity()
         {
             Id = edgeEntity.Id,
