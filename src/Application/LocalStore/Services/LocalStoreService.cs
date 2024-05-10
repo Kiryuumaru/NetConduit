@@ -1,5 +1,7 @@
 ﻿using Application.Common;
+using Application.LocalStore.Common;
 using Application.LocalStore.Interfaces;
+using Microsoft.Extensions.DependencyInjection;
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -11,157 +13,141 @@ using TransactionHelpers.Exceptions;
 
 namespace Application.LocalStore.Services;
 
-public class LocalStoreService(ILocalStore localStore)
+public class LocalStoreService(ILocalStore localStore, IServiceProvider serviceProvider) : LocalStoreImpl(localStore, serviceProvider)
 {
-    private readonly ILocalStore _localStore = localStore;
-
-    public string CommonGroup { get; set; } = "common_store";
-
-    public async Task<Result<bool>> Contains(string id, string? group = null, CancellationToken cancellationToken = default)
+    public override async Task<Result<bool>> Contains(string id, string? group = null, CancellationToken cancellationToken = default)
     {
-        Result<bool> result = new();
-
-        if (string.IsNullOrEmpty(group))
-        {
-            group = CommonGroup;
-        }
-
-        if (!result.Success(await _localStore.Get(group, id, cancellationToken), out string? value))
-        {
-            return result;
-        }
-
-        result.WithValue(!string.IsNullOrEmpty(value));
-
-        return result;
-    }
-
-    public async Task<Result> ContainsOrError(string id, string? group = null, CancellationToken cancellationToken = default)
-    {
-        Result result = new();
-
-        if (string.IsNullOrEmpty(group))
-        {
-            group = CommonGroup;
-        }
-
-        if (!result.Success(await _localStore.Get(group, id, cancellationToken), out string? value))
-        {
-            return result;
-        }
-
-        if (string.IsNullOrEmpty(value))
-        {
-            result.WithError(new Exception(id + " does not exists"));
-        }
-
-        return result;
-    }
-
-    public async Task<Result<T>> Get<T>(string id, string? group = null, CancellationToken cancellationToken = default)
-        where T : class
-    {
-        Result<T> result = new();
-
-        if (string.IsNullOrEmpty(group))
-        {
-            group = CommonGroup;
-        }
-
-        if (!result.Success(await _localStore.Get(group, id, cancellationToken), out string? value))
-        {
-            return result;
-        }
-
+        var concurrencyService = ServiceProvider.GetRequiredService<LocalStoreConcurrencyService>();
+        IDisposable? scope = null;
         try
         {
-            if (!string.IsNullOrEmpty(value))
-            {
-                T? obj = JsonSerializer.Deserialize<T>(value, JsonSerializerExtension.CamelCaseOption);
-                result.WithValue(obj);
-            }
-            else
-            {
-                result.WithValue((T?)default);
-            }
-        }
-        catch (Exception ex)
-        {
-            result.WithError(ex);
-        }
+            scope = await concurrencyService.Aquire(cancellationToken);
 
-        return result;
+            return await CoreContains(id, group, cancellationToken);
+        }
+        catch
+        {
+            throw;
+        }
+        finally
+        {
+            scope?.Dispose();
+        }
     }
 
-    public async Task<Result<string[]>> GetIds(string? group = null, CancellationToken cancellationToken = default)
+    public override async Task<Result> ContainsOrError(string id, string? group = null, CancellationToken cancellationToken = default)
     {
-        Result<string[]> result = new();
-
-        if (string.IsNullOrEmpty(group))
-        {
-            group = CommonGroup;
-        }
-
-        if (!result.Success(await _localStore.GetIds(group, cancellationToken), out string[]? ids))
-        {
-            return result;
-        }
-
-        result.WithValue(ids);
-
-        return result;
-    }
-
-    public async Task<Result> Set<T>(string id, T? obj, string? group = null, CancellationToken cancellationToken = default)
-        where T : class
-    {
-        Result result = new();
-
-        if (string.IsNullOrEmpty(group))
-        {
-            group = CommonGroup;
-        }
-
-        string data;
+        var concurrencyService = ServiceProvider.GetRequiredService<LocalStoreConcurrencyService>();
+        IDisposable? scope = null;
         try
         {
-            data = JsonSerializer.Serialize(obj, JsonSerializerExtension.CamelCaseOption);
-        }
-        catch (Exception ex)
-        {
-            result.WithError(ex);
-            return result;
-        }
+            scope = await concurrencyService.Aquire(cancellationToken);
 
-        if (!result.Success(await _localStore.Set(group, id, data, cancellationToken)))
-        {
-            return result;
+            return await CoreContainsOrError(id, group, cancellationToken);
         }
-
-        return result;
+        catch
+        {
+            throw;
+        }
+        finally
+        {
+            scope?.Dispose();
+        }
     }
 
-    public async Task<Result<bool>> Delete(string id, string? group = null, CancellationToken cancellationToken = default)
+    public override async Task<Result<T>> Get<T>(string id, string? group = null, CancellationToken cancellationToken = default)
+        where T : class
     {
-        Result<bool> result = new();
+        var concurrencyService = ServiceProvider.GetRequiredService<LocalStoreConcurrencyService>();
+        IDisposable? scope = null;
+        try
+        {
+            scope = await concurrencyService.Aquire(cancellationToken);
 
+            return await CoreGet<T>(id, group, cancellationToken);
+        }
+        catch
+        {
+            throw;
+        }
+        finally
+        {
+            scope?.Dispose();
+        }
+    }
+
+    public override async Task<Result<string[]>> GetIds(string? group = null, CancellationToken cancellationToken = default)
+    {
+        var concurrencyService = ServiceProvider.GetRequiredService<LocalStoreConcurrencyService>();
+        IDisposable? scope = null;
+        try
+        {
+            scope = await concurrencyService.Aquire(cancellationToken);
+
+            return await CoreGetIds(group, cancellationToken);
+        }
+        catch
+        {
+            throw;
+        }
+        finally
+        {
+            scope?.Dispose();
+        }
+    }
+
+    public override async Task<Result> Set<T>(string id, T? obj, string? group = null, CancellationToken cancellationToken = default)
+        where T : class
+    {
+        var concurrencyService = ServiceProvider.GetRequiredService<LocalStoreConcurrencyService>();
+        IDisposable? scope = null;
+        try
+        {
+            scope = await concurrencyService.Aquire(cancellationToken);
+
+            return await CoreSet(id, obj, group, cancellationToken);
+        }
+        catch
+        {
+            throw;
+        }
+        finally
+        {
+            scope?.Dispose();
+        }
+    }
+
+    public override async Task<Result<bool>> Delete(string id, string? group = null, CancellationToken cancellationToken = default)
+    {
+        var concurrencyService = ServiceProvider.GetRequiredService<LocalStoreConcurrencyService>();
+        IDisposable? scope = null;
+        try
+        {
+            scope = await concurrencyService.Aquire(cancellationToken);
+
+            return await CoreDelete(id, group, cancellationToken);
+        }
+        catch
+        {
+            throw;
+        }
+        finally
+        {
+            scope?.Dispose();
+        }
+    }
+
+    public async Task<ConcurrentLocalStore> Transaction(string? group = null, CancellationToken cancellationToken = default)
+    {
         if (string.IsNullOrEmpty(group))
         {
             group = CommonGroup;
         }
-
-        if (!result.Success(await _localStore.Get(group, id, cancellationToken), out string? value))
+        var concurrencyService = ServiceProvider.GetRequiredService<LocalStoreConcurrencyService>();
+        var concurrentLocalStore = new ConcurrentLocalStore(LocalStore, ServiceProvider, await concurrencyService.Aquire(cancellationToken))
         {
-            return result;
-        }
-
-        if (!result.Success(await _localStore.Set(group, id, null, cancellationToken)))
-        {
-            return result;
-        }
-
-        result.WithValue(!string.IsNullOrEmpty(value));
-
-        return result;
+            CommonGroup = group
+        };
+        return concurrentLocalStore;
     }
 }

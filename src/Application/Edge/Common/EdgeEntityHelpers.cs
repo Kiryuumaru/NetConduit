@@ -12,7 +12,7 @@ namespace Application.Edge.Common;
 
 public static class EdgeEntityHelpers
 {
-    public static EdgeConnectionEntity Encode(EdgeEntity edgeEntity)
+    public static EdgeConnectionEntity Encode(EdgeTokenEntity edgeEntity)
     {
         if (string.IsNullOrEmpty(edgeEntity.Token))
         {
@@ -38,7 +38,7 @@ public static class EdgeEntityHelpers
     {
         var decoded = handshakeToken.Decode();
 
-        EdgeEntity edgeEntity = JsonSerializer.Deserialize<EdgeEntity>(decoded, JsonSerializerExtension.CamelCaseOption)
+        EdgeTokenEntity edgeEntity = JsonSerializer.Deserialize<EdgeTokenEntity>(decoded, JsonSerializerExtension.CamelCaseOption)
             ?? throw new Exception("Invalid handshakeToken");
 
         return new EdgeConnectionEntity()

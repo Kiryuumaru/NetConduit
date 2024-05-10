@@ -19,11 +19,11 @@ public class EdgeController(EdgeService edgeService) : ControllerBase
     /// <summary>
     /// Retrieves all Edge entities.
     /// </summary>
-    /// <returns>An HTTP result containing an array of EdgeEntity.</returns>
+    /// <returns>An HTTP result containing an array of EdgeTokenEntity.</returns>
     /// <response code="200">Returns when the operation is successful.</response>
     /// <response code="500">Returns when an unexpected error occurs.</response>
     [HttpGet]
-    public Task<HttpResult<EdgeEntity[]>> GetAll()
+    public Task<HttpResult<EdgeTokenEntity[]>> GetAll()
     {
         return _edgeService.GetAll();
     }
@@ -32,7 +32,7 @@ public class EdgeController(EdgeService edgeService) : ControllerBase
     /// Retrieves a specific Edge entity by its ID.
     /// </summary>
     /// <param name="id">The ID of the Edge entity to retrieve.</param>
-    /// <returns>An HTTP result containing the EdgeEntity.</returns>
+    /// <returns>An HTTP result containing the EdgeTokenEntity.</returns>
     /// <response code="200">Returns when the operation is successful.</response>
     /// <response code="400">Returns when the provided ID is invalid.</response>
     /// <response code="404">Returns when the provided ID is not found.</response>
@@ -47,12 +47,12 @@ public class EdgeController(EdgeService edgeService) : ControllerBase
     /// Creates a new Edge entity.
     /// </summary>
     /// <param name="edge">The data for the new Edge entity.</param>
-    /// <returns>An HTTP result containing the created EdgeEntity.</returns>
+    /// <returns>An HTTP result containing the created EdgeTokenEntity.</returns>
     /// <response code="200">Returns when the operation is successful.</response>
     /// <response code="400">Returns when the provided data is invalid.</response>
     /// <response code="500">Returns when an unexpected error occurs.</response>
     [HttpPost]
-    public Task<HttpResult<EdgeEntity>> Create([FromBody] EdgeAddDto edge)
+    public Task<HttpResult<EdgeTokenEntity>> Create([FromBody] EdgeAddDto edge)
     {
         return _edgeService.Create(edge);
     }
@@ -62,13 +62,13 @@ public class EdgeController(EdgeService edgeService) : ControllerBase
     /// </summary>
     /// <param name="id">The ID of the Edge entity to update.</param>
     /// <param name="edge">The updated data for the Edge entity.</param>
-    /// <returns>An HTTP result containing the updated EdgeEntity.</returns>
+    /// <returns>An HTTP result containing the updated EdgeTokenEntity.</returns>
     /// <response code="200">Returns when the operation is successful.</response>
     /// <response code="400">Returns when the provided ID or data is invalid.</response>
     /// <response code="404">Returns when the Edge entity with the given ID is not found.</response>
     /// <response code="500">Returns when an unexpected error occurs.</response>
     [HttpPut("{id}")]
-    public Task<HttpResult<EdgeEntity>> Edit(string id, [FromBody] EdgeEditDto edge)
+    public Task<HttpResult<EdgeTokenEntity>> Edit(string id, [FromBody] EdgeEditDto edge)
     {
         return _edgeService.Edit(id, edge);
     }

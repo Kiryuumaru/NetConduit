@@ -11,4 +11,6 @@ namespace Domain.Edge.Models;
 public class EdgeRoutingTable : EdgeConnectionEntity
 {
     public required Dictionary<string, PortRouteEntity> Table { get; init; }
+
+    public required Dictionary<string, EdgeEntity> Edges { get; init; }
 }

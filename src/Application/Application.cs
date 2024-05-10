@@ -13,6 +13,7 @@ public class Application : ApplicationDependency
         base.AddServices(builder, services);
 
         services.AddTransient<LocalStoreService>();
+        services.AddSingleton<LocalStoreConcurrencyService>();
         services.AddSingleton<EventHubService>();
         services.AddSingleton<StreamLineService>();
     }

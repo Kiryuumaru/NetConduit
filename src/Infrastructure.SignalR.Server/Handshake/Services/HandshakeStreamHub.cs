@@ -68,13 +68,30 @@ public class HandshakeStreamHub(
                     var toEdgePortRoute = (await portRouteService.GetAll(toEdgeId: edgeEntity.Id, cancellationToken: hub.Context.ConnectionAborted)).GetValueOrThrow();
 
                     Dictionary<string, PortRouteEntity> table = [];
+                    Dictionary<string, EdgeEntity> edges = [];
                     foreach (var route in fromEdgePortRoute)
                     {
                         table.Add(route.Id, route);
+                        if (!edges.ContainsKey(route.FromEdgeId))
+                        {
+                            edges.Add(route.FromEdgeId, (await edgeService.Get(route.FromEdgeId)).GetValueOrThrow());
+                        }
+                        if (!edges.ContainsKey(route.ToEdgeId))
+                        {
+                            edges.Add(route.ToEdgeId, (await edgeService.Get(route.ToEdgeId)).GetValueOrThrow());
+                        }
                     }
                     foreach (var route in toEdgePortRoute)
                     {
                         table.Add(route.Id, route);
+                        if (!edges.ContainsKey(route.FromEdgeId))
+                        {
+                            edges.Add(route.FromEdgeId, (await edgeService.Get(route.FromEdgeId)).GetValueOrThrow());
+                        }
+                        if (!edges.ContainsKey(route.ToEdgeId))
+                        {
+                            edges.Add(route.ToEdgeId, (await edgeService.Get(route.ToEdgeId)).GetValueOrThrow());
+                        }
                     }
 
                     EdgeRoutingTable edgeRoutingTable = new()
@@ -83,7 +100,8 @@ public class HandshakeStreamHub(
                         Name = edgeEntity.Name,
                         Token = edgeEntity.Token,
                         HandshakeToken = handshakeToken,
-                        Table = table
+                        Table = table,
+                        Edges = edges
                     };
 
                     await channel.Writer.WriteAsync(edgeRoutingTable, hub.Context.ConnectionAborted.WithTimeout(TimeSpan.FromSeconds(10)));
