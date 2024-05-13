@@ -70,8 +70,8 @@ public class EdgeService(ILogger<EdgeService> logger, EdgeStoreService edgeStore
 
         if (string.IsNullOrEmpty(id))
         {
-            result.WithError(new ArgumentException("Id is empty"));
             result.WithStatusCode(HttpStatusCode.BadRequest);
+            result.WithError("EDGE_ID_INVALID", "Edge ID is invalid");
             return result;
         }
 
@@ -86,8 +86,8 @@ public class EdgeService(ILogger<EdgeService> logger, EdgeStoreService edgeStore
 
         if (edge == null)
         {
-            result.WithError(new Exception("Edge not found"));
             result.WithStatusCode(HttpStatusCode.NotFound);
+            result.WithError("EDGE_ID_NOT_FOUND", "Edge ID not found");
             return result;
         }
 
@@ -103,8 +103,8 @@ public class EdgeService(ILogger<EdgeService> logger, EdgeStoreService edgeStore
 
         if (string.IsNullOrEmpty(edgeAddDto.Name))
         {
-            result.WithError(new ArgumentException("Edge field name is empty"));
             result.WithStatusCode(HttpStatusCode.BadRequest);
+            result.WithError("EDGE_NAME_INVALID", "Edge name is invalid");
             return result;
         }
 
@@ -132,22 +132,22 @@ public class EdgeService(ILogger<EdgeService> logger, EdgeStoreService edgeStore
 
         if (string.IsNullOrEmpty(id))
         {
-            result.WithError(new ArgumentException("Id is empty"));
             result.WithStatusCode(HttpStatusCode.BadRequest);
+            result.WithError("EDGE_ID_INVALID", "Edge ID is invalid");
             return result;
         }
 
         if (string.IsNullOrEmpty(edgeEditDto.NewName) && !edgeEditDto.RenewToken)
         {
-            result.WithError(new ArgumentException("No edge field to edit"));
             result.WithStatusCode(HttpStatusCode.BadRequest);
+            result.WithError("EDGE_NO_CHANGES", "No edge field to edit");
             return result;
         }
 
         if (id.Equals(EdgeDefaults.ServerEdgeConnectionEntity.Id))
         {
-            result.WithError(new ArgumentException("Server is not editable"));
             result.WithStatusCode(HttpStatusCode.BadRequest);
+            result.WithError("EDGE_SERVER_NOT_EDITABLE", "Edge server is not editable");
             return result;
         }
 
@@ -162,16 +162,16 @@ public class EdgeService(ILogger<EdgeService> logger, EdgeStoreService edgeStore
 
         if (edge == null)
         {
-            result.WithError(new Exception("Edge not found"));
             result.WithStatusCode(HttpStatusCode.NotFound);
+            result.WithError("EDGE_ID_NOT_FOUND", "Edge ID not found");
             return result;
         }
 
         if ((string.IsNullOrEmpty(edgeEditDto.NewName) || edgeEditDto.NewName == edge.Name) &&
             !edgeEditDto.RenewToken)
         {
-            result.WithError(new ArgumentException("No edge field changes"));
             result.WithStatusCode(HttpStatusCode.BadRequest);
+            result.WithError("EDGE_NO_CHANGES", "No edge field to edit");
             return result;
         }
 
@@ -203,15 +203,15 @@ public class EdgeService(ILogger<EdgeService> logger, EdgeStoreService edgeStore
 
         if (string.IsNullOrEmpty(id))
         {
-            result.WithError(new ArgumentException("Id is empty"));
             result.WithStatusCode(HttpStatusCode.BadRequest);
+            result.WithError("EDGE_ID_INVALID", "Edge ID is invalid");
             return result;
         }
 
         if (id.Equals(EdgeDefaults.ServerEdgeConnectionEntity.Id))
         {
-            result.WithError(new ArgumentException("Server is not deletable"));
             result.WithStatusCode(HttpStatusCode.BadRequest);
+            result.WithError("EDGE_SERVER_NOT_DELETABLE", "Edge server is not deletable");
             return result;
         }
 
@@ -226,8 +226,8 @@ public class EdgeService(ILogger<EdgeService> logger, EdgeStoreService edgeStore
 
         if (!contains)
         {
-            result.WithError(new ArgumentException("Edge does not exists"));
             result.WithStatusCode(HttpStatusCode.NotFound);
+            result.WithError("EDGE_ID_NOT_FOUND", "Edge ID not found");
             return result;
         }
 

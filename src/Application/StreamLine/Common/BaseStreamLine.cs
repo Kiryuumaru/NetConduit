@@ -1,4 +1,5 @@
 ﻿using DisposableHelpers.Attributes;
+using Domain.PortRoute.Entities;
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -8,7 +9,7 @@ using System.Threading.Tasks;
 namespace Application.StreamLine.Common;
 
 [Disposable]
-public abstract partial class BaseStreamLine(int port)
+public abstract partial class BaseStreamLine(PortRouteEntity route)
 {
-    public int Port { get; } = port;
+    public PortRouteEntity Route { get; } = route;
 }

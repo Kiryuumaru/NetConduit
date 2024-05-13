@@ -8,7 +8,6 @@ using System.Threading.Tasks;
 
 namespace Application.StreamLine.Common;
 
-public class IncomingStreamLine(PortRouteEntity route) : BaseStreamLine(route.ToEdgePort)
+public class IncomingStreamLine(PortRouteEntity route) : BaseStreamLine(route)
 {
-    public PortRouteEntity Route { get; } = route;
 }
