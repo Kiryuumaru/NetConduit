@@ -64,33 +64,33 @@ public class HandshakeStreamHub(
             {
                 try
                 {
-                    var fromEdgePortRoute = (await portRouteService.GetAll(fromEdgeId: edgeEntity.Id, cancellationToken: hub.Context.ConnectionAborted)).GetValueOrThrow();
-                    var toEdgePortRoute = (await portRouteService.GetAll(toEdgeId: edgeEntity.Id, cancellationToken: hub.Context.ConnectionAborted)).GetValueOrThrow();
+                    var sourceEdgePortRoute = (await portRouteService.GetAll(sourceEdgeId: edgeEntity.Id, cancellationToken: hub.Context.ConnectionAborted)).GetValueOrThrow();
+                    var destinationEdgePortRoute = (await portRouteService.GetAll(destinationEdgeId: edgeEntity.Id, cancellationToken: hub.Context.ConnectionAborted)).GetValueOrThrow();
 
                     Dictionary<string, PortRouteEntity> table = [];
                     Dictionary<string, EdgeEntity> edges = [];
-                    foreach (var route in fromEdgePortRoute)
+                    foreach (var route in sourceEdgePortRoute)
                     {
                         table.Add(route.Id, route);
-                        if (!edges.ContainsKey(route.FromEdgeId))
+                        if (!edges.ContainsKey(route.SourceEdgeId))
                         {
-                            edges.Add(route.FromEdgeId, (await edgeService.Get(route.FromEdgeId)).GetValueOrThrow());
+                            edges.Add(route.SourceEdgeId, (await edgeService.Get(route.SourceEdgeId)).GetValueOrThrow());
                         }
-                        if (!edges.ContainsKey(route.ToEdgeId))
+                        if (!edges.ContainsKey(route.DestinationEdgeId))
                         {
-                            edges.Add(route.ToEdgeId, (await edgeService.Get(route.ToEdgeId)).GetValueOrThrow());
+                            edges.Add(route.DestinationEdgeId, (await edgeService.Get(route.DestinationEdgeId)).GetValueOrThrow());
                         }
                     }
-                    foreach (var route in toEdgePortRoute)
+                    foreach (var route in destinationEdgePortRoute)
                     {
                         table.Add(route.Id, route);
-                        if (!edges.ContainsKey(route.FromEdgeId))
+                        if (!edges.ContainsKey(route.SourceEdgeId))
                         {
-                            edges.Add(route.FromEdgeId, (await edgeService.Get(route.FromEdgeId)).GetValueOrThrow());
+                            edges.Add(route.SourceEdgeId, (await edgeService.Get(route.SourceEdgeId)).GetValueOrThrow());
                         }
-                        if (!edges.ContainsKey(route.ToEdgeId))
+                        if (!edges.ContainsKey(route.DestinationEdgeId))
                         {
-                            edges.Add(route.ToEdgeId, (await edgeService.Get(route.ToEdgeId)).GetValueOrThrow());
+                            edges.Add(route.DestinationEdgeId, (await edgeService.Get(route.DestinationEdgeId)).GetValueOrThrow());
                         }
                     }
 

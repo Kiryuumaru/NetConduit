@@ -23,26 +23,26 @@ public class PortRouteService(ILogger<PortRouteService> logger, PortRouteStoreSe
     private readonly EdgeStoreService _edgeStoreService = edgeStoreService;
     private readonly PortRouteEventHubService _portRouteEventHubService = portRouteEventHubService;
 
-    public async Task<HttpResult<PortRouteEntity[]>> GetAll(string? fromEdgeId = null, string? toEdgeId = null, CancellationToken cancellationToken = default)
+    public async Task<HttpResult<PortRouteEntity[]>> GetAll(string? sourceEdgeId = null, string? destinationEdgeId = null, CancellationToken cancellationToken = default)
     {
         HttpResult<PortRouteEntity[]> result = new();
 
         var store = _portRouteStoreService.GetStore();
         var edgeStore = _edgeStoreService.GetStore();
 
-        if (!string.IsNullOrEmpty(fromEdgeId) &&
-            (!result.Success(await edgeStore.Contains(fromEdgeId, cancellationToken: cancellationToken), out bool containsFromEdgeId) || !containsFromEdgeId))
+        if (!string.IsNullOrEmpty(sourceEdgeId) &&
+            (!result.Success(await edgeStore.Contains(sourceEdgeId, cancellationToken: cancellationToken), out bool containsSourceEdgeId) || !containsSourceEdgeId))
         {
             result.WithStatusCode(HttpStatusCode.NotFound);
-            result.WithError("FROM_EDGE_ID_NOT_FOUND", "Port route fromEdgeId does not exists");
+            result.WithError("SOURCE_EDGE_ID_NOT_FOUND", "Port route sourceEdgeId does not exists");
             return result;
         }
 
-        if (!string.IsNullOrEmpty(toEdgeId) &&
-            (!result.Success(await edgeStore.Contains(toEdgeId, cancellationToken: cancellationToken), out bool containsToEdgeId) || !containsToEdgeId))
+        if (!string.IsNullOrEmpty(destinationEdgeId) &&
+            (!result.Success(await edgeStore.Contains(destinationEdgeId, cancellationToken: cancellationToken), out bool containsDestinationEdgeId) || !containsDestinationEdgeId))
         {
             result.WithStatusCode(HttpStatusCode.NotFound);
-            result.WithError("TO_EDGE_ID_NOT_FOUND", "Port route toEdgeId does not exists");
+            result.WithError("DESTINATION_EDGE_ID_NOT_FOUND", "Port route destinationEdgeId does not exists");
             return result;
         }
 
@@ -63,9 +63,9 @@ public class PortRouteService(ILogger<PortRouteService> logger, PortRouteStoreSe
                 result.WithStatusCode(HttpStatusCode.InternalServerError);
                 return result;
             }
-            if ((string.IsNullOrEmpty(fromEdgeId) && string.IsNullOrEmpty(toEdgeId)) ||
-                (!string.IsNullOrEmpty(fromEdgeId) && fromEdgeId.Equals(portRouteEntity.FromEdgeId)) ||
-                (!string.IsNullOrEmpty(toEdgeId) && toEdgeId.Equals(portRouteEntity.ToEdgeId)))
+            if ((string.IsNullOrEmpty(sourceEdgeId) && string.IsNullOrEmpty(destinationEdgeId)) ||
+                (!string.IsNullOrEmpty(sourceEdgeId) && sourceEdgeId.Equals(portRouteEntity.SourceEdgeId)) ||
+                (!string.IsNullOrEmpty(destinationEdgeId) && destinationEdgeId.Equals(portRouteEntity.DestinationEdgeId)))
             {
                 portRouteEntities.Add(portRouteEntity);
             }
@@ -114,74 +114,74 @@ public class PortRouteService(ILogger<PortRouteService> logger, PortRouteStoreSe
     {
         HttpResult<PortRouteEntity> result = new();
 
-        if (string.IsNullOrEmpty(portRouteAddDto.FromEdgeId))
+        if (string.IsNullOrEmpty(portRouteAddDto.SourceEdgeId))
         {
             result.WithStatusCode(HttpStatusCode.BadRequest);
-            result.WithError("FROM_EDGE_ID_INVALID", "Port route fromEdgeId is invalid");
+            result.WithError("SOURCE_EDGE_ID_INVALID", "Port route sourceEdgeId is invalid");
             return result;
         }
 
-        if (string.IsNullOrEmpty(portRouteAddDto.ToEdgeId))
+        if (string.IsNullOrEmpty(portRouteAddDto.DestinationEdgeId))
         {
             result.WithStatusCode(HttpStatusCode.BadRequest);
-            result.WithError("TO_EDGE_ID_INVALID", "Port route toEdgeId is invalid");
+            result.WithError("DESTINATION_EDGE_ID_INVALID", "Port route destinationEdgeId is invalid");
             return result;
         }
 
-        if (portRouteAddDto.FromEdgePort == 0)
+        if (portRouteAddDto.SourceEdgePort == 0)
         {
             result.WithStatusCode(HttpStatusCode.BadRequest);
-            result.WithError("FROM_EDGE_PORT_INVALID", "Port route fromEdgeId is invalid");
+            result.WithError("SOURCE_EDGE_PORT_INVALID", "Port route sourceEdgeId is invalid");
             return result;
         }
 
-        if (portRouteAddDto.ToEdgePort == 0)
+        if (portRouteAddDto.DestinationEdgePort == 0)
         {
             result.WithStatusCode(HttpStatusCode.BadRequest);
-            result.WithError("TO_EDGE_PORT_INVALID", "Port route toEdgePort is invalid");
+            result.WithError("DESTINATION_EDGE_PORT_INVALID", "Port route destinationEdgePort is invalid");
             return result;
         }
 
         var edgeStore = _edgeStoreService.GetStore();
 
-        List<string> edgeIds = [portRouteAddDto.FromEdgeId, portRouteAddDto.ToEdgeId];
+        List<string> edgeIds = [portRouteAddDto.SourceEdgeId, portRouteAddDto.DestinationEdgeId];
 
         foreach (var edgeId in edgeIds)
         {
-            bool isFrom = portRouteAddDto.FromEdgeId == edgeId;
+            bool isFrom = portRouteAddDto.SourceEdgeId == edgeId;
             if (!result.Success(await edgeStore.Contains(edgeId, cancellationToken: cancellationToken), out bool containsEdgeId) || !containsEdgeId)
             {
                 result.WithStatusCode(HttpStatusCode.NotFound);
                 if (isFrom)
                 {
-                    result.WithError("FROM_EDGE_ID_NOT_FOUND", "Port route fromEdgeId not found");
+                    result.WithError("SOURCE_EDGE_ID_NOT_FOUND", "Port route sourceEdgeId not found");
                 }
                 else
                 {
-                    result.WithError("TO_EDGE_ID_NOT_FOUND", "Port route toEdgeId not found");
+                    result.WithError("DESTINATION_EDGE_ID_NOT_FOUND", "Port route destinationEdgeId not found");
                 }
                 return result;
             }
 
-            if (!result.SuccessAndHasValue(await GetAll(fromEdgeId: edgeId, toEdgeId: edgeId, cancellationToken: cancellationToken), out PortRouteEntity[]? edgePorts))
+            if (!result.SuccessAndHasValue(await GetAll(sourceEdgeId: edgeId, destinationEdgeId: edgeId, cancellationToken: cancellationToken), out PortRouteEntity[]? edgePorts))
             {
                 return result;
             }
 
             foreach (var edgePort in edgePorts)
             {
-                if (edgePort.FromEdgeId.Equals(edgeId) &&
-                    edgePort.FromEdgePort == portRouteAddDto.FromEdgePort)
+                if (edgePort.SourceEdgeId.Equals(edgeId) &&
+                    edgePort.SourceEdgePort == portRouteAddDto.SourceEdgePort)
                 {
                     result.WithStatusCode(HttpStatusCode.BadRequest);
-                    result.WithError("FROM_EDGE_PORT_ALREADY_EXISTS", "Port route fromEdgePort already exists");
+                    result.WithError("SOURCE_EDGE_PORT_ALREADY_EXISTS", "Port route sourceEdgePort already exists");
                     return result;
                 }
-                if (edgePort.ToEdgeId.Equals(edgeId) &&
-                    edgePort.ToEdgePort == portRouteAddDto.ToEdgePort)
+                if (edgePort.DestinationEdgeId.Equals(edgeId) &&
+                    edgePort.DestinationEdgePort == portRouteAddDto.DestinationEdgePort)
                 {
                     result.WithStatusCode(HttpStatusCode.BadRequest);
-                    result.WithError("TO_EDGE_PORT_ALREADY_EXISTS", "Port route toEdgePort already exists");
+                    result.WithError("DESTINATION_EDGE_PORT_ALREADY_EXISTS", "Port route destinationEdgePort already exists");
                     return result;
                 }
             }
@@ -192,10 +192,10 @@ public class PortRouteService(ILogger<PortRouteService> logger, PortRouteStoreSe
         PortRouteEntity newRoute = new()
         {
             Id = Guid.NewGuid().Encode(),
-            FromEdgeId = portRouteAddDto.FromEdgeId,
-            FromEdgePort = portRouteAddDto.FromEdgePort,
-            ToEdgeId = portRouteAddDto.ToEdgeId,
-            ToEdgePort = portRouteAddDto.ToEdgePort,
+            SourceEdgeId = portRouteAddDto.SourceEdgeId,
+            SourceEdgePort = portRouteAddDto.SourceEdgePort,
+            DestinationEdgeId = portRouteAddDto.DestinationEdgeId,
+            DestinationEdgePort = portRouteAddDto.DestinationEdgePort,
         };
 
         if (!result.Success(await store.Set(newRoute.Id, newRoute, cancellationToken: cancellationToken)))
@@ -205,8 +205,8 @@ public class PortRouteService(ILogger<PortRouteService> logger, PortRouteStoreSe
             return result;
         }
 
-        _portRouteEventHubService.OnPortRouteChanges(newRoute.FromEdgeId);
-        _portRouteEventHubService.OnPortRouteChanges(newRoute.ToEdgeId);
+        _portRouteEventHubService.OnPortRouteChanges(newRoute.SourceEdgeId);
+        _portRouteEventHubService.OnPortRouteChanges(newRoute.DestinationEdgeId);
 
         result.WithValue(newRoute);
         result.WithStatusCode(HttpStatusCode.OK);
@@ -227,10 +227,10 @@ public class PortRouteService(ILogger<PortRouteService> logger, PortRouteStoreSe
             return result;
         }
 
-        if (string.IsNullOrEmpty(portRouteEditDto.FromEdgeId) &&
-            string.IsNullOrEmpty(portRouteEditDto.ToEdgeId) &&
-            portRouteEditDto.FromEdgePort == null &&
-            portRouteEditDto.ToEdgePort == null)
+        if (string.IsNullOrEmpty(portRouteEditDto.SourceEdgeId) &&
+            string.IsNullOrEmpty(portRouteEditDto.DestinationEdgeId) &&
+            portRouteEditDto.SourceEdgePort == null &&
+            portRouteEditDto.DestinationEdgePort == null)
         {
             result.WithStatusCode(HttpStatusCode.BadRequest);
             result.WithError("PORT_ROUTE_NO_CHANGES", "No port route field to edit");
@@ -253,10 +253,10 @@ public class PortRouteService(ILogger<PortRouteService> logger, PortRouteStoreSe
             return result;
         }
 
-        if ((string.IsNullOrEmpty(portRouteEditDto.FromEdgeId) || portRouteEditDto.FromEdgeId == portRoute.FromEdgeId) &&
-            (string.IsNullOrEmpty(portRouteEditDto.ToEdgeId) || portRouteEditDto.ToEdgeId == portRoute.ToEdgeId) &&
-            (portRouteEditDto.FromEdgePort == null || portRouteEditDto.FromEdgePort == portRoute.FromEdgePort) &&
-            (portRouteEditDto.ToEdgePort == null || portRouteEditDto.ToEdgePort == portRoute.ToEdgePort))
+        if ((string.IsNullOrEmpty(portRouteEditDto.SourceEdgeId) || portRouteEditDto.SourceEdgeId == portRoute.SourceEdgeId) &&
+            (string.IsNullOrEmpty(portRouteEditDto.DestinationEdgeId) || portRouteEditDto.DestinationEdgeId == portRoute.DestinationEdgeId) &&
+            (portRouteEditDto.SourceEdgePort == null || portRouteEditDto.SourceEdgePort == portRoute.SourceEdgePort) &&
+            (portRouteEditDto.DestinationEdgePort == null || portRouteEditDto.DestinationEdgePort == portRoute.DestinationEdgePort))
         {
             result.WithStatusCode(HttpStatusCode.BadRequest);
             result.WithError("PORT_ROUTE_NO_CHANGES", "No port route field to edit");
@@ -267,27 +267,27 @@ public class PortRouteService(ILogger<PortRouteService> logger, PortRouteStoreSe
 
         List<string> edgeIds = [];
 
-        edgeIds.Add(string.IsNullOrEmpty(portRouteEditDto.FromEdgeId) ? portRoute.FromEdgeId : portRouteEditDto.FromEdgeId);
-        edgeIds.Add(string.IsNullOrEmpty(portRouteEditDto.ToEdgeId) ? portRoute.ToEdgeId : portRouteEditDto.ToEdgeId);
+        edgeIds.Add(string.IsNullOrEmpty(portRouteEditDto.SourceEdgeId) ? portRoute.SourceEdgeId : portRouteEditDto.SourceEdgeId);
+        edgeIds.Add(string.IsNullOrEmpty(portRouteEditDto.DestinationEdgeId) ? portRoute.DestinationEdgeId : portRouteEditDto.DestinationEdgeId);
 
         foreach (var edgeId in edgeIds)
         {
-            bool isFrom = (string.IsNullOrEmpty(portRouteEditDto.FromEdgeId) ? portRoute.FromEdgeId : portRouteEditDto.FromEdgeId) == edgeId;
+            bool isFrom = (string.IsNullOrEmpty(portRouteEditDto.SourceEdgeId) ? portRoute.SourceEdgeId : portRouteEditDto.SourceEdgeId) == edgeId;
             if (!result.Success(await edgeStore.Contains(edgeId, cancellationToken: cancellationToken), out bool containsEdgeId) || !containsEdgeId)
             {
                 result.WithStatusCode(HttpStatusCode.NotFound);
                 if (isFrom)
                 {
-                    result.WithError("FROM_EDGE_ID_NOT_FOUND", "Port route fromEdgeId not found");
+                    result.WithError("SOURCE_EDGE_ID_NOT_FOUND", "Port route sourceEdgeId not found");
                 }
                 else
                 {
-                    result.WithError("TO_EDGE_ID_NOT_FOUND", "Port route toEdgeId not found");
+                    result.WithError("DESTINATION_EDGE_ID_NOT_FOUND", "Port route destinationEdgeId not found");
                 }
                 return result;
             }
 
-            if (!result.SuccessAndHasValue(await GetAll(fromEdgeId: edgeId, toEdgeId: edgeId, cancellationToken: cancellationToken), out PortRouteEntity[]? edgePorts))
+            if (!result.SuccessAndHasValue(await GetAll(sourceEdgeId: edgeId, destinationEdgeId: edgeId, cancellationToken: cancellationToken), out PortRouteEntity[]? edgePorts))
             {
                 return result;
             }
@@ -298,18 +298,18 @@ public class PortRouteService(ILogger<PortRouteService> logger, PortRouteStoreSe
                 {
                     continue;
                 }
-                if (edgePort.FromEdgeId.Equals(edgeId) &&
-                    edgePort.FromEdgePort == portRouteEditDto.FromEdgePort)
+                if (edgePort.SourceEdgeId.Equals(edgeId) &&
+                    edgePort.SourceEdgePort == portRouteEditDto.SourceEdgePort)
                 {
                     result.WithStatusCode(HttpStatusCode.BadRequest);
-                    result.WithError("FROM_EDGE_PORT_ALREADY_EXISTS", "Port route fromEdgePort already exists");
+                    result.WithError("SOURCE_EDGE_PORT_ALREADY_EXISTS", "Port route sourceEdgePort already exists");
                     return result;
                 }
-                if (edgePort.ToEdgeId.Equals(edgeId) &&
-                    edgePort.ToEdgePort == portRouteEditDto.ToEdgePort)
+                if (edgePort.DestinationEdgeId.Equals(edgeId) &&
+                    edgePort.DestinationEdgePort == portRouteEditDto.DestinationEdgePort)
                 {
                     result.WithStatusCode(HttpStatusCode.BadRequest);
-                    result.WithError("TO_EDGE_PORT_ALREADY_EXISTS", "Port route toEdgePort already exists");
+                    result.WithError("DESTINATION_EDGE_PORT_ALREADY_EXISTS", "Port route destinationEdgePort already exists");
                     return result;
                 }
             }
@@ -318,10 +318,10 @@ public class PortRouteService(ILogger<PortRouteService> logger, PortRouteStoreSe
         PortRouteEntity newPortRoute = new()
         {
             Id = portRoute.Id,
-            FromEdgeId = string.IsNullOrEmpty(portRouteEditDto.FromEdgeId) ? portRoute.FromEdgeId : portRouteEditDto.FromEdgeId,
-            ToEdgeId = string.IsNullOrEmpty(portRouteEditDto.ToEdgeId) ? portRoute.ToEdgeId : portRouteEditDto.ToEdgeId,
-            FromEdgePort = portRouteEditDto.FromEdgePort == null ? portRoute.FromEdgePort : portRouteEditDto.FromEdgePort.Value,
-            ToEdgePort = portRouteEditDto.ToEdgePort == null ? portRoute.ToEdgePort : portRouteEditDto.ToEdgePort.Value
+            SourceEdgeId = string.IsNullOrEmpty(portRouteEditDto.SourceEdgeId) ? portRoute.SourceEdgeId : portRouteEditDto.SourceEdgeId,
+            DestinationEdgeId = string.IsNullOrEmpty(portRouteEditDto.DestinationEdgeId) ? portRoute.DestinationEdgeId : portRouteEditDto.DestinationEdgeId,
+            SourceEdgePort = portRouteEditDto.SourceEdgePort == null ? portRoute.SourceEdgePort : portRouteEditDto.SourceEdgePort.Value,
+            DestinationEdgePort = portRouteEditDto.DestinationEdgePort == null ? portRoute.DestinationEdgePort : portRouteEditDto.DestinationEdgePort.Value
         };
 
         if (!result.Success(await store.Set(id, newPortRoute, cancellationToken: cancellationToken)))
@@ -331,8 +331,8 @@ public class PortRouteService(ILogger<PortRouteService> logger, PortRouteStoreSe
             return result;
         }
 
-        _portRouteEventHubService.OnPortRouteChanges(newPortRoute.FromEdgeId);
-        _portRouteEventHubService.OnPortRouteChanges(newPortRoute.ToEdgeId);
+        _portRouteEventHubService.OnPortRouteChanges(newPortRoute.SourceEdgeId);
+        _portRouteEventHubService.OnPortRouteChanges(newPortRoute.DestinationEdgeId);
 
         result.WithValue(newPortRoute);
         result.WithStatusCode(HttpStatusCode.OK);
@@ -376,8 +376,8 @@ public class PortRouteService(ILogger<PortRouteService> logger, PortRouteStoreSe
             return result;
         }
 
-        _portRouteEventHubService.OnPortRouteChanges(portRoute.FromEdgeId);
-        _portRouteEventHubService.OnPortRouteChanges(portRoute.ToEdgeId);
+        _portRouteEventHubService.OnPortRouteChanges(portRoute.SourceEdgeId);
+        _portRouteEventHubService.OnPortRouteChanges(portRoute.DestinationEdgeId);
 
         result.WithStatusCode(HttpStatusCode.OK);
 

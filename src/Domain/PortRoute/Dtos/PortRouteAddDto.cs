@@ -8,11 +8,11 @@ namespace Domain.PortRoute.Dtos;
 
 public class PortRouteAddDto
 {
-    public required string FromEdgeId { get; init; }
+    public required string SourceEdgeId { get; init; }
 
-    public required int FromEdgePort { get; init; }
+    public required int SourceEdgePort { get; init; }
 
-    public required string ToEdgeId { get; init; }
+    public required string DestinationEdgeId { get; init; }
 
-    public required int ToEdgePort { get; init; }
+    public required int DestinationEdgePort { get; init; }
 }

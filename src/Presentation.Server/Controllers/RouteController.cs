@@ -26,9 +26,9 @@ public class RouteController(PortRouteService portRouteService) : ControllerBase
     /// <response code="404">Returns when the field edgeId is provided and is not found.</response>
     /// <response code="500">Returns when an unexpected error occurs.</response>
     [HttpGet]
-    public Task<HttpResult<PortRouteEntity[]>> GetAll(string? fromEdgeId, string? toEdgeId)
+    public Task<HttpResult<PortRouteEntity[]>> GetAll(string? sourceEdgeId, string? destinationEdgeId)
     {
-        return _portRouteService.GetAll(fromEdgeId: fromEdgeId, toEdgeId: toEdgeId);
+        return _portRouteService.GetAll(sourceEdgeId: sourceEdgeId, destinationEdgeId: destinationEdgeId);
     }
 
     /// <summary>
@@ -53,7 +53,7 @@ public class RouteController(PortRouteService portRouteService) : ControllerBase
     /// <returns>HTTP result containing the created PortRouteEntity.</returns>
     /// <response code="200">Returns when the operation is successful.</response>
     /// <response code="400">Returns when the provided body is invalid.</response>
-    /// <response code="404">Returns when the provided fromEdgeId or toEdgeId is not found.</response>
+    /// <response code="404">Returns when the provided sourceEdgeId or destinationEdgeId is not found.</response>
     /// <response code="500">Returns when an unexpected error occurs.</response>
     [HttpPost]
     public Task<HttpResult<PortRouteEntity>> Create([FromBody] PortRouteAddDto portRouteAddDto)
@@ -69,7 +69,7 @@ public class RouteController(PortRouteService portRouteService) : ControllerBase
     /// <returns>HTTP result containing the edited PortRouteEntity.</returns>
     /// <response code="200">Returns when the operation is successful.</response>
     /// <response code="400">Returns when the provided body is invalid.</response>
-    /// <response code="404">Returns when the provided fromEdgeId or toEdgeId is not found.</response>
+    /// <response code="404">Returns when the provided sourceEdgeId or destinationEdgeId is not found.</response>
     /// <response code="500">Returns when an unexpected error occurs.</response>
     [HttpPut("{id}")]
     public Task<HttpResult<PortRouteEntity>> Edit(string id, [FromBody] PortRouteEditDto portRouteEditDto)
