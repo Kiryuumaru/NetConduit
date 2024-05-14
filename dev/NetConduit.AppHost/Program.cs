@@ -5,16 +5,16 @@ var server = builder.AddProject<Projects.Presentation_Server>("presentation-serv
 builder.AddProject<Projects.Presentation_Edge>("presentation-edge1")
     .WithReference(server)
     .WithEnvironment("SERVER_ENDPOINT", "@ref:services:presentation-server:https:0")
-    .WithEnvironment("HANDSHAKE_TOKEN", "ew0KICAiaWQiOiAiZmlfYVNpWXFZVVNQRXV2S29Kal9tZyIsDQogICJuYW1lIjogIkNMWU5ULVBDIiwNCiAgInRva2VuIjogIkZlVDZvRWhjOEpPb1RSZ28yWU5BSzFFTk55d1hQbDkybXVQdGVwclg3cjhOWmtobThIIg0KfQ==");
+    .WithEnvironment("HANDSHAKE_TOKEN", "ew0KICAidG9rZW4iOiAiSDRlQUxZc1Q2dFppOHprUVRqajd3WU1VWUxKTWVJZU1sMlVkNTdvVFdwS3FnNTNSZFAiLA0KICAiaWQiOiAiTklHaWxhVnUyMEt1b2FQT05iMllXdyIsDQogICJuYW1lIjogIkNMWU5ULVBDIg0KfQ==");
 
 builder.AddProject<Projects.Presentation_Edge>("presentation-edge2")
     .WithReference(server)
     .WithEnvironment("SERVER_ENDPOINT", "@ref:services:presentation-server:https:0")
-    .WithEnvironment("HANDSHAKE_TOKEN", "ew0KICAiaWQiOiAiOUxJN2x2MDBkMFdzSUl5WS1TLURCQSIsDQogICJuYW1lIjogIkxFQS1QQyIsDQogICJ0b2tlbiI6ICI4aTdzQ01CQ3FpQVU3ZUdCbWo3VTAzOWg0cDg1UnVIckVzZEF0aTFYMGRSTGlSVUU5cyINCn0=");
+    .WithEnvironment("HANDSHAKE_TOKEN", "ew0KICAidG9rZW4iOiAib3A0TzZOY2VzdGZVUVp0TWE0a21zRkwyN3EzWmdNSG9HYVczc2hZTnQwa05zNmZ4MmYiLA0KICAiaWQiOiAibmduZWtybXVNRWVvcDREZjU3UFlmZyIsDQogICJuYW1lIjogIkxFQS1QQyINCn0=");
 
 builder.AddProject<Projects.Presentation_Edge>("presentation-edge3")
     .WithReference(server)
     .WithEnvironment("SERVER_ENDPOINT", "@ref:services:presentation-server:https:0")
-    .WithEnvironment("HANDSHAKE_TOKEN", "ew0KICAiaWQiOiAicVl3MkNiZ3ZvRTZBYmx5Z3BUWGFjUSIsDQogICJuYW1lIjogIlJFSUxFRU4tUEMiLA0KICAidG9rZW4iOiAiajV3SDlWR1p3T1V4WExXeUZVUDJyUmVIdmhRd2RRejdMeDkzS1dSdVhFakFZajNpdVEiDQp9");
+    .WithEnvironment("HANDSHAKE_TOKEN", "ew0KICAidG9rZW4iOiAiNHloMGlvTlVPZ2taS2dBSmw3Q2F5RHk4WlU2QW12elhZalBQdm9VaHFlNnpVV1lHUXgiLA0KICAiaWQiOiAiWk1vcXM3d2hWMEtDbnlTRVdsN2RRdyIsDQogICJuYW1lIjogIlJFSUxFRU4tUEMiDQp9");
 
 builder.Build().Run();
