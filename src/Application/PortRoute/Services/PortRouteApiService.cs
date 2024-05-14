@@ -31,7 +31,7 @@ public class PortRouteApiService(ILogger<PortRouteApiService> logger, IServicePr
     private Task<HttpResult> InvokeEndpoint(HttpMethod method, string path, CancellationToken cancellationToken)
     {
         var endpoint = _configuration.GetVarRefValue("SERVER_ENDPOINT").Trim('/') + "/api/route" + path;
-        return new HttpClient().Execute(method, endpoint, cancellationToken);
+        return new HttpClient().Execute(method, endpoint, JsonSerializerExtension.CamelCaseOption, cancellationToken);
     }
 
     private Task<HttpResult<TReturn>> InvokeEndpoint<TReturn>(HttpMethod method, string path, CancellationToken cancellationToken)

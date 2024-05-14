@@ -15,12 +15,11 @@ using TransactionHelpers;
 
 namespace Application.StreamLine.Services;
 
-public class StreamLineService(ILogger<StreamLineService> logger, IServiceProvider serviceProvider)
+public class StreamLineService(ILogger<StreamLineService> logger)
 {
     private record StreamLineHolder(BaseStreamLine StreamLine, Action<EdgeRoutingTable> Validator);
 
     private readonly ILogger<StreamLineService> _logger = logger;
-    private readonly IServiceProvider _serviceProvider = serviceProvider;
     private readonly Dictionary<string, StreamLineHolder> _streamLines = [];
     private readonly SemaphoreSlim _locker = new(1);
 

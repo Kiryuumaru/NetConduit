@@ -28,7 +28,7 @@ public class EdgeApiService(ILogger<EdgeApiService> logger, IServiceProvider ser
     private Task<HttpResult> InvokeEndpoint(HttpMethod method, string path, CancellationToken cancellationToken)
     {
         var endpoint = _configuration.GetVarRefValue("SERVER_ENDPOINT").Trim('/') + "/api/edge" + path;
-        return new HttpClient().Execute(method, endpoint, cancellationToken);
+        return new HttpClient().Execute(method, endpoint, JsonSerializerExtension.CamelCaseOption, cancellationToken);
     }
 
     private Task<HttpResult<TReturn>> InvokeEndpoint<TReturn>(HttpMethod method, string path, CancellationToken cancellationToken)
