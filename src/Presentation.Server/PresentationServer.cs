@@ -1,6 +1,9 @@
 ﻿using Application.Server;
 using ApplicationBuilderHelpers;
+using Google.Protobuf.WellKnownTypes;
+using Microsoft.Extensions.FileProviders;
 using Microsoft.OpenApi.Models;
+using Presentation.Server.Components;
 using System.Reflection;
 
 namespace Presentation.Server;
@@ -38,6 +41,9 @@ internal class PresentationServer : ApplicationServer
             var xmlFilename = $"{Assembly.GetExecutingAssembly().GetName().Name}.xml";
             options.IncludeXmlComments(Path.Combine(AppContext.BaseDirectory, xmlFilename));
         });
+
+        services.AddRazorComponents()
+            .AddInteractiveServerComponents();
     }
 
     public override void AddMiddlewares(ApplicationDependencyBuilder builder, IHost host)
@@ -49,6 +55,17 @@ internal class PresentationServer : ApplicationServer
             (host as IApplicationBuilder)!.UseSwagger();
             (host as IApplicationBuilder)!.UseSwaggerUI();
         }
+        else
+        {
+            (host as IApplicationBuilder)!.UseExceptionHandler("/Error", createScopeForErrors: true);
+            (host as IApplicationBuilder)!.UseHsts();
+        }
+
+        (host as IApplicationBuilder)!.UseHttpsRedirection();
+
+        (host as IApplicationBuilder)!.UseStaticFiles();
+
+        (host as IApplicationBuilder)!.UseAntiforgery();
     }
 
     public override void AddMappings(ApplicationDependencyBuilder builder, IHost host)
@@ -59,5 +76,8 @@ internal class PresentationServer : ApplicationServer
         (host as WebApplication)!.UseHttpsRedirection();
         (host as WebApplication)!.UseAuthorization();
         (host as WebApplication)!.MapControllers();
+
+        (host as WebApplication)!.MapRazorComponents<App>()
+            .AddInteractiveServerRenderMode();
     }
 }
