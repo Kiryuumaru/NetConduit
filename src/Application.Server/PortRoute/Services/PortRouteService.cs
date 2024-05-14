@@ -177,13 +177,6 @@ public class PortRouteService(ILogger<PortRouteService> logger, PortRouteStoreSe
                     result.WithError("SOURCE_EDGE_PORT_ALREADY_EXISTS", "Port route sourceEdgePort already exists");
                     return result;
                 }
-                if (edgePort.DestinationEdgeId.Equals(edgeId) &&
-                    edgePort.DestinationEdgePort == portRouteAddDto.DestinationEdgePort)
-                {
-                    result.WithStatusCode(HttpStatusCode.BadRequest);
-                    result.WithError("DESTINATION_EDGE_PORT_ALREADY_EXISTS", "Port route destinationEdgePort already exists");
-                    return result;
-                }
             }
         }
 
@@ -303,13 +296,6 @@ public class PortRouteService(ILogger<PortRouteService> logger, PortRouteStoreSe
                 {
                     result.WithStatusCode(HttpStatusCode.BadRequest);
                     result.WithError("SOURCE_EDGE_PORT_ALREADY_EXISTS", "Port route sourceEdgePort already exists");
-                    return result;
-                }
-                if (edgePort.DestinationEdgeId.Equals(edgeId) &&
-                    edgePort.DestinationEdgePort == portRouteEditDto.DestinationEdgePort)
-                {
-                    result.WithStatusCode(HttpStatusCode.BadRequest);
-                    result.WithError("DESTINATION_EDGE_PORT_ALREADY_EXISTS", "Port route destinationEdgePort already exists");
                     return result;
                 }
             }
