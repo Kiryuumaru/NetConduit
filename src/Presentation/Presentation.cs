@@ -22,6 +22,7 @@ internal class Presentation : Application.Application
     {
         base.AddServices(builder, services);
 
+        services.AddMvc();
         services.AddControllers();
         services.AddEndpointsApiExplorer();
         services.AddSwaggerGen(options =>

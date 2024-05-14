@@ -18,8 +18,6 @@ public class HandshakeWorker(ILogger<HandshakeWorker> logger, IServiceProvider s
     private readonly IServiceProvider _serviceProvider = serviceProvider;
     private readonly IConfiguration _configuration = configuration;
 
-    private readonly int _batchToSend = 100;
-
     protected override Task ExecuteAsync(CancellationToken stoppingToken)
     {
         StartStream(stoppingToken);
