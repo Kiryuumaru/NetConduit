@@ -10,6 +10,18 @@ namespace Application.Common;
 
 public static class IConfigurationExtensions
 {
+    public static bool ContainsVarRefValue(this IConfiguration configuration, string varName)
+    {
+        try
+        {
+            return !string.IsNullOrEmpty(GetVarRefValue(configuration, varName));
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
     public static string GetVarRefValue(this IConfiguration configuration, string varName)
     {
         string? varValue = $"@ref:{varName}";

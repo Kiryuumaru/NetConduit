@@ -13,8 +13,7 @@
   </ItemGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\..\src\Presentation.Edge\Presentation.Edge.csproj" />
-    <ProjectReference Include="..\..\src\Presentation.Server\Presentation.Server.csproj" />
+    <ProjectReference Include="..\..\src\Presentation\Presentation.csproj" />
   </ItemGroup>
 
 </Project>
