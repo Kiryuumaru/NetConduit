@@ -18,4 +18,11 @@ public static class JsonSerializerExtension
         PropertyNameCaseInsensitive = true,
         WriteIndented = true
     };
+
+    public static readonly JsonSerializerOptions CamelCaseNoIndentOption = new()
+    {
+        PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
+        PropertyNameCaseInsensitive = true,
+        WriteIndented = false
+    };
 }

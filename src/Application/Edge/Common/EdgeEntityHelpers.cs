@@ -28,7 +28,7 @@ public static class EdgeEntityHelpers
         {
             Id = edgeEntity.Id,
             Name = edgeEntity.Name,
-            HandshakeToken = JsonSerializer.Serialize(edgeEntity, JsonSerializerExtension.CamelCaseOption).Encode()
+            HandshakeToken = JsonSerializer.Serialize(edgeEntity, JsonSerializerExtension.CamelCaseNoIndentOption).Encode()
         };
     }
 
@@ -36,7 +36,7 @@ public static class EdgeEntityHelpers
     {
         var decoded = handshakeToken.Decode();
 
-        EdgeTokenEntity edgeEntity = JsonSerializer.Deserialize<EdgeTokenEntity>(decoded, JsonSerializerExtension.CamelCaseOption)
+        EdgeTokenEntity edgeEntity = JsonSerializer.Deserialize<EdgeTokenEntity>(decoded, JsonSerializerExtension.CamelCaseNoIndentOption)
             ?? throw new Exception("Invalid handshakeToken");
 
         return new EdgeConnectionEntity()
