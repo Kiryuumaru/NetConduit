@@ -43,11 +43,11 @@ public class EdgeApiService(ILogger<EdgeApiService> logger, IServiceProvider ser
         return new HttpClient().ExecuteWithContent<TReturn, TPayload>(payload, method, endpoint, JsonSerializerExtension.CamelCaseOption, cancellationToken);
     }
 
-    public Task<HttpResult<EdgeTokenEntity>> Create(EdgeAddDto edgeAddDto, CancellationToken cancellationToken = default)
+    public Task<HttpResult<EdgeEntity>> Create(EdgeAddDto edgeAddDto, CancellationToken cancellationToken = default)
     {
         if (_configuration.ContainsVarRefValue("SERVER_ENDPOINT"))
         {
-            return InvokeEndpoint<EdgeAddDto, EdgeTokenEntity>(HttpMethod.Post, edgeAddDto, "", cancellationToken);
+            return InvokeEndpoint<EdgeAddDto, EdgeEntity>(HttpMethod.Post, edgeAddDto, "", cancellationToken);
         }
         else
         {
@@ -67,11 +67,11 @@ public class EdgeApiService(ILogger<EdgeApiService> logger, IServiceProvider ser
         }
     }
 
-    public Task<HttpResult<EdgeTokenEntity>> Edit(string id, EdgeEditDto edgeEditDto, CancellationToken cancellationToken = default)
+    public Task<HttpResult<EdgeEntity>> Edit(string id, EdgeEditDto edgeEditDto, CancellationToken cancellationToken = default)
     {
         if (_configuration.ContainsVarRefValue("SERVER_ENDPOINT"))
         {
-            return InvokeEndpoint<EdgeEditDto, EdgeTokenEntity>(HttpMethod.Put, edgeEditDto, "/" + id, cancellationToken);
+            return InvokeEndpoint<EdgeEditDto, EdgeEntity>(HttpMethod.Put, edgeEditDto, "/" + id, cancellationToken);
         }
         else
         {
@@ -91,11 +91,11 @@ public class EdgeApiService(ILogger<EdgeApiService> logger, IServiceProvider ser
         }
     }
 
-    public Task<HttpResult<EdgeTokenEntity[]>> GetAll(CancellationToken cancellationToken = default)
+    public Task<HttpResult<EdgeEntity[]>> GetAll(CancellationToken cancellationToken = default)
     {
         if (_configuration.ContainsVarRefValue("SERVER_ENDPOINT"))
         {
-            return InvokeEndpoint<EdgeTokenEntity[]>(HttpMethod.Get, "", cancellationToken);
+            return InvokeEndpoint<EdgeEntity[]>(HttpMethod.Get, "", cancellationToken);
         }
         else
         {

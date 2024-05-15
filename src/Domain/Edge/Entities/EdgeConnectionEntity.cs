@@ -6,7 +6,7 @@ using System.Threading.Tasks;
 
 namespace Domain.Edge.Entities;
 
-public class EdgeConnectionEntity : EdgeTokenEntity
+public class EdgeConnectionEntity : EdgeEntity
 {
     public required string HandshakeToken { get; init; }
 }

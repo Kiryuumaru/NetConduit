@@ -20,7 +20,6 @@ public static class EdgeEntityHelpers
             {
                 Id = edgeEntity.Id,
                 Name = edgeEntity.Name,
-                Token = edgeEntity.Token,
                 HandshakeToken = ""
             };
         }
@@ -29,7 +28,6 @@ public static class EdgeEntityHelpers
         {
             Id = edgeEntity.Id,
             Name = edgeEntity.Name,
-            Token = edgeEntity.Token,
             HandshakeToken = JsonSerializer.Serialize(edgeEntity, JsonSerializerExtension.CamelCaseOption).Encode()
         };
     }
@@ -45,7 +43,6 @@ public static class EdgeEntityHelpers
         {
             Id = edgeEntity.Id,
             Name = edgeEntity.Name,
-            Token = edgeEntity.Token,
             HandshakeToken = handshakeToken
         };
     }

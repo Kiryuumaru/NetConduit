@@ -33,9 +33,9 @@ public class EdgeService(ILogger<EdgeService> logger, EdgeStoreService edgeStore
         return StringEncoder.Random(50);
     }
 
-    public async Task<HttpResult<EdgeTokenEntity[]>> GetAll(CancellationToken cancellationToken = default)
+    public async Task<HttpResult<EdgeEntity[]>> GetAll(CancellationToken cancellationToken = default)
     {
-        HttpResult<EdgeTokenEntity[]> result = new();
+        HttpResult<EdgeEntity[]> result = new();
 
         var store = _edgeStoreService.GetStore();
 
@@ -46,7 +46,7 @@ public class EdgeService(ILogger<EdgeService> logger, EdgeStoreService edgeStore
             return result;
         }
 
-        List<EdgeTokenEntity> edgeEntities = [];
+        List<EdgeEntity> edgeEntities = [];
 
         foreach (var id in edgeIds)
         {
@@ -98,9 +98,9 @@ public class EdgeService(ILogger<EdgeService> logger, EdgeStoreService edgeStore
         return result;
     }
 
-    public async Task<HttpResult<EdgeTokenEntity>> Create(EdgeAddDto edgeAddDto, CancellationToken cancellationToken = default)
+    public async Task<HttpResult<EdgeEntity>> Create(EdgeAddDto edgeAddDto, CancellationToken cancellationToken = default)
     {
-        HttpResult<EdgeTokenEntity> result = new();
+        HttpResult<EdgeEntity> result = new();
 
         if (string.IsNullOrEmpty(edgeAddDto.Name))
         {
@@ -121,15 +121,15 @@ public class EdgeService(ILogger<EdgeService> logger, EdgeStoreService edgeStore
             return result;
         }
 
-        result.WithValue(newEdge);
+        result.WithValue(newEdge as EdgeEntity);
         result.WithStatusCode(HttpStatusCode.OK);
 
         return result;
     }
 
-    public async Task<HttpResult<EdgeTokenEntity>> Edit(string id, EdgeEditDto edgeEditDto, CancellationToken cancellationToken = default)
+    public async Task<HttpResult<EdgeEntity>> Edit(string id, EdgeEditDto edgeEditDto, CancellationToken cancellationToken = default)
     {
-        HttpResult<EdgeTokenEntity> result = new();
+        HttpResult<EdgeEntity> result = new();
 
         if (string.IsNullOrEmpty(id))
         {
@@ -190,7 +190,7 @@ public class EdgeService(ILogger<EdgeService> logger, EdgeStoreService edgeStore
             return result;
         }
 
-        result.WithValue(newEdge);
+        result.WithValue(newEdge as EdgeEntity);
         result.WithStatusCode(HttpStatusCode.OK);
 
         _logger.LogInformation("Edge id {} was edited", newEdge.Id);
@@ -246,9 +246,9 @@ public class EdgeService(ILogger<EdgeService> logger, EdgeStoreService edgeStore
         return result;
     }
 
-    internal async Task<HttpResult<EdgeTokenEntity>> Create(EdgeTokenEntity newEdge, CancellationToken cancellationToken = default)
+    internal async Task<HttpResult<EdgeEntity>> Create(EdgeTokenEntity newEdge, CancellationToken cancellationToken = default)
     {
-        HttpResult<EdgeTokenEntity> result = new();
+        HttpResult<EdgeEntity> result = new();
 
         var store = _edgeStoreService.GetStore();
 
@@ -259,7 +259,7 @@ public class EdgeService(ILogger<EdgeService> logger, EdgeStoreService edgeStore
             return result;
         }
 
-        result.WithValue(newEdge);
+        result.WithValue(newEdge as EdgeEntity);
         result.WithStatusCode(HttpStatusCode.OK);
 
         _logger.LogInformation("Edge id {} was created", newEdge.Id);

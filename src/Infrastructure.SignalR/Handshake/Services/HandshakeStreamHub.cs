@@ -98,8 +98,6 @@ public class HandshakeStreamHub(
                     {
                         Id = edgeEntity.Id,
                         Name = edgeEntity.Name,
-                        Token = edgeEntity.Token,
-                        HandshakeToken = handshakeToken,
                         Table = table,
                         Edges = edges
                     };

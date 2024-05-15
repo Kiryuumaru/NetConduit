@@ -8,7 +8,7 @@ using System.Threading.Tasks;
 
 namespace Domain.Edge.Models;
 
-public class EdgeRoutingTable : EdgeConnectionEntity
+public class EdgeRoutingTable : EdgeEntity
 {
     public required Dictionary<string, PortRouteEntity> Table { get; init; }
 

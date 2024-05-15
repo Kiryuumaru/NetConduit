@@ -24,13 +24,13 @@ namespace Application.Edge.Interfaces;
 
 public interface IEdgeService
 {
-    Task<HttpResult<EdgeTokenEntity[]>> GetAll(CancellationToken cancellationToken = default);
+    Task<HttpResult<EdgeEntity[]>> GetAll(CancellationToken cancellationToken = default);
 
     Task<HttpResult<EdgeConnectionEntity>> Get(string id, CancellationToken cancellationToken = default);
 
-    Task<HttpResult<EdgeTokenEntity>> Create(EdgeAddDto edgeAddDto, CancellationToken cancellationToken = default);
+    Task<HttpResult<EdgeEntity>> Create(EdgeAddDto edgeAddDto, CancellationToken cancellationToken = default);
 
-    Task<HttpResult<EdgeTokenEntity>> Edit(string id, EdgeEditDto edgeEditDto, CancellationToken cancellationToken = default);
+    Task<HttpResult<EdgeEntity>> Edit(string id, EdgeEditDto edgeEditDto, CancellationToken cancellationToken = default);
 
     Task<HttpResult> Delete(string id, CancellationToken cancellationToken = default);
 }

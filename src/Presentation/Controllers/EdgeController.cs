@@ -24,7 +24,7 @@ public class EdgeController(EdgeApiService edgeApiService) : ControllerBase
     /// <response code="200">Returns when the operation is successful.</response>
     /// <response code="500">Returns when an unexpected error occurs.</response>
     [HttpGet]
-    public Task<HttpResult<EdgeTokenEntity[]>> GetAll()
+    public Task<HttpResult<EdgeEntity[]>> GetAll()
     {
         return _edgeApiService.GetAll();
     }
@@ -53,7 +53,7 @@ public class EdgeController(EdgeApiService edgeApiService) : ControllerBase
     /// <response code="400">Returns when the provided data is invalid.</response>
     /// <response code="500">Returns when an unexpected error occurs.</response>
     [HttpPost]
-    public Task<HttpResult<EdgeTokenEntity>> Create([FromBody] EdgeAddDto edge)
+    public Task<HttpResult<EdgeEntity>> Create([FromBody] EdgeAddDto edge)
     {
         return _edgeApiService.Create(edge);
     }
@@ -69,7 +69,7 @@ public class EdgeController(EdgeApiService edgeApiService) : ControllerBase
     /// <response code="404">Returns when the Edge entity with the given ID is not found.</response>
     /// <response code="500">Returns when an unexpected error occurs.</response>
     [HttpPut("{id}")]
-    public Task<HttpResult<EdgeTokenEntity>> Edit(string id, [FromBody] EdgeEditDto edge)
+    public Task<HttpResult<EdgeEntity>> Edit(string id, [FromBody] EdgeEditDto edge)
     {
         return _edgeApiService.Edit(id, edge);
     }
