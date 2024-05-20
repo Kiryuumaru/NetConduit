@@ -9,7 +9,7 @@ using System.Reflection;
 
 namespace Presentation;
 
-internal class PresentationBase : ApplicationBase
+internal class BasePresentation : BaseApplication
 {
     public override void AddConfiguration(ApplicationDependencyBuilder builder, IConfiguration configuration)
     {

@@ -6,7 +6,7 @@ using Presentation;
 
 var builder = ApplicationDependencyBuilder.FromBuilder(WebApplication.CreateBuilder(args));
 
-builder.Add<PresentationBase>();
+builder.Add<BasePresentation>();
 builder.Add<SignalRApplication>();
 builder.Add<SQLiteApplication>();
 
