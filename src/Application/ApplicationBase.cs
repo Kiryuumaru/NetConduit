@@ -12,7 +12,7 @@ using Microsoft.Extensions.DependencyInjection;
 
 namespace Application;
 
-public class Application : ApplicationDependency
+public class ApplicationBase : ApplicationDependency
 {
     public override void AddServices(ApplicationDependencyBuilder builder, IServiceCollection services)
     {

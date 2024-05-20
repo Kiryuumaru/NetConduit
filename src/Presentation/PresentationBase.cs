@@ -1,4 +1,5 @@
-﻿using Application.Common;
+﻿using Application;
+using Application.Common;
 using Application.Server;
 using ApplicationBuilderHelpers;
 using Google.Protobuf.WellKnownTypes;
@@ -8,7 +9,7 @@ using System.Reflection;
 
 namespace Presentation;
 
-internal class Presentation : Application.Application
+internal class PresentationBase : ApplicationBase
 {
     public override void AddConfiguration(ApplicationDependencyBuilder builder, IConfiguration configuration)
     {
