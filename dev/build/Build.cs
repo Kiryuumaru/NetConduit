@@ -10,8 +10,12 @@ using Nuke.Common.Tooling;
 using Nuke.Common.Utilities.Collections;
 using NukeBuildHelpers;
 
-class Build : BaseNukeBuildHelpers
+public class Build : BaseNukeBuildHelpers
 {
+    public override string[] EnvironmentBranches { get; } = ["master", "prerelease"];
+
+    public override string MainEnvironmentBranch { get; } = "master";
+
     public static int Main () => Execute<Build>(x => x.Version);
 
     public Target Clean => _ => _
