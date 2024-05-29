@@ -9,10 +9,9 @@ namespace Application.Server.Edge.Common;
 
 public static class EdgeDefaults
 {
-    public static EdgeTokenEntity ServerEdgeConnectionEntity { get; } = new()
+    public static EdgeEntity ServerEdgeEntity { get; } = new()
     {
         Id = "server",
-        Name = "Server",
-        Token = ""
+        Name = "Server"
     };
 }

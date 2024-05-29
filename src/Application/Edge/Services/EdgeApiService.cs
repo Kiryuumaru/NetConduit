@@ -19,9 +19,8 @@ using System.Threading.Tasks;
 
 namespace Application.Edge.Services;
 
-public class EdgeApiService(ILogger<EdgeApiService> logger, IServiceProvider serviceProvider, IConfiguration configuration) : IEdgeService
+public class EdgeApiService(IServiceProvider serviceProvider, IConfiguration configuration) : IEdgeService
 {
-    private readonly ILogger<EdgeApiService> _logger = logger;
     private readonly IServiceProvider _serviceProvider = serviceProvider;
     private readonly IConfiguration _configuration = configuration;
 
@@ -43,11 +42,11 @@ public class EdgeApiService(ILogger<EdgeApiService> logger, IServiceProvider ser
         return new HttpClient().ExecuteWithContent<TReturn, TPayload>(payload, method, endpoint, JsonSerializerExtension.CamelCaseOption, cancellationToken);
     }
 
-    public Task<HttpResult<EdgeEntity>> Create(EdgeAddDto edgeAddDto, CancellationToken cancellationToken = default)
+    public Task<HttpResult<EdgeConnectionEntity>> Create(EdgeAddDto edgeAddDto, CancellationToken cancellationToken = default)
     {
         if (_configuration.ContainsVarRefValue("SERVER_ENDPOINT"))
         {
-            return InvokeEndpoint<EdgeAddDto, EdgeEntity>(HttpMethod.Post, edgeAddDto, "", cancellationToken);
+            return InvokeEndpoint<EdgeAddDto, EdgeConnectionEntity>(HttpMethod.Post, edgeAddDto, "", cancellationToken);
         }
         else
         {

@@ -1,4 +1,5 @@
 ﻿using Application.Common;
+using Domain.Edge.Dtos;
 using Domain.Edge.Entities;
 using Domain.Edge.Models;
 using System;
@@ -12,6 +13,16 @@ namespace Application.Edge.Common;
 
 public static class EdgeEntityHelpers
 {
+    public static EdgeTokenEntity GenerateToken(EdgeEntity edgeEntity)
+    {
+        return new()
+        {
+            Id = edgeEntity.Id,
+            Name = edgeEntity.Name,
+            Token = StringEncoder.Random(50)
+        };
+    }
+
     public static EdgeConnectionEntity Encode(EdgeTokenEntity edgeEntity)
     {
         if (string.IsNullOrEmpty(edgeEntity.Token))

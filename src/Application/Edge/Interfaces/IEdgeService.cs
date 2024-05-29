@@ -28,7 +28,7 @@ public interface IEdgeService
 
     Task<HttpResult<EdgeConnectionEntity>> Get(string id, CancellationToken cancellationToken = default);
 
-    Task<HttpResult<EdgeEntity>> Create(EdgeAddDto edgeAddDto, CancellationToken cancellationToken = default);
+    Task<HttpResult<EdgeConnectionEntity>> Create(EdgeAddDto edgeAddDto, CancellationToken cancellationToken = default);
 
     Task<HttpResult<EdgeEntity>> Edit(string id, EdgeEditDto edgeEditDto, CancellationToken cancellationToken = default);
 

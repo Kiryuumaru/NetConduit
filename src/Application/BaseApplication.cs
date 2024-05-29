@@ -5,6 +5,7 @@ using Application.Handshake.Services;
 using Application.LocalStore.Services;
 using Application.PortRoute.Interfaces;
 using Application.Server.Edge.Services;
+using Application.Server.Edge.Workers;
 using Application.Server.PortRoute.Services;
 using Application.StreamLine.Services;
 using ApplicationBuilderHelpers;
@@ -36,6 +37,7 @@ public class BaseApplication : ApplicationDependency
             services.AddScoped<PortRouteService>();
             services.AddScoped<PortRouteStoreService>();
             services.AddSingleton<PortRouteEventHubService>();
+            services.AddHostedService<EdgeWorker>();
         }
     }
 }

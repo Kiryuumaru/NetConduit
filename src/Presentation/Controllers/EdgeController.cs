@@ -53,7 +53,7 @@ public class EdgeController(EdgeApiService edgeApiService) : ControllerBase
     /// <response code="400">Returns when the provided data is invalid.</response>
     /// <response code="500">Returns when an unexpected error occurs.</response>
     [HttpPost]
-    public Task<HttpResult<EdgeEntity>> Create([FromBody] EdgeAddDto edge)
+    public Task<HttpResult<EdgeConnectionEntity>> Create([FromBody] EdgeAddDto edge)
     {
         return _edgeApiService.Create(edge);
     }

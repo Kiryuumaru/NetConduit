@@ -5,6 +5,7 @@ using ApplicationBuilderHelpers;
 using Google.Protobuf.WellKnownTypes;
 using Microsoft.Extensions.FileProviders;
 using Microsoft.OpenApi.Models;
+using System.Diagnostics.CodeAnalysis;
 using System.Reflection;
 
 namespace Presentation;

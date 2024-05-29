@@ -3,6 +3,7 @@ using Nuke.Common.Tools.DotNet;
 using NukeBuildHelpers;
 using NukeBuildHelpers.Attributes;
 using NukeBuildHelpers.Enums;
+using NukeBuildHelpers.Models.RunContext;
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -17,9 +18,7 @@ public class NetConduitWindowsX64 : AppEntry<Build>
 
     public override RunsOnType PublishRunsOn => RunsOnType.Windows2022;
 
-    public override bool MainRelease => false;
-
-    public override void Build()
+    public override void Build(AppRunContext appRunContext)
     {
         var projPath = RootDirectory / "src" / "Presentation" / "Presentation.csproj";
         OutputDirectory.DeleteDirectory();

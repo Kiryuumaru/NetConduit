@@ -1,5 +1,8 @@
-﻿using Application.Server.Edge.Common;
+﻿using Application.Common;
+using Application.Edge.Common;
+using Application.Server.Edge.Common;
 using Application.Server.Edge.Services;
+using Domain.Edge.Dtos;
 using Domain.Edge.Entities;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
@@ -22,10 +25,13 @@ internal class EdgeWorker(ILogger<EdgeWorker> logger, IServiceProvider servicePr
         using var scope = _serviceProvider.CreateScope();
         var edgeService = scope.ServiceProvider.GetRequiredService<EdgeService>();
 
-        if ((await edgeService.Get(EdgeDefaults.ServerEdgeConnectionEntity.Id, stoppingToken)).HasNoValue)
+        if (!(await edgeService.Get(EdgeDefaults.ServerEdgeEntity.Id, stoppingToken)).SuccessAndHasValue(out var edgeConnectionEntity))
         {
-            (await edgeService.Create(EdgeDefaults.ServerEdgeConnectionEntity, stoppingToken)).ThrowIfError();
+            EdgeTokenEntity newServerEdge = EdgeEntityHelpers.GenerateToken(EdgeDefaults.ServerEdgeEntity);
+            edgeConnectionEntity = (await edgeService.Create(newServerEdge, stoppingToken)).GetValueOrThrow();
         }
+
+        _logger.LogInformation("Server Edge was initialized with handshake-token {}", edgeConnectionEntity.HandshakeToken);
 
         Start(stoppingToken);
     }
