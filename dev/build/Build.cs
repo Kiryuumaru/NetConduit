@@ -7,8 +7,12 @@ using Nuke.Common.Execution;
 using Nuke.Common.IO;
 using Nuke.Common.ProjectModel;
 using Nuke.Common.Tooling;
+using Nuke.Common.Tools.DotNet;
 using Nuke.Common.Utilities.Collections;
 using NukeBuildHelpers;
+using NukeBuildHelpers.Entry;
+using NukeBuildHelpers.Entry.Extensions;
+using NukeBuildHelpers.Runner.Abstraction;
 
 public class Build : BaseNukeBuildHelpers
 {
@@ -16,7 +20,7 @@ public class Build : BaseNukeBuildHelpers
 
     public override string MainEnvironmentBranch { get; } = "master";
 
-    public static int Main () => Execute<Build>(x => x.Version);
+    public static int Main() => Execute<Build>(x => x.Version);
 
     public Target Clean => _ => _
         .Unlisted()
@@ -36,5 +40,45 @@ public class Build : BaseNukeBuildHelpers
             }
             Console.WriteLine("Cleaning " + (RootDirectory / ".vs").ToString());
             (RootDirectory / ".vs").DeleteDirectory();
+        });
+
+    public BuildEntry NetConduitLinuxX64Build => _ => _
+        .AppId("net_conduit")
+        .RunnerOS(RunnerOS.Ubuntu2204)
+        .Execute(context =>
+        {
+            var projPath = RootDirectory / "src" / "Presentation" / "Presentation.csproj";
+            DotNetTasks.DotNetClean(_ => _
+                .SetProject(projPath));
+            DotNetTasks.DotNetBuild(_ => _
+                .SetProjectFile(projPath)
+                .SetConfiguration("Release"));
+            DotNetTasks.DotNetPublish(_ => _
+                .SetProject(projPath)
+                .SetConfiguration("Release")
+                .EnableSelfContained()
+                .SetRuntime("linux-x64")
+                .EnablePublishSingleFile()
+                .SetOutput(OutputDirectory));
+        });
+
+    public BuildEntry NetConduitWindowsX64Build => _ => _
+        .AppId("net_conduit")
+        .RunnerOS(RunnerOS.Windows2022)
+        .Execute(context =>
+        {
+            var projPath = RootDirectory / "src" / "Presentation" / "Presentation.csproj";
+            DotNetTasks.DotNetClean(_ => _
+                .SetProject(projPath));
+            DotNetTasks.DotNetBuild(_ => _
+                .SetProjectFile(projPath)
+                .SetConfiguration("Release"));
+            DotNetTasks.DotNetPublish(_ => _
+                .SetProject(projPath)
+                .SetConfiguration("Release")
+                .EnableSelfContained()
+                .SetRuntime("win-x64")
+                .EnablePublishSingleFile()
+                .SetOutput(OutputDirectory));
         });
 }
