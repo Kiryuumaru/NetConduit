@@ -14,7 +14,7 @@ using NukeBuildHelpers.Entry;
 using NukeBuildHelpers.Entry.Extensions;
 using NukeBuildHelpers.Runner.Abstraction;
 
-public class Build : BaseNukeBuildHelpers
+class Build : BaseNukeBuildHelpers
 {
     public override string[] EnvironmentBranches { get; } = ["master", "prerelease"];
 
