@@ -45,6 +45,7 @@ class Build : BaseNukeBuildHelpers
     public BuildEntry NetConduitLinuxX64Build => _ => _
         .AppId("net_conduit")
         .RunnerOS(RunnerOS.Ubuntu2204)
+        .Condition(true)
         .Execute(context =>
         {
             BuildBinary("linux-x64");
@@ -53,6 +54,7 @@ class Build : BaseNukeBuildHelpers
     public BuildEntry NetConduitLinuxArm64Build => _ => _
         .AppId("net_conduit")
         .RunnerOS(RunnerOS.Ubuntu2204)
+        .Condition(true)
         .Execute(context =>
         {
             BuildBinary("linux-arm64");
@@ -61,6 +63,7 @@ class Build : BaseNukeBuildHelpers
     public BuildEntry NetConduitWindowsX64Build => _ => _
         .AppId("net_conduit")
         .RunnerOS(RunnerOS.Windows2022)
+        .Condition(true)
         .Execute(context =>
         {
             BuildBinary("win-x64");
@@ -69,6 +72,7 @@ class Build : BaseNukeBuildHelpers
     public BuildEntry NetConduitWindowsArm64Build => _ => _
         .AppId("net_conduit")
         .RunnerOS(RunnerOS.Windows2022)
+        .Condition(true)
         .Execute(context =>
         {
             BuildBinary("win-arm64");
