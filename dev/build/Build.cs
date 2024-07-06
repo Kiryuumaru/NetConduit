@@ -47,19 +47,15 @@ class Build : BaseNukeBuildHelpers
         .RunnerOS(RunnerOS.Ubuntu2204)
         .Execute(context =>
         {
-            var projPath = RootDirectory / "src" / "Presentation" / "Presentation.csproj";
-            DotNetTasks.DotNetClean(_ => _
-                .SetProject(projPath));
-            DotNetTasks.DotNetBuild(_ => _
-                .SetProjectFile(projPath)
-                .SetConfiguration("Release"));
-            DotNetTasks.DotNetPublish(_ => _
-                .SetProject(projPath)
-                .SetConfiguration("Release")
-                .EnableSelfContained()
-                .SetRuntime("linux-x64")
-                .EnablePublishSingleFile()
-                .SetOutput(OutputDirectory));
+            BuildBinary("linux-x64");
+        });
+
+    public BuildEntry NetConduitLinuxArm64Build => _ => _
+        .AppId("net_conduit")
+        .RunnerOS(RunnerOS.Ubuntu2204)
+        .Execute(context =>
+        {
+            BuildBinary("linux-arm64");
         });
 
     public BuildEntry NetConduitWindowsX64Build => _ => _
@@ -67,18 +63,31 @@ class Build : BaseNukeBuildHelpers
         .RunnerOS(RunnerOS.Windows2022)
         .Execute(context =>
         {
-            var projPath = RootDirectory / "src" / "Presentation" / "Presentation.csproj";
-            DotNetTasks.DotNetClean(_ => _
-                .SetProject(projPath));
-            DotNetTasks.DotNetBuild(_ => _
-                .SetProjectFile(projPath)
-                .SetConfiguration("Release"));
-            DotNetTasks.DotNetPublish(_ => _
-                .SetProject(projPath)
-                .SetConfiguration("Release")
-                .EnableSelfContained()
-                .SetRuntime("win-x64")
-                .EnablePublishSingleFile()
-                .SetOutput(OutputDirectory));
+            BuildBinary("win-x64");
         });
+
+    public BuildEntry NetConduitWindowsArm64Build => _ => _
+        .AppId("net_conduit")
+        .RunnerOS(RunnerOS.Windows2022)
+        .Execute(context =>
+        {
+            BuildBinary("win-arm64");
+        });
+
+    private void BuildBinary(string runtime)
+    {
+        var projPath = RootDirectory / "src" / "Presentation" / "Presentation.csproj";
+        DotNetTasks.DotNetClean(_ => _
+            .SetProject(projPath));
+        DotNetTasks.DotNetBuild(_ => _
+            .SetProjectFile(projPath)
+            .SetConfiguration("Release"));
+        DotNetTasks.DotNetPublish(_ => _
+            .SetProject(projPath)
+            .SetConfiguration("Release")
+            .EnableSelfContained()
+            .SetRuntime(runtime)
+            .EnablePublishSingleFile()
+            .SetOutput(OutputDirectory / runtime));
+    }
 }
