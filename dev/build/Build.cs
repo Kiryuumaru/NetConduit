@@ -13,7 +13,6 @@ using NukeBuildHelpers;
 using NukeBuildHelpers.Entry;
 using NukeBuildHelpers.Entry.Extensions;
 using NukeBuildHelpers.Runner.Abstraction;
-using static Nuke.Common.Tools.NSwag.NSwagTasks;
 
 class Build : BaseNukeBuildHelpers
 {
