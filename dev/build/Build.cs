@@ -13,6 +13,7 @@ using NukeBuildHelpers;
 using NukeBuildHelpers.Entry;
 using NukeBuildHelpers.Entry.Extensions;
 using NukeBuildHelpers.Runner.Abstraction;
+using static Nuke.Common.Tools.NSwag.NSwagTasks;
 
 class Build : BaseNukeBuildHelpers
 {
@@ -45,7 +46,7 @@ class Build : BaseNukeBuildHelpers
     public BuildEntry NetConduitLinuxX64Build => _ => _
         .AppId("net_conduit")
         .RunnerOS(RunnerOS.Ubuntu2204)
-        .Condition(true)
+        .ReleaseAsset(GetReleaseArchivePath("linux-x64"))
         .Execute(context =>
         {
             BuildBinary("linux-x64");
@@ -54,7 +55,7 @@ class Build : BaseNukeBuildHelpers
     public BuildEntry NetConduitLinuxArm64Build => _ => _
         .AppId("net_conduit")
         .RunnerOS(RunnerOS.Ubuntu2204)
-        .Condition(true)
+        .ReleaseAsset(GetReleaseArchivePath("linux-arm64"))
         .Execute(context =>
         {
             BuildBinary("linux-arm64");
@@ -63,7 +64,7 @@ class Build : BaseNukeBuildHelpers
     public BuildEntry NetConduitWindowsX64Build => _ => _
         .AppId("net_conduit")
         .RunnerOS(RunnerOS.Windows2022)
-        .Condition(true)
+        .ReleaseAsset(GetReleaseArchivePath("win-x64"))
         .Execute(context =>
         {
             BuildBinary("win-x64");
@@ -72,7 +73,7 @@ class Build : BaseNukeBuildHelpers
     public BuildEntry NetConduitWindowsArm64Build => _ => _
         .AppId("net_conduit")
         .RunnerOS(RunnerOS.Windows2022)
-        .Condition(true)
+        .ReleaseAsset(GetReleaseArchivePath("win-arm64"))
         .Execute(context =>
         {
             BuildBinary("win-arm64");
@@ -80,6 +81,7 @@ class Build : BaseNukeBuildHelpers
 
     private void BuildBinary(string runtime)
     {
+        var releasePath = GetReleasePath(runtime);
         var projPath = RootDirectory / "src" / "Presentation" / "Presentation.csproj";
         DotNetTasks.DotNetClean(_ => _
             .SetProject(projPath));
@@ -92,6 +94,39 @@ class Build : BaseNukeBuildHelpers
             .EnableSelfContained()
             .SetRuntime(runtime)
             .EnablePublishSingleFile()
-            .SetOutput(OutputDirectory / runtime));
+            .SetOutput(releasePath / releasePath.Name));
+        if (runtime.StartsWith("linux-"))
+        {
+            releasePath.TarGZipTo(GetReleaseArchivePath(runtime));
+        }
+        else if (runtime.StartsWith("win-"))
+        {
+            releasePath.ZipTo(GetReleaseArchivePath(runtime));
+        }
+        else
+        {
+            throw new Exception($"{runtime} not supported.");
+        }
+    }
+
+    private AbsolutePath GetReleasePath(string runtime)
+    {
+        return OutputDirectory / ("net_conduit-" + runtime);
+    }
+
+    private AbsolutePath GetReleaseArchivePath(string runtime)
+    {
+        if (runtime.StartsWith("linux-"))
+        {
+            return GetReleasePath(runtime) + ".tar.gz";
+        }
+        else if (runtime.StartsWith("win-"))
+        {
+            return GetReleasePath(runtime) + ".zip";
+        }
+        else
+        {
+            throw new Exception($"{runtime} not supported.");
+        }
     }
 }
