@@ -13,12 +13,12 @@
   </ItemGroup>
 
   <ItemGroup>
-    <PackageReference Include="DisposableHelpers" Version="1.2.4" />
+    <PackageReference Include="DisposableHelpers" Version="1.2.14" />
     <PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions" Version="8.0.1" />
     <PackageReference Include="Microsoft.Extensions.Hosting.Abstractions" Version="8.0.0" />
-    <PackageReference Include="ApplicationBuilderHelpers" Version="0.2.1" />
-    <PackageReference Include="RestfulHelpers" Version="1.7.10" />
-    <PackageReference Include="TransactionHelpers" Version="2.5.5" />
+    <PackageReference Include="ApplicationBuilderHelpers" Version="0.2.9" />
+    <PackageReference Include="RestfulHelpers" Version="1.7.31" />
+    <PackageReference Include="TransactionHelpers" Version="2.5.16" />
   </ItemGroup>
 
   <ItemGroup>

@@ -6,8 +6,13 @@
 		<ImplicitUsings>enable</ImplicitUsings>
 		<GenerateDocumentationFile>true</GenerateDocumentationFile>
 		<IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>
+		<IncludeAllContentForSelfExtract>true</IncludeAllContentForSelfExtract>
 		<EnableCompressionInSingleFile>true</EnableCompressionInSingleFile>
 	</PropertyGroup>
+	
+	<ItemGroup>
+		<EmbeddedResource Include="wwwroot\**" />
+	</ItemGroup>
 
 	<ItemGroup>
 		<PackageReference Include="Swashbuckle.AspNetCore" Version="6.6.2" />
@@ -20,10 +25,6 @@
 		<ProjectReference Include="..\Application\Application.csproj" />
 		<ProjectReference Include="..\Infrastructure.SignalR\Infrastructure.SignalR.csproj" />
 		<ProjectReference Include="..\Infrastructure.SQLite\Infrastructure.SQLite.csproj" />
-	</ItemGroup>
-
-	<ItemGroup>
-	  <Folder Include="Common\" />
 	</ItemGroup>
 
 </Project>

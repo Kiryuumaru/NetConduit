@@ -4,7 +4,9 @@ using Application.Server;
 using ApplicationBuilderHelpers;
 using Google.Protobuf.WellKnownTypes;
 using Microsoft.Extensions.FileProviders;
+using Microsoft.Extensions.Hosting;
 using Microsoft.OpenApi.Models;
+using Presentation.Components;
 using System.Diagnostics.CodeAnalysis;
 using System.Reflection;
 
@@ -23,6 +25,9 @@ internal class BasePresentation : BaseApplication
     public override void AddServices(ApplicationDependencyBuilder builder, IServiceCollection services)
     {
         base.AddServices(builder, services);
+
+        services.AddRazorComponents()
+            .AddInteractiveServerComponents();
 
         services.AddMvc();
         services.AddControllers();
@@ -67,5 +72,14 @@ internal class BasePresentation : BaseApplication
         (host as WebApplication)!.UseHttpsRedirection();
         (host as WebApplication)!.UseAuthorization();
         (host as WebApplication)!.MapControllers();
+
+        (host as WebApplication)!.UseStaticFiles(new StaticFileOptions
+        {
+            FileProvider = new EmbeddedFileProvider(Assembly.GetAssembly(type: typeof(App))!, "Presentation.wwwroot"),
+            RequestPath = ""
+        });
+        (host as WebApplication)!.UseAntiforgery();
+        (host as WebApplication)!.MapRazorComponents<App>()
+            .AddInteractiveServerRenderMode();
     }
 }
