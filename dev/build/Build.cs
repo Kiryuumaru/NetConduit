@@ -42,41 +42,23 @@ class Build : BaseNukeBuildHelpers
             (RootDirectory / ".vs").DeleteDirectory();
         });
 
-    public BuildEntry NetConduitLinuxX64Build => _ => _
+    public BuildEntry NetConduitBuild => _ => _
         .AppId("net_conduit")
-        .RunnerOS(RunnerOS.Ubuntu2204)
-        .ReleaseAsset(GetReleaseArchivePath("linux-x64"))
-        .Execute(context =>
-        {
-            BuildBinary("linux-x64");
-        });
-
-    public BuildEntry NetConduitLinuxArm64Build => _ => _
-        .AppId("net_conduit")
-        .RunnerOS(RunnerOS.Ubuntu2204)
-        .ReleaseAsset(GetReleaseArchivePath("linux-arm64"))
-        .Execute(context =>
-        {
-            BuildBinary("linux-arm64");
-        });
-
-    public BuildEntry NetConduitWindowsX64Build => _ => _
-        .AppId("net_conduit")
-        .RunnerOS(RunnerOS.Windows2022)
-        .ReleaseAsset(GetReleaseArchivePath("win-x64"))
-        .Execute(context =>
-        {
-            BuildBinary("win-x64");
-        });
-
-    public BuildEntry NetConduitWindowsArm64Build => _ => _
-        .AppId("net_conduit")
-        .RunnerOS(RunnerOS.Windows2022)
-        .ReleaseAsset(GetReleaseArchivePath("win-arm64"))
-        .Execute(context =>
-        {
-            BuildBinary("win-arm64");
-        });
+        .Matrix(["linux", "win"], (_, runtime) => _
+            .RunnerOS(runtime switch
+            {
+                "linux" => RunnerOS.Ubuntu2204,
+                "win" => RunnerOS.Windows2022,
+                _ => throw new NotSupportedException()
+            })
+            .Matrix(["x64", "arm64"], (_, arch) => _
+                .WorkflowId($"{runtime}_{arch}")
+                .DisplayName($"Build {runtime}-{arch}")
+                .ReleaseAsset(GetReleaseArchivePath($"{runtime}-{arch}"))
+                .Execute(context =>
+                {
+                    BuildBinary($"{runtime}-{arch}");
+                })));
 
     private void BuildBinary(string runtime)
     {
