@@ -10,9 +10,11 @@ using Nuke.Common.Tooling;
 using Nuke.Common.Tools.DotNet;
 using Nuke.Common.Utilities.Collections;
 using NukeBuildHelpers;
+using NukeBuildHelpers.Common;
 using NukeBuildHelpers.Entry;
 using NukeBuildHelpers.Entry.Extensions;
 using NukeBuildHelpers.Runner.Abstraction;
+using static Nuke.Common.Tools.NSwag.NSwagTasks;
 
 class Build : BaseNukeBuildHelpers
 {
@@ -52,17 +54,33 @@ class Build : BaseNukeBuildHelpers
                 _ => throw new NotSupportedException()
             })
             .Matrix(["x64", "arm64"], (_, arch) => _
-                .WorkflowId($"{runtime}_{arch}")
+                .WorkflowId($"build_{runtime}_{arch}")
                 .DisplayName($"Build {runtime}-{arch}")
-                .ReleaseAsset(GetReleaseArchivePath($"{runtime}-{arch}"))
+                .ReleaseAsset(GetReleaseArchivePath(runtime, arch))
                 .Execute(context =>
                 {
-                    BuildBinary($"{runtime}-{arch}");
+                    BuildBinary(runtime, arch);
                 })));
 
-    private void BuildBinary(string runtime)
+    public PublishEntry PublishLocal => _ => _
+        .AppId("net_conduit")
+        .RunnerOS(RunnerOS.Ubuntu2204)
+        .Condition(false)
+        .Execute(context =>
+        {
+            foreach (var archive in OutputDirectory.GetFiles())
+            {
+                if (!archive.HasExtension(".zip", ".tar.gz"))
+                {
+                    continue;
+                }
+                archive.CopyRecursively(RootDirectory / "out" / archive.Name);
+            }
+        });
+
+    private void BuildBinary(string runtime, string arch)
     {
-        var releasePath = GetReleasePath(runtime);
+        var releasePath = GetReleasePath(runtime, arch);
         var projPath = RootDirectory / "src" / "Presentation" / "Presentation.csproj";
         DotNetTasks.DotNetClean(_ => _
             .SetProject(projPath));
@@ -73,41 +91,34 @@ class Build : BaseNukeBuildHelpers
             .SetProject(projPath)
             .SetConfiguration("Release")
             .EnableSelfContained()
-            .SetRuntime(runtime)
+            .SetRuntime($"{runtime}-{arch}")
             .EnablePublishSingleFile()
             .SetOutput(releasePath / releasePath.Name));
-        if (runtime.StartsWith("linux-"))
+        switch (runtime)
         {
-            releasePath.TarGZipTo(GetReleaseArchivePath(runtime));
-        }
-        else if (runtime.StartsWith("win-"))
-        {
-            releasePath.ZipTo(GetReleaseArchivePath(runtime));
-        }
-        else
-        {
-            throw new Exception($"{runtime} not supported.");
+            case "linux":
+                releasePath.TarGZipTo(GetReleaseArchivePath(runtime, arch));
+                break;
+            case "win":
+                releasePath.ZipTo(GetReleaseArchivePath(runtime, arch));
+                break;
+            default:
+                throw new Exception($"{runtime} not supported.");
         }
     }
 
-    private AbsolutePath GetReleasePath(string runtime)
+    private AbsolutePath GetReleaseArchivePath(string runtime, string arch)
     {
-        return OutputDirectory / ("net_conduit-" + runtime);
+        return runtime switch
+        {
+            "linux" => GetReleasePath(runtime, arch) + ".tar.gz",
+            "win" => GetReleasePath(runtime, arch) + ".zip",
+            _ => throw new Exception($"{runtime} not supported.")
+        };
     }
 
-    private AbsolutePath GetReleaseArchivePath(string runtime)
+    private AbsolutePath GetReleasePath(string runtime, string arch)
     {
-        if (runtime.StartsWith("linux-"))
-        {
-            return GetReleasePath(runtime) + ".tar.gz";
-        }
-        else if (runtime.StartsWith("win-"))
-        {
-            return GetReleasePath(runtime) + ".zip";
-        }
-        else
-        {
-            throw new Exception($"{runtime} not supported.");
-        }
+        return OutputDirectory / $"net_conduit-{runtime}-{arch}";
     }
 }
