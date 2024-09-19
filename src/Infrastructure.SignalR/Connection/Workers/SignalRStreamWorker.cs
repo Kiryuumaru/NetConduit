@@ -1,4 +1,5 @@
 ﻿using Application.Common;
+using Application.Configuration.Extensions;
 using DisposableHelpers;
 using Infrastructure.SignalR.Common;
 using Infrastructure.SignalR.Edge.Connection.Services;
@@ -79,7 +80,7 @@ internal class SignalRStreamWorker(ILogger<SignalRStreamWorker> logger, IConfigu
         {
             try
             {
-                string apiEndpoint = _configuration.GetVarRefValue("SERVER_ENDPOINT");
+                string apiEndpoint = _configuration.GetServerEndpoint() ?? throw new Exception("Server endpoint was not set");
 
                 _hubConnection = new HubConnectionBuilder()
                     .WithUrl(apiEndpoint.Trim('/') + '/' + Defaults.DefaultStream.Trim('/'))

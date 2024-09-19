@@ -12,19 +12,19 @@ using System.Reflection;
 
 namespace Presentation;
 
-internal class BasePresentation : BaseApplication
+internal class BasePresentation : Application.Application
 {
-    public override void AddConfiguration(ApplicationDependencyBuilder builder, IConfiguration configuration)
+    public override void AddConfiguration(ApplicationHostBuilder applicationBuilder, IConfiguration configuration)
     {
-        base.AddConfiguration(builder, configuration);
+        base.AddConfiguration(applicationBuilder, configuration);
 
-        builder.Builder.AddServiceDefaults();
+        applicationBuilder.Builder.AddServiceDefaults();
         (configuration as ConfigurationManager)!.AddEnvironmentVariables();
     }
 
-    public override void AddServices(ApplicationDependencyBuilder builder, IServiceCollection services)
+    public override void AddServices(ApplicationHostBuilder applicationBuilder, IServiceCollection services)
     {
-        base.AddServices(builder, services);
+        base.AddServices(applicationBuilder, services);
 
         services.AddRazorComponents()
             .AddInteractiveServerComponents();
@@ -51,9 +51,9 @@ internal class BasePresentation : BaseApplication
         });
     }
 
-    public override void AddMiddlewares(ApplicationDependencyBuilder builder, IHost host)
+    public override void AddMiddlewares(ApplicationHost applicationHost, IHost host)
     {
-        base.AddMiddlewares(builder, host);
+        base.AddMiddlewares(applicationHost, host);
 
         if ((host as WebApplication)!.Environment.IsDevelopment())
         {
@@ -64,20 +64,16 @@ internal class BasePresentation : BaseApplication
         (host as IApplicationBuilder)!.UseHttpsRedirection();
     }
 
-    public override void AddMappings(ApplicationDependencyBuilder builder, IHost host)
+    public override void AddMappings(ApplicationHost applicationHost, IHost host)
     {
-        base.AddMappings(builder, host);
+        base.AddMappings(applicationHost, host);
 
         (host as WebApplication)!.MapDefaultEndpoints();
         (host as WebApplication)!.UseHttpsRedirection();
         (host as WebApplication)!.UseAuthorization();
         (host as WebApplication)!.MapControllers();
 
-        (host as WebApplication)!.UseStaticFiles(new StaticFileOptions
-        {
-            FileProvider = new EmbeddedFileProvider(Assembly.GetAssembly(type: typeof(App))!, "Presentation.wwwroot"),
-            RequestPath = ""
-        });
+        (host as WebApplication)!.UseStaticFiles();
         (host as WebApplication)!.UseAntiforgery();
         (host as WebApplication)!.MapRazorComponents<App>()
             .AddInteractiveServerRenderMode();

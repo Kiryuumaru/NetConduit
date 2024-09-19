@@ -1,10 +1,12 @@
 ﻿using Application.Common;
 using Application.Edge.Common;
-using Application.Server.Edge.Services;
-using Application.Server.PortRoute.Services;
+using Application.Edge.Services;
+using Application.PortRoute.Services;
 using Domain.Edge.Entities;
 using Domain.Edge.Models;
 using Domain.PortRoute.Entities;
+using Infrastructure.SignalR.Server;
+using Infrastructure.SignalR.Server.Handshake.Services;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using System;
@@ -14,7 +16,7 @@ using System.Text;
 using System.Threading.Channels;
 using System.Threading.Tasks;
 
-namespace Infrastructure.SignalR.Server.Handshake.Services;
+namespace Infrastructure.SignalR.Handshake.Services;
 
 public class HandshakeStreamHub(
     ILogger<HandshakeStreamHub> logger,
@@ -42,7 +44,7 @@ public class HandshakeStreamHub(
             }
             catch
             {
-                _logger.LogInformation("Handshake attempt error: handshake token: {}", handshakeToken);
+                _logger.LogInformation("Handshake attempt error: handshake token: {HandshakeToken}", handshakeToken);
                 channel.Writer.TryComplete(new Exception("Invalid handshake token"));
                 return;
             }
@@ -53,12 +55,12 @@ public class HandshakeStreamHub(
             }
             catch
             {
-                _logger.LogInformation("Handshake attempt error: Edge already locked: {}", handshakeToken);
+                _logger.LogInformation("Handshake attempt error: Edge already locked: {HandshakeToken}", handshakeToken);
                 channel.Writer.TryComplete(new Exception("Edge already locked"));
                 return;
             }
 
-            _logger.LogInformation("New handshake stream ({}, {})", edgeEntity.Name, edgeEntity.Id);
+            _logger.LogInformation("New handshake stream ({EdgeName}, {EdgeId})", edgeEntity.Name, edgeEntity.Id);
 
             async Task Send()
             {
@@ -106,7 +108,7 @@ public class HandshakeStreamHub(
                 }
                 catch (Exception ex)
                 {
-                    _logger.LogError("Error ({}, {}): {}", edgeEntity.Name, edgeEntity.Id, ex.Message);
+                    _logger.LogError("Error ({EdgeName}, {EdgeId}): {ErrorMessage}", edgeEntity.Name, edgeEntity.Id, ex.Message);
                 }
             }
 
@@ -125,7 +127,7 @@ public class HandshakeStreamHub(
         }
         catch (Exception ex)
         {
-            _logger.LogInformation("Routine stopped: {}", ex.Message);
+            _logger.LogInformation("Routine stopped: {ErrorMessage}", ex.Message);
         }
     }
 }

@@ -7,7 +7,7 @@ using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
 
-namespace Application.Server.PortRoute.Services;
+namespace Application.PortRoute.Services;
 
 public class PortRouteEventHubService
 {

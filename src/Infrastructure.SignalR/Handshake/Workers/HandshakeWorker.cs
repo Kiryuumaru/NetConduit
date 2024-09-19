@@ -9,8 +9,9 @@ using Microsoft.Extensions.Logging;
 using System.Threading.Channels;
 using Infrastructure.SignalR.Common;
 using Application.Handshake.Services;
+using Application.Configuration.Extensions;
 
-namespace Infrastructure.SignalR.Client.Edge.Applet.Workers;
+namespace Infrastructure.SignalR.Handshake.Workers;
 
 public class HandshakeWorker(ILogger<HandshakeWorker> logger, IServiceProvider serviceProvider, IConfiguration configuration) : BackgroundService
 {
@@ -30,7 +31,7 @@ public class HandshakeWorker(ILogger<HandshakeWorker> logger, IServiceProvider s
         using var scope = _serviceProvider.CreateScope();
         var portRouteEventHubService = _serviceProvider.GetRequiredService<HandshakeService>();
         var signalRStreamService = scope.ServiceProvider.GetRequiredService<SignalRStreamService>();
-        var handshakeToken = _configuration.GetVarRefValue("HANDSHAKE_TOKEN");
+        var handshakeToken = _configuration.GetHandshakeToken();
 
         while (!stoppingToken.IsCancellationRequested)
         {
@@ -55,7 +56,7 @@ public class HandshakeWorker(ILogger<HandshakeWorker> logger, IServiceProvider s
                     if (!hasFirstPayload)
                     {
                         hasFirstPayload = true;
-                        _logger.LogInformation("Handshake stream attached ({}, {})", edgeInvoke.Name, edgeInvoke.Id);
+                        _logger.LogInformation("Handshake stream attached ({EdgeName}, {EdgeId})", edgeInvoke.Name, edgeInvoke.Id);
                     }
                     _logger.LogInformation("Handshake received updates");
                     portRouteEventHubService.OnHandshakeChanges(edgeInvoke);
@@ -65,7 +66,7 @@ public class HandshakeWorker(ILogger<HandshakeWorker> logger, IServiceProvider s
             }
             catch (Exception ex)
             {
-                _logger.LogError("Handshake subscribe error: {}", ex.Message);
+                _logger.LogError("Handshake subscribe error: {ErrorMessage}", ex.Message);
             }
             finally
             {

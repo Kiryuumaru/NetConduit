@@ -8,7 +8,7 @@ using Domain.PortRoute.Entities;
 using Microsoft.AspNetCore.Mvc;
 using RestfulHelpers.Common;
 
-namespace Presentation.Server.Controllers;
+namespace Presentation.Controllers;
 
 /// <summary>
 /// Controller for managing port routes.

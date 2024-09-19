@@ -14,17 +14,26 @@
 		<EmbeddedResource Include="wwwroot\**" />
 	</ItemGroup>
 
+	<PropertyGroup>
+		<Copyright>Copyright (C) 2024 Kiryuumaru</Copyright>
+		<Company>Kiryuumaru</Company>
+		<Version>1.2.3-beta</Version>
+		<AssemblyTitle>Net Conduit</AssemblyTitle>
+	</PropertyGroup>
+
 	<ItemGroup>
-		<PackageReference Include="Swashbuckle.AspNetCore" Version="6.6.2" />
+		<PackageReference Include="CommandLineParser" Version="2.9.1" />
+		<PackageReference Include="Swashbuckle.AspNetCore" Version="6.7.3" />
 		<PackageReference Include="Microsoft.Extensions.Hosting" Version="8.0.0" />
 		<PackageReference Include="Microsoft.Extensions.DependencyInjection" Version="8.0.0" />
 	</ItemGroup>
 
 	<ItemGroup>
-		<ProjectReference Include="..\..\dev\NetConduit.ServiceDefaults\NetConduit.ServiceDefaults.csproj" />
 		<ProjectReference Include="..\Application\Application.csproj" />
+		<ProjectReference Include="..\Infrastructure.Serilog\Infrastructure.Serilog.csproj" />
 		<ProjectReference Include="..\Infrastructure.SignalR\Infrastructure.SignalR.csproj" />
-		<ProjectReference Include="..\Infrastructure.SQLite\Infrastructure.SQLite.csproj" />
+		<ProjectReference Include="..\Infrastructure.SQLite.LocalStore\Infrastructure.SQLite.LocalStore.csproj" />
+		<ProjectReference Include="..\Presentation.AspireTest\Presentation.AspireTest.ServiceDefaults\Presentation.AspireTest.ServiceDefaults.csproj" />
 	</ItemGroup>
 
 </Project>

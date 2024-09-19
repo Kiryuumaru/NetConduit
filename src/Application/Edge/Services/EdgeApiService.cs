@@ -1,7 +1,7 @@
 ﻿using Application.Common;
+using Application.Configuration.Extensions;
 using Application.Edge.Interfaces;
 using Application.Handshake.Services;
-using Application.Server.Edge.Services;
 using Application.Server.PortRoute.Services;
 using Domain.Edge.Dtos;
 using Domain.Edge.Entities;
@@ -12,6 +12,7 @@ using RestfulHelpers;
 using RestfulHelpers.Common;
 using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Linq;
 using System.Text;
 using System.Threading;
@@ -24,27 +25,33 @@ public class EdgeApiService(IServiceProvider serviceProvider, IConfiguration con
     private readonly IServiceProvider _serviceProvider = serviceProvider;
     private readonly IConfiguration _configuration = configuration;
 
+    private string GetServerEndpoint()
+    {
+        var endpoint = _configuration.GetServerEndpoint() ?? throw new Exception("Server endpoint was not set");
+        return endpoint;
+    }
+
     private Task<HttpResult> InvokeEndpoint(HttpMethod method, string path, CancellationToken cancellationToken)
     {
-        var endpoint = _configuration.GetVarRefValue("SERVER_ENDPOINT").Trim('/') + "/api/edge" + path;
+        var endpoint = GetServerEndpoint().Trim('/') + "/api/edge" + path;
         return new HttpClient().Execute(method, endpoint, JsonSerializerExtension.CamelCaseOption, cancellationToken);
     }
 
     private Task<HttpResult<TReturn>> InvokeEndpoint<TReturn>(HttpMethod method, string path, CancellationToken cancellationToken)
     {
-        var endpoint = _configuration.GetVarRefValue("SERVER_ENDPOINT").Trim('/') + "/api/edge" + path;
+        var endpoint = GetServerEndpoint().Trim('/') + "/api/edge" + path;
         return new HttpClient().Execute<TReturn>(method, endpoint, JsonSerializerExtension.CamelCaseOption, cancellationToken);
     }
 
     private Task<HttpResult<TReturn>> InvokeEndpoint<TPayload, TReturn>(HttpMethod method, TPayload payload, string path, CancellationToken cancellationToken)
     {
-        var endpoint = _configuration.GetVarRefValue("SERVER_ENDPOINT").Trim('/') + "/api/edge" + path;
+        var endpoint = GetServerEndpoint().Trim('/') + "/api/edge" + path;
         return new HttpClient().ExecuteWithContent<TReturn, TPayload>(payload, method, endpoint, JsonSerializerExtension.CamelCaseOption, cancellationToken);
     }
 
     public Task<HttpResult<EdgeConnectionEntity>> Create(EdgeAddDto edgeAddDto, CancellationToken cancellationToken = default)
     {
-        if (_configuration.ContainsVarRefValue("SERVER_ENDPOINT"))
+        if (_configuration.GetServerEndpoint() != null)
         {
             return InvokeEndpoint<EdgeAddDto, EdgeConnectionEntity>(HttpMethod.Post, edgeAddDto, "", cancellationToken);
         }
@@ -56,7 +63,7 @@ public class EdgeApiService(IServiceProvider serviceProvider, IConfiguration con
 
     public Task<HttpResult> Delete(string id, CancellationToken cancellationToken = default)
     {
-        if (_configuration.ContainsVarRefValue("SERVER_ENDPOINT"))
+        if (_configuration.GetServerEndpoint() != null)
         {
             return InvokeEndpoint(HttpMethod.Delete, "/" + id, cancellationToken);
         }
@@ -68,7 +75,7 @@ public class EdgeApiService(IServiceProvider serviceProvider, IConfiguration con
 
     public Task<HttpResult<EdgeEntity>> Edit(string id, EdgeEditDto edgeEditDto, CancellationToken cancellationToken = default)
     {
-        if (_configuration.ContainsVarRefValue("SERVER_ENDPOINT"))
+        if (_configuration.GetServerEndpoint() != null)
         {
             return InvokeEndpoint<EdgeEditDto, EdgeEntity>(HttpMethod.Put, edgeEditDto, "/" + id, cancellationToken);
         }
@@ -80,7 +87,7 @@ public class EdgeApiService(IServiceProvider serviceProvider, IConfiguration con
 
     public Task<HttpResult<EdgeConnectionEntity>> Get(string id, CancellationToken cancellationToken = default)
     {
-        if (_configuration.ContainsVarRefValue("SERVER_ENDPOINT"))
+        if (_configuration.GetServerEndpoint() != null)
         {
             return InvokeEndpoint<EdgeConnectionEntity>(HttpMethod.Get, "/" + id, cancellationToken);
         }
@@ -92,7 +99,7 @@ public class EdgeApiService(IServiceProvider serviceProvider, IConfiguration con
 
     public Task<HttpResult<EdgeEntity[]>> GetAll(CancellationToken cancellationToken = default)
     {
-        if (_configuration.ContainsVarRefValue("SERVER_ENDPOINT"))
+        if (_configuration.GetServerEndpoint() != null)
         {
             return InvokeEndpoint<EdgeEntity[]>(HttpMethod.Get, "", cancellationToken);
         }

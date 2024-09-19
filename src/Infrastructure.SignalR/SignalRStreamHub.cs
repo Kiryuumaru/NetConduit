@@ -14,8 +14,8 @@ using Microsoft.AspNetCore.SignalR.Client;
 using System;
 using DisposableHelpers.Attributes;
 using Domain.Edge.Models;
-using Infrastructure.SignalR.Server.Handshake.Services;
 using Infrastructure.SignalR.Common;
+using Infrastructure.SignalR.Handshake.Services;
 
 namespace Infrastructure.SignalR.Server;
 

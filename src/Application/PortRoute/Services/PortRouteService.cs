@@ -2,6 +2,7 @@
 using Application.LocalStore.Services;
 using Application.PortRoute.Interfaces;
 using Application.Server.Edge.Services;
+using Application.Server.PortRoute.Services;
 using Domain.PortRoute.Dtos;
 using Domain.PortRoute.Entities;
 using Microsoft.Extensions.DependencyInjection;
@@ -15,7 +16,7 @@ using System.Text;
 using System.Threading.Tasks;
 using TransactionHelpers;
 
-namespace Application.Server.PortRoute.Services;
+namespace Application.PortRoute.Services;
 
 public class PortRouteService(ILogger<PortRouteService> logger, PortRouteStoreService portRouteStoreService, EdgeStoreService edgeStoreService, PortRouteEventHubService portRouteEventHubService) : IPortRouteService
 {
@@ -49,7 +50,7 @@ public class PortRouteService(ILogger<PortRouteService> logger, PortRouteStoreSe
 
         if (!result.SuccessAndHasValue(await store.GetIds(cancellationToken: cancellationToken), out string[]? portRouteIds))
         {
-            _logger.LogError("Error port route GetAll: {}", result.Error);
+            _logger.LogError("Error port route GetAll: {Error}", result.Error);
             result.WithStatusCode(HttpStatusCode.InternalServerError);
             return result;
         }
@@ -60,13 +61,13 @@ public class PortRouteService(ILogger<PortRouteService> logger, PortRouteStoreSe
         {
             if (!result.SuccessAndHasValue(await store.Get<PortRouteEntity>(id, cancellationToken: cancellationToken), out PortRouteEntity? portRouteEntity))
             {
-                _logger.LogError("Error port route GetAll: {}", result.Error);
+                _logger.LogError("Error port route GetAll: {Error}", result.Error);
                 result.WithStatusCode(HttpStatusCode.InternalServerError);
                 return result;
             }
-            if ((string.IsNullOrEmpty(sourceEdgeId) && string.IsNullOrEmpty(destinationEdgeId)) ||
-                (!string.IsNullOrEmpty(sourceEdgeId) && sourceEdgeId.Equals(portRouteEntity.SourceEdgeId)) ||
-                (!string.IsNullOrEmpty(destinationEdgeId) && destinationEdgeId.Equals(portRouteEntity.DestinationEdgeId)))
+            if (string.IsNullOrEmpty(sourceEdgeId) && string.IsNullOrEmpty(destinationEdgeId) ||
+                !string.IsNullOrEmpty(sourceEdgeId) && sourceEdgeId.Equals(portRouteEntity.SourceEdgeId) ||
+                !string.IsNullOrEmpty(destinationEdgeId) && destinationEdgeId.Equals(portRouteEntity.DestinationEdgeId))
             {
                 portRouteEntities.Add(portRouteEntity);
             }
@@ -93,7 +94,7 @@ public class PortRouteService(ILogger<PortRouteService> logger, PortRouteStoreSe
 
         if (!result.Success(await store.Get<PortRouteEntity>(id, cancellationToken: cancellationToken), out PortRouteEntity? portRouteEntity))
         {
-            _logger.LogError("Error port route Get: {}", result.Error);
+            _logger.LogError("Error port route Get: {Error}", result.Error);
             result.WithStatusCode(HttpStatusCode.InternalServerError);
             return result;
         }
@@ -194,7 +195,7 @@ public class PortRouteService(ILogger<PortRouteService> logger, PortRouteStoreSe
 
         if (!result.Success(await store.Set(newRoute.Id, newRoute, cancellationToken: cancellationToken)))
         {
-            _logger.LogError("Error port route Create: {}", result.Error);
+            _logger.LogError("Error port route Create: {Error}", result.Error);
             result.WithStatusCode(HttpStatusCode.InternalServerError);
             return result;
         }
@@ -205,7 +206,7 @@ public class PortRouteService(ILogger<PortRouteService> logger, PortRouteStoreSe
         result.WithValue(newRoute);
         result.WithStatusCode(HttpStatusCode.OK);
 
-        _logger.LogInformation("Port route id {} was created", newRoute.Id);
+        _logger.LogInformation("Port route id {RouteId} was created", newRoute.Id);
 
         return result;
     }
@@ -235,7 +236,7 @@ public class PortRouteService(ILogger<PortRouteService> logger, PortRouteStoreSe
 
         if (!result.Success(await store.Get<PortRouteEntity>(id, cancellationToken: cancellationToken), false, out PortRouteEntity? portRoute))
         {
-            _logger.LogError("Error port route Edit: {}", result.Error);
+            _logger.LogError("Error port route Edit: {Error}", result.Error);
             result.WithStatusCode(HttpStatusCode.InternalServerError);
             return result;
         }
@@ -313,7 +314,7 @@ public class PortRouteService(ILogger<PortRouteService> logger, PortRouteStoreSe
 
         if (!result.Success(await store.Set(id, newPortRoute, cancellationToken: cancellationToken)))
         {
-            _logger.LogError("Error port route Edit: {}", result.Error);
+            _logger.LogError("Error port route Edit: {Error}", result.Error);
             result.WithStatusCode(HttpStatusCode.InternalServerError);
             return result;
         }
@@ -324,7 +325,7 @@ public class PortRouteService(ILogger<PortRouteService> logger, PortRouteStoreSe
         result.WithValue(newPortRoute);
         result.WithStatusCode(HttpStatusCode.OK);
 
-        _logger.LogInformation("Port route id {} was edited", newPortRoute.Id);
+        _logger.LogInformation("Port route id {RouteId} was edited", newPortRoute.Id);
 
         return result;
     }
@@ -344,7 +345,7 @@ public class PortRouteService(ILogger<PortRouteService> logger, PortRouteStoreSe
 
         if (!result.Success(await store.Get<PortRouteEntity>(id, cancellationToken: cancellationToken), false, out PortRouteEntity? portRoute))
         {
-            _logger.LogError("Error port route Delete: {}", result.Error);
+            _logger.LogError("Error port route Delete: {Error}", result.Error);
             result.WithStatusCode(HttpStatusCode.InternalServerError);
             return result;
         }
@@ -358,7 +359,7 @@ public class PortRouteService(ILogger<PortRouteService> logger, PortRouteStoreSe
 
         if (!result.Success(await store.Delete(id, cancellationToken: cancellationToken)))
         {
-            _logger.LogError("Error port route Delete: {}", result.Error);
+            _logger.LogError("Error port route Delete: {Error}", result.Error);
             result.WithStatusCode(HttpStatusCode.InternalServerError);
             return result;
         }
@@ -368,7 +369,7 @@ public class PortRouteService(ILogger<PortRouteService> logger, PortRouteStoreSe
 
         result.WithStatusCode(HttpStatusCode.OK);
 
-        _logger.LogInformation("Port route id {} was deleted", id);
+        _logger.LogInformation("Port route id {RouteId} was deleted", id);
 
         return result;
     }

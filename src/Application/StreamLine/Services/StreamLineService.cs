@@ -46,7 +46,7 @@ public class StreamLineService(ILogger<StreamLineService> logger)
         }
         catch (Exception ex)
         {
-            _logger.LogError("Error on updating route table: {}", ex.Message);
+            _logger.LogError("Error on updating route table: {ErrorMessage}", ex.Message);
         }
         finally
         {
@@ -77,11 +77,11 @@ public class StreamLineService(ILogger<StreamLineService> logger)
                 _streamLines.Add(streamLine.Route.Id, new(streamLine, validator));
                 if (isOutgoingCallback(streamLine))
                 {
-                    _logger.LogInformation("ADD Outgoing: ({}, {})", ert.Edges[streamLine.Route.DestinationEdgeId].Name, streamLine.Route.SourceEdgePort);
+                    _logger.LogInformation("ADD Outgoing: ({DestinationEdgeName}, {SourceEdgePort})", ert.Edges[streamLine.Route.DestinationEdgeId].Name, streamLine.Route.SourceEdgePort);
                 }
                 else
                 {
-                    _logger.LogInformation("ADD Incoming: ({}, {})", ert.Edges[streamLine.Route.SourceEdgeId].Name, streamLine.Route.DestinationEdgePort);
+                    _logger.LogInformation("ADD Incoming: ({SourceEdgeName}, {DestinationEdgePort})", ert.Edges[streamLine.Route.SourceEdgeId].Name, streamLine.Route.DestinationEdgePort);
                 }
             }
             void remove(EdgeRoutingTable ert)
@@ -90,11 +90,11 @@ public class StreamLineService(ILogger<StreamLineService> logger)
                 streamLine.Dispose();
                 if (isOutgoingCallback(streamLine))
                 {
-                    _logger.LogInformation("REMOVE Outgoing: ({}, {})", ert.Edges[streamLine.Route.DestinationEdgeId].Name, streamLine.Route.SourceEdgePort);
+                    _logger.LogInformation("REMOVE Outgoing: ({DestinationEdgeName}, {SourceEdgePort})", ert.Edges[streamLine.Route.DestinationEdgeId].Name, streamLine.Route.SourceEdgePort);
                 }
                 else
                 {
-                    _logger.LogInformation("REMOVE Incoming: ({}, {})", ert.Edges[streamLine.Route.SourceEdgeId].Name, streamLine.Route.DestinationEdgePort);
+                    _logger.LogInformation("REMOVE Incoming: ({SourceEdgeName}, {DestinationEdgePort})", ert.Edges[streamLine.Route.SourceEdgeId].Name, streamLine.Route.DestinationEdgePort);
                 }
             }
             validator = validatorEdgeRoutingTable =>

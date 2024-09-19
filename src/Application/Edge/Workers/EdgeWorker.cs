@@ -1,7 +1,7 @@
 ﻿using Application.Common;
 using Application.Edge.Common;
+using Application.Edge.Services;
 using Application.Server.Edge.Common;
-using Application.Server.Edge.Services;
 using Domain.Edge.Dtos;
 using Domain.Edge.Entities;
 using Microsoft.Extensions.DependencyInjection;
@@ -31,7 +31,7 @@ internal class EdgeWorker(ILogger<EdgeWorker> logger, IServiceProvider servicePr
             edgeConnectionEntity = (await edgeService.Create(newServerEdge, stoppingToken)).GetValueOrThrow();
         }
 
-        _logger.LogInformation("Server Edge was initialized with handshake-token {}", edgeConnectionEntity.HandshakeToken);
+        _logger.LogInformation("Server Edge was initialized with handshake-token {HandshakeToken}", edgeConnectionEntity.HandshakeToken);
 
         Start(stoppingToken);
     }
