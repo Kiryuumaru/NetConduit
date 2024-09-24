@@ -21,4 +21,13 @@ builder.AddProject<Projects.Presentation>("presentation-edge3")
     .WithEnvironment("NET_CONDUIT_SERVER_ENDPOINT", "@ref:services:presentation-server:https:0")
     .WithEnvironment("NET_CONDUIT_HANDSHAKE_TOKEN", "eyJ0b2tlbiI6InBWUWVPaWFOWWZrblZoMnJ2OG13OFRsWnZVQzBkaDAxNGhmeXNyTjM1NWN4SEdCOGtEIiwiaWQiOiJZZjBCLU9EMmpFbW1JeUNTeFRWczB3IiwibmFtZSI6IkxBTklBS0VBLVBDIn0=");
 
+builder.AddProject<Projects.TestTCPMocker>("testtcpmocker-server1")
+    .WithEnvironment("TCP_MOCKER_SERVER_MODE", "yes");
+
+builder.AddProject<Projects.TestTCPMocker>("testtcpmocker-client1")
+    .WithEnvironment("TCP_MOCKER_SERVER_MODE", "no");
+
+builder.AddProject<Projects.TestTCPMocker>("testtcpmocker-client1")
+    .WithEnvironment("TCP_MOCKER_SERVER_MODE", "no");
+
 builder.Build().Run();
