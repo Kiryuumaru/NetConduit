@@ -27,7 +27,7 @@ builder.AddProject<Projects.TestTCPMocker>("testtcpmocker-server1")
 builder.AddProject<Projects.TestTCPMocker>("testtcpmocker-client1")
     .WithEnvironment("TCP_MOCKER_SERVER_MODE", "no");
 
-builder.AddProject<Projects.TestTCPMocker>("testtcpmocker-client1")
+builder.AddProject<Projects.TestTCPMocker>("testtcpmocker-client2")
     .WithEnvironment("TCP_MOCKER_SERVER_MODE", "no");
 
 builder.Build().Run();

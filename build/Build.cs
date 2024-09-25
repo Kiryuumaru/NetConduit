@@ -45,8 +45,6 @@ class Build : BaseNukeBuildHelpers
             }
             Console.WriteLine("Cleaning " + (RootDirectory / ".vs").ToString());
             (RootDirectory / ".vs").DeleteDirectory();
-            Console.WriteLine("Cleaning " + (RootDirectory / ".nuke" / "temp").ToString());
-            (RootDirectory / ".nuke" / "temp").DeleteDirectory();
             Console.WriteLine("Cleaning " + (RootDirectory / "out").ToString());
             (RootDirectory / "out").DeleteDirectory();
         });
