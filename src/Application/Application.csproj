@@ -13,14 +13,14 @@
 	</ItemGroup>
 
 	<ItemGroup>
-		<PackageReference Include="AbsolutePathHelpers" Version="0.1.25" />
-		<PackageReference Include="DisposableHelpers" Version="1.2.33" />
-		<PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions" Version="8.0.1" />
-		<PackageReference Include="Microsoft.Extensions.Hosting.Abstractions" Version="8.0.0" />
-		<PackageReference Include="ApplicationBuilderHelpers" Version="1.0.14" />
-		<PackageReference Include="CliWrap" Version="3.6.6" />
-		<PackageReference Include="RestfulHelpers" Version="1.7.68" />
-		<PackageReference Include="TransactionHelpers" Version="2.5.38" />
+		<PackageReference Include="AbsolutePathHelpers" Version="0.1.43" />
+		<PackageReference Include="DisposableHelpers" Version="1.2.50" />
+		<PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions" Version="8.0.2" />
+		<PackageReference Include="Microsoft.Extensions.Hosting.Abstractions" Version="8.0.1" />
+		<PackageReference Include="ApplicationBuilderHelpers" Version="1.0.33" />
+		<PackageReference Include="CliWrap" Version="3.6.7" />
+		<PackageReference Include="RestfulHelpers" Version="1.7.99" />
+		<PackageReference Include="TransactionHelpers" Version="2.5.57" />
 	</ItemGroup>
 
 	<ItemGroup>

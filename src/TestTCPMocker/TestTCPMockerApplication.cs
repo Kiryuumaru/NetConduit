@@ -20,5 +20,6 @@ internal class TestTCPMockerApplication : ApplicationDependency
         services.AddScoped<TCPServerMocker>();
 
         services.AddHostedService<TCPSenderWorker>();
+        services.AddHostedService<TCPSenderWorker>();
     }
 }
