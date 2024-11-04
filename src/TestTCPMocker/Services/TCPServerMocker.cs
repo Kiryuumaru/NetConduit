@@ -8,6 +8,7 @@ using System.Net;
 using System.Text;
 using System.Threading.Tasks;
 using System.Collections.Concurrent;
+using System.IO;
 
 namespace TestTCPMocker.Services;
 
@@ -18,7 +19,7 @@ internal partial class TCPServerMocker(ILogger<TCPServerMocker> logger)
 
     private CancellationTokenSource? cts = new();
 
-    public async void Start(int port, CancellationToken stoppingToken)
+    public async Task StartWait(int port, CancellationToken stoppingToken)
     {
         cts = CancellationTokenSource.CreateLinkedTokenSource(stoppingToken);
         var ct = cts.Token;
@@ -40,40 +41,30 @@ internal partial class TCPServerMocker(ILogger<TCPServerMocker> logger)
         }
     }
 
-    public async void StartSend(TcpClient client, CancellationToken stoppingToken)
+    public async void Start(int port, CancellationToken stoppingToken)
     {
+        await StartWait(port, stoppingToken);
+    }
+
+    private async void StartSend(TcpClient client, CancellationToken stoppingToken)
+    {
+        _logger.LogInformation("Client connected {ClientEndPoint}", (client.Client.LocalEndPoint as IPEndPoint)?.Address);
+
         NetworkStream ns = client.GetStream();
-
-        ConcurrentDictionary<Guid, DateTimeOffset> packetMap = [];
-
-        while (!stoppingToken.IsCancellationRequested)
-        {
-            Guid msgGuid = Guid.NewGuid();
-            packetMap[msgGuid] = DateTimeOffset.UtcNow;
-            byte[] msgBytes = Encoding.Default.GetBytes(msgGuid.ToString());
-            await ns.WriteAsync(msgBytes, stoppingToken);
-
-            try
-            {
-                await Task.Delay(1000, stoppingToken);
-            }
-            catch { }
-        }
+        byte[] buffer = new byte[4096];
 
         while (client.Connected)
         {
-            byte[] msgBytes = new byte[4096];
-            await ns.ReadAsync(msgBytes, stoppingToken);
-            string msgStr = Encoding.Default.GetString(msgBytes);
-            if (Guid.TryParse(msgStr, out var msgGuid) && packetMap.TryGetValue(msgGuid, out var dateTimeSent))
+            try
             {
-                TimeSpan span = DateTimeOffset.UtcNow - dateTimeSent;
-
+                int bytesread = await ns.ReadAsync(buffer, stoppingToken);
+                await ns.WriteAsync(buffer.AsMemory(0, bytesread), stoppingToken);
             }
+            catch { }
         }
     }
 
-    public void Stop()
+    private void Stop()
     {
         if (cts == null)
         {

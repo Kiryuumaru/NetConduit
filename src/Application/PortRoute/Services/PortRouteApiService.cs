@@ -2,7 +2,7 @@
 using Application.Configuration.Extensions;
 using Application.Edge.Services;
 using Application.LocalStore.Services;
-using Application.PortRoute.Services;
+using Application.PortRoute.Interfaces;
 using Application.Server.Edge.Services;
 using Domain.Edge.Dtos;
 using Domain.Edge.Entities;
@@ -21,7 +21,7 @@ using System.Text;
 using System.Threading.Tasks;
 using TransactionHelpers;
 
-namespace Application.PortRoute.Interfaces;
+namespace Application.PortRoute.Services;
 
 public class PortRouteApiService(ILogger<PortRouteApiService> logger, IServiceProvider serviceProvider, IConfiguration configuration) : IPortRouteService
 {

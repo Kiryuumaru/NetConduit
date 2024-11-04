@@ -1,7 +1,6 @@
 ﻿using Application.Common;
 using Application.Edge.Common;
 using Application.Edge.Services;
-using Application.Server.Edge.Common;
 using Domain.Edge.Dtos;
 using Domain.Edge.Entities;
 using Microsoft.Extensions.DependencyInjection;
@@ -13,7 +12,7 @@ using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
 
-namespace Application.Server.Edge.Workers;
+namespace Application.Edge.Workers;
 
 internal class EdgeWorker(ILogger<EdgeWorker> logger, IServiceProvider serviceProvider) : BackgroundService
 {

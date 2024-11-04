@@ -6,7 +6,7 @@ using Domain.Edge.Models;
 using Microsoft.AspNetCore.Mvc;
 using RestfulHelpers.Common;
 
-namespace Presentation.Server.Controllers;
+namespace Presentation.Controllers;
 
 /// <summary>
 /// Controller for managing Edge entities.
@@ -39,7 +39,7 @@ public class EdgeController(EdgeApiService edgeApiService) : ControllerBase
     /// <response code="404">Returns when the provided ID is not found.</response>
     /// <response code="500">Returns when an unexpected error occurs.</response>
     [HttpGet("{id}")]
-    public Task<HttpResult<EdgeConnectionEntity>> Get(string id)
+    public Task<HttpResult<EdgeConnection>> Get(string id)
     {
         return _edgeApiService.Get(id);
     }
@@ -53,7 +53,7 @@ public class EdgeController(EdgeApiService edgeApiService) : ControllerBase
     /// <response code="400">Returns when the provided data is invalid.</response>
     /// <response code="500">Returns when an unexpected error occurs.</response>
     [HttpPost]
-    public Task<HttpResult<EdgeConnectionEntity>> Create([FromBody] EdgeAddDto edge)
+    public Task<HttpResult<EdgeConnection>> Create([FromBody] EdgeAddDto edge)
     {
         return _edgeApiService.Create(edge);
     }

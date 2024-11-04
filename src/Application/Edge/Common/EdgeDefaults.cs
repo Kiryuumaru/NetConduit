@@ -5,11 +5,11 @@ using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
 
-namespace Application.Server.Edge.Common;
+namespace Application.Edge.Common;
 
 public static class EdgeDefaults
 {
-    public static EdgeEntity ServerEdgeEntity { get; } = new()
+    public static EdgeInfo ServerEdgeInfo { get; } = new()
     {
         Id = "server",
         Name = "Server"

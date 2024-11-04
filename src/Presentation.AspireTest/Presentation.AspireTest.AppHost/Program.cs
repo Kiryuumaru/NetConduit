@@ -1,7 +1,11 @@
 var builder = DistributedApplication.CreateBuilder(args);
 
-//var server = builder.AddProject<Projects.Presentation>("presentation-server")
-//    .WithArgs("run -s");
+var server = builder.AddProject<Projects.Presentation>("presentation-server")
+    .WithArgs("-l", "trace")
+    .WithEnvironment("ASPNETCORE_URLS", "http://*:23456");
+
+builder.AddProject<Projects.TestTCPMocker>("relayapi1-serverapi1")
+    .WithEnvironment("TCP_MOCKER_RELAY_TO_MOQ", "23457:localhost:23456");
 
 //builder.AddProject<Projects.Presentation>("presentation-edge1")
 //    .WithReference(server)
@@ -21,13 +25,31 @@ var builder = DistributedApplication.CreateBuilder(args);
 //    .WithEnvironment("NET_CONDUIT_SERVER_ENDPOINT", "@ref:services:presentation-server:https:0")
 //    .WithEnvironment("NET_CONDUIT_HANDSHAKE_TOKEN", "eyJ0b2tlbiI6InBWUWVPaWFOWWZrblZoMnJ2OG13OFRsWnZVQzBkaDAxNGhmeXNyTjM1NWN4SEdCOGtEIiwiaWQiOiJZZjBCLU9EMmpFbW1JeUNTeFRWczB3IiwibmFtZSI6IkxBTklBS0VBLVBDIn0=");
 
-builder.AddProject<Projects.TestTCPMocker>("testtcpmocker-server1")
-    .WithEnvironment("TCP_MOCKER_SERVER_MODE", "yes");
+//builder.AddProject<Projects.TestTCPMocker>("server1")
+//    .WithEnvironment("TCP_MOCKER_SERVER_TO_MOQ", "20000");
 
-builder.AddProject<Projects.TestTCPMocker>("testtcpmocker-client1")
-    .WithEnvironment("TCP_MOCKER_SERVER_MODE", "no");
+//builder.AddProject<Projects.TestTCPMocker>("relay1-server1")
+//    .WithEnvironment("TCP_MOCKER_RELAY_TO_MOQ", "20001:localhost:20000");
 
-builder.AddProject<Projects.TestTCPMocker>("testtcpmocker-client2")
-    .WithEnvironment("TCP_MOCKER_SERVER_MODE", "no");
+//builder.AddProject<Projects.TestTCPMocker>("relay2-server1")
+//    .WithEnvironment("TCP_MOCKER_RELAY_TO_MOQ", "20002:localhost:20000");
+
+//builder.AddProject<Projects.TestTCPMocker>("relay3-relay2")
+//    .WithEnvironment("TCP_MOCKER_RELAY_TO_MOQ", "20003:localhost:20002");
+
+//builder.AddProject<Projects.TestTCPMocker>("client1-server1")
+//    .WithEnvironment("TCP_MOCKER_CLIENT_TO_MOQ", "localhost:20000");
+
+//builder.AddProject<Projects.TestTCPMocker>("client2-server1")
+//    .WithEnvironment("TCP_MOCKER_CLIENT_TO_MOQ", "localhost:20000");
+
+//builder.AddProject<Projects.TestTCPMocker>("client3-relay1")
+//    .WithEnvironment("TCP_MOCKER_CLIENT_TO_MOQ", "localhost:20001");
+
+//builder.AddProject<Projects.TestTCPMocker>("client4-relay2")
+//    .WithEnvironment("TCP_MOCKER_CLIENT_TO_MOQ", "localhost:20002");
+
+//builder.AddProject<Projects.TestTCPMocker>("client5-relay3")
+//    .WithEnvironment("TCP_MOCKER_CLIENT_TO_MOQ", "localhost:20003");
 
 builder.Build().Run();

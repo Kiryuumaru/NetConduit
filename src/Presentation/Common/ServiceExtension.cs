@@ -2,7 +2,6 @@
 using Application;
 using Application.Common;
 using CliWrap.EventStream;
-using CommandLine;
 using Microsoft.Extensions.Logging;
 using Serilog;
 using Serilog.Events;

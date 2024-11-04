@@ -13,48 +13,40 @@ namespace Application.Edge.Common;
 
 public static class EdgeEntityHelpers
 {
-    public static EdgeTokenEntity GenerateToken(EdgeEntity edgeEntity)
+    public static EdgeEntity Create(string id, string name)
     {
         return new()
         {
-            Id = edgeEntity.Id,
-            Name = edgeEntity.Name,
-            Token = StringEncoder.Random(50)
+            Id = id,
+            Name = name,
+            Key = RandomHelpers.ByteArray(1024)
         };
     }
 
-    public static EdgeConnectionEntity Encode(EdgeTokenEntity edgeEntity)
+    public static EdgeConnection Encode(EdgeEntity edgeEntity)
     {
-        if (string.IsNullOrEmpty(edgeEntity.Token))
-        {
-            return new EdgeConnectionEntity()
-            {
-                Id = edgeEntity.Id,
-                Name = edgeEntity.Name,
-                HandshakeToken = ""
-            };
-        }
-
-        return new EdgeConnectionEntity()
+        return new EdgeConnection()
         {
             Id = edgeEntity.Id,
             Name = edgeEntity.Name,
-            HandshakeToken = JsonSerializer.Serialize(edgeEntity, JsonSerializerExtension.CamelCaseNoIndentOption).Encode()
+            Key = edgeEntity.Key,
+            Token = JsonSerializer.Serialize(edgeEntity, JsonSerializerExtension.CamelCaseNoIndentOption).Encode()
         };
     }
 
-    public static EdgeConnectionEntity Decode(string handshakeToken)
+    public static EdgeConnection Decode(string token)
     {
-        var decoded = handshakeToken.Decode();
+        var decoded = token.Decode();
 
-        EdgeTokenEntity edgeEntity = JsonSerializer.Deserialize<EdgeTokenEntity>(decoded, JsonSerializerExtension.CamelCaseNoIndentOption)
+        EdgeEntity edgeEntity = JsonSerializer.Deserialize<EdgeEntity>(decoded, JsonSerializerExtension.CamelCaseNoIndentOption)
             ?? throw new Exception("Invalid handshakeToken");
 
-        return new EdgeConnectionEntity()
+        return new EdgeConnection()
         {
             Id = edgeEntity.Id,
             Name = edgeEntity.Name,
-            HandshakeToken = handshakeToken
+            Key = edgeEntity.Key,
+            Token = JsonSerializer.Serialize(edgeEntity, JsonSerializerExtension.CamelCaseNoIndentOption).Encode()
         };
     }
 }

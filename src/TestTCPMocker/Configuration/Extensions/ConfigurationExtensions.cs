@@ -13,12 +13,18 @@ namespace TestTCPMocker.Configuration.Extensions;
 
 public static class ConfigurationExtensions
 {
-    public static bool GetIsServerMode(this IConfiguration configuration)
+    public static string? GetClientConnect(this IConfiguration configuration)
     {
-        return configuration.GetVarRefValueOrDefault("TCP_MOCKER_SERVER_MODE", "no").Equals("yes", StringComparison.InvariantCultureIgnoreCase);
+        return configuration.GetVarRefValueOrDefault("TCP_MOCKER_CLIENT_TO_MOQ");
     }
-    public static void SetIsServerMode(this IConfiguration configuration, bool makeFileLogs)
+
+    public static string? GetRelayConnect(this IConfiguration configuration)
     {
-        configuration["TCP_MOCKER_SERVER_MODE"] = makeFileLogs ? "yes" : "no";
+        return configuration.GetVarRefValueOrDefault("TCP_MOCKER_RELAY_TO_MOQ");
+    }
+
+    public static string? GetServerConnect(this IConfiguration configuration)
+    {
+        return configuration.GetVarRefValueOrDefault("TCP_MOCKER_SERVER_TO_MOQ");
     }
 }

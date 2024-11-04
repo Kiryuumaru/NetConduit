@@ -49,11 +49,11 @@ public class EdgeApiService(IServiceProvider serviceProvider, IConfiguration con
         return new HttpClient().ExecuteWithContent<TReturn, TPayload>(payload, method, endpoint, JsonSerializerExtension.CamelCaseOption, cancellationToken);
     }
 
-    public Task<HttpResult<EdgeConnectionEntity>> Create(EdgeAddDto edgeAddDto, CancellationToken cancellationToken = default)
+    public Task<HttpResult<EdgeConnection>> Create(EdgeAddDto edgeAddDto, CancellationToken cancellationToken = default)
     {
         if (_configuration.GetServerEndpoint() != null)
         {
-            return InvokeEndpoint<EdgeAddDto, EdgeConnectionEntity>(HttpMethod.Post, edgeAddDto, "", cancellationToken);
+            return InvokeEndpoint<EdgeAddDto, EdgeConnection>(HttpMethod.Post, edgeAddDto, "", cancellationToken);
         }
         else
         {
@@ -85,11 +85,11 @@ public class EdgeApiService(IServiceProvider serviceProvider, IConfiguration con
         }
     }
 
-    public Task<HttpResult<EdgeConnectionEntity>> Get(string id, CancellationToken cancellationToken = default)
+    public Task<HttpResult<EdgeConnection>> Get(string id, CancellationToken cancellationToken = default)
     {
         if (_configuration.GetServerEndpoint() != null)
         {
-            return InvokeEndpoint<EdgeConnectionEntity>(HttpMethod.Get, "/" + id, cancellationToken);
+            return InvokeEndpoint<EdgeConnection>(HttpMethod.Get, "/" + id, cancellationToken);
         }
         else
         {

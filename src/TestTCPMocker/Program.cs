@@ -3,7 +3,7 @@ using Microsoft.Extensions.Hosting;
 using ApplicationBuilderHelpers;
 using TestTCPMocker;
 
-var appBuilder = ApplicationHost.FromBuilder(Host.CreateApplicationBuilder(args))
+await ApplicationHost.FromBuilder(Host.CreateApplicationBuilder(args))
     .Add<TestTCPMockerApplication>()
     .Build()
     .Run();

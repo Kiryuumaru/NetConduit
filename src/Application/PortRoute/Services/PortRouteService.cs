@@ -1,8 +1,7 @@
 ﻿using Application.Common;
+using Application.Edge.Services;
 using Application.LocalStore.Services;
 using Application.PortRoute.Interfaces;
-using Application.Server.Edge.Services;
-using Application.Server.PortRoute.Services;
 using Domain.PortRoute.Dtos;
 using Domain.PortRoute.Entities;
 using Microsoft.Extensions.DependencyInjection;

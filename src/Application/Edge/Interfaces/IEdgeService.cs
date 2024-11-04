@@ -1,7 +1,6 @@
 ﻿using Application.Common;
 using Application.Edge.Common;
 using Application.LocalStore.Services;
-using Application.Server.Edge.Common;
 using Application.Server.PortRoute.Services;
 using Domain.Edge.Dtos;
 using Domain.Edge.Entities;
@@ -24,13 +23,13 @@ namespace Application.Edge.Interfaces;
 
 public interface IEdgeService
 {
-    Task<HttpResult<EdgeEntity[]>> GetAll(CancellationToken cancellationToken = default);
+    Task<HttpResult<EdgeInfoGetDto[]>> GetAll(CancellationToken cancellationToken = default);
 
-    Task<HttpResult<EdgeConnectionEntity>> Get(string id, CancellationToken cancellationToken = default);
+    Task<HttpResult<EdgeWithTokenGetDto>> Get(string id, CancellationToken cancellationToken = default);
 
-    Task<HttpResult<EdgeConnectionEntity>> Create(EdgeAddDto edgeAddDto, CancellationToken cancellationToken = default);
+    Task<HttpResult<EdgeWithTokenGetDto>> Create(EdgeAddDto edgeAddDto, CancellationToken cancellationToken = default);
 
-    Task<HttpResult<EdgeEntity>> Edit(string id, EdgeEditDto edgeEditDto, CancellationToken cancellationToken = default);
+    Task<HttpResult<EdgeInfoGetDto>> Edit(string id, EdgeEditDto edgeEditDto, CancellationToken cancellationToken = default);
 
-    Task<HttpResult> Delete(string id, CancellationToken cancellationToken = default);
+    Task<HttpResult<EdgeInfoGetDto>> Delete(string id, CancellationToken cancellationToken = default);
 }

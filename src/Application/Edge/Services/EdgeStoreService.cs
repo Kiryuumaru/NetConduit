@@ -15,7 +15,7 @@ using System.Threading.Tasks;
 using TransactionHelpers;
 using TransactionHelpers.Interface;
 
-namespace Application.Server.Edge.Services;
+namespace Application.Edge.Services;
 
 public class EdgeStoreService(ILogger<EdgeStoreService> logger, IServiceProvider serviceProvider)
 {

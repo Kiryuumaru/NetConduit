@@ -9,8 +9,6 @@ Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "Domain", "src\Domain\Domain
 EndProject
 Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "Infrastructure.SQLite", "src\Infrastructure.SQLite\Infrastructure.SQLite.csproj", "{8C938622-4221-4FBF-9DB0-BF9B4763CD50}"
 EndProject
-Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "Infrastructure.SignalR", "src\Infrastructure.SignalR\Infrastructure.SignalR.csproj", "{A8F4049B-4CB4-49E2-A743-EF2C87F27DBF}"
-EndProject
 Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "Presentation", "src\Presentation\Presentation.csproj", "{A2FF6303-D1B7-446D-895B-5C10A0402299}"
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "_build", "build\_build.csproj", "{FF813C4D-D55D-43B9-B353-8279B25FF127}"
@@ -43,10 +41,6 @@ Global
 		{8C938622-4221-4FBF-9DB0-BF9B4763CD50}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{8C938622-4221-4FBF-9DB0-BF9B4763CD50}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{8C938622-4221-4FBF-9DB0-BF9B4763CD50}.Release|Any CPU.Build.0 = Release|Any CPU
-		{A8F4049B-4CB4-49E2-A743-EF2C87F27DBF}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
-		{A8F4049B-4CB4-49E2-A743-EF2C87F27DBF}.Debug|Any CPU.Build.0 = Debug|Any CPU
-		{A8F4049B-4CB4-49E2-A743-EF2C87F27DBF}.Release|Any CPU.ActiveCfg = Release|Any CPU
-		{A8F4049B-4CB4-49E2-A743-EF2C87F27DBF}.Release|Any CPU.Build.0 = Release|Any CPU
 		{A2FF6303-D1B7-446D-895B-5C10A0402299}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
 		{A2FF6303-D1B7-446D-895B-5C10A0402299}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{A2FF6303-D1B7-446D-895B-5C10A0402299}.Release|Any CPU.ActiveCfg = Release|Any CPU

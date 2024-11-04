@@ -12,5 +12,5 @@ public class EdgeRoutingTable : EdgeEntity
 {
     public required Dictionary<string, PortRouteEntity> Table { get; init; }
 
-    public required Dictionary<string, EdgeEntity> Edges { get; init; }
+    public required Dictionary<string, EdgeInfo> Edges { get; init; }
 }

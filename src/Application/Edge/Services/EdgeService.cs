@@ -2,8 +2,6 @@
 using Application.Edge.Common;
 using Application.Edge.Interfaces;
 using Application.LocalStore.Services;
-using Application.Server.Edge.Common;
-using Application.Server.Edge.Services;
 using Application.Server.PortRoute.Services;
 using Domain.Edge.Dtos;
 using Domain.Edge.Entities;
@@ -31,6 +29,12 @@ public class EdgeService(ILogger<EdgeService> logger, EdgeStoreService edgeStore
 
     public async Task<HttpResult<EdgeEntity[]>> GetAll(CancellationToken cancellationToken = default)
     {
+        using var _ = _logger.BeginScopeMap(new()
+        {
+            ["Service"] = nameof(EdgeService),
+            ["ServiceAction"] = nameof(GetAll)
+        });
+
         HttpResult<EdgeEntity[]> result = new();
 
         var store = _edgeStoreService.GetStore();
@@ -61,9 +65,16 @@ public class EdgeService(ILogger<EdgeService> logger, EdgeStoreService edgeStore
         return result;
     }
 
-    public async Task<HttpResult<EdgeConnectionEntity>> Get(string id, CancellationToken cancellationToken = default)
+    public async Task<HttpResult<EdgeConnection>> Get(string id, CancellationToken cancellationToken = default)
     {
-        HttpResult<EdgeConnectionEntity> result = new();
+        using var _ = _logger.BeginScopeMap(new()
+        {
+            ["Service"] = nameof(EdgeService),
+            ["ServiceAction"] = nameof(Get),
+            ["EdgeId"] = id
+        });
+
+        HttpResult<EdgeConnection> result = new();
 
         if (string.IsNullOrEmpty(id))
         {
@@ -94,9 +105,16 @@ public class EdgeService(ILogger<EdgeService> logger, EdgeStoreService edgeStore
         return result;
     }
 
-    public async Task<HttpResult<EdgeConnectionEntity>> Create(EdgeAddDto edgeAddDto, CancellationToken cancellationToken = default)
+    public async Task<HttpResult<EdgeConnection>> Create(EdgeAddDto edgeAddDto, CancellationToken cancellationToken = default)
     {
-        HttpResult<EdgeConnectionEntity> result = new();
+        using var _ = _logger.BeginScopeMap(new()
+        {
+            ["Service"] = nameof(EdgeService),
+            ["ServiceAction"] = nameof(Create),
+            ["EdgeName"] = edgeAddDto.Name
+        });
+
+        HttpResult<EdgeConnection> result = new();
 
         if (string.IsNullOrEmpty(edgeAddDto.Name))
         {
@@ -111,7 +129,7 @@ public class EdgeService(ILogger<EdgeService> logger, EdgeStoreService edgeStore
             Name = edgeAddDto.Name,
         });
 
-        if (!result.Success(await Create(newEdge, cancellationToken), out EdgeConnectionEntity? edgeConnectionEntity))
+        if (!result.Success(await Create(newEdge, cancellationToken), out EdgeConnection? edgeConnectionEntity))
         {
             return result;
         }
@@ -124,6 +142,13 @@ public class EdgeService(ILogger<EdgeService> logger, EdgeStoreService edgeStore
 
     public async Task<HttpResult<EdgeEntity>> Edit(string id, EdgeEditDto edgeEditDto, CancellationToken cancellationToken = default)
     {
+        using var _ = _logger.BeginScopeMap(new()
+        {
+            ["Service"] = nameof(EdgeService),
+            ["ServiceAction"] = nameof(Edit),
+            ["EdgeId"] = id
+        });
+
         HttpResult<EdgeEntity> result = new();
 
         if (string.IsNullOrEmpty(id))
@@ -208,6 +233,13 @@ public class EdgeService(ILogger<EdgeService> logger, EdgeStoreService edgeStore
 
     public async Task<HttpResult> Delete(string id, CancellationToken cancellationToken = default)
     {
+        using var _ = _logger.BeginScopeMap(new()
+        {
+            ["Service"] = nameof(EdgeService),
+            ["ServiceAction"] = nameof(Delete),
+            ["EdgeId"] = id
+        });
+
         HttpResult result = new();
 
         if (string.IsNullOrEmpty(id))
@@ -254,9 +286,16 @@ public class EdgeService(ILogger<EdgeService> logger, EdgeStoreService edgeStore
         return result;
     }
 
-    internal async Task<HttpResult<EdgeConnectionEntity>> Create(EdgeTokenEntity newEdge, CancellationToken cancellationToken = default)
+    internal async Task<HttpResult<EdgeConnection>> Create(EdgeTokenEntity newEdge, CancellationToken cancellationToken = default)
     {
-        HttpResult<EdgeConnectionEntity> result = new();
+        using var _ = _logger.BeginScopeMap(new()
+        {
+            ["Service"] = nameof(EdgeService),
+            ["ServiceAction"] = nameof(Create),
+            ["EdgeId"] = id
+        });
+
+        HttpResult<EdgeConnection> result = new();
 
         var store = _edgeStoreService.GetStore();
 

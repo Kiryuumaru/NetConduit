@@ -14,7 +14,7 @@ using System.Text;
 using System.Threading.Tasks;
 using TransactionHelpers;
 
-namespace Application.Server.PortRoute.Services;
+namespace Application.PortRoute.Services;
 
 public class PortRouteStoreService(ILogger<PortRouteStoreService> logger, IServiceProvider serviceProvider)
 {

@@ -10,7 +10,7 @@ using System.Threading.Tasks;
 using TransactionHelpers;
 using TransactionHelpers.Exceptions;
 
-namespace Application.LocalStore.Services;
+namespace Application.LocalStore.Common;
 
 public abstract class LocalStoreImpl(ILocalStoreService localStore, IServiceProvider serviceProvider)
 {

@@ -4,15 +4,16 @@ using Application.Server;
 using ApplicationBuilderHelpers;
 using Google.Protobuf.WellKnownTypes;
 using Microsoft.Extensions.FileProviders;
-using Microsoft.Extensions.Hosting;
 using Microsoft.OpenApi.Models;
+using Presentation.AspireTest.ServiceDefaults;
 using Presentation.Components;
+using Presentation.Services;
 using System.Diagnostics.CodeAnalysis;
 using System.Reflection;
 
 namespace Presentation;
 
-internal class BasePresentation : Application.Application
+internal class Presentation : Application.Application
 {
     public override void AddConfiguration(ApplicationHostBuilder applicationBuilder, IConfiguration configuration)
     {
@@ -25,6 +26,8 @@ internal class BasePresentation : Application.Application
     public override void AddServices(ApplicationHostBuilder applicationBuilder, IServiceCollection services)
     {
         base.AddServices(applicationBuilder, services);
+
+        services.AddScoped<ClientManager>();
 
         services.AddRazorComponents()
             .AddInteractiveServerComponents();

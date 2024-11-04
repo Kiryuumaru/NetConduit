@@ -17,12 +17,13 @@
 	<PropertyGroup>
 		<Copyright>Copyright (C) 2024 Kiryuumaru</Copyright>
 		<Company>Kiryuumaru</Company>
-		<Version>1.2.3-beta</Version>
+		<Version>0.0.0</Version>
 		<AssemblyTitle>Net Conduit</AssemblyTitle>
+		<AssemblyName>netc</AssemblyName>
 	</PropertyGroup>
 
 	<ItemGroup>
-		<PackageReference Include="CommandLineParser" Version="2.9.1" />
+		<PackageReference Include="CliFx" Version="2.3.5" />
 		<PackageReference Include="Swashbuckle.AspNetCore" Version="6.9.0" />
 		<PackageReference Include="Microsoft.Extensions.Hosting" Version="8.0.1" />
 		<PackageReference Include="Microsoft.Extensions.DependencyInjection" Version="8.0.1" />
@@ -31,7 +32,6 @@
 	<ItemGroup>
 		<ProjectReference Include="..\Application\Application.csproj" />
 		<ProjectReference Include="..\Infrastructure.Serilog\Infrastructure.Serilog.csproj" />
-		<ProjectReference Include="..\Infrastructure.SignalR\Infrastructure.SignalR.csproj" />
 		<ProjectReference Include="..\Infrastructure.SQLite.LocalStore\Infrastructure.SQLite.LocalStore.csproj" />
 		<ProjectReference Include="..\Presentation.AspireTest\Presentation.AspireTest.ServiceDefaults\Presentation.AspireTest.ServiceDefaults.csproj" />
 	</ItemGroup>
