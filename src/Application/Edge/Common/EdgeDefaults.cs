@@ -9,9 +9,9 @@ namespace Application.Edge.Common;
 
 public static class EdgeDefaults
 {
-    public static EdgeInfo ServerEdgeInfo { get; } = new()
-    {
-        Id = "server",
-        Name = "Server"
-    };
+    public static Guid ServerEdgeId { get; } = Guid.Empty;
+
+    public static string ServerEdgeName { get; } = "server";
+
+    public static int EdgeKeySize { get; } = 64;
 }

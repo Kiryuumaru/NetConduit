@@ -1,6 +1,5 @@
 ﻿using Application;
 using Application.Common;
-using Application.Server;
 using ApplicationBuilderHelpers;
 using Google.Protobuf.WellKnownTypes;
 using Microsoft.Extensions.FileProviders;
@@ -8,8 +7,10 @@ using Microsoft.OpenApi.Models;
 using Presentation.AspireTest.ServiceDefaults;
 using Presentation.Components;
 using Presentation.Services;
+using Microsoft.Extensions.Options;
 using System.Diagnostics.CodeAnalysis;
 using System.Reflection;
+using Application.Configuration.Extensions;
 
 namespace Presentation;
 
@@ -20,6 +21,9 @@ internal class Presentation : Application.Application
         base.AddConfiguration(applicationBuilder, configuration);
 
         applicationBuilder.Builder.AddServiceDefaults();
+
+        (applicationBuilder.Builder as WebApplicationBuilder)!.WebHost.UseUrls(configuration.GetApiUrls());
+
         (configuration as ConfigurationManager)!.AddEnvironmentVariables();
     }
 
@@ -28,6 +32,11 @@ internal class Presentation : Application.Application
         base.AddServices(applicationBuilder, services);
 
         services.AddScoped<ClientManager>();
+
+        services.AddHttpClient(Options.DefaultName, client =>
+        {
+            client.DefaultRequestHeaders.Add("User-Agent", Defaults.AppNamePascalCase);
+        });
 
         services.AddRazorComponents()
             .AddInteractiveServerComponents();
@@ -58,13 +67,11 @@ internal class Presentation : Application.Application
     {
         base.AddMiddlewares(applicationHost, host);
 
-        if ((host as WebApplication)!.Environment.IsDevelopment())
-        {
-            (host as IApplicationBuilder)!.UseSwagger();
-            (host as IApplicationBuilder)!.UseSwaggerUI();
-        }
-
-        (host as IApplicationBuilder)!.UseHttpsRedirection();
+        //if ((host as WebApplication)!.Environment.IsDevelopment())
+        //{
+        //}
+        (host as IApplicationBuilder)!.UseSwagger();
+        (host as IApplicationBuilder)!.UseSwaggerUI();
     }
 
     public override void AddMappings(ApplicationHost applicationHost, IHost host)
@@ -72,7 +79,6 @@ internal class Presentation : Application.Application
         base.AddMappings(applicationHost, host);
 
         (host as WebApplication)!.MapDefaultEndpoints();
-        (host as WebApplication)!.UseHttpsRedirection();
         (host as WebApplication)!.UseAuthorization();
         (host as WebApplication)!.MapControllers();
 

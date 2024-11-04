@@ -28,6 +28,12 @@ public class EdgeStoreService(ILogger<EdgeStoreService> logger, IServiceProvider
 
     public LocalStoreService GetStore()
     {
+        using var _ = _logger.BeginScopeMap(new()
+        {
+            ["Service"] = nameof(EdgeStoreService),
+            ["ServiceAction"] = nameof(GetStore)
+        });
+
         _localStoreService ??= _serviceProvider.GetRequiredService<LocalStoreService>();
         _localStoreService.CommonGroup = _edgeGroupStore;
         return _localStoreService;

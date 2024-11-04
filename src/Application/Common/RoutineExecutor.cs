@@ -8,7 +8,7 @@ namespace Application.Common;
 
 public static class RoutineExecutor
 {
-    public static async void Execute(TimeSpan timingSpan, bool runFirst, CancellationToken stoppingToken, Func<CancellationToken, Task> execute, Action<Exception> onError)
+    public static async void Execute(TimeSpan timingSpan, bool runFirst, Func<CancellationToken, Task> execute, Action<Exception> onError, CancellationToken stoppingToken)
     {
         DateTimeOffset hitTime = runFirst ? DateTimeOffset.MinValue : DateTimeOffset.UtcNow;
 
@@ -35,8 +35,8 @@ public static class RoutineExecutor
         }
     }
 
-    public static void Execute(TimeSpan timingSpan, CancellationToken stoppingToken, Func<CancellationToken, Task> execute, Action<Exception> onError)
+    public static void Execute(TimeSpan timingSpan, Func<CancellationToken, Task> execute, Action<Exception> onError, CancellationToken stoppingToken)
     {
-        Execute(timingSpan, true, stoppingToken, execute, onError);
+        Execute(timingSpan, true, execute, onError, stoppingToken);
     }
 }

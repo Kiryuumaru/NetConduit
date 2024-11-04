@@ -1,8 +1,7 @@
-﻿using Application.Edge.Services;
-using Application.Server.Edge.Services;
+﻿using Application.Edge.Interfaces;
+using Application.Edge.Services;
 using Domain.Edge.Dtos;
 using Domain.Edge.Entities;
-using Domain.Edge.Models;
 using Microsoft.AspNetCore.Mvc;
 using RestfulHelpers.Common;
 
@@ -13,9 +12,9 @@ namespace Presentation.Controllers;
 /// </summary>
 [Route("api/[controller]")]
 [ApiController]
-public class EdgeController(EdgeApiService edgeApiService) : ControllerBase
+public class EdgeController(IEdgeService edgeService) : ControllerBase
 {
-    private readonly EdgeApiService _edgeApiService = edgeApiService;
+    private readonly IEdgeService _edgeApiService = edgeService;
 
     /// <summary>
     /// Retrieves all Edge entities.
@@ -24,7 +23,7 @@ public class EdgeController(EdgeApiService edgeApiService) : ControllerBase
     /// <response code="200">Returns when the operation is successful.</response>
     /// <response code="500">Returns when an unexpected error occurs.</response>
     [HttpGet]
-    public Task<HttpResult<EdgeEntity[]>> GetAll()
+    public Task<HttpResult<GetEdgeInfoDto[]>> GetAll()
     {
         return _edgeApiService.GetAll();
     }
@@ -39,9 +38,24 @@ public class EdgeController(EdgeApiService edgeApiService) : ControllerBase
     /// <response code="404">Returns when the provided ID is not found.</response>
     /// <response code="500">Returns when an unexpected error occurs.</response>
     [HttpGet("{id}")]
-    public Task<HttpResult<EdgeConnection>> Get(string id)
+    public Task<HttpResult<GetEdgeInfoDto>> Get(string id)
     {
         return _edgeApiService.Get(id);
+    }
+
+    /// <summary>
+    /// Retrieves a specific Edge entity by its ID.
+    /// </summary>
+    /// <param name="id">The ID of the Edge entity to retrieve.</param>
+    /// <returns>An HTTP result containing the EdgeTokenEntity.</returns>
+    /// <response code="200">Returns when the operation is successful.</response>
+    /// <response code="400">Returns when the provided ID is invalid.</response>
+    /// <response code="404">Returns when the provided ID is not found.</response>
+    /// <response code="500">Returns when an unexpected error occurs.</response>
+    [HttpGet("{id}/token")]
+    public Task<HttpResult<GetEdgeWithTokenDto>> GetToken(string id)
+    {
+        return _edgeApiService.GetToken(id);
     }
 
     /// <summary>
@@ -53,7 +67,7 @@ public class EdgeController(EdgeApiService edgeApiService) : ControllerBase
     /// <response code="400">Returns when the provided data is invalid.</response>
     /// <response code="500">Returns when an unexpected error occurs.</response>
     [HttpPost]
-    public Task<HttpResult<EdgeConnection>> Create([FromBody] EdgeAddDto edge)
+    public Task<HttpResult<GetEdgeWithTokenDto>> Create([FromBody] AddEdgeDto edge)
     {
         return _edgeApiService.Create(edge);
     }
@@ -69,7 +83,7 @@ public class EdgeController(EdgeApiService edgeApiService) : ControllerBase
     /// <response code="404">Returns when the Edge entity with the given ID is not found.</response>
     /// <response code="500">Returns when an unexpected error occurs.</response>
     [HttpPut("{id}")]
-    public Task<HttpResult<EdgeEntity>> Edit(string id, [FromBody] EdgeEditDto edge)
+    public Task<HttpResult<GetEdgeWithTokenDto>> Edit(string id, [FromBody] EditEdgeDto edge)
     {
         return _edgeApiService.Edit(id, edge);
     }
@@ -84,7 +98,7 @@ public class EdgeController(EdgeApiService edgeApiService) : ControllerBase
     /// <response code="404">Returns when the Edge entity with the given ID is not found.</response>
     /// <response code="500">Returns when an unexpected error occurs.</response>
     [HttpDelete("{id}")]
-    public Task<HttpResult> Delete(string id)
+    public Task<HttpResult<GetEdgeInfoDto>> Delete(string id)
     {
         return _edgeApiService.Delete(id);
     }

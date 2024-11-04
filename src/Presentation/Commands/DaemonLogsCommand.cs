@@ -20,7 +20,7 @@ using System.Threading;
 namespace Presentation.Commands;
 
 [Command("daemon logs", Description = "Daemon logs command.")]
-internal class DaemonLogsCommand : BaseCommand
+public class DaemonLogsCommand : BaseCommand
 {
     [CommandOption("tail", 't', Description = "Log lines print.")]
     public int Tail { get; set; } = 10;

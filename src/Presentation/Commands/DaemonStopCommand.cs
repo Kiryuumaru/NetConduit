@@ -16,7 +16,7 @@ using System.Threading;
 namespace Presentation.Commands;
 
 [Command("daemon stop", Description = "Daemon stop command.")]
-internal class DaemonStopCommand : BaseCommand
+public class DaemonStopCommand : BaseCommand
 {
     public override async ValueTask Run(ApplicationHostBuilder<WebApplicationBuilder> appBuilder, CancellationToken stoppingToken)
     {

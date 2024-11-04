@@ -9,7 +9,7 @@ using Microsoft.Extensions.Configuration;
 
 namespace Application.ServiceMaster.Services;
 
-internal class ServiceManagerService(ILogger<ServiceManagerService> logger, IConfiguration configuration)
+public class ServiceManagerService(ILogger<ServiceManagerService> logger, IConfiguration configuration)
 {
     private readonly ILogger<ServiceManagerService> _logger = logger;
     private readonly IConfiguration _configuration = configuration;
@@ -26,10 +26,8 @@ internal class ServiceManagerService(ILogger<ServiceManagerService> logger, ICon
     {
         var nameLower = name.ToLowerInvariant();
 
-        using var _ = _logger.BeginScopeMap(new()
+        using var _ = _logger.BeginScopeMap(nameof(ServiceManagerService), nameof(Download), new()
         {
-            ["Service"] = nameof(ServiceManagerService),
-            [$"{nameof(ServiceManagerService)}_Action"] = nameof(Download),
             ["ServiceName"] = nameLower,
         });
 

@@ -2,7 +2,7 @@
 
 public abstract class BaseAuditableEntity : BaseEntity
 {
-    public required DateTimeOffset Created { get; init; }
+    public DateTimeOffset Created { get; set; } = DateTimeOffset.UtcNow;
 
-    public required DateTimeOffset LastModified { get; init; }
+    public DateTimeOffset LastModified { get; set; } = DateTimeOffset.UtcNow;
 }

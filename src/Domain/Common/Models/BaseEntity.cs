@@ -2,7 +2,7 @@
 
 public abstract class BaseEntity
 {
-    public required Guid Id { get; init; }
+    public Guid Id { get; set; } = Guid.NewGuid();
 
-    public required Guid Rev { get; init; }
+    public Guid Rev { get; set; } = Guid.NewGuid();
 }

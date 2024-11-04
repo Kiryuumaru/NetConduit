@@ -17,7 +17,7 @@ using System.Threading;
 namespace Presentation.Commands;
 
 [Command("daemon start", Description = "Daemon start command.")]
-internal class DaemonStartCommand : BaseCommand
+public class DaemonStartCommand : BaseCommand
 {
     public override async ValueTask Run(ApplicationHostBuilder<WebApplicationBuilder> appBuilder, CancellationToken stoppingToken)
     {

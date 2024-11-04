@@ -2,10 +2,8 @@
 using Application.Edge.Common;
 using Application.Edge.Interfaces;
 using Application.LocalStore.Services;
-using Application.Server.PortRoute.Services;
 using Domain.Edge.Dtos;
 using Domain.Edge.Entities;
-using Domain.Edge.Models;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using RestfulHelpers.Common;
@@ -27,36 +25,60 @@ public class EdgeService(ILogger<EdgeService> logger, EdgeStoreService edgeStore
     private readonly ILogger<EdgeService> _logger = logger;
     private readonly EdgeStoreService _edgeStoreService = edgeStoreService;
 
-    public async Task<HttpResult<EdgeEntity[]>> GetAll(CancellationToken cancellationToken = default)
+    async Task<HttpResult<bool>> IEdgeService.Contains(string id, CancellationToken cancellationToken)
     {
-        using var _ = _logger.BeginScopeMap(new()
-        {
-            ["Service"] = nameof(EdgeService),
-            ["ServiceAction"] = nameof(GetAll)
-        });
+        using var _ = _logger.BeginScopeMap(nameof(EdgeService), nameof(IEdgeService.Contains));
 
-        HttpResult<EdgeEntity[]> result = new();
+        HttpResult<bool> result = new();
+
+        var store = _edgeStoreService.GetStore();
+
+        if (!result.Success(await store.Contains(id, cancellationToken: cancellationToken), out bool contains))
+        {
+            _logger.LogError("Error: {Error}", result.Error);
+            result.WithError("EDGE_INTERNAL_SERVER_ERROR", $"Internal server error: {result.Error}");
+            result.WithStatusCode(HttpStatusCode.InternalServerError);
+            return result;
+        }
+
+        result.WithValue(contains);
+        result.WithStatusCode(HttpStatusCode.OK);
+
+        return result;
+    }
+
+    async Task<HttpResult<GetEdgeInfoDto[]>> IEdgeService.GetAll(CancellationToken cancellationToken)
+    {
+        using var _ = _logger.BeginScopeMap(nameof(EdgeService), nameof(IEdgeService.GetAll));
+
+        HttpResult<GetEdgeInfoDto[]> result = new();
 
         var store = _edgeStoreService.GetStore();
 
         if (!result.SuccessAndHasValue(await store.GetIds(cancellationToken: cancellationToken), out string[]? edgeIds))
         {
-            _logger.LogError("Error edge GetAll: {Error}", result.Error);
+            _logger.LogError("Error: {Error}", result.Error);
+            result.WithError("EDGE_INTERNAL_SERVER_ERROR", $"Internal server error: {result.Error}");
             result.WithStatusCode(HttpStatusCode.InternalServerError);
             return result;
         }
 
-        List<EdgeEntity> edgeEntities = [];
+        List<GetEdgeInfoDto> edgeEntities = [];
 
         foreach (var id in edgeIds)
         {
-            if (!result.SuccessAndHasValue(await store.Get<EdgeTokenEntity>(id, cancellationToken: cancellationToken), out EdgeTokenEntity? edge))
+            if (!result.SuccessAndHasValue(await store.Get<EdgeEntity>(id, cancellationToken: cancellationToken), out EdgeEntity? edge))
             {
-                _logger.LogError("Error edge GetAll: {Error}", result.Error);
+                _logger.LogError("Error: {Error}", result.Error);
+                result.WithError("EDGE_INTERNAL_SERVER_ERROR", $"Internal server error: {result.Error}");
                 result.WithStatusCode(HttpStatusCode.InternalServerError);
                 return result;
             }
-            edgeEntities.Add(edge);
+            edgeEntities.Add(new()
+            {
+                Id = edge.Id,
+                Name = edge.Name,
+            });
         }
 
         result.WithValue(edgeEntities.ToArray());
@@ -65,165 +87,216 @@ public class EdgeService(ILogger<EdgeService> logger, EdgeStoreService edgeStore
         return result;
     }
 
-    public async Task<HttpResult<EdgeConnection>> Get(string id, CancellationToken cancellationToken = default)
+    async Task<HttpResult<GetEdgeInfoDto>> IEdgeService.Get(string id, CancellationToken cancellationToken)
     {
-        using var _ = _logger.BeginScopeMap(new()
+        using var _ = _logger.BeginScopeMap(nameof(EdgeService), nameof(IEdgeService.Get));
+
+        HttpResult<GetEdgeInfoDto> result = new();
+
+        if (!result.SuccessAndHasValue(await Get(id, cancellationToken), out EdgeEntity? edge))
         {
-            ["Service"] = nameof(EdgeService),
-            ["ServiceAction"] = nameof(Get),
-            ["EdgeId"] = id
+            return result;
+        }
+
+        result.WithValue(new GetEdgeInfoDto()
+        {
+            Id = edge.Id,
+            Name = edge.Name,
+        });
+        result.WithStatusCode(HttpStatusCode.OK);
+
+        return result;
+    }
+
+    async Task<HttpResult<GetEdgeWithTokenDto>> IEdgeService.GetToken(string id, CancellationToken cancellationToken)
+    {
+        using var _ = _logger.BeginScopeMap(nameof(EdgeService), nameof(IEdgeService.GetToken));
+
+        HttpResult<GetEdgeWithTokenDto> result = new();
+
+        if (!result.SuccessAndHasValue(await Get(id, cancellationToken), out EdgeEntity? edge))
+        {
+            return result;
+        }
+
+        string token = EdgeEntityHelpers.Encode(new()
+        {
+            Id = edge.Id,
+            Name = edge.Name,
+            Key = edge.Key,
         });
 
-        HttpResult<EdgeConnection> result = new();
-
-        if (string.IsNullOrEmpty(id))
+        result.WithValue(new GetEdgeWithTokenDto()
         {
+            Id = edge.Id,
+            Name = edge.Name,
+            Token = token
+        });
+        result.WithStatusCode(HttpStatusCode.OK);
+
+        return result;
+    }
+
+    async Task<HttpResult<GetEdgeWithTokenDto>> IEdgeService.Create(AddEdgeDto edgeAddDto, CancellationToken cancellationToken)
+    {
+        using var _ = _logger.BeginScopeMap(nameof(EdgeService), nameof(IEdgeService.Create), new()
+        {
+            ["EdgeId"] = edgeAddDto.Id,
+            ["EdgeName"] = edgeAddDto.Name
+        });
+
+        HttpResult<GetEdgeWithTokenDto> result = new();
+
+        if (string.IsNullOrEmpty(edgeAddDto.Name))
+        {
+            _logger.LogError("Error: Edge name is invalid");
+            result.WithError("EDGE_NAME_INVALID", "Edge name is invalid");
             result.WithStatusCode(HttpStatusCode.BadRequest);
-            result.WithError("EDGE_ID_INVALID", "Edge ID is invalid");
             return result;
         }
 
         var store = _edgeStoreService.GetStore();
 
-        if (!result.Success(await store.Get<EdgeTokenEntity>(id, cancellationToken: cancellationToken), out EdgeTokenEntity? edge))
+        if (edgeAddDto.Id != null)
         {
-            _logger.LogError("Error edge Get: {Error}", result.Error);
+            if (!result.Success(await store.Contains(edgeAddDto.Id.Value.ToString(), cancellationToken: cancellationToken), out bool contains))
+            {
+                _logger.LogError("Error: {Error}", result.Error);
+                result.WithError("EDGE_INTERNAL_SERVER_ERROR", $"Internal server error: {result.Error}");
+                result.WithStatusCode(HttpStatusCode.InternalServerError);
+                return result;
+            }
+
+            if (contains)
+            {
+                _logger.LogError("Error: Edge ID already exists");
+                result.WithError("EDGE_ID_NOT_FOUND", "Edge ID already exists");
+                result.WithStatusCode(HttpStatusCode.Conflict);
+                return result;
+            }
+        }
+
+        EdgeEntity newEdge = new()
+        {
+            Id = edgeAddDto.Id ?? Guid.NewGuid(),
+            Name = edgeAddDto.Name,
+            Key = RandomHelpers.ByteArray(EdgeDefaults.EdgeKeySize)
+        };
+
+        if (!result.Success(await store.Set(newEdge.Id.ToString(), newEdge, cancellationToken: cancellationToken)))
+        {
+            _logger.LogError("Error: {Error}", result.Error);
+            result.WithError("EDGE_INTERNAL_SERVER_ERROR", $"Internal server error: {result.Error}");
             result.WithStatusCode(HttpStatusCode.InternalServerError);
             return result;
         }
 
-        if (edge == null)
+        string token = EdgeEntityHelpers.Encode(new()
         {
-            result.WithStatusCode(HttpStatusCode.NotFound);
-            result.WithError("EDGE_ID_NOT_FOUND", "Edge ID not found");
-            return result;
-        }
+            Id = newEdge.Id,
+            Name = newEdge.Name,
+            Key = newEdge.Key,
+        });
 
-        result.WithValue(EdgeEntityHelpers.Encode(edge));
+        result.WithValue(new GetEdgeWithTokenDto()
+        {
+            Id = newEdge.Id,
+            Name = newEdge.Name,
+            Token = token
+        });
         result.WithStatusCode(HttpStatusCode.OK);
 
         return result;
     }
 
-    public async Task<HttpResult<EdgeConnection>> Create(EdgeAddDto edgeAddDto, CancellationToken cancellationToken = default)
+    async Task<HttpResult<GetEdgeWithTokenDto>> IEdgeService.Edit(string id, EditEdgeDto edgeEditDto, CancellationToken cancellationToken)
     {
-        using var _ = _logger.BeginScopeMap(new()
+        using var _ = _logger.BeginScopeMap(nameof(EdgeService), nameof(IEdgeService.Edit), new()
         {
-            ["Service"] = nameof(EdgeService),
-            ["ServiceAction"] = nameof(Create),
-            ["EdgeName"] = edgeAddDto.Name
-        });
-
-        HttpResult<EdgeConnection> result = new();
-
-        if (string.IsNullOrEmpty(edgeAddDto.Name))
-        {
-            result.WithStatusCode(HttpStatusCode.BadRequest);
-            result.WithError("EDGE_NAME_INVALID", "Edge name is invalid");
-            return result;
-        }
-
-        EdgeTokenEntity newEdge = EdgeEntityHelpers.GenerateToken(new()
-        {
-            Id = Guid.NewGuid().Encode(),
-            Name = edgeAddDto.Name,
-        });
-
-        if (!result.Success(await Create(newEdge, cancellationToken), out EdgeConnection? edgeConnectionEntity))
-        {
-            return result;
-        }
-
-        result.WithValue(edgeConnectionEntity);
-        result.WithStatusCode(HttpStatusCode.OK);
-
-        return result;
-    }
-
-    public async Task<HttpResult<EdgeEntity>> Edit(string id, EdgeEditDto edgeEditDto, CancellationToken cancellationToken = default)
-    {
-        using var _ = _logger.BeginScopeMap(new()
-        {
-            ["Service"] = nameof(EdgeService),
-            ["ServiceAction"] = nameof(Edit),
             ["EdgeId"] = id
         });
 
-        HttpResult<EdgeEntity> result = new();
+        HttpResult<GetEdgeWithTokenDto> result = new();
 
         if (string.IsNullOrEmpty(id))
         {
-            result.WithStatusCode(HttpStatusCode.BadRequest);
+            _logger.LogError("Error: Edge ID is invalid");
             result.WithError("EDGE_ID_INVALID", "Edge ID is invalid");
+            result.WithStatusCode(HttpStatusCode.BadRequest);
             return result;
         }
 
         if (string.IsNullOrEmpty(edgeEditDto.NewName) && !edgeEditDto.RenewToken)
         {
-            result.WithStatusCode(HttpStatusCode.BadRequest);
+            _logger.LogError("Error: No edge field to edit");
             result.WithError("EDGE_NO_CHANGES", "No edge field to edit");
+            result.WithStatusCode(HttpStatusCode.BadRequest);
             return result;
         }
 
-        if (id.Equals(EdgeDefaults.ServerEdgeEntity.Id))
+        if (id.Equals(EdgeDefaults.ServerEdgeId))
         {
-            result.WithStatusCode(HttpStatusCode.BadRequest);
+            _logger.LogError("Error: Edge server is not editable");
             result.WithError("EDGE_SERVER_NOT_EDITABLE", "Edge server is not editable");
+            result.WithStatusCode(HttpStatusCode.BadRequest);
             return result;
         }
 
         var store = _edgeStoreService.GetStore();
 
-        if (!result.Success(await store.Get<EdgeTokenEntity>(id, cancellationToken: cancellationToken), false, out EdgeTokenEntity? edge))
+        if (!result.Success(await store.Get<EdgeEntity>(id, cancellationToken: cancellationToken), false, out EdgeEntity? edge))
         {
-            _logger.LogError("Error edge Edit: {Error}", result.Error);
+            _logger.LogError("Error: {Error}", result.Error);
+            result.WithError("EDGE_SERVER_NOT_EDITABLE", $"Internal server error: {result.Error}");
             result.WithStatusCode(HttpStatusCode.InternalServerError);
             return result;
         }
 
         if (edge == null)
         {
-            result.WithStatusCode(HttpStatusCode.NotFound);
+            _logger.LogError("Error: Edge ID not found");
             result.WithError("EDGE_ID_NOT_FOUND", "Edge ID not found");
+            result.WithStatusCode(HttpStatusCode.NotFound);
             return result;
         }
 
         if ((string.IsNullOrEmpty(edgeEditDto.NewName) || edgeEditDto.NewName == edge.Name) &&
             !edgeEditDto.RenewToken)
         {
-            result.WithStatusCode(HttpStatusCode.BadRequest);
+            _logger.LogError("Error: No edge field to edit");
             result.WithError("EDGE_NO_CHANGES", "No edge field to edit");
+            result.WithStatusCode(HttpStatusCode.BadRequest);
             return result;
         }
 
-        EdgeTokenEntity newEdge;
-
-        if (edgeEditDto.RenewToken)
+        EdgeEntity newEdge = new()
         {
-            newEdge = EdgeEntityHelpers.GenerateToken(new()
-            {
-                Id = edge.Id,
-                Name = string.IsNullOrEmpty(edgeEditDto.NewName) ? edge.Name : edgeEditDto.NewName,
-            });
-        }
-        else
-        {
-            newEdge = new()
-            {
-                Id = edge.Id,
-                Name = string.IsNullOrEmpty(edgeEditDto.NewName) ? edge.Name : edgeEditDto.NewName,
-                Token = edge.Token
-            };
-        }
+            Id = edge.Id,
+            Name = string.IsNullOrEmpty(edgeEditDto.NewName) ? edge.Name : edgeEditDto.NewName,
+            Key = edgeEditDto.RenewToken ? RandomHelpers.ByteArray(EdgeDefaults.EdgeKeySize) : edge.Key,
+        };
 
         if (!result.Success(await store.Set(id, newEdge, cancellationToken: cancellationToken)))
         {
             _logger.LogError("Error edge Edit: {Error}", result.Error);
+            result.WithError("EDGE_INTERNAL_SERVER_ERROR", $"Internal server error: {result.Error}");
             result.WithStatusCode(HttpStatusCode.InternalServerError);
             return result;
         }
 
-        result.WithValue(newEdge as EdgeEntity);
+        string token = EdgeEntityHelpers.Encode(new()
+        {
+            Id = newEdge.Id,
+            Name = newEdge.Name,
+            Key = newEdge.Key,
+        });
+
+        result.WithValue(new GetEdgeWithTokenDto()
+        {
+            Id = newEdge.Id,
+            Name = newEdge.Name,
+            Token = token
+        });
         result.WithStatusCode(HttpStatusCode.OK);
 
         _logger.LogInformation("Edge id {EdgeId} was edited", newEdge.Id);
@@ -231,28 +304,28 @@ public class EdgeService(ILogger<EdgeService> logger, EdgeStoreService edgeStore
         return result;
     }
 
-    public async Task<HttpResult> Delete(string id, CancellationToken cancellationToken = default)
+    async Task<HttpResult<GetEdgeInfoDto>> IEdgeService.Delete(string id, CancellationToken cancellationToken)
     {
-        using var _ = _logger.BeginScopeMap(new()
+        using var _ = _logger.BeginScopeMap(nameof(EdgeService), nameof(IEdgeService.Delete), new()
         {
-            ["Service"] = nameof(EdgeService),
-            ["ServiceAction"] = nameof(Delete),
             ["EdgeId"] = id
         });
 
-        HttpResult result = new();
+        HttpResult<GetEdgeInfoDto> result = new();
 
         if (string.IsNullOrEmpty(id))
         {
-            result.WithStatusCode(HttpStatusCode.BadRequest);
+            _logger.LogError("Error: Edge ID is invalid");
             result.WithError("EDGE_ID_INVALID", "Edge ID is invalid");
+            result.WithStatusCode(HttpStatusCode.BadRequest);
             return result;
         }
 
-        if (id.Equals(EdgeDefaults.ServerEdgeEntity.Id))
+        if (id.Equals(EdgeDefaults.ServerEdgeId))
         {
-            result.WithStatusCode(HttpStatusCode.BadRequest);
+            _logger.LogError("Error: Edge server is not deletable");
             result.WithError("EDGE_SERVER_NOT_DELETABLE", "Edge server is not deletable");
+            result.WithStatusCode(HttpStatusCode.BadRequest);
             return result;
         }
 
@@ -260,21 +333,24 @@ public class EdgeService(ILogger<EdgeService> logger, EdgeStoreService edgeStore
 
         if (!result.Success(await store.Contains(id, cancellationToken: cancellationToken), out bool contains))
         {
-            _logger.LogError("Error edge Delete: {Error}", result.Error);
+            _logger.LogError("Error: {Error}", result.Error);
+            result.WithError("EDGE_INTERNAL_SERVER_ERROR", $"Internal server error: {result.Error}");
             result.WithStatusCode(HttpStatusCode.InternalServerError);
             return result;
         }
 
         if (!contains)
         {
-            result.WithStatusCode(HttpStatusCode.NotFound);
+            _logger.LogError("Error: Edge ID not found");
             result.WithError("EDGE_ID_NOT_FOUND", "Edge ID not found");
+            result.WithStatusCode(HttpStatusCode.NotFound);
             return result;
         }
 
         if (!result.Success(await store.Delete(id, cancellationToken: cancellationToken)))
         {
-            _logger.LogError("Error edge Delete: {Error}", result.Error);
+            _logger.LogError("Error: {Error}", result.Error);
+            result.WithError("EDGE_INTERNAL_SERVER_ERROR", $"Internal server error: {result.Error}");
             result.WithStatusCode(HttpStatusCode.InternalServerError);
             return result;
         }
@@ -286,32 +362,38 @@ public class EdgeService(ILogger<EdgeService> logger, EdgeStoreService edgeStore
         return result;
     }
 
-    internal async Task<HttpResult<EdgeConnection>> Create(EdgeTokenEntity newEdge, CancellationToken cancellationToken = default)
+    private async Task<HttpResult<EdgeEntity>> Get(string id, CancellationToken cancellationToken)
     {
-        using var _ = _logger.BeginScopeMap(new()
-        {
-            ["Service"] = nameof(EdgeService),
-            ["ServiceAction"] = nameof(Create),
-            ["EdgeId"] = id
-        });
+        HttpResult<EdgeEntity> result = new();
 
-        HttpResult<EdgeConnection> result = new();
+        if (string.IsNullOrEmpty(id))
+        {
+            _logger.LogError("Error: Edge ID is invalid");
+            result.WithError("EDGE_ID_INVALID", "Edge ID is invalid");
+            result.WithStatusCode(HttpStatusCode.BadRequest);
+            return result;
+        }
 
         var store = _edgeStoreService.GetStore();
 
-        if (!result.Success(await store.Set(newEdge.Id, newEdge, cancellationToken: cancellationToken)))
+        if (!result.Success(await store.Get<EdgeEntity>(id, cancellationToken: cancellationToken), out EdgeEntity? edge))
         {
-            _logger.LogError("Error edge Create: {Error}", result.Error);
+            _logger.LogError("Error: {Error}", result.Error);
+            result.WithError("EDGE_INTERNAL_SERVER_ERROR", $"Internal server error: {result.Error}");
             result.WithStatusCode(HttpStatusCode.InternalServerError);
             return result;
         }
 
-        var newEdgeConnectionEntity = EdgeEntityHelpers.Encode(newEdge);
+        if (edge == null)
+        {
+            _logger.LogError("Error: Edge ID {EdgeId} not found", id);
+            result.WithError("EDGE_INTERNAL_SERVER_ERROR", "Edge ID not found");
+            result.WithStatusCode(HttpStatusCode.NotFound);
+            return result;
+        }
 
-        result.WithValue(newEdgeConnectionEntity);
+        result.WithValue(edge);
         result.WithStatusCode(HttpStatusCode.OK);
-
-        _logger.LogInformation("Edge id {EdgeId} was created with handshake-token {Error}", newEdge.Id, newEdgeConnectionEntity.HandshakeToken);
 
         return result;
     }

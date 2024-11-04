@@ -13,7 +13,7 @@ using System.Threading;
 namespace Presentation.Commands;
 
 [Command("update", Description = "Update client.")]
-internal class UpdateCommand : BaseCommand
+public class UpdateCommand : BaseCommand
 {
     public override async ValueTask Run(ApplicationHostBuilder<WebApplicationBuilder> appBuilder, CancellationToken stoppingToken)
     {

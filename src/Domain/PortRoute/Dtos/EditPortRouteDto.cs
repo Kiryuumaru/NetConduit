@@ -6,13 +6,13 @@ using System.Threading.Tasks;
 
 namespace Domain.PortRoute.Dtos;
 
-public class PortRouteEditDto
+public class EditPortRouteDto
 {
-    public byte[]? SourceEdgeId { get; init; }
+    public Guid? SourceEdgeId { get; init; }
 
     public int? SourceEdgePort { get; init; }
 
-    public byte[]? DestinationEdgeId { get; init; }
+    public Guid? DestinationEdgeId { get; init; }
 
     public int? DestinationEdgePort { get; init; }
 }

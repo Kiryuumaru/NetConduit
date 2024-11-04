@@ -4,7 +4,7 @@ using Application.Configuration.Extensions;
 using Serilog;
 using System.Runtime.InteropServices;
 using Application.Common;
-using Presentation.ServiceMaster.Services;
+using Application.ServiceMaster.Services;
 
 namespace Presentation.Services;
 
@@ -17,11 +17,7 @@ internal class ClientManager(ILogger<ClientManager> logger, IConfiguration confi
 
     public async Task UpdateClient(CancellationToken cancellationToken)
     {
-        using var _ = _logger.BeginScopeMap(new()
-        {
-            ["Service"] = nameof(ClientManager),
-            [$"{nameof(ClientManager)}_Action"] = nameof(UpdateClient)
-        });
+        using var _ = _logger.BeginScopeMap(nameof(ClientManager), nameof(UpdateClient));
 
         _logger.LogInformation("Downloading latest client...");
 
@@ -57,11 +53,7 @@ internal class ClientManager(ILogger<ClientManager> logger, IConfiguration confi
 
     public async Task Install(string? username, string? password, CancellationToken cancellationToken)
     {
-        using var _ = _logger.BeginScopeMap(new()
-        {
-            ["Service"] = nameof(ClientManager),
-            [$"{nameof(ClientManager)}_Action"] = nameof(Install)
-        });
+        using var _ = _logger.BeginScopeMap(nameof(ClientManager), nameof(Install));
 
         _logger.LogInformation("Installing client...");
 
@@ -89,11 +81,7 @@ internal class ClientManager(ILogger<ClientManager> logger, IConfiguration confi
 
     public async Task Start(CancellationToken cancellationToken)
     {
-        using var _ = _logger.BeginScopeMap(new()
-        {
-            ["Service"] = nameof(ClientManager),
-            [$"{nameof(ClientManager)}_Action"] = nameof(Start)
-        });
+        using var _ = _logger.BeginScopeMap(nameof(ClientManager), nameof(Start));
 
         _logger.LogInformation("Starting client service...");
 
@@ -104,11 +92,7 @@ internal class ClientManager(ILogger<ClientManager> logger, IConfiguration confi
 
     public async Task Stop(CancellationToken cancellationToken)
     {
-        using var _ = _logger.BeginScopeMap(new()
-        {
-            ["Service"] = nameof(ClientManager),
-            [$"{nameof(ClientManager)}_Action"] = nameof(Stop)
-        });
+        using var _ = _logger.BeginScopeMap(nameof(ClientManager), nameof(Stop));
 
         _logger.LogInformation("Stopping client service...");
 
@@ -119,11 +103,7 @@ internal class ClientManager(ILogger<ClientManager> logger, IConfiguration confi
 
     public async Task Uninstall(CancellationToken cancellationToken)
     {
-        using var _ = _logger.BeginScopeMap(new()
-        {
-            ["Service"] = nameof(ClientManager),
-            [$"{nameof(ClientManager)}_Action"] = nameof(Uninstall)
-        });
+        using var _ = _logger.BeginScopeMap(nameof(ClientManager), nameof(Uninstall));
 
         _logger.LogInformation("Uninstalling client service...");
 

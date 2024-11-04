@@ -88,13 +88,14 @@ public static class CommonConfigurationExtensions
         configuration[$"{Defaults.AppNameUpperSnakeCase}_LOGGER_LEVEL"] = loggerLevel.ToString();
     }
 
+    public const string HomePathKey = $"{Defaults.AppNameUpperSnakeCase}_HOME_PATH";
     public static AbsolutePath GetHomePath(this IConfiguration configuration)
     {
-        return configuration.GetVarRefValue($"{Defaults.AppNameUpperSnakeCase}_HOME_PATH");
+        return configuration.GetVarRefValue(HomePathKey);
     }
     public static void SetHomePath(this IConfiguration configuration, AbsolutePath dataPath)
     {
-        configuration[$"{Defaults.AppNameUpperSnakeCase}_HOME_PATH"] = dataPath;
+        configuration[HomePathKey] = dataPath;
     }
 
     public static AbsolutePath GetDataPath(this IConfiguration configuration)

@@ -14,7 +14,7 @@ using System.Threading;
 
 namespace Presentation.Commands;
 
-internal abstract class BaseCommand : ICommand
+public abstract class BaseCommand : ICommand
 {
     [CommandOption("log-level", 'l', Description = "Level of logs to show.")]
     public LogLevel LogLevel { get; set; } = LogLevel.Information;
@@ -22,7 +22,7 @@ internal abstract class BaseCommand : ICommand
     [CommandOption("as-json", Description = "Output as json.")]
     public bool AsJson { get; set; } = false;
 
-    [CommandOption("home", Description = "Home directory.", EnvironmentVariable = "NET_CONDUIT_HOME")]
+    [CommandOption("home", Description = "Home directory.", EnvironmentVariable = CommonConfigurationExtensions.HomePathKey)]
     public string Home { get; set; } = AbsolutePath.Create(Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData)) / "netc";
 
     public ApplicationHostBuilder<WebApplicationBuilder> CreateBuilder()

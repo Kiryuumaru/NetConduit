@@ -1,10 +1,11 @@
 ﻿using Application.Common;
 using Application.Configuration.Extensions;
+using Application.Edge.Interfaces;
 using Application.Edge.Services;
 using Application.Edge.Workers;
 using Application.LocalStore.Services;
-using Application.PortRoute.Services;
 using Application.ServiceMaster.Services;
+using Application.Tcp.Services;
 using ApplicationBuilderHelpers;
 using Microsoft.Extensions.DependencyInjection;
 
@@ -18,22 +19,20 @@ public class Application : ApplicationDependency
 
         services.AddTransient<LocalStoreService>();
         services.AddSingleton<LocalStoreConcurrencyService>();
-        services.AddScoped<EdgeApiService>();
-        services.AddScoped<PortRouteApiService>();
         services.AddScoped<ServiceManagerService>();
         services.AddScoped<DaemonManagerService>();
+        services.AddTransient<TcpClientService>();
+        services.AddTransient<TcpServerService>();
 
-        if (applicationBuilder.Configuration.GetServerEndpoint() != null)
+        if (applicationBuilder.Configuration.GetStartAsServerMode())
         {
+            services.AddScoped<IEdgeService, EdgeService>();
+            services.AddScoped<EdgeStoreService>();
+            services.AddHostedService<EdgeServerWorker>();
         }
         else
         {
-            services.AddScoped<EdgeService>();
-            services.AddScoped<EdgeStoreService>();
-            services.AddScoped<PortRouteService>();
-            services.AddScoped<PortRouteStoreService>();
-            services.AddSingleton<PortRouteEventHubService>();
-            services.AddHostedService<EdgeWorker>();
+            services.AddScoped<IEdgeService, EdgeApiService>();
         }
     }
 }

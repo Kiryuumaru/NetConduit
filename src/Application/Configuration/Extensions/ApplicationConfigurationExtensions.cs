@@ -13,22 +13,44 @@ namespace Application.Configuration.Extensions;
 
 public static class ApplicationConfigurationExtensions
 {
-    public static string GetServerEndpoint(this IConfiguration configuration)
+    public const string ApiUrlsKey = "NET_CONDUIT_API_URLS";
+    public static string GetApiUrls(this IConfiguration configuration)
     {
-        return configuration.GetVarRefValue("NET_CONDUIT_SERVER_ENDPOINT");
+        return configuration.GetVarRefValue(ApiUrlsKey);
     }
-    public static void SetServerEndpoint(this IConfiguration configuration, string? serverEndpoint)
+    public static void SetApiUrls(this IConfiguration configuration, string apiUrls)
     {
-        configuration["NET_CONDUIT_SERVER_ENDPOINT"] = serverEndpoint;
+        configuration[ApiUrlsKey] = apiUrls;
     }
 
+    public const string ServerTcpHostKey = "NET_CONDUIT_SERVER_TCP_HOST";
+    public static string GetServerTcpHost(this IConfiguration configuration)
+    {
+        return configuration.GetVarRefValue(ServerTcpHostKey);
+    }
+    public static void SetServerTcpHost(this IConfiguration configuration, string tcpHost)
+    {
+        configuration[ServerTcpHostKey] = tcpHost;
+    }
+
+    public const string ServerTcpPortKey = "NET_CONDUIT_SERVER_TCP_PORT";
+    public static int GetServerTcpPort(this IConfiguration configuration)
+    {
+        return int.Parse(configuration.GetVarRefValue(ServerTcpPortKey));
+    }
+    public static void SetServerTcpPort(this IConfiguration configuration, int tcpPort)
+    {
+        configuration[ServerTcpPortKey] = tcpPort.ToString();
+    }
+
+    public const string HandshakeTokenKey = "NET_CONDUIT_HANDSHAKE_TOKEN";
     public static string GetHandshakeToken(this IConfiguration configuration)
     {
-        return configuration.GetVarRefValue("NET_CONDUIT_HANDSHAKE_TOKEN");
+        return configuration.GetVarRefValue(HandshakeTokenKey);
     }
     public static void SetHandshakeToken(this IConfiguration configuration, string? handshakeToken)
     {
-        configuration["NET_CONDUIT_HANDSHAKE_TOKEN"] = handshakeToken;
+        configuration[HandshakeTokenKey] = handshakeToken;
     }
 
     public static bool GetStartAsServerMode(this IConfiguration configuration)

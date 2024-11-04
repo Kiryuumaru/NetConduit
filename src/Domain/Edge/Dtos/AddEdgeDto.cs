@@ -6,11 +6,9 @@ using System.Threading.Tasks;
 
 namespace Domain.Edge.Dtos;
 
-public class EdgeWithTokenGetDto
+public class AddEdgeDto
 {
-    public required string Id { get; init; }
+    public Guid? Id { get; init; }
 
     public required string Name { get; init; }
-
-    public required string Token { get; init; }
 }

@@ -18,7 +18,7 @@ using System.Threading;
 namespace Presentation.Commands;
 
 [Command("daemon install", Description = "Daemon install command.")]
-internal class DaemonInstallCommand : BaseCommand
+public class DaemonInstallCommand : BaseCommand
 {
     [CommandOption("username", 'u', Description = "Username of the service account.")]
     public string? Username { get; set; }

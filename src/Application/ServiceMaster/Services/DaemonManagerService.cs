@@ -9,7 +9,7 @@ using Microsoft.Extensions.Configuration;
 
 namespace Application.ServiceMaster.Services;
 
-internal class DaemonManagerService(ILogger<DaemonManagerService> logger, IConfiguration configuration, ServiceManagerService serviceDownloader)
+public class DaemonManagerService(ILogger<DaemonManagerService> logger, IConfiguration configuration, ServiceManagerService serviceDownloader)
 {
     private readonly ILogger<DaemonManagerService> _logger = logger;
     private readonly IConfiguration _configuration = configuration;
@@ -19,11 +19,7 @@ internal class DaemonManagerService(ILogger<DaemonManagerService> logger, IConfi
 
     public async Task<AbsolutePath> PrepareServiceWrapper(CancellationToken cancellationToken)
     {
-        using var _ = _logger.BeginScopeMap(new()
-        {
-            ["Service"] = nameof(DaemonManagerService),
-            [$"{nameof(DaemonManagerService)}Action"] = nameof(PrepareServiceWrapper)
-        });
+        using var _ = _logger.BeginScopeMap(nameof(DaemonManagerService), nameof(PrepareServiceWrapper));
 
         var home = _configuration.GetHomePath();
 
@@ -69,10 +65,8 @@ internal class DaemonManagerService(ILogger<DaemonManagerService> logger, IConfi
     {
         var idLower = id.ToLowerInvariant();
 
-        using var _ = _logger.BeginScopeMap(new()
+        using var _ = _logger.BeginScopeMap(nameof(DaemonManagerService), nameof(Install), new()
         {
-            ["Service"] = nameof(DaemonManagerService),
-            [$"{nameof(DaemonManagerService)}_Action"] = nameof(Install),
             ["ServiceId"] = idLower,
         });
 
@@ -144,10 +138,8 @@ internal class DaemonManagerService(ILogger<DaemonManagerService> logger, IConfi
     {
         var idLower = id.ToLowerInvariant();
 
-        using var _ = _logger.BeginScopeMap(new()
+        using var _ = _logger.BeginScopeMap(nameof(DaemonManagerService), nameof(Start), new()
         {
-            ["Service"] = nameof(DaemonManagerService),
-            [$"{nameof(DaemonManagerService)}_Action"] = nameof(Start),
             ["ServiceId"] = idLower,
         });
 
@@ -176,10 +168,8 @@ internal class DaemonManagerService(ILogger<DaemonManagerService> logger, IConfi
     {
         var idLower = id.ToLowerInvariant();
 
-        using var _ = _logger.BeginScopeMap(new()
+        using var _ = _logger.BeginScopeMap(nameof(DaemonManagerService), nameof(Stop), new()
         {
-            ["Service"] = nameof(DaemonManagerService),
-            [$"{nameof(DaemonManagerService)}_Action"] = nameof(Stop),
             ["ServiceId"] = idLower,
         });
 
@@ -202,10 +192,8 @@ internal class DaemonManagerService(ILogger<DaemonManagerService> logger, IConfi
     {
         var idLower = id.ToLowerInvariant();
 
-        using var _ = _logger.BeginScopeMap(new()
+        using var _ = _logger.BeginScopeMap(nameof(DaemonManagerService), nameof(Uninstall), new()
         {
-            ["Service"] = nameof(DaemonManagerService),
-            [$"{nameof(DaemonManagerService)}_Action"] = nameof(Uninstall),
             ["ServiceId"] = idLower,
         });
 

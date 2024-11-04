@@ -17,7 +17,7 @@ using System.Threading;
 namespace Presentation.Commands;
 
 [Command("daemon uninstall", Description = "Daemon uninstall command.")]
-internal class DaemonUninstallCommand : BaseCommand
+public class DaemonUninstallCommand : BaseCommand
 {
     public override async ValueTask Run(ApplicationHostBuilder<WebApplicationBuilder> appBuilder, CancellationToken stoppingToken)
     {

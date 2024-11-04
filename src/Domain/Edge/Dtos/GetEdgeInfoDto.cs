@@ -6,9 +6,9 @@ using System.Threading.Tasks;
 
 namespace Domain.Edge.Dtos;
 
-public class EdgeEditDto
+public class GetEdgeInfoDto
 {
-    public string? NewName { get; init; }
+    public required Guid Id { get; init; }
 
-    public bool RenewToken { get; init; }
+    public required string Name { get; init; }
 }
