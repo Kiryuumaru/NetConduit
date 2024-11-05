@@ -53,13 +53,7 @@ public partial class TcpServerService(ILogger<TcpServerService> logger)
             TcpClient client = await server.AcceptTcpClientAsync(ct);
             NetworkStream networkStream = client.GetStream();
             TcpClientStream tcpClientStream = tcpClientStreamFactory(client, networkStream);
-            var clientCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
-            void ClientStream_Disposing(object? sender, EventArgs e)
-            {
-                clientCts.Cancel();
-                tcpClientStream.Disposing -= ClientStream_Disposing;
-            }
-            tcpClientStream.Disposing += ClientStream_Disposing;
+            CancellationTokenSource clientCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
             StartSend(client, networkStream, tcpClientStream, clientCts.Token);
             WatchLiveliness(client, tcpClientStream, clientCts);
         }
@@ -94,12 +88,10 @@ public partial class TcpServerService(ILogger<TcpServerService> logger)
         {
             try
             {
-                if (tcpClient.Client.Poll(0, SelectMode.SelectRead))
+                if (tcpClient.Client.Poll(0, SelectMode.SelectRead) &&
+                    await tcpClient.Client.ReceiveAsync(buff, SocketFlags.Peek) == 0)
                 {
-                    if (await tcpClient.Client.ReceiveAsync(buff, SocketFlags.Peek) == 0)
-                    {
-                        break;
-                    }
+                    break;
                 }
 
                 await Task.Delay(_livelinessSpan, cts.Token);
