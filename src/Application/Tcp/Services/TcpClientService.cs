@@ -17,9 +17,10 @@ public partial class TcpClientService(ILogger<TcpClientService> logger)
 {
     private readonly ILogger<TcpClientService> _logger = logger;
 
-    private IPAddress? _ipAddress = null;
-    private int? _port = 0;
     private CancellationTokenSource? _cts = null;
+    private IPAddress? _ipAddress = null;
+    private int _port = 0;
+    private int _bufferSize = 0;
 
     public async Task Start(IPAddress address, int port, Func<TcpClient, NetworkStream, TcpClientStream> clientStreamFactory, CancellationToken stoppingToken)
     {
@@ -40,7 +41,7 @@ public partial class TcpClientService(ILogger<TcpClientService> logger)
             client.Close();
             client.Dispose();
         });
-        
+
         while (!ct.IsCancellationRequested)
         {
             client = new();

@@ -16,10 +16,12 @@ public partial class TcpServerService(ILogger<TcpServerService> logger)
 {
     private readonly ILogger<TcpServerService> _logger = logger;
 
+    private readonly TimeSpan _livelinessSpan = TimeSpan.FromSeconds(1);
+
+    private CancellationTokenSource? _cts = null;
     private IPAddress? _ipAddress = null;
     private int _port = 0;
     private int _bufferSize = 0;
-    private CancellationTokenSource? _cts = null;
 
     public async Task Start(IPAddress address, int port, int bufferSize, Func<TcpClient, NetworkStream, TcpClientStream> tcpClientStreamFactory, CancellationToken stoppingToken)
     {
@@ -51,14 +53,15 @@ public partial class TcpServerService(ILogger<TcpServerService> logger)
             TcpClient client = await server.AcceptTcpClientAsync(ct);
             NetworkStream networkStream = client.GetStream();
             TcpClientStream tcpClientStream = tcpClientStreamFactory(client, networkStream);
-            var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            var clientCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
             void ClientStream_Disposing(object? sender, EventArgs e)
             {
-                cts.Cancel();
+                clientCts.Cancel();
                 tcpClientStream.Disposing -= ClientStream_Disposing;
             }
             tcpClientStream.Disposing += ClientStream_Disposing;
-            StartSend(client, networkStream, tcpClientStream, cts.Token);
+            StartSend(client, networkStream, tcpClientStream, clientCts.Token);
+            WatchLiveliness(client, tcpClientStream, clientCts);
         }
     }
 
@@ -79,6 +82,36 @@ public partial class TcpServerService(ILogger<TcpServerService> logger)
             }
             catch { }
         }
+    }
+
+    private async void WatchLiveliness(TcpClient tcpClient, TcpClientStream tcpClientStream, CancellationTokenSource cts)
+    {
+        var clientEndPoint = (tcpClient.Client.LocalEndPoint as IPEndPoint)?.Address;
+
+        byte[] buff = new byte[1];
+
+        while (!tcpClientStream.IsDisposedOrDisposing && !cts.IsCancellationRequested)
+        {
+            try
+            {
+                if (tcpClient.Client.Poll(0, SelectMode.SelectRead))
+                {
+                    if (await tcpClient.Client.ReceiveAsync(buff, SocketFlags.Peek) == 0)
+                    {
+                        break;
+                    }
+                }
+
+                await Task.Delay(_livelinessSpan, cts.Token);
+            }
+            catch { }
+        }
+
+        cts.Cancel();
+
+        tcpClient.Close();
+        tcpClient.Dispose();
+        tcpClientStream.Dispose();
 
         _logger.LogTrace("TCP Server {Address}:{Port} client {ClientEndPoint} disconnected", _ipAddress, _port, clientEndPoint);
     }
