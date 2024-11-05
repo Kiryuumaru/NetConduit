@@ -8,6 +8,7 @@ using System.Net;
 using System.Text;
 using System.Threading.Tasks;
 using Application.Tcp.Models;
+using System.Net.Http;
 
 namespace Application.Tcp.Services;
 
@@ -50,24 +51,23 @@ public partial class TcpServerService(ILogger<TcpServerService> logger)
 
         while (!ct.IsCancellationRequested)
         {
-            TcpClient client = await server.AcceptTcpClientAsync(ct);
-            NetworkStream networkStream = client.GetStream();
-            TcpClientStream tcpClientStream = tcpClientStreamFactory(client, networkStream);
+            TcpClient tcpClient = await server.AcceptTcpClientAsync(ct);
+            IPAddress clientEndPoint = (tcpClient.Client.LocalEndPoint as IPEndPoint)?.Address!;
+            NetworkStream networkStream = tcpClient.GetStream();
+            TcpClientStream tcpClientStream = tcpClientStreamFactory(tcpClient, networkStream);
             CancellationTokenSource clientCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
-            StartSend(client, networkStream, tcpClientStream, clientCts.Token);
-            WatchLiveliness(client, tcpClientStream, clientCts);
+            StartSend(tcpClient, clientEndPoint, networkStream, tcpClientStream, clientCts.Token);
+            WatchLiveliness(tcpClient, clientEndPoint, tcpClientStream, clientCts);
         }
     }
 
-    private async void StartSend(TcpClient tcpClient, NetworkStream networkStream, TcpClientStream tcpClientStream, CancellationToken stoppingToken)
+    private async void StartSend(TcpClient tcpClient, IPAddress clientAddress, NetworkStream networkStream, TcpClientStream tcpClientStream, CancellationToken stoppingToken)
     {
-        var clientEndPoint = (tcpClient.Client.LocalEndPoint as IPEndPoint)?.Address;
-
-        _logger.LogTrace("TCP Server {Address}:{Port} client {ClientEndPoint} connected", _ipAddress, _port, clientEndPoint);
+        _logger.LogTrace("TCP Server {Address}:{Port} client {ClientEndPoint} connected", _ipAddress, _port, clientAddress);
 
         byte[] buffer = new byte[_bufferSize];
 
-        while (!tcpClientStream.IsDisposedOrDisposing && !stoppingToken.IsCancellationRequested)
+        while (tcpClient.Connected && !tcpClientStream.IsDisposedOrDisposing && !stoppingToken.IsCancellationRequested)
         {
             try
             {
@@ -78,18 +78,16 @@ public partial class TcpServerService(ILogger<TcpServerService> logger)
         }
     }
 
-    private async void WatchLiveliness(TcpClient tcpClient, TcpClientStream tcpClientStream, CancellationTokenSource cts)
+    private async void WatchLiveliness(TcpClient tcpClient, IPAddress clientAddress, TcpClientStream tcpClientStream, CancellationTokenSource cts)
     {
-        var clientEndPoint = (tcpClient.Client.LocalEndPoint as IPEndPoint)?.Address;
+        byte[] buffer = new byte[1];
 
-        byte[] buff = new byte[1];
-
-        while (!tcpClientStream.IsDisposedOrDisposing && !cts.IsCancellationRequested)
+        while (tcpClient.Connected && !tcpClientStream.IsDisposedOrDisposing && !cts.IsCancellationRequested)
         {
             try
             {
                 if (tcpClient.Client.Poll(0, SelectMode.SelectRead) &&
-                    await tcpClient.Client.ReceiveAsync(buff, SocketFlags.Peek) == 0)
+                    await tcpClient.Client.ReceiveAsync(buffer, SocketFlags.Peek) == 0)
                 {
                     break;
                 }
@@ -100,12 +98,11 @@ public partial class TcpServerService(ILogger<TcpServerService> logger)
         }
 
         cts.Cancel();
-
         tcpClient.Close();
         tcpClient.Dispose();
         tcpClientStream.Dispose();
 
-        _logger.LogTrace("TCP Server {Address}:{Port} client {ClientEndPoint} disconnected", _ipAddress, _port, clientEndPoint);
+        _logger.LogTrace("TCP Server {Address}:{Port} client {ClientEndPoint} disconnected", _ipAddress, _port, clientAddress);
     }
 
     private void Stop()
