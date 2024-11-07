@@ -33,6 +33,7 @@ public class Application : ApplicationDependency
         else
         {
             services.AddScoped<IEdgeService, EdgeApiService>();
+            services.AddHostedService<EdgeClientWorker>();
         }
     }
 }

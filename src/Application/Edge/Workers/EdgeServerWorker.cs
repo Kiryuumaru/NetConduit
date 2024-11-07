@@ -64,7 +64,8 @@ internal class EdgeServerWorker(ILogger<EdgeServerWorker> logger, IServiceProvid
         {
             return new()
             {
-                ReceiverStream = ns
+                ReceiverStream = ns,
+                SenderStream = null,
             };
         }, stoppingToken);
     }
