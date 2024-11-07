@@ -17,6 +17,7 @@ using NukeBuildHelpers.Entry.Extensions;
 using NukeBuildHelpers.Runner.Abstraction;
 using NukeBuildHelpers.RunContext.Extensions;
 using Microsoft.Build.Logging;
+using static Nuke.Common.Tools.NSwag.NSwagTasks;
 
 class Build : BaseNukeBuildHelpers
 {
@@ -107,6 +108,8 @@ class Build : BaseNukeBuildHelpers
     public PublishEntry PublishAssets => _ => _
         .AppId(appId)
         .RunnerOS(RunnerOS.Ubuntu2204)
+        .WorkflowId("publish")
+        .DisplayName("Publish binaries")
         .ReleaseAsset(() =>
         {
             List<AbsolutePath> paths = [];
