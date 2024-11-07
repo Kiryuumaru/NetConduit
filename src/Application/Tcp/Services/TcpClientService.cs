@@ -13,6 +13,7 @@ using Application.Common;
 using Application.StreamPipeline.Common;
 using Microsoft.AspNetCore.Hosting.Server;
 using System.Net.Http;
+using System.IO;
 
 namespace Application.Tcp.Services;
 
@@ -93,8 +94,24 @@ public partial class TcpClientService(ILogger<TcpClientService> logger)
         _logger.LogTrace("TCP client connected to server {ServerHost}:{ServerPort}", _ipAddress, _port);
 
         await Task.WhenAll(
-            ForwardStream(streamPipe.SenderStream, networkStream, false, stoppingToken),
-            ForwardStream(networkStream, streamPipe.ReceiverStream, true, stoppingToken));
+            ForwardStream(networkStream, streamPipe.ReceiverStream, true, stoppingToken),
+            Task.Run(async () => {
+                byte[] buffer = new byte[_bufferSize];
+
+                while (!stoppingToken.IsCancellationRequested)
+                {
+                    try
+                    {
+                        int bytesread = await streamPipe.SenderStream.ReadAsync(buffer, stoppingToken);
+                        await networkStream.WriteAsync(buffer.AsMemory(0, bytesread), stoppingToken);
+                    }
+                    catch (OperationCanceledException) { }
+                    catch (Exception ex)
+                    {
+                        _logger.LogTrace("Error send streaming server {ServerHost}:{ServerPort}: {Error}", _ipAddress, _port, ex.Message);
+                    }
+                }
+            }));
     }
 
     private async void WatchLiveliness(TcpClient tcpClient, NetworkStream networkStream, StreamPipe streamPipe, CancellationTokenSource cts)

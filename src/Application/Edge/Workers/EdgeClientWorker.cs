@@ -71,7 +71,7 @@ internal class EdgeClientWorker(ILogger<EdgeClientWorker> logger, IServiceProvid
                 DateTimeOffset sendTime = DateTimeOffset.UtcNow;
 
                 await streamPipe.SenderStream!.WriteAsync(sendBytes, stoppingToken);
-                await streamPipe.SenderStream!.FlushAsync(stoppingToken);
+                await streamPipe.SenderStream.FlushAsync(stoppingToken);
                 byte[] receivedBytes = new byte[4096];
                 await streamPipe.ReceiverStream!.ReadAsync(receivedBytes, stoppingToken);
 
