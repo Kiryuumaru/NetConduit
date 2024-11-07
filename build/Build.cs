@@ -189,7 +189,7 @@ class Build : BaseNukeBuildHelpers
         return OutputDirectory / GetReleaseName(runtime, arch);
     }
 
-    private AbsolutePath GetReleaseName(string runtime, string arch)
+    private string GetReleaseName(string runtime, string arch)
     {
         return $"{executableName}-{runtime}-{arch}";
     }
