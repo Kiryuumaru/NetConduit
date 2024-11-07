@@ -26,6 +26,11 @@ EndProject
 Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Solution Items", "Solution Items", "{CC01B39F-E689-4306-8790-33587381793F}"
 	ProjectSection(SolutionItems) = preProject
 		.editorconfig = .editorconfig
+		.github\workflows\dependabot-auto-bump.yml = .github\workflows\dependabot-auto-bump.yml
+		.github\workflows\dependabot-auto-merge.yml = .github\workflows\dependabot-auto-merge.yml
+		installer_template.ps1 = installer_template.ps1
+		installer_template.sh = installer_template.sh
+		.github\workflows\nuke-cicd.yml = .github\workflows\nuke-cicd.yml
 	EndProjectSection
 EndProject
 Global

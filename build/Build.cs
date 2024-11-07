@@ -15,12 +15,20 @@ using NukeBuildHelpers.Common.Attributes;
 using NukeBuildHelpers.Entry;
 using NukeBuildHelpers.Entry.Extensions;
 using NukeBuildHelpers.Runner.Abstraction;
+using NukeBuildHelpers.RunContext.Extensions;
+using Microsoft.Build.Logging;
 
 class Build : BaseNukeBuildHelpers
 {
     public override string[] EnvironmentBranches { get; } = ["master", "prerelease"];
 
     public override string MainEnvironmentBranch { get; } = "master";
+
+    private readonly string gitRepoName = "NetConduit";
+    private readonly string gitUsername = "Kiryuumaru";
+    private readonly string appId = "net_conduit";
+    private readonly string executableName = "net_conduit";
+    private readonly string assemblyName = "netc";
 
     private readonly string[] runtimeMatrix = ["linux", "win"];
     private readonly string[] archMatrix = ["x64", "arm64"];
@@ -50,7 +58,7 @@ class Build : BaseNukeBuildHelpers
         });
 
     public BuildEntry NetConduitBuild => _ => _
-        .AppId("net_conduit")
+        .AppId(appId)
         .Matrix(runtimeMatrix, (_, runtime) => _
             .Matrix(archMatrix, (_, arch) => _
                 .WorkflowId($"build_{runtime}_{arch}")
@@ -63,35 +71,41 @@ class Build : BaseNukeBuildHelpers
                 })
                 .Execute(context =>
                 {
-                    var releasePath = GetReleasePath(runtime, arch);
+                    string projectVersion = "0.0.0";
+                    if (context.TryGetVersionedContext(out var versionedContext))
+                    {
+                        projectVersion = versionedContext.AppVersion.Version.WithoutMetadata().ToString();
+                    }
+                    var outAssetPath = GetReleaseArchivePath(runtime, arch);
+                    var archivePath = outAssetPath.Parent / outAssetPath.NameWithoutExtension;
+                    var outPath = archivePath / outAssetPath.NameWithoutExtension;
                     var projPath = RootDirectory / "src" / "Presentation" / "Presentation.csproj";
-                    DotNetTasks.DotNetClean(_ => _
-                        .SetProject(projPath));
+
                     DotNetTasks.DotNetBuild(_ => _
                         .SetProjectFile(projPath)
+                        .SetVersion(projectVersion)
+                        .SetInformationalVersion(projectVersion)
+                        .SetFileVersion(projectVersion)
+                        .SetAssemblyVersion(projectVersion)
                         .SetConfiguration("Release"));
                     DotNetTasks.DotNetPublish(_ => _
                         .SetProject(projPath)
                         .SetConfiguration("Release")
                         .EnableSelfContained()
-                        .SetRuntime($"{runtime}-{arch}")
+                        .SetRuntime($"{runtime}-{arch.ToLowerInvariant()}")
+                        .SetVersion(projectVersion)
+                        .SetInformationalVersion(projectVersion)
+                        .SetFileVersion(projectVersion)
+                        .SetAssemblyVersion(projectVersion)
                         .EnablePublishSingleFile()
-                        .SetOutput(releasePath / releasePath.Name));
-                    switch (runtime)
-                    {
-                        case "linux":
-                            releasePath.TarGZipTo(GetReleaseArchivePath(runtime, arch));
-                            break;
-                        case "win":
-                            releasePath.ZipTo(GetReleaseArchivePath(runtime, arch));
-                            break;
-                        default:
-                            throw new Exception($"{runtime} not supported.");
-                    }
+                        .SetOutput(outPath));
+
+                    GenerateReleaseArchive(runtime, arch);
+                    GenerateOneLineInstallScript(runtime, arch);
                 })));
 
     public PublishEntry PublishAssets => _ => _
-        .AppId("net_conduit")
+        .AppId(appId)
         .RunnerOS(RunnerOS.Ubuntu2204)
         .ReleaseAsset(() =>
         {
@@ -101,10 +115,64 @@ class Build : BaseNukeBuildHelpers
                 foreach (var arch in archMatrix)
                 {
                     paths.Add(GetReleaseArchivePath(runtime, arch));
+                    paths.Add(GetOneLineInstallScriptPath(runtime, arch));
                 }
             }
             return [.. paths];
         });
+
+    private void GenerateOneLineInstallScript(string runtime, string arch)
+    {
+        string scriptExt;
+        string execExt;
+        switch (runtime)
+        {
+            case "linux":
+                scriptExt = ".sh";
+                execExt = "";
+                break;
+            case "win":
+                scriptExt = ".ps1";
+                execExt = ".exe";
+                break;
+            default:
+                throw new Exception($"{runtime} not supported.");
+        }
+        (OutputDirectory / $"installer_{arch}{scriptExt}").WriteAllText((RootDirectory / $"installer_template{scriptExt}").ReadAllText()
+            .Replace("{{$username}}", gitUsername)
+            .Replace("{{$repo}}", gitRepoName)
+            .Replace("{{$appname}}", GetReleaseName(runtime, arch))
+            .Replace("{{$appexec}}", $"{assemblyName}{execExt}")
+            .Replace("{{$rootextract}}", GetReleaseName(runtime, arch))
+            .Replace("{{$homepath}}", $"$env:ProgramData\\{executableName}"));
+    }
+
+    private void GenerateReleaseArchive(string runtime, string arch)
+    {
+        var outAssetPath = GetReleaseArchivePath(runtime, arch);
+        var archivePath = outAssetPath.Parent / outAssetPath.NameWithoutExtension;
+        switch (runtime)
+        {
+            case "linux":
+                archivePath.TarGZipTo(outAssetPath);
+                break;
+            case "win":
+                archivePath.ZipTo(outAssetPath);
+                break;
+            default:
+                throw new Exception($"{runtime} not supported.");
+        }
+    }
+
+    private AbsolutePath GetOneLineInstallScriptPath(string runtime, string arch)
+    {
+        return runtime switch
+        {
+            "linux" => OutputDirectory / $"installer_{arch}.sh",
+            "win" => OutputDirectory / $"installer_{arch}.ps1",
+            _ => throw new Exception($"{runtime} not supported.")
+        };
+    }
 
     private AbsolutePath GetReleaseArchivePath(string runtime, string arch)
     {
@@ -118,6 +186,11 @@ class Build : BaseNukeBuildHelpers
 
     private AbsolutePath GetReleasePath(string runtime, string arch)
     {
-        return OutputDirectory / $"net_conduit-{runtime}-{arch}";
+        return OutputDirectory / GetReleaseName(runtime, arch);
+    }
+
+    private AbsolutePath GetReleaseName(string runtime, string arch)
+    {
+        return $"{executableName}-{runtime}-{arch}";
     }
 }
