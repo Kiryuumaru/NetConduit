@@ -3,6 +3,8 @@ using Application.Configuration.Extensions;
 using Application.Edge.Common;
 using Application.Edge.Interfaces;
 using Application.Edge.Services;
+using Application.StreamPipeline.Common;
+using Application.StreamPipeline.Models;
 using Application.Tcp.Services;
 using Domain.Edge.Dtos;
 using Domain.Edge.Entities;
@@ -60,13 +62,18 @@ internal class EdgeServerWorker(ILogger<EdgeServerWorker> logger, IServiceProvid
         var tcpHost = _configuration.GetServerTcpHost();
         var tcpPort = _configuration.GetServerTcpPort();
 
-        await tcpServer.Start(Dns.GetHostEntry(tcpHost).AddressList.Last(), tcpPort, 4096, (tcpClient, ns) =>
+        await tcpServer.Start(Dns.GetHostEntry(tcpHost).AddressList.Last(), tcpPort, 4096, streamPipe =>
         {
-            return new()
-            {
-                ReceiverStream = ns,
-                SenderStream = null,
-            };
+            CancellationToken ct = CancellationTokenSource.CreateLinkedTokenSource(stoppingToken).Token;
+
+            StartMock(streamPipe, ct);
+
         }, stoppingToken);
+    }
+
+    private async void StartMock(StreamPipe streamPipe, CancellationToken stoppingToken)
+    {
+        await StreamHelpers.ForwardStream(streamPipe.SenderStream, streamPipe.ReceiverStream, 4096,
+            ex => _logger.LogError("{Error}", ex.Message), stoppingToken);
     }
 }

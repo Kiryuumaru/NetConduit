@@ -29,7 +29,7 @@ public partial class TcpClientService(ILogger<TcpClientService> logger)
     private int _port = 0;
     private int _bufferSize = 0;
 
-    public async Task Start(IPAddress address, int port, int bufferSize, Func<NetworkStream, StreamPipe> streamPipeFactory, CancellationToken stoppingToken)
+    public async Task Start(IPAddress address, int port, int bufferSize, Action<StreamPipe> onClientCallback, CancellationToken stoppingToken)
     {
         using var _ = _logger.BeginScopeMap(nameof(TcpServerService), nameof(Start), new()
         {
@@ -75,47 +75,29 @@ public partial class TcpClientService(ILogger<TcpClientService> logger)
             }
 
             NetworkStream networkStream = tcpClient.GetStream();
-            StreamPipe streamPipe = streamPipeFactory(networkStream);
+            StreamPipe streamPipe = new()
+            {
+                ReceiverStream = networkStream,
+                SenderStream = networkStream,
+            };
+            onClientCallback(streamPipe);
             CancellationTokenSource clientCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
-            StartStream(networkStream, streamPipe, clientCts.Token);
             WatchLiveliness(tcpClient, networkStream, streamPipe, clientCts);
 
             await clientCts.Token.WhenCanceled();
         }
     }
 
-    private async void StartStream(NetworkStream networkStream, StreamPipe streamPipe, CancellationToken stoppingToken)
+    private async void WatchLiveliness(TcpClient tcpClient, NetworkStream networkStream, StreamPipe streamPipe, CancellationTokenSource cts)
     {
-        using var _ = _logger.BeginScopeMap(nameof(TcpServerService), nameof(StartStream), new()
+        using var _ = _logger.BeginScopeMap(nameof(TcpClientService), nameof(WatchLiveliness), new()
         {
-            ["ServerAddress"] = $"{_ipAddress}:{_port}"
+            ["ServerAddress"] = _ipAddress,
+            ["ServerPort"] = _port,
         });
 
         _logger.LogTrace("TCP client connected to server {ServerHost}:{ServerPort}", _ipAddress, _port);
 
-        await Task.WhenAll(
-            ForwardStream(networkStream, streamPipe.ReceiverStream, true, stoppingToken),
-            Task.Run(async () => {
-                byte[] buffer = new byte[_bufferSize];
-
-                while (!stoppingToken.IsCancellationRequested)
-                {
-                    try
-                    {
-                        int bytesread = await streamPipe.SenderStream.ReadAsync(buffer, stoppingToken);
-                        await networkStream.WriteAsync(buffer.AsMemory(0, bytesread), stoppingToken);
-                    }
-                    catch (OperationCanceledException) { }
-                    catch (Exception ex)
-                    {
-                        _logger.LogTrace("Error send streaming server {ServerHost}:{ServerPort}: {Error}", _ipAddress, _port, ex.Message);
-                    }
-                }
-            }));
-    }
-
-    private async void WatchLiveliness(TcpClient tcpClient, NetworkStream networkStream, StreamPipe streamPipe, CancellationTokenSource cts)
-    {
         byte[] buffer = new byte[1];
 
         while (tcpClient.Connected && !streamPipe.IsDisposedOrDisposing && !cts.IsCancellationRequested)
@@ -141,20 +123,6 @@ public partial class TcpClientService(ILogger<TcpClientService> logger)
         cts.Cancel();
 
         _logger.LogTrace("TCP client disconnected from server {ServerHost}:{ServerPort}", _ipAddress, _port);
-    }
-
-    private async Task ForwardStream(Stream? source, Stream? destination, bool isSender, CancellationToken stoppingToken)
-    {
-        var streamer = isSender ? "sender" : "receiver";
-
-        using var _ = _logger.BeginScopeMap(nameof(TcpClientService), nameof(StartStream), new()
-        {
-            ["StreamDirection"] = streamer,
-            ["ServerAddress"] = $"{_ipAddress}:{_port}"
-        });
-
-        await StreamHelpers.ForwardStream(source, destination, _bufferSize,
-            ex => _logger.LogTrace("Error {StreamDirection} streaming server {ServerHost}:{ServerPort}: {Error}", streamer, _ipAddress, _port, ex.Message), stoppingToken);
     }
 
     private void Stop()

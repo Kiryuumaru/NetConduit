@@ -26,7 +26,7 @@ public partial class TcpServerService(ILogger<TcpServerService> logger)
     private int _port = 0;
     private int _bufferSize = 0;
 
-    public async Task Start(IPAddress address, int port, int bufferSize, Func<TcpClient, NetworkStream, StreamPipe> streamPipeFactory, CancellationToken stoppingToken)
+    public async Task Start(IPAddress address, int port, int bufferSize, Action<StreamPipe> onClientCallback, CancellationToken stoppingToken)
     {
         using var _ = _logger.BeginScopeMap(nameof(TcpServerService), nameof(Start), new()
         {
@@ -62,29 +62,28 @@ public partial class TcpServerService(ILogger<TcpServerService> logger)
             TcpClient tcpClient = await server.AcceptTcpClientAsync(ct);
             IPAddress clientEndPoint = (tcpClient.Client.LocalEndPoint as IPEndPoint)?.Address!;
             NetworkStream networkStream = tcpClient.GetStream();
-            StreamPipe streamPipe = streamPipeFactory(tcpClient, networkStream);
+            StreamPipe streamPipe = new()
+            {
+                ReceiverStream = networkStream,
+                SenderStream = networkStream,
+            };
+            onClientCallback(streamPipe);
             CancellationTokenSource clientCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
-            StartStream(clientEndPoint, networkStream, streamPipe, clientCts.Token);
             WatchLiveliness(tcpClient, networkStream, clientEndPoint, streamPipe, clientCts);
         }
     }
 
-    private async void StartStream(IPAddress clientAddress, NetworkStream networkStream, StreamPipe streamPipe, CancellationToken stoppingToken)
+    private async void WatchLiveliness(TcpClient tcpClient, NetworkStream networkStream, IPAddress clientAddress, StreamPipe streamPipe, CancellationTokenSource cts)
     {
-        using var _ = _logger.BeginScopeMap(nameof(TcpServerService), nameof(StartStream), new()
+        using var _ = _logger.BeginScopeMap(nameof(TcpServerService), nameof(WatchLiveliness), new()
         {
-            ["ClientAddress"] = clientAddress
+            ["ServerAddress"] = _ipAddress,
+            ["ServerPort"] = _port,
+            ["ClientAddress"] = clientAddress,
         });
 
         _logger.LogTrace("TCP server {Address}:{Port} client {ClientEndPoint} connected", _ipAddress, _port, clientAddress);
 
-        await Task.WhenAll(
-            ForwardStream(networkStream, streamPipe.ReceiverStream, false, clientAddress, stoppingToken),
-            ForwardStream(streamPipe.SenderStream, networkStream, true, clientAddress, stoppingToken));
-    }
-
-    private async void WatchLiveliness(TcpClient tcpClient, NetworkStream networkStream, IPAddress clientAddress, StreamPipe streamPipe, CancellationTokenSource cts)
-    {
         byte[] buffer = new byte[1];
 
         while (tcpClient.Connected && !streamPipe.IsDisposedOrDisposing && !cts.IsCancellationRequested)
@@ -110,20 +109,6 @@ public partial class TcpServerService(ILogger<TcpServerService> logger)
         cts.Cancel();
 
         _logger.LogTrace("TCP server {Address}:{Port} client {ClientEndPoint} disconnected", _ipAddress, _port, clientAddress);
-    }
-
-    private async Task ForwardStream(Stream? source, Stream? destination, bool isSender, IPAddress clientAddress, CancellationToken stoppingToken)
-    {
-        var streamer = isSender ? "sender" : "receiver";
-
-        using var _ = _logger.BeginScopeMap(nameof(TcpServerService), nameof(StartStream), new()
-        {
-            ["StreamDirection"] = streamer,
-            ["ClientAddress"] = clientAddress
-        });
-
-        await StreamHelpers.ForwardStream(source, destination, _bufferSize,
-            ex => _logger.LogTrace("Error {StreamDirection} streaming client {ClientEndPoint}: {Error}", streamer, clientAddress, ex.Message), stoppingToken);
     }
 
     private void Stop()

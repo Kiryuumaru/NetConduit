@@ -11,19 +11,19 @@ namespace Application.StreamPipeline.Models;
 [Disposable]
 public partial class StreamPipe
 {
-    public required Stream? ReceiverStream { get; init; }
+    public required Stream ReceiverStream { get; init; }
 
-    public required Stream? SenderStream { get; init; }
+    public required Stream SenderStream { get; init; }
 
     protected void Dispose(bool disposing)
     {
         if (disposing)
         {
-            ReceiverStream?.Close();
-            SenderStream?.Close();
+            ReceiverStream.Close();
+            SenderStream.Close();
 
-            ReceiverStream?.Dispose();
-            SenderStream?.Dispose();
+            ReceiverStream.Dispose();
+            SenderStream.Dispose();
         }
     }
 }

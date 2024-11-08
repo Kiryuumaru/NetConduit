@@ -44,24 +44,16 @@ internal class EdgeClientWorker(ILogger<EdgeClientWorker> logger, IServiceProvid
         var tcpHost = _configuration.GetServerTcpHost();
         var tcpPort = _configuration.GetServerTcpPort();
 
-        await tcpClient.Start(Dns.GetHostEntry(tcpHost).AddressList.Last(), tcpPort, 4096, ns =>
+        await tcpClient.Start(Dns.GetHostEntry(tcpHost).AddressList.Last(), tcpPort, 4096, streamPipe =>
         {
-            StreamPipe streamPipe = new()
-            {
-                ReceiverStream = new MemoryStream(),
-                SenderStream = new MemoryStream(),
-            };
-
             StartMock(streamPipe, stoppingToken);
-
-            return streamPipe;
 
         }, stoppingToken);
     }
 
     private async void StartMock(StreamPipe streamPipe, CancellationToken stoppingToken)
     {
-        while (!stoppingToken.IsCancellationRequested)
+        while (!stoppingToken.IsCancellationRequested && !streamPipe.IsDisposedOrDisposing)
         {
             string sendStr = Guid.NewGuid().ToString();
             byte[] sendBytes = Encoding.Default.GetBytes(sendStr);
@@ -70,10 +62,9 @@ internal class EdgeClientWorker(ILogger<EdgeClientWorker> logger, IServiceProvid
             {
                 DateTimeOffset sendTime = DateTimeOffset.UtcNow;
 
-                await streamPipe.SenderStream!.WriteAsync(sendBytes, stoppingToken);
-                await streamPipe.SenderStream.FlushAsync(stoppingToken);
+                await streamPipe.SenderStream.WriteAsync(sendBytes, stoppingToken);
                 byte[] receivedBytes = new byte[4096];
-                await streamPipe.ReceiverStream!.ReadAsync(receivedBytes, stoppingToken);
+                await streamPipe.ReceiverStream.ReadAsync(receivedBytes, stoppingToken);
 
                 DateTimeOffset receivedTime = DateTimeOffset.UtcNow;
 

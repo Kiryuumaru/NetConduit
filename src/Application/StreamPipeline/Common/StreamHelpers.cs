@@ -8,14 +8,8 @@ namespace Application.StreamPipeline.Common;
 
 internal static class StreamHelpers
 {
-    public static async Task ForwardStream(Stream? source, Stream? destination, int bufferSize, Action<Exception> onError, CancellationToken stoppingToken)
+    public static async Task ForwardStream(Stream source, Stream destination, int bufferSize, Action<Exception> onError, CancellationToken stoppingToken)
     {
-        if (source == null || !source.CanRead ||
-            destination == null || !destination.CanRead)
-        {
-            return;
-        }
-
         byte[] buffer = new byte[bufferSize];
 
         while (!stoppingToken.IsCancellationRequested)
