@@ -34,7 +34,7 @@ internal class EdgeServerWorker(ILogger<EdgeServerWorker> logger, IServiceProvid
         using var _ = _logger.BeginScopeMap(nameof(EdgeServerWorker), nameof(ExecuteAsync));
 
         using var scope = _serviceProvider.CreateScope();
-        var edgeService = scope.ServiceProvider.GetRequiredService<IEdgeService>();
+        var edgeService = scope.ServiceProvider.GetRequiredService<IEdgeStoreService>();
 
         if (!(await edgeService.Contains(EdgeDefaults.ServerEdgeId.ToString(), stoppingToken)).SuccessAndHasValue(out var contains) || !contains ||
             !(await edgeService.GetToken(EdgeDefaults.ServerEdgeId.ToString(), stoppingToken)).SuccessAndHasValue(out var edgeConnectionEntity))
@@ -64,7 +64,7 @@ internal class EdgeServerWorker(ILogger<EdgeServerWorker> logger, IServiceProvid
 
         await tcpServer.Start(Dns.GetHostEntry(tcpHost).AddressList.Last(), tcpPort, 4096, streamPipe =>
         {
-            CancellationToken ct = CancellationTokenSource.CreateLinkedTokenSource(stoppingToken).Token;
+            CancellationToken ct = streamPipe.CancelWhenDisposing(stoppingToken);
 
             StartMock(streamPipe, ct);
 

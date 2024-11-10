@@ -12,9 +12,9 @@ namespace Presentation.Controllers;
 /// </summary>
 [Route("api/[controller]")]
 [ApiController]
-public class EdgeController(IEdgeService edgeService) : ControllerBase
+public class EdgeController(IEdgeStoreService edgeService) : ControllerBase
 {
-    private readonly IEdgeService _edgeApiService = edgeService;
+    private readonly IEdgeStoreService _edgeApiService = edgeService;
 
     /// <summary>
     /// Retrieves all Edge entities.

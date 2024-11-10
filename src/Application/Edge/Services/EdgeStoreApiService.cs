@@ -18,7 +18,7 @@ using System.Threading.Tasks;
 
 namespace Application.Edge.Services;
 
-public class EdgeApiService(IServiceProvider serviceProvider, IConfiguration configuration) : IEdgeService
+public class EdgeStoreApiService(IServiceProvider serviceProvider, IConfiguration configuration) : IEdgeStoreService
 {
     private readonly IServiceProvider _serviceProvider = serviceProvider;
     private readonly IConfiguration _configuration = configuration;
@@ -90,7 +90,7 @@ public class EdgeApiService(IServiceProvider serviceProvider, IConfiguration con
     //    }
     //    else
     //    {
-    //        return _serviceProvider.GetRequiredService<EdgeService>().Create(edgeAddDto, cancellationToken);
+    //        return _serviceProvider.GetRequiredService<EdgeStoreService>().Create(edgeAddDto, cancellationToken);
     //    }
     //}
 
@@ -102,7 +102,7 @@ public class EdgeApiService(IServiceProvider serviceProvider, IConfiguration con
     //    }
     //    else
     //    {
-    //        return _serviceProvider.GetRequiredService<EdgeService>().Delete(id, cancellationToken);
+    //        return _serviceProvider.GetRequiredService<EdgeStoreService>().Delete(id, cancellationToken);
     //    }
     //}
 
@@ -114,7 +114,7 @@ public class EdgeApiService(IServiceProvider serviceProvider, IConfiguration con
     //    }
     //    else
     //    {
-    //        return _serviceProvider.GetRequiredService<EdgeService>().Edit(id, edgeEditDto, cancellationToken);
+    //        return _serviceProvider.GetRequiredService<EdgeStoreService>().Edit(id, edgeEditDto, cancellationToken);
     //    }
     //}
 
@@ -126,7 +126,7 @@ public class EdgeApiService(IServiceProvider serviceProvider, IConfiguration con
     //    }
     //    else
     //    {
-    //        return _serviceProvider.GetRequiredService<EdgeService>().Get(id, cancellationToken);
+    //        return _serviceProvider.GetRequiredService<EdgeStoreService>().Get(id, cancellationToken);
     //    }
     //}
 
@@ -138,7 +138,7 @@ public class EdgeApiService(IServiceProvider serviceProvider, IConfiguration con
     //    }
     //    else
     //    {
-    //        return _serviceProvider.GetRequiredService<EdgeService>().GetAll(cancellationToken);
+    //        return _serviceProvider.GetRequiredService<EdgeStoreService>().GetAll(cancellationToken);
     //    }
     //}
 }

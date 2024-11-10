@@ -19,7 +19,7 @@ using TransactionHelpers.Interface;
 
 namespace Application.Edge.Interfaces;
 
-public interface IEdgeService
+public interface IEdgeStoreService
 {
     Task<HttpResult<bool>> Contains(string id, CancellationToken cancellationToken = default);
 

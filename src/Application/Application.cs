@@ -17,23 +17,26 @@ public class Application : ApplicationDependency
     {
         base.AddServices(applicationBuilder, services);
 
-        services.AddTransient<LocalStoreService>();
+        services.AddTransient<LocalStoreFactoryService>();
         services.AddSingleton<LocalStoreConcurrencyService>();
+
         services.AddScoped<ServiceManagerService>();
         services.AddScoped<DaemonManagerService>();
+
         services.AddTransient<TcpClientService>();
         services.AddTransient<TcpServerService>();
 
         if (applicationBuilder.Configuration.GetStartAsServerMode())
         {
-            services.AddScoped<IEdgeService, EdgeService>();
-            services.AddScoped<EdgeStoreService>();
+            services.AddScoped<IEdgeStoreService, EdgeStoreService>();
+
             services.AddHostedService<EdgeServerWorker>();
         }
         else
         {
-            services.AddScoped<IEdgeService, EdgeApiService>();
-            services.AddHostedService<EdgeClientWorker>();
+            services.AddScoped<IEdgeStoreService, EdgeStoreApiService>();
+
+            services.AddHostedService<EdgeClientMockerWorker>();
         }
     }
 }

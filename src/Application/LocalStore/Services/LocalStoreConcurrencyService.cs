@@ -1,9 +1,13 @@
 ﻿using Application.Common;
+using Application.Edge.Services;
+using Application.LocalStore.Common;
 using Application.LocalStore.Interfaces;
 using DisposableHelpers;
+using Microsoft.Extensions.DependencyInjection;
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Reflection.Metadata;
 using System.Text;
 using System.Text.Json;
 using System.Threading.Tasks;
@@ -12,18 +16,18 @@ using TransactionHelpers.Exceptions;
 
 namespace Application.LocalStore.Services;
 
-internal class LocalStoreConcurrencyService
+public class LocalStoreConcurrencyService()
 {
-    private readonly SemaphoreSlim _locker = new(1);
+    private readonly SemaphoreSlim semaphoreSlim = new(1);
 
-    internal async Task<IDisposable> Aquire(CancellationToken cancellationToken = default)
+    public async Task<IDisposable> Aquire(CancellationToken cancellationToken)
     {
-        await _locker.WaitAsync(cancellationToken);
+        await semaphoreSlim.WaitAsync(cancellationToken);
         return new Disposable(disposing =>
         {
             if (disposing)
             {
-                _locker.Release();
+                semaphoreSlim.Release();
             }
         });
     }

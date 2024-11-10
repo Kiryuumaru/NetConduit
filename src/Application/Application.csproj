@@ -7,14 +7,14 @@
 	</PropertyGroup>
 
 	<ItemGroup>
-		<PackageReference Include="AbsolutePathHelpers" Version="0.1.43" />
-		<PackageReference Include="DisposableHelpers" Version="1.2.50" />
+		<PackageReference Include="AbsolutePathHelpers" Version="0.1.48" />
+		<PackageReference Include="DisposableHelpers" Version="1.2.58" />
 		<PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions" Version="8.0.2" />
 		<PackageReference Include="Microsoft.Extensions.Hosting.Abstractions" Version="8.0.1" />
-		<PackageReference Include="ApplicationBuilderHelpers" Version="1.0.33" />
+		<PackageReference Include="ApplicationBuilderHelpers" Version="1.0.37" />
 		<PackageReference Include="CliWrap" Version="3.6.7" />
-		<PackageReference Include="RestfulHelpers" Version="1.7.100" />
-		<PackageReference Include="TransactionHelpers" Version="2.5.57" />
+		<PackageReference Include="RestfulHelpers" Version="1.7.105" />
+		<PackageReference Include="TransactionHelpers" Version="2.5.59" />
 	</ItemGroup>
 
 	<ItemGroup>

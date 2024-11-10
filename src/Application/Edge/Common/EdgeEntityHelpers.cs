@@ -30,8 +30,15 @@ public static class EdgeEntityHelpers
     {
         var decoded = token.Decode();
 
-        GetEdgeWithKeyDto edgeEntity = JsonSerializer.Deserialize<GetEdgeWithKeyDto>(decoded, JsonSerializerExtension.CamelCaseNoIndentOption)
-            ?? throw new Exception("Invalid edge token");
+        GetEdgeWithKeyDto edgeEntity;
+        try
+        {
+            edgeEntity = JsonSerializer.Deserialize<GetEdgeWithKeyDto>(decoded, JsonSerializerExtension.CamelCaseNoIndentOption) ?? throw new Exception();
+        }
+        catch
+        {
+            throw new Exception("Invalid edge token");
+        }
 
         return edgeEntity;
     }

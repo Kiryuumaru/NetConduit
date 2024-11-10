@@ -3,16 +3,19 @@ var builder = DistributedApplication.CreateBuilder(args);
 builder.AddProject<Projects.Presentation>("presentation-server1")
     .WithArgs("server", "start")
     .WithArgs("-l", "trace")
-    .WithArgs("--api-urls", "http://*:21100")
+    .WithArgs("--api-urls", "http://*:21110")
     .WithArgs("--server-host", "localhost")
     .WithArgs("--server-port", "21000");
 
-builder.AddProject<Projects.Presentation>("presentation-client1")
-    .WithArgs("client", "start")
-    .WithArgs("-l", "trace")
-    .WithArgs("--api-urls", "http://*:21101")
-    .WithArgs("--server-host", "localhost")
-    .WithArgs("--server-port", "21000");
+for (int i = 0; i < 0; i++)
+{
+    builder.AddProject<Projects.Presentation>($"presentation-client{i}")
+        .WithArgs("client", "start")
+        .WithArgs("-l", "trace")
+        .WithArgs("--api-urls", $"http://*:{31110 + i}")
+        .WithArgs("--server-host", "localhost")
+        .WithArgs("--server-port", "21000");
+}
 
 //builder.AddProject<Projects.TestTCPMocker>("relayapi1-serverapi1")
 //    .WithEnvironment("TCP_MOCKER_RELAY_TO_MOQ", "23457:localhost:23456");

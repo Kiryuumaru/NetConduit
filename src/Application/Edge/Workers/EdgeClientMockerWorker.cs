@@ -22,9 +22,9 @@ using System.Threading.Tasks;
 
 namespace Application.Edge.Workers;
 
-internal class EdgeClientWorker(ILogger<EdgeClientWorker> logger, IServiceProvider serviceProvider, IConfiguration configuration) : BackgroundService
+internal class EdgeClientMockerWorker(ILogger<EdgeClientMockerWorker> logger, IServiceProvider serviceProvider, IConfiguration configuration) : BackgroundService
 {
-    private readonly ILogger<EdgeClientWorker> _logger = logger;
+    private readonly ILogger<EdgeClientMockerWorker> _logger = logger;
     private readonly IServiceProvider _serviceProvider = serviceProvider;
     private readonly IConfiguration _configuration = configuration;
 
@@ -36,7 +36,7 @@ internal class EdgeClientWorker(ILogger<EdgeClientWorker> logger, IServiceProvid
 
     private async Task Routine(CancellationToken stoppingToken)
     {
-        using var _ = _logger.BeginScopeMap(nameof(EdgeClientWorker), nameof(Routine));
+        using var _ = _logger.BeginScopeMap(nameof(EdgeClientMockerWorker), nameof(Routine));
 
         using var scope = _serviceProvider.CreateScope();
         var tcpClient = scope.ServiceProvider.GetRequiredService<TcpClientService>();
@@ -84,7 +84,7 @@ internal class EdgeClientWorker(ILogger<EdgeClientWorker> logger, IServiceProvid
                 _logger.LogError("{Error}", ex.Message);
             }
 
-            await Task.Delay(5000, stoppingToken);
+            await Task.Delay(100, stoppingToken);
         }
     }
 }

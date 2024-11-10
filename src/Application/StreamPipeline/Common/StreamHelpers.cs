@@ -6,7 +6,7 @@ using System.Threading.Tasks;
 
 namespace Application.StreamPipeline.Common;
 
-internal static class StreamHelpers
+public static class StreamHelpers
 {
     public static async Task ForwardStream(Stream source, Stream destination, int bufferSize, Action<Exception> onError, CancellationToken stoppingToken)
     {
