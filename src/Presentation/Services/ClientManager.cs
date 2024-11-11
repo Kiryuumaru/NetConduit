@@ -41,11 +41,11 @@ internal class ClientManager(ILogger<ClientManager> logger, IConfiguration confi
             "latest",
             async extractFactory =>
             {
-                var extractTemp = _configuration.GetTempPath() / $"hvcc-{Guid.NewGuid()}";
+                var extractTemp = _configuration.GetTempPath() / $"netc-{Guid.NewGuid()}";
                 await extractFactory.DownloadedFilePath.UnZipTo(extractTemp, cancellationToken);
-                await (extractTemp / folderName / "hvcc.exe").CopyTo(extractFactory.ExtractDirectory / "hvcc.exe");
+                await (extractTemp / folderName / "netc.exe").CopyTo(extractFactory.ExtractDirectory / "netc.exe");
             },
-            executableLinkFactory => [(executableLinkFactory / "hvcc.exe", "hvcc.exe")],
+            executableLinkFactory => [(executableLinkFactory / "netc.exe", "netc.exe")],
             cancellationToken);
 
         _logger.LogInformation("Latest client downloaded");
@@ -59,7 +59,7 @@ internal class ClientManager(ILogger<ClientManager> logger, IConfiguration confi
 
         var hvccServicePath = await _serviceManager.GetCurrentServicePath(Defaults.AppNameKebabCase, cancellationToken)
             ?? throw new Exception("hvcc client was not downloaded");
-        var hvccExecPath = hvccServicePath / "hvcc.exe";
+        var hvccExecPath = hvccServicePath / "netc.exe";
 
         await _daemonManager.Install(
             Defaults.AppNameKebabCase,

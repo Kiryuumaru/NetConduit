@@ -72,14 +72,14 @@ internal class EdgeServerWorker(ILogger<EdgeServerWorker> logger, IServiceProvid
 
             IPAddress clientEndPoint = (tcpClient.Client.LocalEndPoint as IPEndPoint)?.Address!;
 
-            //var streamPipe = streamPipelineFactory.Pipe(streamTranceiver, _bufferSize, ct);
+            var streamPipelineService = streamPipelineFactory.Pipe(streamTranceiver, _bufferSize, ct);
 
-            Start(tcpClient, clientEndPoint, streamTranceiver, ct);
+            Start(tcpClient, clientEndPoint, streamPipelineService, ct);
 
         }, stoppingToken);
     }
 
-    private async void Start(TcpClient tcpClient, IPAddress iPAddress, TranceiverStream tranceiverStream, CancellationToken stoppingToken)
+    private async void Start(TcpClient tcpClient, IPAddress iPAddress, StreamPipelineService streamPipelineService, CancellationToken stoppingToken)
     {
         using var _ = _logger.BeginScopeMap(nameof(EdgeServerWorker), nameof(Start), new()
         {
@@ -88,23 +88,36 @@ internal class EdgeServerWorker(ILogger<EdgeServerWorker> logger, IServiceProvid
 
         _logger.LogInformation("Stream pipe {CLientIPEndPoint} started", iPAddress);
 
-        //if (await Handshake(tcpClient, iPAddress, streamTranceiver, stoppingToken))
-        //{
-        //    BlockingMemoryStream blockingMemoryStream = new(_bufferSize);
-        //    stoppingToken.Register(blockingMemoryStream.Dispose);
-        //    await Task.WhenAll(
-        //        Task.Run(async () => await StreamHelpers.ForwardStream(streamTranceiver.SenderStream, blockingMemoryStream, _bufferSize,
-        //            ex => _logger.LogError("{Error}", ex.Message), stoppingToken), stoppingToken),
-        //        Task.Run(async () => await StreamHelpers.ForwardStream(blockingMemoryStream, streamTranceiver.ReceiverStream, _bufferSize,
-        //            ex => _logger.LogError("{Error}", ex.Message), stoppingToken), stoppingToken));
-        //}
-        BlockingMemoryStream blockingMemoryStream = new(_bufferSize);
-        stoppingToken.Register(blockingMemoryStream.Dispose);
-        await Task.WhenAll(
-            Task.Run(async () => await StreamHelpers.ForwardStream(tranceiverStream, blockingMemoryStream, _bufferSize,
-                ex => _logger.LogError("{Error}", ex.Message), stoppingToken), stoppingToken),
-            Task.Run(async () => await StreamHelpers.ForwardStream(blockingMemoryStream, tranceiverStream, _bufferSize,
-                ex => _logger.LogError("{Error}", ex.Message), stoppingToken), stoppingToken));
+        while (!stoppingToken.IsCancellationRequested && !streamPipelineService.IsDisposedOrDisposing)
+        {
+            string sendStr = Guid.NewGuid().ToString();
+            byte[] sendBytes = Encoding.Default.GetBytes(sendStr);
+
+            try
+            {
+                var ss = streamPipelineService.Get(StreamPipelineFactory.CommandChannelKey);
+
+                byte[] receivedBytes = new byte[_bufferSize];
+                await ss.ReadAsync(receivedBytes, stoppingToken);
+
+                string receivedStr = Encoding.Default.GetString(receivedBytes.Where(x => x != 0).ToArray());
+
+                _logger.LogInformation("received {DAT}", receivedStr);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError("{Error}", ex.Message);
+            }
+
+            await Task.Delay(100, stoppingToken);
+        }
+        //BlockingMemoryStream blockingMemoryStream = new(_bufferSize);
+        //stoppingToken.Register(blockingMemoryStream.Dispose);
+        //await Task.WhenAll(
+        //    Task.Run(async () => await StreamHelpers.ForwardStream(tranceiverStream, blockingMemoryStream, _bufferSize,
+        //        ex => _logger.LogError("{Error}", ex.Message), stoppingToken), stoppingToken),
+        //    Task.Run(async () => await StreamHelpers.ForwardStream(blockingMemoryStream, tranceiverStream, _bufferSize,
+        //        ex => _logger.LogError("{Error}", ex.Message), stoppingToken), stoppingToken));
 
         _logger.LogInformation("Stream pipe {CLientIPEndPoint} ended", iPAddress);
     }

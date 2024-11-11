@@ -1,13 +1,17 @@
-﻿using Application.StreamPipeline.Common;
+﻿using Application.Common;
+using Application.StreamPipeline.Common;
 using DisposableHelpers.Attributes;
 using Microsoft.Extensions.Logging;
 using System;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Linq;
 using System.Net.Sockets;
 using System.Reflection;
 using System.Text;
+using System.Threading.Channels;
 using System.Threading.Tasks;
+using System.Threading.Tasks.Dataflow;
 
 namespace Application.StreamPipeline.Services;
 
@@ -18,61 +22,92 @@ public partial class StreamPipelineService(ILogger<StreamPipelineService> logger
 
     private readonly Dictionary<Guid, TranceiverStream> _tranceiverStreamMap = [];
     private readonly ReaderWriterLockSlim _rwl = new();
+    private readonly BufferBlock<(Guid Channel, TranceiverStream TranceiverStream)> _registerQueue = new();
 
     private const int _headerSize = 16;
 
-    private TranceiverStream? _tranceiverStream = null;
+    private int? _bufferSize = null;
+    private TranceiverStream? _mainTranceiverStream = null;
     private CancellationTokenSource? _cts = null;
 
-    public async void Start(TranceiverStream tranceiverStream, int bufferSize, CancellationToken stoppingToken)
+    public async void Start(TranceiverStream mainTranceiverStream, int bufferSize, CancellationToken stoppingToken)
     {
-        var fullBufferSize = bufferSize + _headerSize;
-
         if (_cts != null)
         {
             throw new Exception("TranceiverStream already started");
         }
 
-        _tranceiverStream = tranceiverStream;
+        _logger.LogInformation("Stream pipeline started");
+
+        _bufferSize = bufferSize;
+        _mainTranceiverStream = mainTranceiverStream;
         _cts = CancellationTokenSource.CreateLinkedTokenSource(stoppingToken);
+        var ct = _cts.Token;
 
-        Memory<byte> receivedBytes = new byte[fullBufferSize];
-        await _tranceiverStream.ReadAsync(receivedBytes, _cts.Token);
-        Guid guid = new(receivedBytes[.._headerSize].Span);
+        var fullBufferSize = _bufferSize.Value + _headerSize;
 
-        BlockingMemoryStream blockingMemoryStream = new(bufferSize);
+        await Task.WhenAll(
+            Task.Run(async () =>
+            {
+                while (!ct.IsCancellationRequested && !_mainTranceiverStream.IsDisposedOrDisposing)
+                {
+                    try
+                    {
+                        Memory<byte> receivedBytes = new byte[fullBufferSize];
+                        await _mainTranceiverStream.ReadAsync(receivedBytes, ct);
+                        Guid channel = new(receivedBytes[.._headerSize].Span);
+                        await _tranceiverStreamMap[channel].WriteAsync(receivedBytes[_headerSize..], ct);
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogError("{Error}", ex.Message);
+                    }
+                }
+            }, ct),
+            Task.Run(async () =>
+            {
+                while (!ct.IsCancellationRequested && !_mainTranceiverStream.IsDisposedOrDisposing)
+                {
+                    var register = await _registerQueue.ReceiveAsync(ct);
+                    var channelCt = register.TranceiverStream.CancelWhenDisposed(ct);
+                    StartPipe(register.Channel, register.TranceiverStream, channelCt);
+                }
+            }, ct)
+        );
 
-        await blockingMemoryStream.WriteAsync(receivedBytes[_headerSize..], _cts.Token);
+        _logger.LogInformation("Stream pipeline ended");
     }
 
-    private void RegisterPipe(Guid guid, TranceiverStream tranceiverStream)
+    private async void StartPipe(Guid channelKey, TranceiverStream tranceiverStream, CancellationToken stoppingToken)
     {
+        var fullBufferSize = _bufferSize!.Value + _headerSize;
 
-    }
+        Memory<byte> header = channelKey.ToByteArray();
 
-    private void UnregisterPipe(Guid guid)
-    {
-        if (!_tranceiverStreamMap.TryGetValue(guid, out TranceiverStream? tranceiverStream))
+        while (!stoppingToken.IsCancellationRequested)
         {
-            return;
+            try
+            {
+                Memory<byte> receivedBytes = new byte[fullBufferSize];
+                header.CopyTo(receivedBytes[.._headerSize]);
+                await tranceiverStream.ReadAsync(receivedBytes.Slice(_headerSize, _bufferSize.Value), stoppingToken);
+                await _mainTranceiverStream!.WriteAsync(receivedBytes, stoppingToken);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError("{Error}", ex.Message);
+            }
         }
-
-        tranceiverStream.Dispose();
     }
 
-    public void Set(Guid guid, TranceiverStream tranceiverStream)
+    public void Set(Guid channelKey, TranceiverStream tranceiverStream)
     {
         try
         {
             _rwl.EnterWriteLock();
 
-            if (_cts == null)
-            {
-                throw new Exception("StreamPipeline is not started");
-            }
-
-            _tranceiverStreamMap[guid] = tranceiverStream;
-            RegisterPipe(guid, tranceiverStream);
+            _tranceiverStreamMap[channelKey] = tranceiverStream;
+            _registerQueue.Post((channelKey, tranceiverStream));
         }
         finally
         {
@@ -80,19 +115,18 @@ public partial class StreamPipelineService(ILogger<StreamPipelineService> logger
         }
     }
 
-    public bool Remove(Guid guid)
+    public bool Remove(Guid channelKey)
     {
         try
         {
             _rwl.EnterWriteLock();
 
-            if (_cts == null)
+            if (_tranceiverStreamMap.TryGetValue(channelKey, out TranceiverStream? tranceiverStream))
             {
-                throw new Exception("StreamPipeline is not started");
+                tranceiverStream.Dispose();
+                return _tranceiverStreamMap.Remove(channelKey);
             }
-
-            UnregisterPipe(guid);
-            return _tranceiverStreamMap.Remove(guid);
+            return false;
         }
         finally
         {
@@ -100,18 +134,13 @@ public partial class StreamPipelineService(ILogger<StreamPipelineService> logger
         }
     }
 
-    public TranceiverStream Get(Guid guid)
+    public TranceiverStream Get(Guid channelKey)
     {
         try
         {
             _rwl.EnterReadLock();
 
-            if (_cts == null)
-            {
-                throw new Exception("StreamPipeline is not started");
-            }
-
-            return _tranceiverStreamMap[guid];
+            return _tranceiverStreamMap[channelKey];
         }
         finally
         {
@@ -119,18 +148,13 @@ public partial class StreamPipelineService(ILogger<StreamPipelineService> logger
         }
     }
 
-    public bool Contains(Guid guid)
+    public bool Contains(Guid channelKey)
     {
         try
         {
             _rwl.EnterReadLock();
 
-            if (_cts == null)
-            {
-                throw new Exception("StreamPipeline is not started");
-            }
-
-            return _tranceiverStreamMap.ContainsKey(guid);
+            return _tranceiverStreamMap.ContainsKey(channelKey);
         }
         finally
         {
@@ -149,7 +173,7 @@ public partial class StreamPipelineService(ILogger<StreamPipelineService> logger
                 _cts?.Cancel();
                 _cts = null;
 
-                _tranceiverStream?.Dispose();
+                _mainTranceiverStream?.Dispose();
 
                 foreach (var pipe in _tranceiverStreamMap.Values)
                 {

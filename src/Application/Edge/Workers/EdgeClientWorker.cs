@@ -4,6 +4,7 @@ using Application.Edge.Common;
 using Application.Edge.Interfaces;
 using Application.Edge.Services;
 using Application.StreamPipeline.Common;
+using Application.StreamPipeline.Services;
 using Application.Tcp.Services;
 using Domain.Edge.Dtos;
 using Domain.Edge.Entities;
@@ -28,6 +29,8 @@ internal class EdgeClientWorker(ILogger<EdgeClientWorker> logger, IServiceProvid
     private readonly IServiceProvider _serviceProvider = serviceProvider;
     private readonly IConfiguration _configuration = configuration;
 
+    private readonly int _bufferSize = 4096;
+
     protected override Task ExecuteAsync(CancellationToken stoppingToken)
     {
         RoutineExecutor.Execute(TimeSpan.FromSeconds(1), true, Routine, ex => _logger.LogError("Error: {Error}", ex.Message), stoppingToken);
@@ -40,22 +43,27 @@ internal class EdgeClientWorker(ILogger<EdgeClientWorker> logger, IServiceProvid
 
         using var scope = _serviceProvider.CreateScope();
         var tcpClient = scope.ServiceProvider.GetRequiredService<TcpClientService>();
+        var streamPipelineFactory = scope.ServiceProvider.GetRequiredService<StreamPipelineFactory>();
 
         var tcpHost = _configuration.GetServerTcpHost();
         var tcpPort = _configuration.GetServerTcpPort();
 
-        await tcpClient.Start(Dns.GetHostEntry(tcpHost).AddressList.Last(), tcpPort, 4096, tranceiverStream =>
+        await tcpClient.Start(Dns.GetHostEntry(tcpHost).AddressList.Last(), tcpPort, _bufferSize, tranceiverStream =>
         {
-            Start(tranceiverStream, stoppingToken);
+            CancellationToken ct = tranceiverStream.CancelWhenDisposing(stoppingToken);
+
+            var streamPipeline = streamPipelineFactory.Pipe(tranceiverStream, _bufferSize, ct);
+
+            Start(streamPipeline, ct);
 
         }, stoppingToken);
     }
 
-    private async void Start(TranceiverStream tranceiverStream, CancellationToken stoppingToken)
+    private async void Start(StreamPipelineService streamPipelineService, CancellationToken stoppingToken)
     {
         _logger.LogInformation("Stream pipe started");
 
-        while (!stoppingToken.IsCancellationRequested && !tranceiverStream.IsDisposedOrDisposing)
+        while (!stoppingToken.IsCancellationRequested && !streamPipelineService.IsDisposedOrDisposing)
         {
             string sendStr = Guid.NewGuid().ToString();
             byte[] sendBytes = Encoding.Default.GetBytes(sendStr);
@@ -64,22 +72,9 @@ internal class EdgeClientWorker(ILogger<EdgeClientWorker> logger, IServiceProvid
             {
                 DateTimeOffset sendTime = DateTimeOffset.UtcNow;
 
-                await tranceiverStream.WriteAsync(sendBytes, stoppingToken);
-                byte[] receivedBytes = new byte[4096];
-                await tranceiverStream.ReadAsync(receivedBytes, stoppingToken);
+                var ss = streamPipelineService.Get(StreamPipelineFactory.CommandChannelKey);
 
-                DateTimeOffset receivedTime = DateTimeOffset.UtcNow;
-
-                string receivedStr = Encoding.Default.GetString(receivedBytes.Where(x => x != 0).ToArray());
-
-                if (sendStr != receivedStr)
-                {
-                    _logger.LogError("Mismatch: {Sent} != {Received}", sendStr, receivedStr);
-                }
-                else
-                {
-                    _logger.LogInformation("Received time {TimeStamp}ms...", (receivedTime - sendTime).TotalMilliseconds);
-                }
+                await ss.WriteAsync(sendBytes, stoppingToken);
             }
             catch (Exception ex)
             {

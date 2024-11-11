@@ -14,12 +14,16 @@ using Presentation.Services;
 using Application.Logger.Interfaces;
 using Microsoft.Extensions.Hosting;
 using System.Threading;
+using CliFx.Exceptions;
 
 namespace Presentation.Commands;
 
 [Command("daemon install", Description = "Daemon install command.")]
 public class DaemonInstallCommand : BaseCommand
 {
+    [CommandOption("server", Description = "Install server daemon.")]
+    public bool Server { get; set; }
+
     [CommandOption("username", 'u', Description = "Username of the service account.")]
     public string? Username { get; set; }
 
