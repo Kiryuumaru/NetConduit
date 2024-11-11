@@ -1,5 +1,4 @@
-﻿using Application.StreamPipeline.Models;
-using DisposableHelpers.Attributes;
+﻿using DisposableHelpers.Attributes;
 using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;

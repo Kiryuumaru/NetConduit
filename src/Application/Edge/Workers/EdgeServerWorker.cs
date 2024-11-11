@@ -4,7 +4,6 @@ using Application.Edge.Common;
 using Application.Edge.Interfaces;
 using Application.Edge.Services;
 using Application.StreamPipeline.Common;
-using Application.StreamPipeline.Models;
 using Application.StreamPipeline.Services;
 using Application.Tcp.Services;
 using Domain.Edge.Dtos;
@@ -73,14 +72,14 @@ internal class EdgeServerWorker(ILogger<EdgeServerWorker> logger, IServiceProvid
 
             IPAddress clientEndPoint = (tcpClient.Client.LocalEndPoint as IPEndPoint)?.Address!;
 
-            var streamPipe = streamPipelineFactory.Pipe(streamTranceiver, _bufferSize, ct);
+            //var streamPipe = streamPipelineFactory.Pipe(streamTranceiver, _bufferSize, ct);
 
             Start(tcpClient, clientEndPoint, streamTranceiver, ct);
 
         }, stoppingToken);
     }
 
-    private async void Start(TcpClient tcpClient, IPAddress iPAddress, StreamTranceiver streamTranceiver, CancellationToken stoppingToken)
+    private async void Start(TcpClient tcpClient, IPAddress iPAddress, TranceiverStream tranceiverStream, CancellationToken stoppingToken)
     {
         using var _ = _logger.BeginScopeMap(nameof(EdgeServerWorker), nameof(Start), new()
         {
@@ -102,15 +101,15 @@ internal class EdgeServerWorker(ILogger<EdgeServerWorker> logger, IServiceProvid
         BlockingMemoryStream blockingMemoryStream = new(_bufferSize);
         stoppingToken.Register(blockingMemoryStream.Dispose);
         await Task.WhenAll(
-            Task.Run(async () => await StreamHelpers.ForwardStream(streamTranceiver.SenderStream, blockingMemoryStream, _bufferSize,
+            Task.Run(async () => await StreamHelpers.ForwardStream(tranceiverStream, blockingMemoryStream, _bufferSize,
                 ex => _logger.LogError("{Error}", ex.Message), stoppingToken), stoppingToken),
-            Task.Run(async () => await StreamHelpers.ForwardStream(blockingMemoryStream, streamTranceiver.ReceiverStream, _bufferSize,
+            Task.Run(async () => await StreamHelpers.ForwardStream(blockingMemoryStream, tranceiverStream, _bufferSize,
                 ex => _logger.LogError("{Error}", ex.Message), stoppingToken), stoppingToken));
 
         _logger.LogInformation("Stream pipe {CLientIPEndPoint} ended", iPAddress);
     }
 
-    private async Task<bool> Handshake(TcpClient tcpClient, IPAddress iPAddress, StreamTranceiver streamPipe, CancellationToken stoppingToken)
+    private async Task<bool> Handshake(TcpClient tcpClient, IPAddress iPAddress, TranceiverStream tranceiverStream, CancellationToken stoppingToken)
     {
         using var _ = _logger.BeginScopeMap(nameof(EdgeServerWorker), nameof(Handshake), new()
         {
@@ -122,14 +121,14 @@ internal class EdgeServerWorker(ILogger<EdgeServerWorker> logger, IServiceProvid
         _logger.LogInformation("Handshake {CLientIPEndPoint} started", iPAddress);
 
         byte[] receivedBytes = new byte[_bufferSize];
-        await streamPipe.ReceiverStream.ReadAsync(receivedBytes, ct);
+        await tranceiverStream.ReadAsync(receivedBytes, ct);
 
         BlockingMemoryStream blockingMemoryStream = new(_bufferSize);
         stoppingToken.Register(blockingMemoryStream.Dispose);
         await Task.WhenAll(
-            Task.Run(async () => await StreamHelpers.ForwardStream(streamPipe.SenderStream, blockingMemoryStream, _bufferSize,
+            Task.Run(async () => await StreamHelpers.ForwardStream(tranceiverStream, blockingMemoryStream, _bufferSize,
                 ex => _logger.LogError("{Error}", ex.Message), stoppingToken), stoppingToken),
-            Task.Run(async () => await StreamHelpers.ForwardStream(blockingMemoryStream, streamPipe.ReceiverStream, _bufferSize,
+            Task.Run(async () => await StreamHelpers.ForwardStream(blockingMemoryStream, tranceiverStream, _bufferSize,
                 ex => _logger.LogError("{Error}", ex.Message), stoppingToken), stoppingToken));
 
 

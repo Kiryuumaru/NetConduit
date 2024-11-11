@@ -3,7 +3,7 @@ using Application.Configuration.Extensions;
 using Application.Edge.Common;
 using Application.Edge.Interfaces;
 using Application.Edge.Services;
-using Application.StreamPipeline.Models;
+using Application.StreamPipeline.Common;
 using Application.Tcp.Services;
 using Domain.Edge.Dtos;
 using Domain.Edge.Entities;
@@ -44,18 +44,18 @@ internal class EdgeClientWorker(ILogger<EdgeClientWorker> logger, IServiceProvid
         var tcpHost = _configuration.GetServerTcpHost();
         var tcpPort = _configuration.GetServerTcpPort();
 
-        await tcpClient.Start(Dns.GetHostEntry(tcpHost).AddressList.Last(), tcpPort, 4096, streamPipe =>
+        await tcpClient.Start(Dns.GetHostEntry(tcpHost).AddressList.Last(), tcpPort, 4096, tranceiverStream =>
         {
-            Start(streamPipe, stoppingToken);
+            Start(tranceiverStream, stoppingToken);
 
         }, stoppingToken);
     }
 
-    private async void Start(StreamTranceiver streamPipe, CancellationToken stoppingToken)
+    private async void Start(TranceiverStream tranceiverStream, CancellationToken stoppingToken)
     {
         _logger.LogInformation("Stream pipe started");
 
-        while (!stoppingToken.IsCancellationRequested && !streamPipe.IsDisposedOrDisposing)
+        while (!stoppingToken.IsCancellationRequested && !tranceiverStream.IsDisposedOrDisposing)
         {
             string sendStr = Guid.NewGuid().ToString();
             byte[] sendBytes = Encoding.Default.GetBytes(sendStr);
@@ -64,9 +64,9 @@ internal class EdgeClientWorker(ILogger<EdgeClientWorker> logger, IServiceProvid
             {
                 DateTimeOffset sendTime = DateTimeOffset.UtcNow;
 
-                await streamPipe.SenderStream.WriteAsync(sendBytes, stoppingToken);
+                await tranceiverStream.WriteAsync(sendBytes, stoppingToken);
                 byte[] receivedBytes = new byte[4096];
-                await streamPipe.ReceiverStream.ReadAsync(receivedBytes, stoppingToken);
+                await tranceiverStream.ReadAsync(receivedBytes, stoppingToken);
 
                 DateTimeOffset receivedTime = DateTimeOffset.UtcNow;
 

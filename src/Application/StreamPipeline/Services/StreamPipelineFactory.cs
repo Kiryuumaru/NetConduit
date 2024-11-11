@@ -1,4 +1,4 @@
-﻿using Application.StreamPipeline.Models;
+﻿using Application.StreamPipeline.Common;
 using DisposableHelpers.Attributes;
 using Microsoft.Extensions.DependencyInjection;
 using System;
@@ -14,10 +14,10 @@ public partial class StreamPipelineFactory(IServiceProvider serviceProvider)
 {
     private readonly IServiceProvider _serviceProvider = serviceProvider;
 
-    public StreamPipelineService Pipe(StreamTranceiver streamTranceiver, int bufferSize, CancellationToken stoppingToken)
+    public StreamPipelineService Pipe(TranceiverStream tranceiverStream, int bufferSize, CancellationToken stoppingToken)
     {
         var streamPipelineService = _serviceProvider.GetRequiredService<StreamPipelineService>();
-        streamPipelineService.Start(streamTranceiver, bufferSize, stoppingToken);
+        streamPipelineService.Start(tranceiverStream, bufferSize, stoppingToken);
         return streamPipelineService;
     }
 }

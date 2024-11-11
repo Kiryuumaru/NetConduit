@@ -12,11 +12,15 @@ public static class StreamHelpers
     {
         byte[] buffer = new byte[bufferSize];
 
-        while (!stoppingToken.IsCancellationRequested)
+        while (!stoppingToken.IsCancellationRequested && source.CanRead && destination.CanWrite)
         {
             try
             {
                 int bytesread = await source.ReadAsync(buffer, stoppingToken);
+                if (!destination.CanWrite)
+                {
+                    break;
+                }
                 await destination.WriteAsync(buffer.AsMemory(0, bytesread), stoppingToken);
             }
             catch (OperationCanceledException)

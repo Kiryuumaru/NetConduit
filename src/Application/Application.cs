@@ -5,7 +5,6 @@ using Application.Edge.Services;
 using Application.Edge.Workers;
 using Application.LocalStore.Services;
 using Application.ServiceMaster.Services;
-using Application.StreamPipeline.Models;
 using Application.StreamPipeline.Services;
 using Application.Tcp.Services;
 using ApplicationBuilderHelpers;

@@ -1,5 +1,4 @@
-﻿using Application.StreamPipeline.Models;
-using Application.Tcp.Services;
+﻿using Application.Tcp.Services;
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -7,16 +6,17 @@ using System.Net.Sockets;
 using System.Net;
 using System.Text;
 using System.Threading.Tasks;
+using Application.StreamPipeline.Common;
 
 namespace Application.Tcp.Common;
 
 internal static class TcpClientHelpers
 {
-    public static async Task WatchLiveliness(TcpClient tcpClient, NetworkStream networkStream, StreamTranceiver streamTranceiver, CancellationTokenSource cts, TimeSpan livelinessSpan)
+    public static async Task WatchLiveliness(TcpClient tcpClient, NetworkStream networkStream, TranceiverStream tranceiverStream, CancellationTokenSource cts, TimeSpan livelinessSpan)
     {
         byte[] buffer = new byte[1];
 
-        while (tcpClient.Connected && !streamTranceiver.IsDisposedOrDisposing && !cts.IsCancellationRequested)
+        while (tcpClient.Connected && !tranceiverStream.IsDisposedOrDisposing && !cts.IsCancellationRequested)
         {
             try
             {
@@ -38,6 +38,6 @@ internal static class TcpClientHelpers
         tcpClient.Dispose();
         networkStream.Close();
         networkStream.Dispose();
-        streamTranceiver.Dispose();
+        tranceiverStream.Dispose();
     }
 }
