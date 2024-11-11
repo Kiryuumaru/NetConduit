@@ -11,6 +11,7 @@ using System.Net.Http;
 using Application.StreamPipeline.Models;
 using Application.Common;
 using Application.StreamPipeline.Common;
+using Application.Tcp.Common;
 
 namespace Application.Tcp.Services;
 
@@ -26,7 +27,7 @@ public partial class TcpServerService(ILogger<TcpServerService> logger)
     private int _port = 0;
     private int _bufferSize = 0;
 
-    public async Task Start(IPAddress address, int port, int bufferSize, Action<StreamPipe> onClientCallback, CancellationToken stoppingToken)
+    public async Task Start(IPAddress address, int port, int bufferSize, Action<TcpClient, StreamTranceiver> onClientCallback, CancellationToken stoppingToken)
     {
         using var _ = _logger.BeginScopeMap(nameof(TcpServerService), nameof(Start), new()
         {
@@ -62,18 +63,18 @@ public partial class TcpServerService(ILogger<TcpServerService> logger)
             TcpClient tcpClient = await server.AcceptTcpClientAsync(ct);
             IPAddress clientEndPoint = (tcpClient.Client.LocalEndPoint as IPEndPoint)?.Address!;
             NetworkStream networkStream = tcpClient.GetStream();
-            StreamPipe streamPipe = new()
+            StreamTranceiver streamPipe = new()
             {
                 ReceiverStream = networkStream,
                 SenderStream = networkStream,
             };
-            onClientCallback(streamPipe);
+            onClientCallback(tcpClient, streamPipe);
             CancellationTokenSource clientCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
             WatchLiveliness(tcpClient, networkStream, clientEndPoint, streamPipe, clientCts);
         }
     }
 
-    private async void WatchLiveliness(TcpClient tcpClient, NetworkStream networkStream, IPAddress clientAddress, StreamPipe streamPipe, CancellationTokenSource cts)
+    private async void WatchLiveliness(TcpClient tcpClient, NetworkStream networkStream, IPAddress clientAddress, StreamTranceiver streamTranceiver, CancellationTokenSource cts)
     {
         using var _ = _logger.BeginScopeMap(nameof(TcpServerService), nameof(WatchLiveliness), new()
         {
@@ -84,29 +85,7 @@ public partial class TcpServerService(ILogger<TcpServerService> logger)
 
         _logger.LogTrace("TCP server {Address}:{Port} client {ClientEndPoint} connected", _ipAddress, _port, clientAddress);
 
-        byte[] buffer = new byte[1];
-
-        while (tcpClient.Connected && !streamPipe.IsDisposedOrDisposing && !cts.IsCancellationRequested)
-        {
-            try
-            {
-                if (tcpClient.Client.Poll(0, SelectMode.SelectRead) &&
-                    await tcpClient.Client.ReceiveAsync(buffer, SocketFlags.Peek, cts.Token) == 0)
-                {
-                    break;
-                }
-
-                await Task.Delay(_livelinessSpan, cts.Token);
-            }
-            catch { }
-        }
-
-        tcpClient.Close();
-        tcpClient.Dispose();
-        networkStream.Close();
-        networkStream.Dispose();
-        streamPipe.Dispose();
-        cts.Cancel();
+        await TcpClientHelpers.WatchLiveliness(tcpClient, networkStream, streamTranceiver, cts, _livelinessSpan);
 
         _logger.LogTrace("TCP server {Address}:{Port} client {ClientEndPoint} disconnected", _ipAddress, _port, clientAddress);
     }

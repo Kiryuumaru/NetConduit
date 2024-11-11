@@ -14,6 +14,7 @@ using Application.StreamPipeline.Common;
 using Microsoft.AspNetCore.Hosting.Server;
 using System.Net.Http;
 using System.IO;
+using Application.Tcp.Common;
 
 namespace Application.Tcp.Services;
 
@@ -29,7 +30,7 @@ public partial class TcpClientService(ILogger<TcpClientService> logger)
     private int _port = 0;
     private int _bufferSize = 0;
 
-    public async Task Start(IPAddress address, int port, int bufferSize, Action<StreamPipe> onClientCallback, CancellationToken stoppingToken)
+    public async Task Start(IPAddress address, int port, int bufferSize, Action<StreamTranceiver> onClientCallback, CancellationToken stoppingToken)
     {
         using var _ = _logger.BeginScopeMap(nameof(TcpServerService), nameof(Start), new()
         {
@@ -75,7 +76,7 @@ public partial class TcpClientService(ILogger<TcpClientService> logger)
             }
 
             NetworkStream networkStream = tcpClient.GetStream();
-            StreamPipe streamPipe = new()
+            StreamTranceiver streamPipe = new()
             {
                 ReceiverStream = networkStream,
                 SenderStream = networkStream,
@@ -88,7 +89,7 @@ public partial class TcpClientService(ILogger<TcpClientService> logger)
         }
     }
 
-    private async void WatchLiveliness(TcpClient tcpClient, NetworkStream networkStream, StreamPipe streamPipe, CancellationTokenSource cts)
+    private async void WatchLiveliness(TcpClient tcpClient, NetworkStream networkStream, StreamTranceiver streamTranceiver, CancellationTokenSource cts)
     {
         using var _ = _logger.BeginScopeMap(nameof(TcpClientService), nameof(WatchLiveliness), new()
         {
@@ -98,29 +99,7 @@ public partial class TcpClientService(ILogger<TcpClientService> logger)
 
         _logger.LogTrace("TCP client connected to server {ServerHost}:{ServerPort}", _ipAddress, _port);
 
-        byte[] buffer = new byte[1];
-
-        while (tcpClient.Connected && !streamPipe.IsDisposedOrDisposing && !cts.IsCancellationRequested)
-        {
-            try
-            {
-                if (tcpClient.Client.Poll(0, SelectMode.SelectRead) &&
-                    await tcpClient.Client.ReceiveAsync(buffer, SocketFlags.Peek, cts.Token) == 0)
-                {
-                    break;
-                }
-
-                await Task.Delay(_livelinessSpan, cts.Token);
-            }
-            catch { }
-        }
-
-        tcpClient.Close();
-        tcpClient.Dispose();
-        networkStream.Close();
-        networkStream.Dispose();
-        streamPipe.Dispose();
-        cts.Cancel();
+        await TcpClientHelpers.WatchLiveliness(tcpClient, networkStream, streamTranceiver, cts, _livelinessSpan);
 
         _logger.LogTrace("TCP client disconnected from server {ServerHost}:{ServerPort}", _ipAddress, _port);
     }

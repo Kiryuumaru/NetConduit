@@ -5,6 +5,8 @@ using Application.Edge.Services;
 using Application.Edge.Workers;
 using Application.LocalStore.Services;
 using Application.ServiceMaster.Services;
+using Application.StreamPipeline.Models;
+using Application.StreamPipeline.Services;
 using Application.Tcp.Services;
 using ApplicationBuilderHelpers;
 using Microsoft.Extensions.DependencyInjection;
@@ -23,6 +25,9 @@ public class Application : ApplicationDependency
         services.AddScoped<ServiceManagerService>();
         services.AddScoped<DaemonManagerService>();
 
+        services.AddTransient<StreamPipelineService>();
+        services.AddScoped<StreamPipelineFactory>();
+
         services.AddTransient<TcpClientService>();
         services.AddTransient<TcpServerService>();
 
@@ -36,7 +41,7 @@ public class Application : ApplicationDependency
         {
             services.AddScoped<IEdgeStoreService, EdgeStoreApiService>();
 
-            services.AddHostedService<EdgeClientMockerWorker>();
+            services.AddHostedService<EdgeClientWorker>();
         }
     }
 }

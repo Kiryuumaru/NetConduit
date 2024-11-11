@@ -19,7 +19,14 @@ public static class StreamHelpers
                 int bytesread = await source.ReadAsync(buffer, stoppingToken);
                 await destination.WriteAsync(buffer.AsMemory(0, bytesread), stoppingToken);
             }
-            catch (OperationCanceledException) { }
+            catch (OperationCanceledException)
+            {
+                break;
+            }
+            catch (ObjectDisposedException)
+            {
+                break;
+            }
             catch (Exception ex)
             {
                 onError(ex);

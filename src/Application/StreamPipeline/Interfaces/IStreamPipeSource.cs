@@ -11,5 +11,5 @@ namespace Application.StreamPipeline.Interfaces;
 
 public interface IStreamPipeSource : IDisposable
 {
-    Task Start(IPAddress address, int port, int bufferSize, Func<TcpClient, NetworkStream, StreamPipe> tcpClientStreamFactory, CancellationToken stoppingToken);
+    Task Start(IPAddress address, int port, int bufferSize, Func<TcpClient, NetworkStream, StreamTranceiver> tcpClientStreamFactory, CancellationToken stoppingToken);
 }

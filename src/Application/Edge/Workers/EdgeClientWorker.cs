@@ -22,9 +22,9 @@ using System.Threading.Tasks;
 
 namespace Application.Edge.Workers;
 
-internal class EdgeClientMockerWorker(ILogger<EdgeClientMockerWorker> logger, IServiceProvider serviceProvider, IConfiguration configuration) : BackgroundService
+internal class EdgeClientWorker(ILogger<EdgeClientWorker> logger, IServiceProvider serviceProvider, IConfiguration configuration) : BackgroundService
 {
-    private readonly ILogger<EdgeClientMockerWorker> _logger = logger;
+    private readonly ILogger<EdgeClientWorker> _logger = logger;
     private readonly IServiceProvider _serviceProvider = serviceProvider;
     private readonly IConfiguration _configuration = configuration;
 
@@ -36,7 +36,7 @@ internal class EdgeClientMockerWorker(ILogger<EdgeClientMockerWorker> logger, IS
 
     private async Task Routine(CancellationToken stoppingToken)
     {
-        using var _ = _logger.BeginScopeMap(nameof(EdgeClientMockerWorker), nameof(Routine));
+        using var _ = _logger.BeginScopeMap(nameof(EdgeClientWorker), nameof(Routine));
 
         using var scope = _serviceProvider.CreateScope();
         var tcpClient = scope.ServiceProvider.GetRequiredService<TcpClientService>();
@@ -46,13 +46,15 @@ internal class EdgeClientMockerWorker(ILogger<EdgeClientMockerWorker> logger, IS
 
         await tcpClient.Start(Dns.GetHostEntry(tcpHost).AddressList.Last(), tcpPort, 4096, streamPipe =>
         {
-            StartMock(streamPipe, stoppingToken);
+            Start(streamPipe, stoppingToken);
 
         }, stoppingToken);
     }
 
-    private async void StartMock(StreamPipe streamPipe, CancellationToken stoppingToken)
+    private async void Start(StreamTranceiver streamPipe, CancellationToken stoppingToken)
     {
+        _logger.LogInformation("Stream pipe started");
+
         while (!stoppingToken.IsCancellationRequested && !streamPipe.IsDisposedOrDisposing)
         {
             string sendStr = Guid.NewGuid().ToString();
@@ -86,5 +88,7 @@ internal class EdgeClientMockerWorker(ILogger<EdgeClientMockerWorker> logger, IS
 
             await Task.Delay(100, stoppingToken);
         }
+
+        _logger.LogInformation("Stream pipe ended");
     }
 }

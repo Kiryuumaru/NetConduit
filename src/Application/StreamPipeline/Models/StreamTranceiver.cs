@@ -9,7 +9,7 @@ using System.Threading.Tasks;
 namespace Application.StreamPipeline.Models;
 
 [Disposable]
-public partial class StreamPipe
+public partial class StreamTranceiver
 {
     public required Stream ReceiverStream { get; init; }
 
