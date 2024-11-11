@@ -12,27 +12,28 @@ namespace Application.StreamPipeline.Common;
 [Disposable]
 public partial class TranceiverStream(Stream receiverStream, Stream senderStream) : Stream
 {
-    private readonly Stream _receiverStream = receiverStream;
-    private readonly Stream _senderStream = senderStream;
+    public Stream ReceiverStream => receiverStream;
 
-    public override bool CanRead => _receiverStream.CanRead;
+    public Stream SenderStream => senderStream;
+
+    public override bool CanRead => ReceiverStream.CanRead;
 
     public override bool CanSeek => false;
 
-    public override bool CanWrite => _senderStream.CanWrite;
+    public override bool CanWrite => SenderStream.CanWrite;
 
-    public override bool CanTimeout => _receiverStream.CanTimeout || _senderStream.CanTimeout;
+    public override bool CanTimeout => ReceiverStream.CanTimeout || SenderStream.CanTimeout;
 
     public override int ReadTimeout
     {
-        get => _receiverStream.ReadTimeout;
-        set => _receiverStream.ReadTimeout = value;
+        get => ReceiverStream.ReadTimeout;
+        set => ReceiverStream.ReadTimeout = value;
     }
 
     public override int WriteTimeout
     {
-        get => _senderStream.WriteTimeout;
-        set => _senderStream.WriteTimeout = value;
+        get => SenderStream.WriteTimeout;
+        set => SenderStream.WriteTimeout = value;
     }
 
     public override long Length => throw new NotSupportedException();
@@ -45,108 +46,108 @@ public partial class TranceiverStream(Stream receiverStream, Stream senderStream
 
     public override void Close()
     {
-        _receiverStream.Close();
-        _senderStream.Close();
+        ReceiverStream.Close();
+        SenderStream.Close();
 
         base.Close();
     }
 
     public override void CopyTo(Stream destination, int bufferSize)
     {
-        _receiverStream.CopyTo(destination, bufferSize);
+        ReceiverStream.CopyTo(destination, bufferSize);
     }
 
     public override Task CopyToAsync(Stream destination, int bufferSize, CancellationToken cancellationToken)
     {
-        return _receiverStream.CopyToAsync(destination, bufferSize, cancellationToken);
+        return ReceiverStream.CopyToAsync(destination, bufferSize, cancellationToken);
     }
 
     public override void Flush()
     {
-        _senderStream.Flush();
+        SenderStream.Flush();
     }
 
     public override Task FlushAsync(CancellationToken cancellationToken)
     {
-        return _senderStream.FlushAsync(cancellationToken);
+        return SenderStream.FlushAsync(cancellationToken);
     }
 
     public override IAsyncResult BeginRead(byte[] buffer, int offset, int count, AsyncCallback? callback, object? state)
     {
-        return _receiverStream.BeginRead(buffer, offset, count, callback, state);
+        return ReceiverStream.BeginRead(buffer, offset, count, callback, state);
     }
 
     public override int ReadByte()
     {
-        return _receiverStream.ReadByte();
+        return ReceiverStream.ReadByte();
     }
 
     public override int Read(byte[] buffer, int offset, int count)
     {
-        return _receiverStream.Read(buffer, offset, count);
+        return ReceiverStream.Read(buffer, offset, count);
     }
 
     public override int Read(Span<byte> buffer)
     {
-        return _receiverStream.Read(buffer);
+        return ReceiverStream.Read(buffer);
     }
 
     public override Task<int> ReadAsync(byte[] buffer, int offset, int count, CancellationToken cancellationToken)
     {
-        return _receiverStream.ReadAsync(buffer, offset, count, cancellationToken);
+        return ReceiverStream.ReadAsync(buffer, offset, count, cancellationToken);
     }
 
     public override async ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancellationToken = default)
     {
-        return await _receiverStream.ReadAsync(buffer, cancellationToken);
+        return await ReceiverStream.ReadAsync(buffer, cancellationToken);
     }
 
     public override int EndRead(IAsyncResult asyncResult)
     {
-        return _receiverStream.EndRead(asyncResult);
+        return ReceiverStream.EndRead(asyncResult);
     }
 
     public override IAsyncResult BeginWrite(byte[] buffer, int offset, int count, AsyncCallback? callback, object? state)
     {
-        return _senderStream.BeginWrite(buffer, offset, count, callback, state);
+        return SenderStream.BeginWrite(buffer, offset, count, callback, state);
     }
 
     public override void WriteByte(byte value)
     {
-        _senderStream.WriteByte(value);
+        SenderStream.WriteByte(value);
     }
 
     public override void Write(ReadOnlySpan<byte> buffer)
     {
-        _senderStream.Write(buffer);
+        SenderStream.Write(buffer);
     }
 
     public override void Write(byte[] buffer, int offset, int count)
     {
-        _senderStream.Write(buffer, offset, count);
+        SenderStream.Write(buffer, offset, count);
     }
 
     public override Task WriteAsync(byte[] buffer, int offset, int count, CancellationToken cancellationToken)
     {
-        return _senderStream.WriteAsync(buffer, offset, count, cancellationToken);
+        return SenderStream.WriteAsync(buffer, offset, count, cancellationToken);
     }
 
     public override async ValueTask WriteAsync(ReadOnlyMemory<byte> buffer, CancellationToken cancellationToken = default)
     {
-        await _senderStream.WriteAsync(buffer, cancellationToken);
+        await SenderStream.WriteAsync(buffer, cancellationToken);
     }
 
     public override void EndWrite(IAsyncResult asyncResult)
     {
-        _senderStream.EndWrite(asyncResult);
+        SenderStream.EndWrite(asyncResult);
     }
 
     protected override void Dispose(bool disposing)
     {
         if (disposing)
         {
-            _receiverStream.Dispose();
-            _senderStream.Dispose();
+            ReceiverStream.Dispose();
+            SenderStream.Dispose();
         }
 
         base.Dispose(disposing);

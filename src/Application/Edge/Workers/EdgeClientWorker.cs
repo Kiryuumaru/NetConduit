@@ -74,7 +74,7 @@ internal class EdgeClientWorker(ILogger<EdgeClientWorker> logger, IServiceProvid
 
                 var ss = streamPipelineService.Get(StreamPipelineFactory.CommandChannelKey);
 
-                await ss.WriteAsync(sendBytes, stoppingToken);
+                await ss.ReceiverStream.WriteAsync(sendBytes, stoppingToken);
             }
             catch (Exception ex)
             {

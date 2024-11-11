@@ -98,7 +98,7 @@ internal class EdgeServerWorker(ILogger<EdgeServerWorker> logger, IServiceProvid
                 var ss = streamPipelineService.Get(StreamPipelineFactory.CommandChannelKey);
 
                 byte[] receivedBytes = new byte[_bufferSize];
-                await ss.ReadAsync(receivedBytes, stoppingToken);
+                await ss.SenderStream.ReadAsync(receivedBytes, stoppingToken);
 
                 string receivedStr = Encoding.Default.GetString(receivedBytes.Where(x => x != 0).ToArray());
 
