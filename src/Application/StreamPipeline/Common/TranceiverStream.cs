@@ -144,7 +144,7 @@ public partial class TranceiverStream(Stream receiverStream, Stream senderStream
 
     protected override void Dispose(bool disposing)
     {
-        if (disposing)
+        if (IsDisposing)
         {
             ReceiverStream.Dispose();
             SenderStream.Dispose();

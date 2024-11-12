@@ -9,7 +9,8 @@ using System.Threading.Tasks;
 
 namespace Application.StreamPipeline.Common;
 
-public class BlockingMemoryStream : MemoryStream
+[Disposable]
+public partial class BlockingMemoryStream : MemoryStream
 {
     private readonly ManualResetEvent _dataReady = new(false);
     private readonly object _lockObj = new();
@@ -97,15 +98,15 @@ public class BlockingMemoryStream : MemoryStream
 
     protected override void Dispose(bool disposing)
     {
-        base.Dispose(disposing);
-
-        if (disposing)
+        if (IsDisposing)
         {
             _disposed = true;
 
             _dataReady.Set();
             _dataReady.Dispose();
         }
+
+        base.Dispose(disposing);
     }
 
     public override long Seek(long offset, SeekOrigin origin) =>
