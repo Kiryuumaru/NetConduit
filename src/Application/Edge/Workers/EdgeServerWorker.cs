@@ -61,7 +61,7 @@ internal class EdgeServerWorker(ILogger<EdgeServerWorker> logger, IServiceProvid
 
         using var scope = _serviceProvider.CreateScope();
         var tcpServer = scope.ServiceProvider.GetRequiredService<TcpServerService>();
-        var streamPipelineFactory = scope.ServiceProvider.GetRequiredService<StreamPipelineFactory>();
+        var streamPipelineFactory = scope.ServiceProvider.GetRequiredService<StreamPipelineService>();
 
         var tcpHost = _configuration.GetServerTcpHost();
         var tcpPort = _configuration.GetServerTcpPort();
@@ -79,7 +79,7 @@ internal class EdgeServerWorker(ILogger<EdgeServerWorker> logger, IServiceProvid
         }, stoppingToken);
     }
 
-    private async void Start(TcpClient tcpClient, IPAddress iPAddress, StreamPipelineService streamPipelineService, CancellationToken stoppingToken)
+    private async void Start(TcpClient tcpClient, IPAddress iPAddress, StreamMultiplexerService streamPipelineService, CancellationToken stoppingToken)
     {
         using var _ = _logger.BeginScopeMap(nameof(EdgeServerWorker), nameof(Start), new()
         {
@@ -95,10 +95,10 @@ internal class EdgeServerWorker(ILogger<EdgeServerWorker> logger, IServiceProvid
 
             try
             {
-                var ss = streamPipelineService.Get(StreamPipelineFactory.CommandChannelKey);
+                var ss = streamPipelineService.Get(StreamPipelineService.CommandChannelKey);
 
                 byte[] receivedBytes = new byte[_bufferSize];
-                await ss.SenderStream.ReadAsync(receivedBytes, stoppingToken);
+                await ss.ReadAsync(receivedBytes, stoppingToken);
 
                 string receivedStr = Encoding.Default.GetString(receivedBytes.Where(x => x != 0).ToArray());
 

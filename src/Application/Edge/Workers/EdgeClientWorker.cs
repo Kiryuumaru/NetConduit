@@ -43,7 +43,7 @@ internal class EdgeClientWorker(ILogger<EdgeClientWorker> logger, IServiceProvid
 
         using var scope = _serviceProvider.CreateScope();
         var tcpClient = scope.ServiceProvider.GetRequiredService<TcpClientService>();
-        var streamPipelineFactory = scope.ServiceProvider.GetRequiredService<StreamPipelineFactory>();
+        var streamPipelineFactory = scope.ServiceProvider.GetRequiredService<StreamPipelineService>();
 
         var tcpHost = _configuration.GetServerTcpHost();
         var tcpPort = _configuration.GetServerTcpPort();
@@ -59,7 +59,7 @@ internal class EdgeClientWorker(ILogger<EdgeClientWorker> logger, IServiceProvid
         }, stoppingToken);
     }
 
-    private async void Start(StreamPipelineService streamPipelineService, CancellationToken stoppingToken)
+    private async void Start(StreamMultiplexerService streamPipelineService, CancellationToken stoppingToken)
     {
         _logger.LogInformation("Stream pipe started");
 
@@ -72,16 +72,16 @@ internal class EdgeClientWorker(ILogger<EdgeClientWorker> logger, IServiceProvid
             {
                 DateTimeOffset sendTime = DateTimeOffset.UtcNow;
 
-                var ss = streamPipelineService.Get(StreamPipelineFactory.CommandChannelKey);
+                var ss = streamPipelineService.Get(StreamPipelineService.CommandChannelKey);
 
-                await ss.ReceiverStream.WriteAsync(sendBytes, stoppingToken);
+                await ss.WriteAsync(sendBytes, stoppingToken);
             }
             catch (Exception ex)
             {
                 _logger.LogError("{Error}", ex.Message);
             }
 
-            await Task.Delay(100, stoppingToken);
+            await Task.Delay(1000, stoppingToken);
         }
 
         _logger.LogInformation("Stream pipe ended");

@@ -24,8 +24,8 @@ public class Application : ApplicationDependency
         services.AddScoped<ServiceManagerService>();
         services.AddScoped<DaemonManagerService>();
 
+        services.AddTransient<StreamMultiplexerService>();
         services.AddTransient<StreamPipelineService>();
-        services.AddScoped<StreamPipelineFactory>();
 
         services.AddTransient<TcpClientService>();
         services.AddTransient<TcpServerService>();
