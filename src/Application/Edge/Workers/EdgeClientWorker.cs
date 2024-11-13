@@ -52,18 +52,22 @@ internal class EdgeClientWorker(ILogger<EdgeClientWorker> logger, IServiceProvid
         {
             CancellationToken ct = tranceiverStream.CancelWhenDisposing(stoppingToken);
 
-            var streamPipeline = streamPipelineFactory.Pipe(tranceiverStream, _bufferSize, ct);
+            var streamMultiplexer = streamPipelineFactory.Pipe(tranceiverStream, _bufferSize, ct);
 
-            Start(streamPipeline, ct);
+            Start(streamMultiplexer, ct);
 
         }, stoppingToken);
     }
 
-    private async void Start(StreamMultiplexerService streamPipelineService, CancellationToken stoppingToken)
+    private async void Start(StreamMultiplexer streamMultiplexer, CancellationToken stoppingToken)
     {
         _logger.LogInformation("Stream pipe started");
 
-        while (!stoppingToken.IsCancellationRequested && !streamPipelineService.IsDisposedOrDisposing)
+        var commandStream = streamMultiplexer.Get(StreamPipelineService.CommandChannelKey);
+
+        Memory<byte> receivedBytes = new byte[_bufferSize];
+
+        while (!stoppingToken.IsCancellationRequested && !streamMultiplexer.IsDisposedOrDisposing)
         {
             string sendStr = Guid.NewGuid().ToString();
             byte[] sendBytes = Encoding.Default.GetBytes(sendStr);
@@ -72,9 +76,21 @@ internal class EdgeClientWorker(ILogger<EdgeClientWorker> logger, IServiceProvid
             {
                 DateTimeOffset sendTime = DateTimeOffset.UtcNow;
 
-                var ss = streamPipelineService.Get(StreamPipelineService.CommandChannelKey);
+                await commandStream.WriteAsync(sendBytes, stoppingToken);
+                var bytesRead = await commandStream.ReadAsync(receivedBytes, stoppingToken);
 
-                await ss.WriteAsync(sendBytes, stoppingToken);
+                DateTimeOffset receivedTime = DateTimeOffset.UtcNow;
+
+                string receivedStr = Encoding.Default.GetString(receivedBytes[..bytesRead].ToArray());
+
+                if (sendStr != receivedStr)
+                {
+                    _logger.LogError("Mismatch: {Sent} != {Received}", sendStr, receivedStr);
+                }
+                else
+                {
+                    _logger.LogInformation("Received time {TimeStamp}ms...", (receivedTime - sendTime).TotalMilliseconds);
+                }
             }
             catch (Exception ex)
             {

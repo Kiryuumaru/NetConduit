@@ -1,6 +1,8 @@
-﻿using Application.StreamPipeline.Common;
+﻿using Application.Common;
+using Application.StreamPipeline.Common;
 using DisposableHelpers.Attributes;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -10,21 +12,28 @@ using System.Threading.Tasks;
 namespace Application.StreamPipeline.Services;
 
 [Disposable]
-public partial class StreamPipelineService(IServiceProvider serviceProvider)
+public partial class StreamPipelineService(ILogger<StreamPipelineService> logger)
 {
-    private readonly IServiceProvider _serviceProvider = serviceProvider;
+    private readonly ILogger<StreamPipelineService> _logger = logger;
 
     public static readonly Guid CommandChannelKey = new("00000000-0000-0000-0000-000000000001");
     public static readonly Guid LogChannelKey = new("00000000-0000-0000-0000-000000000002");
 
-    public StreamMultiplexerService Pipe(TranceiverStream tranceiverStream, int bufferSize, CancellationToken stoppingToken)
+    public StreamMultiplexer Pipe(TranceiverStream tranceiverStream, int bufferSize, CancellationToken stoppingToken)
     {
-        var streamPipelineService = _serviceProvider.GetRequiredService<StreamMultiplexerService>();
-        TranceiverStream commandChannel = new(new BlockingMemoryStream(bufferSize), new BlockingMemoryStream(bufferSize));
-        TranceiverStream logChannel = new(new BlockingMemoryStream(bufferSize), new BlockingMemoryStream(bufferSize));
-        streamPipelineService.Set(CommandChannelKey, commandChannel);
-        //streamPipelineService.Set(LogChannelKey, logChannel);
-        streamPipelineService.Start(tranceiverStream, bufferSize, stoppingToken);
+        using var _ = _logger.BeginScopeMap(nameof(StreamPipelineService), nameof(Pipe));
+
+        var streamPipelineService = StreamMultiplexer.Create(
+            tranceiverStream,
+            bufferSize,
+            () => _logger.LogTrace("Pipe started"),
+            () => _logger.LogTrace("Pipe ended"),
+            err => _logger.LogError("{ErrorMessage}", err.Message),
+            stoppingToken);
+        streamPipelineService.Set(CommandChannelKey, new(new BlockingMemoryStream(bufferSize), new BlockingMemoryStream(bufferSize)));
+        streamPipelineService.Set(LogChannelKey, new(new BlockingMemoryStream(bufferSize), new BlockingMemoryStream(bufferSize)));
+        streamPipelineService.Start();
+
         return streamPipelineService;
     }
 }

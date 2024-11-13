@@ -72,14 +72,14 @@ internal class EdgeServerWorker(ILogger<EdgeServerWorker> logger, IServiceProvid
 
             IPAddress clientEndPoint = (tcpClient.Client.LocalEndPoint as IPEndPoint)?.Address!;
 
-            var streamPipelineService = streamPipelineFactory.Pipe(streamTranceiver, _bufferSize, ct);
+            var streamMultiplexer = streamPipelineFactory.Pipe(streamTranceiver, _bufferSize, ct);
 
-            Start(tcpClient, clientEndPoint, streamPipelineService, ct);
+            Start(tcpClient, clientEndPoint, streamMultiplexer, ct);
 
         }, stoppingToken);
     }
 
-    private async void Start(TcpClient tcpClient, IPAddress iPAddress, StreamMultiplexerService streamPipelineService, CancellationToken stoppingToken)
+    private async void Start(TcpClient tcpClient, IPAddress iPAddress, StreamMultiplexer streamMultiplexer, CancellationToken stoppingToken)
     {
         using var _ = _logger.BeginScopeMap(nameof(EdgeServerWorker), nameof(Start), new()
         {
@@ -88,19 +88,18 @@ internal class EdgeServerWorker(ILogger<EdgeServerWorker> logger, IServiceProvid
 
         _logger.LogInformation("Stream pipe {CLientIPEndPoint} started", iPAddress);
 
-        while (!stoppingToken.IsCancellationRequested && !streamPipelineService.IsDisposedOrDisposing)
-        {
-            string sendStr = Guid.NewGuid().ToString();
-            byte[] sendBytes = Encoding.Default.GetBytes(sendStr);
+        var commandStream = streamMultiplexer.Get(StreamPipelineService.CommandChannelKey);
 
+        Memory<byte> receivedBytes = new byte[_bufferSize];
+
+        while (!stoppingToken.IsCancellationRequested && !streamMultiplexer.IsDisposedOrDisposing)
+        {
             try
             {
-                var ss = streamPipelineService.Get(StreamPipelineService.CommandChannelKey);
+                var bytesread = await commandStream.ReadAsync(receivedBytes, stoppingToken);
+                await commandStream.WriteAsync(receivedBytes[..bytesread], stoppingToken);
 
-                byte[] receivedBytes = new byte[_bufferSize];
-                await ss.ReadAsync(receivedBytes, stoppingToken);
-
-                string receivedStr = Encoding.Default.GetString(receivedBytes.Where(x => x != 0).ToArray());
+                string receivedStr = Encoding.Default.GetString(receivedBytes[..bytesread].ToArray());
 
                 _logger.LogInformation("received {DAT}", receivedStr);
             }
@@ -111,13 +110,6 @@ internal class EdgeServerWorker(ILogger<EdgeServerWorker> logger, IServiceProvid
 
             await Task.Delay(100, stoppingToken);
         }
-        //BlockingMemoryStream blockingMemoryStream = new(_bufferSize);
-        //stoppingToken.Register(blockingMemoryStream.Dispose);
-        //await Task.WhenAll(
-        //    Task.Run(async () => await StreamHelpers.ForwardStream(tranceiverStream, blockingMemoryStream, _bufferSize,
-        //        ex => _logger.LogError("{Error}", ex.Message), stoppingToken), stoppingToken),
-        //    Task.Run(async () => await StreamHelpers.ForwardStream(blockingMemoryStream, tranceiverStream, _bufferSize,
-        //        ex => _logger.LogError("{Error}", ex.Message), stoppingToken), stoppingToken));
 
         _logger.LogInformation("Stream pipe {CLientIPEndPoint} ended", iPAddress);
     }
