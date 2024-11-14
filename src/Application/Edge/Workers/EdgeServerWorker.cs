@@ -66,52 +66,56 @@ internal class EdgeServerWorker(ILogger<EdgeServerWorker> logger, IServiceProvid
         var tcpHost = _configuration.GetServerTcpHost();
         var tcpPort = _configuration.GetServerTcpPort();
 
-        await tcpServer.Start(Dns.GetHostEntry(tcpHost).AddressList.Last(), tcpPort, _bufferSize, (tcpClient, streamTranceiver) =>
+        await tcpServer.Start(Dns.GetHostEntry(tcpHost).AddressList.Last(), tcpPort, _bufferSize, (tcpClient, streamTranceiver, ct) =>
         {
-            CancellationToken ct = streamTranceiver.CancelWhenDisposing(stoppingToken);
+            CancellationToken clientCt = streamTranceiver.CancelWhenDisposing(stoppingToken, ct);
 
             IPAddress clientEndPoint = (tcpClient.Client.LocalEndPoint as IPEndPoint)?.Address!;
 
-            var streamMultiplexer = streamPipelineFactory.Pipe(streamTranceiver, _bufferSize, ct);
+            var streamMultiplexer = streamPipelineFactory.Pipe(streamTranceiver, _bufferSize, clientCt);
 
-            Start(tcpClient, clientEndPoint, streamMultiplexer, ct);
+            return Start(tcpClient, clientEndPoint, streamMultiplexer, clientCt);
 
         }, stoppingToken);
     }
 
-    private async void Start(TcpClient tcpClient, IPAddress iPAddress, StreamMultiplexer streamMultiplexer, CancellationToken stoppingToken)
+    private Task Start(TcpClient tcpClient, IPAddress iPAddress, StreamMultiplexer streamMultiplexer, CancellationToken stoppingToken)
     {
-        using var _ = _logger.BeginScopeMap(nameof(EdgeServerWorker), nameof(Start), new()
+        return Task.Run(() =>
         {
-            ["ClientAddress"] = iPAddress
-        });
-
-        _logger.LogInformation("Stream pipe {CLientIPEndPoint} started", iPAddress);
-
-        var commandStream = streamMultiplexer.Get(StreamPipelineService.CommandChannelKey);
-
-        Memory<byte> receivedBytes = new byte[_bufferSize];
-
-        while (!stoppingToken.IsCancellationRequested && !streamMultiplexer.IsDisposedOrDisposing)
-        {
-            try
+            using var _ = _logger.BeginScopeMap(nameof(EdgeServerWorker), nameof(Start), new()
             {
-                var bytesread = await commandStream.ReadAsync(receivedBytes, stoppingToken);
-                await commandStream.WriteAsync(receivedBytes[..bytesread], stoppingToken);
+                ["ClientAddress"] = iPAddress
+            });
 
-                string receivedStr = Encoding.Default.GetString(receivedBytes[..bytesread].ToArray());
+            _logger.LogInformation("Stream pipe {CLientIPEndPoint} started", iPAddress);
 
-                _logger.LogInformation("received {DAT}", receivedStr);
-            }
-            catch (Exception ex)
+            var commandStream = streamMultiplexer.Get(StreamPipelineService.CommandChannelKey);
+
+            Span<byte> receivedBytes = stackalloc byte[_bufferSize];
+
+            while (!stoppingToken.IsCancellationRequested && !streamMultiplexer.IsDisposedOrDisposing)
             {
-                _logger.LogError("{Error}", ex.Message);
+                try
+                {
+                    var bytesread = commandStream.Read(receivedBytes);
+                    commandStream.Write(receivedBytes[..bytesread]);
+
+                    string receivedStr = Encoding.Default.GetString(receivedBytes[..bytesread].ToArray());
+
+                    _logger.LogInformation("received {DAT}", receivedStr);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogError("{Error}", ex.Message);
+                }
+
+                stoppingToken.WaitHandle.WaitOne(100);
             }
 
-            await Task.Delay(100, stoppingToken);
-        }
+            _logger.LogInformation("Stream pipe {CLientIPEndPoint} ended", iPAddress);
 
-        _logger.LogInformation("Stream pipe {CLientIPEndPoint} ended", iPAddress);
+        }, stoppingToken);
     }
 
     private async Task<bool> Handshake(TcpClient tcpClient, IPAddress iPAddress, TranceiverStream tranceiverStream, CancellationToken stoppingToken)

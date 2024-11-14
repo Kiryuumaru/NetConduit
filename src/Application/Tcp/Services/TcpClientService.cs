@@ -29,7 +29,7 @@ public partial class TcpClientService(ILogger<TcpClientService> logger)
     private int _port = 0;
     private int _bufferSize = 0;
 
-    public async Task Start(IPAddress address, int port, int bufferSize, Action<TranceiverStream> onClientCallback, CancellationToken stoppingToken)
+    public async Task Start(IPAddress address, int port, int bufferSize, Func<TranceiverStream, CancellationToken, Task> onClientCallback, CancellationToken stoppingToken)
     {
         using var _ = _logger.BeginScopeMap(nameof(TcpServerService), nameof(Start), new()
         {
@@ -76,15 +76,15 @@ public partial class TcpClientService(ILogger<TcpClientService> logger)
 
             NetworkStream networkStream = tcpClient.GetStream();
             TranceiverStream tranceiverStream = new(networkStream, networkStream);
-            onClientCallback(tranceiverStream);
             CancellationTokenSource clientCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
-            WatchLiveliness(tcpClient, networkStream, tranceiverStream, clientCts);
+            onClientCallback.Invoke(tranceiverStream, clientCts.Token).Forget();
+            WatchLiveliness(tcpClient, networkStream, tranceiverStream, clientCts).Forget();
 
             await clientCts.Token.WhenCanceled();
         }
     }
 
-    private async void WatchLiveliness(TcpClient tcpClient, NetworkStream networkStream, TranceiverStream tranceiverStream, CancellationTokenSource cts)
+    private async Task WatchLiveliness(TcpClient tcpClient, NetworkStream networkStream, TranceiverStream tranceiverStream, CancellationTokenSource cts)
     {
         using var _ = _logger.BeginScopeMap(nameof(TcpClientService), nameof(WatchLiveliness), new()
         {

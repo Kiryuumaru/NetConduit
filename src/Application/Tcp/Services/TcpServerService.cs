@@ -26,7 +26,7 @@ public partial class TcpServerService(ILogger<TcpServerService> logger)
     private int _port = 0;
     private int _bufferSize = 0;
 
-    public async Task Start(IPAddress address, int port, int bufferSize, Action<TcpClient, TranceiverStream> onClientCallback, CancellationToken stoppingToken)
+    public async Task Start(IPAddress address, int port, int bufferSize, Func<TcpClient, TranceiverStream, CancellationToken, Task> onClientCallback, CancellationToken stoppingToken)
     {
         using var _ = _logger.BeginScopeMap(nameof(TcpServerService), nameof(Start), new()
         {
@@ -63,13 +63,13 @@ public partial class TcpServerService(ILogger<TcpServerService> logger)
             IPAddress clientEndPoint = (tcpClient.Client.LocalEndPoint as IPEndPoint)?.Address!;
             NetworkStream networkStream = tcpClient.GetStream();
             TranceiverStream tranceiverStream = new(networkStream, networkStream);
-            onClientCallback(tcpClient, tranceiverStream);
             CancellationTokenSource clientCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
-            WatchLiveliness(tcpClient, networkStream, clientEndPoint, tranceiverStream, clientCts);
+            onClientCallback.Invoke(tcpClient, tranceiverStream, clientCts.Token).Forget();
+            WatchLiveliness(tcpClient, networkStream, clientEndPoint, tranceiverStream, clientCts).Forget();
         }
     }
 
-    private async void WatchLiveliness(TcpClient tcpClient, NetworkStream networkStream, IPAddress clientAddress, TranceiverStream tranceiverStream, CancellationTokenSource cts)
+    private async Task WatchLiveliness(TcpClient tcpClient, NetworkStream networkStream, IPAddress clientAddress, TranceiverStream tranceiverStream, CancellationTokenSource cts)
     {
         using var _ = _logger.BeginScopeMap(nameof(TcpServerService), nameof(WatchLiveliness), new()
         {

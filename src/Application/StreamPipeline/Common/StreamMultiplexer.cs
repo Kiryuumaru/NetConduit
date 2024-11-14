@@ -59,7 +59,7 @@ public partial class StreamMultiplexer
         _cts = CancellationTokenSource.CreateLinkedTokenSource(stoppingToken, _mainTranceiverStream.CancelWhenDisposing(stoppingToken));
     }
 
-    public async void Start()
+    public async Task Start()
     {
         _onStarted();
 
@@ -77,7 +77,7 @@ public partial class StreamMultiplexer
                             break;
                         }
                         var channelCt = register.TranceiverStream.CancelWhenDisposed(_cts.Token);
-                        StartReceiverForwarder(register.Channel, register.TranceiverStream, channelCt);
+                        StartReceiverForwarder(register.Channel, register.TranceiverStream, channelCt).Forget();
                     }
                     catch (Exception ex)
                     {
@@ -109,6 +109,11 @@ public partial class StreamMultiplexer
                     {
                         break;
                     }
+                    if (bytesRead == 0)
+                    {
+                        _cts.Token.WaitHandle.WaitOne(100);
+                        continue;
+                    }
                     if (_headerSize > bytesRead)
                     {
                         throw new Exception("Sender received bytes smaller than the header size");
@@ -122,15 +127,16 @@ public partial class StreamMultiplexer
                     {
                         break;
                     }
+                    _cts.Token.WaitHandle.WaitOne(100);
                     _onError(ex);
                 }
             }
         });
     }
 
-    private async void StartReceiverForwarder(Guid channelKey, TranceiverStream tranceiverStream, CancellationToken stoppingToken)
+    private Task StartReceiverForwarder(Guid channelKey, TranceiverStream tranceiverStream, CancellationToken stoppingToken)
     {
-        await Task.Run(() =>
+        return Task.Run(() =>
         {
             Span<byte> header = channelKey.ToByteArray();
             Span<byte> receivedBytes = new byte[_bufferSize + _headerSize];
@@ -256,9 +262,7 @@ public partial class StreamMultiplexer
                 _rwl.EnterWriteLock();
 
                 _cts.Cancel();
-
                 _mainTranceiverStream?.Dispose();
-
                 foreach (var pipe in _tranceiverStreamMap.Values)
                 {
                     pipe.Dispose();

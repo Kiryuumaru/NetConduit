@@ -98,6 +98,8 @@ public partial class BlockingMemoryStream : MemoryStream
 
     protected override void Dispose(bool disposing)
     {
+        CoreDispose();
+
         if (IsDisposing)
         {
             _disposed = true;

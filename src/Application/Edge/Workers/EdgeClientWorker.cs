@@ -48,18 +48,18 @@ internal class EdgeClientWorker(ILogger<EdgeClientWorker> logger, IServiceProvid
         var tcpHost = _configuration.GetServerTcpHost();
         var tcpPort = _configuration.GetServerTcpPort();
 
-        await tcpClient.Start(Dns.GetHostEntry(tcpHost).AddressList.Last(), tcpPort, _bufferSize, tranceiverStream =>
+        await tcpClient.Start(Dns.GetHostEntry(tcpHost).AddressList.Last(), tcpPort, _bufferSize, (tranceiverStream, ct) =>
         {
-            CancellationToken ct = tranceiverStream.CancelWhenDisposing(stoppingToken);
+            CancellationToken clientCt = tranceiverStream.CancelWhenDisposing(stoppingToken, ct);
 
-            var streamMultiplexer = streamPipelineFactory.Pipe(tranceiverStream, _bufferSize, ct);
+            var streamMultiplexer = streamPipelineFactory.Pipe(tranceiverStream, _bufferSize, clientCt);
 
-            Start(streamMultiplexer, ct);
+            return Start(streamMultiplexer, clientCt);
 
         }, stoppingToken);
     }
 
-    private async void Start(StreamMultiplexer streamMultiplexer, CancellationToken stoppingToken)
+    private async Task Start(StreamMultiplexer streamMultiplexer, CancellationToken stoppingToken)
     {
         _logger.LogInformation("Stream pipe started");
 

@@ -32,7 +32,7 @@ public partial class StreamPipelineService(ILogger<StreamPipelineService> logger
             stoppingToken);
         streamPipelineService.Set(CommandChannelKey, new(new BlockingMemoryStream(bufferSize), new BlockingMemoryStream(bufferSize)));
         streamPipelineService.Set(LogChannelKey, new(new BlockingMemoryStream(bufferSize), new BlockingMemoryStream(bufferSize)));
-        streamPipelineService.Start();
+        streamPipelineService.Start().Forget();
 
         return streamPipelineService;
     }
