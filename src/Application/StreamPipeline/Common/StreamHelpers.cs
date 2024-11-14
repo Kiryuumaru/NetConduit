@@ -8,33 +8,46 @@ namespace Application.StreamPipeline.Common;
 
 public static class StreamHelpers
 {
-    public static async Task ForwardStream(Stream source, Stream destination, int bufferSize, Action<Exception> onError, CancellationToken stoppingToken)
+    public static Task ForwardStream(Stream source, Stream destination, int bufferSize, Action<Exception> onError, CancellationToken stoppingToken)
     {
-        byte[] buffer = new byte[bufferSize];
-
-        while (!stoppingToken.IsCancellationRequested && source.CanRead && destination.CanWrite)
+        return Task.Run(() =>
         {
-            try
+            Span<byte> buffer = stackalloc byte[bufferSize];
+
+            while (!stoppingToken.IsCancellationRequested && source.CanRead && destination.CanWrite)
             {
-                int bytesread = await source.ReadAsync(buffer, stoppingToken);
-                if (!destination.CanWrite)
+                try
+                {
+                    int bytesRead = source.Read(buffer);
+                    if (stoppingToken.IsCancellationRequested)
+                    {
+                        break;
+                    }
+                    if (bytesRead == 0)
+                    {
+                        stoppingToken.WaitHandle.WaitOne(100);
+                        continue;
+                    }
+                    if (!destination.CanWrite)
+                    {
+                        break;
+                    }
+                    destination.Write(buffer[..bytesRead]);
+                }
+                catch (OperationCanceledException)
                 {
                     break;
                 }
-                await destination.WriteAsync(buffer.AsMemory(0, bytesread), stoppingToken);
+                catch (ObjectDisposedException)
+                {
+                    break;
+                }
+                catch (Exception ex)
+                {
+                    onError(ex);
+                }
             }
-            catch (OperationCanceledException)
-            {
-                break;
-            }
-            catch (ObjectDisposedException)
-            {
-                break;
-            }
-            catch (Exception ex)
-            {
-                onError(ex);
-            }
-        }
+
+        }, stoppingToken);
     }
 }

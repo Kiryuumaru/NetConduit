@@ -12,32 +12,36 @@ namespace Application.Tcp.Common;
 
 internal static class TcpClientHelpers
 {
-    public static async Task WatchLiveliness(TcpClient tcpClient, NetworkStream networkStream, TranceiverStream tranceiverStream, CancellationTokenSource cts, TimeSpan livelinessSpan)
+    public static Task WatchLiveliness(TcpClient tcpClient, NetworkStream networkStream, TranceiverStream tranceiverStream, CancellationTokenSource cts, TimeSpan livelinessSpan)
     {
-        byte[] buffer = new byte[1];
-
-        while (tcpClient.Connected && !tranceiverStream.IsDisposedOrDisposing && !cts.IsCancellationRequested)
+        return Task.Run(() =>
         {
-            try
+            Span<byte> buffer = stackalloc byte[1];
+
+            while (tcpClient.Connected && !tranceiverStream.IsDisposedOrDisposing && !cts.IsCancellationRequested)
             {
-                if (tcpClient.Client.Poll(0, SelectMode.SelectRead) &&
-                    await tcpClient.Client.ReceiveAsync(buffer, SocketFlags.Peek, cts.Token) == 0)
+                try
                 {
-                    break;
+                    if (tcpClient.Client.Poll(0, SelectMode.SelectRead) &&
+                        tcpClient.Client.Receive(buffer, SocketFlags.Peek) == 0)
+                    {
+                        break;
+                    }
+
+                    cts.Token.WaitHandle.WaitOne(livelinessSpan);
                 }
-
-                await Task.Delay(livelinessSpan, cts.Token);
+                catch (OperationCanceledException) { }
+                catch (ObjectDisposedException) { }
+                catch { }
             }
-            catch (OperationCanceledException) { }
-            catch (ObjectDisposedException) { }
-            catch { }
-        }
 
-        cts.Cancel();
-        tcpClient.Close();
-        tcpClient.Dispose();
-        networkStream.Close();
-        networkStream.Dispose();
-        tranceiverStream.Dispose();
+            cts.Cancel();
+            tcpClient.Close();
+            tcpClient.Dispose();
+            networkStream.Close();
+            networkStream.Dispose();
+            tranceiverStream.Dispose();
+
+        }, cts.Token);
     }
 }

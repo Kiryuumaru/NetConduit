@@ -9,6 +9,7 @@ using System.Linq;
 using System.Net.Sockets;
 using System.Reflection;
 using System.Reflection.PortableExecutable;
+using System.Runtime.InteropServices;
 using System.Text;
 using System.Threading.Channels;
 using System.Threading.Tasks;
@@ -101,7 +102,7 @@ public partial class StreamMultiplexer
     {
         return Task.Run(() =>
         {
-            Span<byte> receivedBytes = new byte[_bufferSize + _headerSize];
+            Span<byte> receivedBytes = stackalloc byte[_bufferSize + _headerSize];
 
             while (!_cts.Token.IsCancellationRequested)
             {
@@ -141,8 +142,10 @@ public partial class StreamMultiplexer
     {
         return Task.Run(() =>
         {
-            Span<byte> header = channelKey.ToByteArray();
-            Span<byte> receivedBytes = new byte[_bufferSize + _headerSize];
+            Span<byte> header = stackalloc byte[_headerSize];
+            MemoryMarshal.Write(header, in channelKey);
+
+            Span<byte> receivedBytes = stackalloc byte[_bufferSize + _headerSize];
 
             while (!stoppingToken.IsCancellationRequested)
             {
