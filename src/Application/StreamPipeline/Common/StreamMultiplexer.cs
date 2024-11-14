@@ -59,39 +59,42 @@ public partial class StreamMultiplexer
         _cts = CancellationTokenSource.CreateLinkedTokenSource(stoppingToken, _mainTranceiverStream.CancelWhenDisposing(stoppingToken));
     }
 
-    public async Task Start()
+    public Task Start()
     {
         _onStarted();
 
-        await Task.WhenAll(
-            StartSender(),
-            Task.Run(async () =>
-            {
-                while (!_cts.Token.IsCancellationRequested)
+        return Task.Run(async () =>
+        {
+            await Task.WhenAll(
+                StartSender(),
+                Task.Run(async () =>
                 {
-                    try
+                    while (!_cts.Token.IsCancellationRequested)
                     {
-                        var register = await _registerQueue.ReceiveAsync(_cts.Token);
-                        if (_cts.Token.IsCancellationRequested)
+                        try
                         {
-                            break;
+                            var register = await _registerQueue.ReceiveAsync(_cts.Token);
+                            if (_cts.Token.IsCancellationRequested)
+                            {
+                                break;
+                            }
+                            var channelCt = register.TranceiverStream.CancelWhenDisposed(_cts.Token);
+                            StartReceiverForwarder(register.Channel, register.TranceiverStream, channelCt).Forget();
                         }
-                        var channelCt = register.TranceiverStream.CancelWhenDisposed(_cts.Token);
-                        StartReceiverForwarder(register.Channel, register.TranceiverStream, channelCt).Forget();
-                    }
-                    catch (Exception ex)
-                    {
-                        if (_cts.Token.IsCancellationRequested)
+                        catch (Exception ex)
                         {
-                            break;
+                            if (_cts.Token.IsCancellationRequested)
+                            {
+                                break;
+                            }
+                            _onError(ex);
                         }
-                        _onError(ex);
                     }
-                }
-            }, _cts.Token)
-        );
+                }, _cts.Token)
+            );
 
-        _onStopped();
+            _onStopped();
+        });
     }
 
     private Task StartSender()

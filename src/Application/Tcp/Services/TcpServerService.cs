@@ -60,12 +60,15 @@ public partial class TcpServerService(ILogger<TcpServerService> logger)
         while (!ct.IsCancellationRequested)
         {
             TcpClient tcpClient = await server.AcceptTcpClientAsync(ct);
-            IPAddress clientEndPoint = (tcpClient.Client.LocalEndPoint as IPEndPoint)?.Address!;
+            IPAddress clientAddress = (tcpClient.Client.LocalEndPoint as IPEndPoint)?.Address!;
             NetworkStream networkStream = tcpClient.GetStream();
             TranceiverStream tranceiverStream = new(networkStream, networkStream);
             CancellationTokenSource clientCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+
+            _logger.LogTrace("TCP server {Address}:{Port} client {ClientEndPoint} connected", _ipAddress, _port, clientAddress);
+
             onClientCallback.Invoke(tcpClient, tranceiverStream, clientCts.Token).Forget();
-            WatchLiveliness(tcpClient, networkStream, clientEndPoint, tranceiverStream, clientCts).Forget();
+            WatchLiveliness(tcpClient, networkStream, clientAddress, tranceiverStream, clientCts).Forget();
         }
     }
 
@@ -77,8 +80,6 @@ public partial class TcpServerService(ILogger<TcpServerService> logger)
             ["ServerPort"] = _port,
             ["ClientAddress"] = clientAddress,
         });
-
-        _logger.LogTrace("TCP server {Address}:{Port} client {ClientEndPoint} connected", _ipAddress, _port, clientAddress);
 
         await TcpClientHelpers.WatchLiveliness(tcpClient, networkStream, tranceiverStream, cts, _livelinessSpan);
 

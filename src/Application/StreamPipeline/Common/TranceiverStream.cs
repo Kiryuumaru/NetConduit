@@ -144,13 +144,13 @@ public partial class TranceiverStream(Stream receiverStream, Stream senderStream
 
     protected override void Dispose(bool disposing)
     {
-        CoreDispose();
-
-        if (IsDisposing)
+        if (disposing)
         {
             ReceiverStream.Dispose();
             SenderStream.Dispose();
         }
+
+        CoreDispose();
 
         base.Dispose(disposing);
     }

@@ -77,6 +77,9 @@ public partial class TcpClientService(ILogger<TcpClientService> logger)
             NetworkStream networkStream = tcpClient.GetStream();
             TranceiverStream tranceiverStream = new(networkStream, networkStream);
             CancellationTokenSource clientCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+
+            _logger.LogTrace("TCP client connected to server {ServerHost}:{ServerPort}", _ipAddress, _port);
+
             onClientCallback.Invoke(tranceiverStream, clientCts.Token).Forget();
             WatchLiveliness(tcpClient, networkStream, tranceiverStream, clientCts).Forget();
 
@@ -91,8 +94,6 @@ public partial class TcpClientService(ILogger<TcpClientService> logger)
             ["ServerAddress"] = _ipAddress,
             ["ServerPort"] = _port,
         });
-
-        _logger.LogTrace("TCP client connected to server {ServerHost}:{ServerPort}", _ipAddress, _port);
 
         await TcpClientHelpers.WatchLiveliness(tcpClient, networkStream, tranceiverStream, cts, _livelinessSpan);
 

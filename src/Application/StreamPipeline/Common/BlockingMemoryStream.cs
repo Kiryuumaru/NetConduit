@@ -15,8 +15,6 @@ public partial class BlockingMemoryStream : MemoryStream
     private readonly ManualResetEvent _dataReady = new(false);
     private readonly object _lockObj = new();
 
-    private bool _disposed = false;
-
     private long _readPosition = 0;
     private long _writePosition = 0;
 
@@ -65,13 +63,13 @@ public partial class BlockingMemoryStream : MemoryStream
     {
         int readCount = 0;
 
-        ObjectDisposedException.ThrowIf(_disposed, this);
+        ObjectDisposedException.ThrowIf(IsDisposed, this);
 
         while (readCount == 0)
         {
             _dataReady.WaitOne();
 
-            if (_disposed)
+            if (IsDisposed)
             {
                 break;
             }
@@ -98,15 +96,17 @@ public partial class BlockingMemoryStream : MemoryStream
 
     protected override void Dispose(bool disposing)
     {
-        CoreDispose();
-
-        if (IsDisposing)
+        if (disposing)
         {
-            _disposed = true;
-
-            _dataReady.Set();
-            _dataReady.Dispose();
+            try
+            {
+                _dataReady.Set();
+                _dataReady.Dispose();
+            }
+            catch { }
         }
+
+        CoreDispose();
 
         base.Dispose(disposing);
     }

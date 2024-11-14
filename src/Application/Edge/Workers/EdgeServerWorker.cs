@@ -61,7 +61,6 @@ internal class EdgeServerWorker(ILogger<EdgeServerWorker> logger, IServiceProvid
 
         using var scope = _serviceProvider.CreateScope();
         var tcpServer = scope.ServiceProvider.GetRequiredService<TcpServerService>();
-        var streamPipelineFactory = scope.ServiceProvider.GetRequiredService<StreamPipelineService>();
 
         var tcpHost = _configuration.GetServerTcpHost();
         var tcpPort = _configuration.GetServerTcpPort();
@@ -72,23 +71,32 @@ internal class EdgeServerWorker(ILogger<EdgeServerWorker> logger, IServiceProvid
 
             IPAddress clientEndPoint = (tcpClient.Client.LocalEndPoint as IPEndPoint)?.Address!;
 
-            var streamMultiplexer = streamPipelineFactory.Pipe(streamTranceiver, _bufferSize, clientCt);
-
-            return Start(tcpClient, clientEndPoint, streamMultiplexer, clientCt);
+            return Start(clientEndPoint, streamTranceiver, clientCt);
 
         }, stoppingToken);
     }
 
-    private Task Start(TcpClient tcpClient, IPAddress iPAddress, StreamMultiplexer streamMultiplexer, CancellationToken stoppingToken)
+    private Task Start(IPAddress iPAddress, TranceiverStream tranceiverStream, CancellationToken stoppingToken)
     {
-        return Task.Run(() =>
+        using var _ = _logger.BeginScopeMap(nameof(EdgeServerWorker), nameof(Start), new()
         {
-            using var _ = _logger.BeginScopeMap(nameof(EdgeServerWorker), nameof(Start), new()
-            {
-                ["ClientAddress"] = iPAddress
-            });
+            ["ClientAddress"] = iPAddress
+        });
 
-            _logger.LogInformation("Stream pipe {CLientIPEndPoint} started", iPAddress);
+        using var scope = _serviceProvider.CreateScope();
+        var streamPipelineFactory = scope.ServiceProvider.GetRequiredService<StreamPipelineService>();
+
+        var streamMultiplexer = streamPipelineFactory.Pipe(
+            tranceiverStream,
+            _bufferSize,
+            () => { _logger.LogInformation("Stream multiplexer {ClientAddress} started", iPAddress); },
+            () => { _logger.LogInformation("Stream multiplexer {ClientAddress} ended", iPAddress); },
+            ex => { _logger.LogError("Error {ClientAddress}: {Error}", iPAddress, ex.Message); },
+            stoppingToken);
+
+        _logger.LogInformation("Stream pipe {ClientAddress} started", iPAddress);
+
+        return Task.Run(() => {
 
             var commandStream = streamMultiplexer.Get(StreamPipelineService.CommandChannelKey);
 
@@ -101,19 +109,23 @@ internal class EdgeServerWorker(ILogger<EdgeServerWorker> logger, IServiceProvid
                     var bytesread = commandStream.Read(receivedBytes);
                     commandStream.Write(receivedBytes[..bytesread]);
 
-                    string receivedStr = Encoding.Default.GetString(receivedBytes[..bytesread].ToArray());
+                    string receivedStr = Encoding.Default.GetString(receivedBytes[..bytesread]);
 
                     _logger.LogInformation("received {DAT}", receivedStr);
                 }
                 catch (Exception ex)
                 {
-                    _logger.LogError("{Error}", ex.Message);
+                    if (stoppingToken.IsCancellationRequested)
+                    {
+                        break;
+                    }
+                    _logger.LogError("Error {ClientAddress}: {Error}", iPAddress, ex.Message);
                 }
 
                 stoppingToken.WaitHandle.WaitOne(100);
             }
 
-            _logger.LogInformation("Stream pipe {CLientIPEndPoint} ended", iPAddress);
+            _logger.LogInformation("Stream pipe {ClientAddress} ended", iPAddress);
 
         }, stoppingToken);
     }
