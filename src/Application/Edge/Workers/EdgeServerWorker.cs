@@ -30,7 +30,9 @@ internal class EdgeServerWorker(ILogger<EdgeServerWorker> logger, IServiceProvid
     private readonly IServiceProvider _serviceProvider = serviceProvider;
     private readonly IConfiguration _configuration = configuration;
 
-    private readonly int _bufferSize = 4096;
+    public static readonly Guid MockChannelKey = new("00000000-0000-0000-0000-000000001234");
+
+    private readonly int _bufferSize = 16384;
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
@@ -65,7 +67,7 @@ internal class EdgeServerWorker(ILogger<EdgeServerWorker> logger, IServiceProvid
         var tcpHost = _configuration.GetServerTcpHost();
         var tcpPort = _configuration.GetServerTcpPort();
 
-        await tcpServer.Start(Dns.GetHostEntry(tcpHost).AddressList.Last(), tcpPort, _bufferSize, (tcpClient, streamTranceiver, ct) =>
+        await tcpServer.Start(Dns.GetHostEntry(tcpHost).AddressList.Last(), tcpPort, (tcpClient, streamTranceiver, ct) =>
         {
             CancellationToken clientCt = streamTranceiver.CancelWhenDisposing(stoppingToken, ct);
 
@@ -86,19 +88,18 @@ internal class EdgeServerWorker(ILogger<EdgeServerWorker> logger, IServiceProvid
         using var scope = _serviceProvider.CreateScope();
         var streamPipelineFactory = scope.ServiceProvider.GetRequiredService<StreamPipelineService>();
 
-        var streamMultiplexer = streamPipelineFactory.Pipe(
+        var streamMultiplexer = streamPipelineFactory.Start(
             tranceiverStream,
-            _bufferSize,
             () => { _logger.LogInformation("Stream multiplexer {ClientAddress} started", iPAddress); },
             () => { _logger.LogInformation("Stream multiplexer {ClientAddress} ended", iPAddress); },
-            ex => { _logger.LogError("Error {ClientAddress}: {Error}", iPAddress, ex.Message); },
+            ex => { _logger.LogError("Stream multiplexer error {ClientAddress}: {Error}", iPAddress, ex.Message); },
             stoppingToken);
 
         _logger.LogInformation("Stream pipe {ClientAddress} started", iPAddress);
 
         return Task.Run(() => {
 
-            var commandStream = streamMultiplexer.Get(StreamPipelineService.CommandChannelKey);
+            var mockStream = streamMultiplexer.Set(MockChannelKey, _bufferSize);
 
             Span<byte> receivedBytes = stackalloc byte[_bufferSize];
 
@@ -106,8 +107,14 @@ internal class EdgeServerWorker(ILogger<EdgeServerWorker> logger, IServiceProvid
             {
                 try
                 {
-                    var bytesread = commandStream.Read(receivedBytes);
-                    commandStream.Write(receivedBytes[..bytesread]);
+                    var bytesread = mockStream.Read(receivedBytes);
+
+                    if (bytesread == 0)
+                    {
+                        stoppingToken.WaitHandle.WaitOne(100);
+                    } 
+
+                    mockStream.Write(receivedBytes[..bytesread]);
 
                     string receivedStr = Encoding.Default.GetString(receivedBytes[..bytesread]);
 
@@ -121,40 +128,10 @@ internal class EdgeServerWorker(ILogger<EdgeServerWorker> logger, IServiceProvid
                     }
                     _logger.LogError("Error {ClientAddress}: {Error}", iPAddress, ex.Message);
                 }
-
-                stoppingToken.WaitHandle.WaitOne(100);
             }
 
             _logger.LogInformation("Stream pipe {ClientAddress} ended", iPAddress);
 
         }, stoppingToken);
-    }
-
-    private async Task<bool> Handshake(TcpClient tcpClient, IPAddress iPAddress, TranceiverStream tranceiverStream, CancellationToken stoppingToken)
-    {
-        using var _ = _logger.BeginScopeMap(nameof(EdgeServerWorker), nameof(Handshake), new()
-        {
-            ["ClientAddress"] = iPAddress
-        });
-
-        CancellationToken ct = stoppingToken.WithTimeout(TimeSpan.FromSeconds(5));
-
-        _logger.LogInformation("Handshake {CLientIPEndPoint} started", iPAddress);
-
-        byte[] receivedBytes = new byte[_bufferSize];
-        await tranceiverStream.ReadAsync(receivedBytes, ct);
-
-        BlockingMemoryStream blockingMemoryStream = new(_bufferSize);
-        stoppingToken.Register(blockingMemoryStream.Dispose);
-        await Task.WhenAll(
-            Task.Run(async () => await StreamHelpers.ForwardStream(tranceiverStream, blockingMemoryStream, _bufferSize,
-                ex => _logger.LogError("{Error}", ex.Message), stoppingToken), stoppingToken),
-            Task.Run(async () => await StreamHelpers.ForwardStream(blockingMemoryStream, tranceiverStream, _bufferSize,
-                ex => _logger.LogError("{Error}", ex.Message), stoppingToken), stoppingToken));
-
-
-        _logger.LogInformation("Handshake {CLientIPEndPoint} ended", iPAddress);
-
-        return true;
     }
 }

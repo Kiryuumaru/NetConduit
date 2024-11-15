@@ -29,7 +29,9 @@ internal class EdgeClientWorker(ILogger<EdgeClientWorker> logger, IServiceProvid
     private readonly IServiceProvider _serviceProvider = serviceProvider;
     private readonly IConfiguration _configuration = configuration;
 
-    private readonly int _bufferSize = 4096;
+    public static readonly Guid MockChannelKey = new("00000000-0000-0000-0000-000000001234");
+
+    private readonly int _bufferSize = 16384;
 
     protected override Task ExecuteAsync(CancellationToken stoppingToken)
     {
@@ -44,14 +46,14 @@ internal class EdgeClientWorker(ILogger<EdgeClientWorker> logger, IServiceProvid
 
         using var _ = _logger.BeginScopeMap(nameof(EdgeClientWorker), nameof(Routine), new()
         {
-            ["ServerAddress"] = tcpHost,
+            ["ServerHost"] = tcpHost,
             ["ServerPort"] = tcpPort
         });
 
         using var scope = _serviceProvider.CreateScope();
         var tcpClient = scope.ServiceProvider.GetRequiredService<TcpClientService>();
 
-        await tcpClient.Start(Dns.GetHostEntry(tcpHost).AddressList.Last(), tcpPort, _bufferSize, (tranceiverStream, ct) =>
+        await tcpClient.Start(tcpHost, tcpPort, (tranceiverStream, ct) =>
         {
             CancellationToken clientCt = tranceiverStream.CancelWhenDisposing(stoppingToken, ct);
 
@@ -64,40 +66,39 @@ internal class EdgeClientWorker(ILogger<EdgeClientWorker> logger, IServiceProvid
     {
         using var _ = _logger.BeginScopeMap(nameof(EdgeClientWorker), nameof(Start), new()
         {
-            ["ServerAddress"] = tcpHost,
+            ["ServerHost"] = tcpHost,
             ["ServerPort"] = tcpPort
         });
 
         using var scope = _serviceProvider.CreateScope();
         var streamPipelineFactory = scope.ServiceProvider.GetRequiredService<StreamPipelineService>();
 
-        var streamMultiplexer = streamPipelineFactory.Pipe(
+        var streamMultiplexer = streamPipelineFactory.Start(
             tranceiverStream,
-            _bufferSize,
             () => { _logger.LogInformation("Stream multiplexer {ServerHost}:{ServerPort} started", tcpHost, tcpPort); },
             () => { _logger.LogInformation("Stream multiplexer {ServerHost}:{ServerPort} ended", tcpHost, tcpPort); },
-            ex => { _logger.LogError("Error {ServerHost}:{ServerPort}: {Error}", tcpHost, tcpPort, ex.Message); },
+            ex => { _logger.LogError("Stream multiplexer error {ServerHost}:{ServerPort}: {Error}", tcpHost, tcpPort, ex.Message); },
             stoppingToken);
 
         _logger.LogInformation("Stream pipe {ServerHost}:{ServerPort} started", tcpHost, tcpPort);
 
         return Task.Run(async () =>
         {
-            var commandStream = streamMultiplexer.Get(StreamPipelineService.CommandChannelKey);
+            var mockStream = streamMultiplexer.Set(MockChannelKey, _bufferSize);
 
             Memory<byte> receivedBytes = new byte[_bufferSize];
 
             while (!stoppingToken.IsCancellationRequested && !streamMultiplexer.IsDisposedOrDisposing)
             {
-                string sendStr = Guid.NewGuid().ToString();
+                string sendStr = StringEncoder.Random(10000);
                 byte[] sendBytes = Encoding.Default.GetBytes(sendStr);
 
                 try
                 {
                     DateTimeOffset sendTime = DateTimeOffset.UtcNow;
 
-                    await commandStream.WriteAsync(sendBytes, stoppingToken);
-                    var bytesRead = await commandStream.ReadAsync(receivedBytes, stoppingToken);
+                    await mockStream.WriteAsync(sendBytes, stoppingToken);
+                    var bytesRead = await mockStream.ReadAsync(receivedBytes, stoppingToken);
 
                     DateTimeOffset receivedTime = DateTimeOffset.UtcNow;
 

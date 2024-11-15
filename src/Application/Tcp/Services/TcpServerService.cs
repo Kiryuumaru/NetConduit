@@ -25,9 +25,8 @@ public partial class TcpServerService(ILogger<TcpServerService> logger)
     private CancellationTokenSource? _cts = null;
     private IPAddress? _ipAddress = null;
     private int _port = 0;
-    private int _bufferSize = 0;
 
-    public Task Start(IPAddress address, int port, int bufferSize, Func<TcpClient, TranceiverStream, CancellationToken, Task> onClientCallback, CancellationToken stoppingToken)
+    public Task Start(IPAddress address, int port, Func<TcpClient, TranceiverStream, CancellationToken, Task> onClientCallback, CancellationToken stoppingToken)
     {
         using var _ = _logger.BeginScopeMap(nameof(TcpServerService), nameof(Start), new()
         {
@@ -42,7 +41,6 @@ public partial class TcpServerService(ILogger<TcpServerService> logger)
 
         _ipAddress = address;
         _port = port;
-        _bufferSize = bufferSize;
 
         _cts = CancellationTokenSource.CreateLinkedTokenSource(stoppingToken);
         var ct = _cts.Token;

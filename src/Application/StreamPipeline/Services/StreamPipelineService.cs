@@ -19,26 +19,28 @@ public partial class StreamPipelineService(ILogger<StreamPipelineService> logger
     public static readonly Guid CommandChannelKey = new("00000000-0000-0000-0000-000000000001");
     public static readonly Guid LogChannelKey = new("00000000-0000-0000-0000-000000000002");
 
-    public StreamMultiplexer Pipe(
+    private const int _commanBufferSize = 4096;
+    private const int _logBufferSize = 4096;
+
+    public StreamMultiplexer Start(
         TranceiverStream tranceiverStream,
-        int bufferSize,
         Action onStarted,
         Action onStopped,
         Action<Exception> onError,
         CancellationToken stoppingToken)
     {
-        using var _ = _logger.BeginScopeMap(nameof(StreamPipelineService), nameof(Pipe));
+        using var _ = _logger.BeginScopeMap(nameof(StreamPipelineService), nameof(Start));
 
         var ct = tranceiverStream.CancelWhenDisposing(stoppingToken);
 
         ct.Register(tranceiverStream.Dispose);
 
-        var streamPipelineService = StreamMultiplexer.Create(tranceiverStream, bufferSize, onStarted, onStopped, onError, ct);
+        var streamPipelineService = StreamMultiplexer.Create(tranceiverStream, onStarted, onStopped, onError, ct);
 
         ct.Register(streamPipelineService.Dispose);
 
-        streamPipelineService.Set(CommandChannelKey, new(new BlockingMemoryStream(bufferSize), new BlockingMemoryStream(bufferSize)));
-        streamPipelineService.Set(LogChannelKey, new(new BlockingMemoryStream(bufferSize), new BlockingMemoryStream(bufferSize)));
+        streamPipelineService.Set(CommandChannelKey, _commanBufferSize);
+        streamPipelineService.Set(LogChannelKey, _logBufferSize);
 
         streamPipelineService.Start().Forget();
 
