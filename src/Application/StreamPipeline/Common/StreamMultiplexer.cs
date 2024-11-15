@@ -41,7 +41,8 @@ public partial class StreamMultiplexer
     private readonly Action<Exception> _onError;
     private readonly CancellationTokenSource _cts;
 
-    private const int _bufferSize = 1048576;
+    private const int _bufferSize = 4096;
+    //private const int _bufferSize = 1048576;
     private const int _channelSize = 16;
     private const int _totalSize = _channelSize + _bufferSize;
 

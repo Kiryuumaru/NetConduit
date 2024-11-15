@@ -118,7 +118,7 @@ internal class EdgeServerWorker(ILogger<EdgeServerWorker> logger, IServiceProvid
 
                     string receivedStr = Encoding.Default.GetString(receivedBytes[..bytesread]);
 
-                    _logger.LogInformation("received {DAT}", receivedStr);
+                    _logger.LogInformation("received {DAT} bytes", receivedStr.Length);
                 }
                 catch (Exception ex)
                 {
