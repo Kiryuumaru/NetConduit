@@ -13,7 +13,7 @@ internal partial class ChunkedTranceiverStreamHolder(TranceiverStream tranceiver
 {
     public readonly TranceiverStream TranceiverStream = tranceiverStream;
 
-    private byte[]? _chunkBytes = null;
+    private Memory<byte>? _chunkBytes = null;
     private int? _chunkPosition = null;
 
     public void WriteToReceiverStream(long length, ReadOnlySpan<byte> buffer)
@@ -27,7 +27,7 @@ internal partial class ChunkedTranceiverStreamHolder(TranceiverStream tranceiver
             else if (length > buffer.Length)
             {
                 _chunkBytes = new byte[length];
-                buffer.CopyTo(_chunkBytes.AsSpan()[..buffer.Length]);
+                buffer.CopyTo(_chunkBytes.Value.Span[..buffer.Length]);
                 _chunkPosition = buffer.Length;
             }
             else
@@ -39,26 +39,26 @@ internal partial class ChunkedTranceiverStreamHolder(TranceiverStream tranceiver
         {
             var chunkNextPos = _chunkPosition.Value + buffer.Length;
 
-            if (chunkNextPos < _chunkBytes.Length)
+            if (chunkNextPos < _chunkBytes.Value.Length)
             {
-                buffer.CopyTo(_chunkBytes.AsSpan().Slice(_chunkPosition.Value, buffer.Length));
+                buffer.CopyTo(_chunkBytes.Value.Span.Slice(_chunkPosition.Value, buffer.Length));
                 _chunkPosition = chunkNextPos;
             }
-            else if (chunkNextPos == _chunkBytes.Length)
+            else if (chunkNextPos == _chunkBytes.Value.Length)
             {
-                buffer.CopyTo(_chunkBytes.AsSpan().Slice(_chunkPosition.Value, buffer.Length));
-                TranceiverStream.ReceiverStream.Write(_chunkBytes);
+                buffer.CopyTo(_chunkBytes.Value.Span.Slice(_chunkPosition.Value, buffer.Length));
+                TranceiverStream.ReceiverStream.Write(_chunkBytes.Value.Span);
                 _chunkBytes = null;
                 _chunkPosition = null;
             }
             else
             {
-                var chunkExcess = chunkNextPos - _chunkBytes.Length;
+                var chunkExcess = chunkNextPos - _chunkBytes.Value.Length;
                 var chunkLengthToWrite = buffer.Length - chunkExcess;
-                buffer.Slice(0, chunkLengthToWrite).CopyTo(_chunkBytes.AsSpan().Slice(_chunkPosition.Value, chunkLengthToWrite));
-                TranceiverStream.ReceiverStream.Write(_chunkBytes);
+                buffer[..chunkLengthToWrite].CopyTo(_chunkBytes.Value.Span.Slice(_chunkPosition.Value, chunkLengthToWrite));
+                TranceiverStream.ReceiverStream.Write(_chunkBytes.Value.Span);
                 _chunkBytes = new byte[length - chunkLengthToWrite];
-                buffer.Slice(chunkLengthToWrite, chunkExcess).CopyTo(_chunkBytes.AsSpan()[..chunkExcess]);
+                buffer.Slice(chunkLengthToWrite, chunkExcess).CopyTo(_chunkBytes.Value.Span[..chunkExcess]);
                 _chunkPosition = chunkExcess;
             }
         }

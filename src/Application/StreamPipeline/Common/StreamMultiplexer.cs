@@ -42,12 +42,10 @@ public partial class StreamMultiplexer
     private readonly Action<Exception> _onError;
     private readonly CancellationTokenSource _cts;
 
-    private const int _chunkSize = 4096;
-    //private const int _chunkSize = 1048576;
     private const int _channelSize = 16;
     private const int _lengthSize = 8;
     private const int _headerSize = _channelSize + _lengthSize;
-    private const int _totalSize = _headerSize + _chunkSize;
+    private const int _totalSize = _headerSize + StreamPipelineDefaults.StreamMultiplexerChunkSize;
 
     private StreamMultiplexer(
         TranceiverStream mainTranceiverStream,
@@ -121,7 +119,7 @@ public partial class StreamMultiplexer
                 {
                     channelBytes.CopyTo(receivedBytes[.._channelSize]);
 
-                    var bytesChunkRead = tranceiverStream.SenderStream.Read(receivedBytes.Slice(_headerSize, _chunkSize));
+                    var bytesChunkRead = tranceiverStream.SenderStream.Read(receivedBytes.Slice(_headerSize, StreamPipelineDefaults.StreamMultiplexerChunkSize));
                     if (stoppingToken.IsCancellationRequested)
                     {
                         break;
@@ -130,7 +128,7 @@ public partial class StreamMultiplexer
                     long length = (tranceiverStream.SenderStream.Length - tranceiverStream.SenderStream.Position) + bytesChunkRead;
                     BinaryPrimitives.WriteInt64LittleEndian(receivedBytes.Slice(_channelSize, _lengthSize), length);
 
-                    _mainTranceiverStream!.Write(receivedBytes[..(_headerSize + bytesChunkRead)]);
+                    _mainTranceiverStream.Write(receivedBytes[..(_headerSize + bytesChunkRead)]);
                 }
                 catch (Exception ex)
                 {

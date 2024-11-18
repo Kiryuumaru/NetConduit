@@ -53,18 +53,19 @@ public static class ApplicationConfigurationExtensions
         configuration[HandshakeTokenKey] = handshakeToken;
     }
 
+    public const string OperationModeKey = "NET_CONDUIT_OPERATION_MODE";
     public static bool GetStartAsServerMode(this IConfiguration configuration)
     {
-        var operationMode = configuration.GetVarRefValue("NET_CONDUIT_OPERATION_MODE");
+        var operationMode = configuration.GetVarRefValue(OperationModeKey);
         return operationMode.ToLowerInvariant() switch
         {
             "server" => true,
             "client" => false,
-            _ => throw new Exception($"Invalid NET_CONDUIT_OPERATION_MODE value \"{operationMode}\"")
+            _ => throw new Exception($"Invalid {OperationModeKey} value \"{operationMode}\"")
         };
     }
     public static void SetStartAsServerMode(this IConfiguration configuration, bool? startAsServerMode)
     {
-        configuration["NET_CONDUIT_OPERATION_MODE"] = startAsServerMode.HasValue ? (startAsServerMode.Value ? "server" : "client") : null;
+        configuration[OperationModeKey] = startAsServerMode.HasValue ? (startAsServerMode.Value ? "server" : "client") : null;
     }
 }

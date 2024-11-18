@@ -78,14 +78,15 @@ public static class CommonConfigurationExtensions
         configuration[$"{Defaults.AppNameUpperSnakeCase}_MAKE_LOGS"] = makeFileLogs ? "yes" : "no";
     }
 
+    public const string LoggerLevelKey = $"{Defaults.AppNameUpperSnakeCase}_LOGGER_LEVEL";
     public static LogLevel GetLoggerLevel(this IConfiguration configuration)
     {
-        var loggerLevel = configuration.GetVarRefValueOrDefault($"{Defaults.AppNameUpperSnakeCase}_LOGGER_LEVEL", LogLevel.Information.ToString());
+        var loggerLevel = configuration.GetVarRefValueOrDefault(LoggerLevelKey, LogLevel.Information.ToString());
         return Enum.Parse<LogLevel>(loggerLevel);
     }
     public static void SetLoggerLevel(this IConfiguration configuration, LogLevel loggerLevel)
     {
-        configuration[$"{Defaults.AppNameUpperSnakeCase}_LOGGER_LEVEL"] = loggerLevel.ToString();
+        configuration[LoggerLevelKey] = loggerLevel.ToString();
     }
 
     public const string HomePathKey = $"{Defaults.AppNameUpperSnakeCase}_HOME_PATH";

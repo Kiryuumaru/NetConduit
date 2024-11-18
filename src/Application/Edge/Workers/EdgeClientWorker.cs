@@ -51,6 +51,8 @@ internal class EdgeClientWorker(ILogger<EdgeClientWorker> logger, IServiceProvid
         using var scope = _serviceProvider.CreateScope();
         var tcpClient = scope.ServiceProvider.GetRequiredService<TcpClientService>();
 
+        await Task.Delay(10000, stoppingToken);
+
         await tcpClient.Start(tcpHost, tcpPort, (tranceiverStream, ct) =>
         {
             CancellationToken clientCt = tranceiverStream.CancelWhenDisposing(stoppingToken, ct);
@@ -93,6 +95,8 @@ internal class EdgeClientWorker(ILogger<EdgeClientWorker> logger, IServiceProvid
 
             while (!stoppingToken.IsCancellationRequested && !streamMultiplexer.IsDisposedOrDisposing)
             {
+                var ict = stoppingToken.WithTimeout(TimeSpan.FromSeconds(10));
+
                 string sendStr = StringEncoder.Random(10001);
                 byte[] sendBytes = Encoding.Default.GetBytes(sendStr);
 
@@ -100,12 +104,12 @@ internal class EdgeClientWorker(ILogger<EdgeClientWorker> logger, IServiceProvid
                 {
                     DateTimeOffset sendTime = DateTimeOffset.UtcNow;
 
-                    await mockStream.WriteAsync(sendBytes, stoppingToken);
-                    var bytesRead = await mockStream.ReadAsync(receivedBytes, stoppingToken);
+                    await mockStream.WriteAsync(sendBytes, ict);
+                    var bytesRead = await mockStream.ReadAsync(receivedBytes, ict);
 
                     DateTimeOffset receivedTime = DateTimeOffset.UtcNow;
 
-                    string receivedStr = Encoding.Default.GetString(receivedBytes[..bytesRead].ToArray());
+                    string receivedStr = Encoding.Default.GetString(receivedBytes[..bytesRead].Span);
 
                     if (sendStr != receivedStr)
                     {
@@ -121,7 +125,7 @@ internal class EdgeClientWorker(ILogger<EdgeClientWorker> logger, IServiceProvid
                         if (lastLog + logSpan < DateTimeOffset.UtcNow)
                         {
                             lastLog = DateTimeOffset.UtcNow;
-                            _logger.LogInformation("Received time {TimeStamp}ms...", aveLi.Average());
+                            _logger.LogInformation("Received time {TimeStamp:0.###}ms", aveLi.Average());
                         }
                     }
                 }

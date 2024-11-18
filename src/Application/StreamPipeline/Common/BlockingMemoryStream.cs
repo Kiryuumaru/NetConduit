@@ -1,5 +1,6 @@
 ﻿using DisposableHelpers.Attributes;
 using System;
+using System.Buffers;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.IO;
@@ -12,7 +13,7 @@ namespace Application.StreamPipeline.Common;
 [Disposable]
 public partial class BlockingMemoryStream : MemoryStream
 {
-    private readonly ManualResetEvent _dataReady = new(false);
+    private readonly ManualResetEventSlim _dataReady = new(false);
     private readonly object _lockObj = new();
 
     private long _readPosition = 0;
@@ -54,9 +55,8 @@ public partial class BlockingMemoryStream : MemoryStream
             base.Position = _writePosition;
             base.Write(buffer, offset, count);
             _writePosition = base.Position;
+            _dataReady.Set();
         }
-
-        _dataReady.Set();
     }
 
     public override int Read(byte[] buffer, int offset, int count)
@@ -67,7 +67,7 @@ public partial class BlockingMemoryStream : MemoryStream
 
         while (readCount == 0)
         {
-            _dataReady.WaitOne();
+            _dataReady.Wait();
 
             if (IsDisposed)
             {
@@ -79,19 +79,88 @@ public partial class BlockingMemoryStream : MemoryStream
                 base.Position = _readPosition;
                 readCount = base.Read(buffer, offset, count);
                 _readPosition = base.Position;
-            }
-
-            if (readCount == 0)
-            {
-                _dataReady.Reset();
-            }
-            else
-            {
-                break;
+                if (readCount == 0)
+                {
+                    _dataReady.Reset();
+                }
+                else
+                {
+                    break;
+                }
             }
         }
 
         return readCount;
+    }
+
+    public override Task<int> ReadAsync(byte[] buffer, int offset, int count, CancellationToken cancellationToken)
+    {
+        int readCount = 0;
+
+        ObjectDisposedException.ThrowIf(IsDisposed, this);
+
+        while (readCount == 0)
+        {
+            _dataReady.Wait(cancellationToken);
+
+            if (IsDisposed)
+            {
+                break;
+            }
+
+            lock (_lockObj)
+            {
+                base.Position = _readPosition;
+                readCount = base.Read(buffer, offset, count);
+                _readPosition = base.Position;
+                if (readCount == 0)
+                {
+                    _dataReady.Reset();
+                }
+                else
+                {
+                    break;
+                }
+            }
+        }
+
+        return Task.FromResult(readCount);
+    }
+
+    public override ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancellationToken = default)
+    {
+        int readCount = 0;
+
+        ObjectDisposedException.ThrowIf(IsDisposed, this);
+
+        while (readCount == 0)
+        {
+            _dataReady.Wait(cancellationToken);
+
+            if (IsDisposed)
+            {
+                break;
+            }
+
+            lock (_lockObj)
+            {
+                base.Position = _readPosition;
+                byte[] sharedBuffer = ArrayPool<byte>.Shared.Rent(buffer.Length);
+                readCount = base.Read(sharedBuffer, 0, buffer.Length);
+                sharedBuffer.AsSpan().CopyTo(buffer.Span);
+                _readPosition = base.Position;
+                if (readCount == 0)
+                {
+                    _dataReady.Reset();
+                }
+                else
+                {
+                    break;
+                }
+            }
+        }
+
+        return ValueTask.FromResult(readCount);
     }
 
     protected override void Dispose(bool disposing)
@@ -100,8 +169,11 @@ public partial class BlockingMemoryStream : MemoryStream
         {
             try
             {
-                _dataReady.Set();
-                _dataReady.Dispose();
+                lock (_lockObj)
+                {
+                    _dataReady.Set();
+                    _dataReady.Dispose();
+                }
             }
             catch { }
         }

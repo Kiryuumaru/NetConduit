@@ -9,11 +9,11 @@ namespace Application.Edge.Common;
 
 public static class EdgeDefaults
 {
-    public static Guid ServerEdgeId { get; } = Guid.Empty;
+    public static readonly Guid ServerEdgeId = Guid.Empty;
 
-    public static string ServerEdgeName { get; } = "server";
+    public const string ServerEdgeName = "server";
 
-    public static int EdgeKeySize { get; } = 64;
+    public const int EdgeKeySize = 64;
 
-    public static int EdgeCommsBufferSize { get; } = 16384;
+    public const int EdgeCommsBufferSize = 16384;
 }

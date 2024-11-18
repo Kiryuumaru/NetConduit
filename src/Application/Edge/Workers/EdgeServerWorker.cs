@@ -97,8 +97,8 @@ internal class EdgeServerWorker(ILogger<EdgeServerWorker> logger, IServiceProvid
 
         _logger.LogInformation("Stream pipe {ClientAddress} started", iPAddress);
 
-        return Task.Run(() => {
-
+        return Task.Run(() =>
+        {
             Span<byte> receivedBytes = stackalloc byte[EdgeDefaults.EdgeCommsBufferSize];
 
             while (!stoppingToken.IsCancellationRequested && !streamMultiplexer.IsDisposedOrDisposing)
@@ -110,7 +110,7 @@ internal class EdgeServerWorker(ILogger<EdgeServerWorker> logger, IServiceProvid
                     if (bytesread == 0)
                     {
                         stoppingToken.WaitHandle.WaitOne(100);
-                    } 
+                    }
 
                     mockStream.Write(receivedBytes[..bytesread]);
 
