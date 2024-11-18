@@ -1,5 +1,6 @@
 ﻿using Application.Common;
 using Application.StreamPipeline.Common;
+using Application.StreamPipeline.Models;
 using DisposableHelpers.Attributes;
 using Microsoft.Extensions.Logging;
 using System;
@@ -31,7 +32,7 @@ public partial class StreamMultiplexer
         return new(mainTranceiverStream, onStarted, onStopped, onError, stoppingToken);
     }
 
-    private readonly Dictionary<Guid, TranceiverStream> _tranceiverStreamMap = [];
+    private readonly Dictionary<Guid, ChunkedTranceiverStreamHolder> _tranceiverStreamHolderMap = [];
     private readonly ReaderWriterLockSlim _rwl = new();
     private readonly BufferBlock<(Guid Channel, TranceiverStream TranceiverStream)> _registerQueue = new();
 
@@ -41,10 +42,12 @@ public partial class StreamMultiplexer
     private readonly Action<Exception> _onError;
     private readonly CancellationTokenSource _cts;
 
-    private const int _bufferSize = 4096;
-    //private const int _bufferSize = 1048576;
+    private const int _chunkSize = 4096;
+    //private const int _chunkSize = 1048576;
     private const int _channelSize = 16;
-    private const int _totalSize = _channelSize + _bufferSize;
+    private const int _lengthSize = 8;
+    private const int _headerSize = _channelSize + _lengthSize;
+    private const int _totalSize = _headerSize + _chunkSize;
 
     private StreamMultiplexer(
         TranceiverStream mainTranceiverStream,
@@ -107,6 +110,7 @@ public partial class StreamMultiplexer
         return Task.Run(() =>
         {
             Span<byte> channelBytes = stackalloc byte[_channelSize];
+            Span<byte> lengthBytes = stackalloc byte[_lengthSize];
             Span<byte> receivedBytes = stackalloc byte[_totalSize];
 
             MemoryMarshal.Write(channelBytes, in channelKey);
@@ -116,12 +120,17 @@ public partial class StreamMultiplexer
                 try
                 {
                     channelBytes.CopyTo(receivedBytes[.._channelSize]);
-                    var bytesRead = tranceiverStream.SenderStream.Read(receivedBytes.Slice(_channelSize, _bufferSize));
+
+                    var bytesChunkRead = tranceiverStream.SenderStream.Read(receivedBytes.Slice(_headerSize, _chunkSize));
                     if (stoppingToken.IsCancellationRequested)
                     {
                         break;
                     }
-                    _mainTranceiverStream!.Write(receivedBytes[..(_channelSize + bytesRead)]);
+
+                    long length = (tranceiverStream.SenderStream.Length - tranceiverStream.SenderStream.Position) + bytesChunkRead;
+                    BinaryPrimitives.WriteInt64LittleEndian(receivedBytes.Slice(_channelSize, _lengthSize), length);
+
+                    _mainTranceiverStream!.Write(receivedBytes[..(_headerSize + bytesChunkRead)]);
                 }
                 catch (Exception ex)
                 {
@@ -148,36 +157,39 @@ public partial class StreamMultiplexer
             {
                 try
                 {
-                    var bytesRead = _mainTranceiverStream.Read(receivedBytes);
+                    var bytesAllRead = _mainTranceiverStream.Read(receivedBytes);
                     if (_cts.Token.IsCancellationRequested)
                     {
                         break;
                     }
-                    if (bytesRead == 0)
+                    if (bytesAllRead == 0)
                     {
                         _cts.Token.WaitHandle.WaitOne(100);
                         continue;
                     }
-                    if (_channelSize > bytesRead)
+                    if (_headerSize > bytesAllRead)
                     {
                         throw new Exception("Sender received bytes smaller than the header size");
                     }
-                    Guid channel = new(receivedBytes[.._channelSize]);
 
-                    TranceiverStream destinationStream;
+                    int bytesChunkRead = bytesAllRead - _headerSize;
+                    Guid channelKey = new(receivedBytes[.._channelSize]);
+                    long chunkLength = BinaryPrimitives.ReadInt64LittleEndian(receivedBytes.Slice(_channelSize, _lengthSize));
+
+                    ChunkedTranceiverStreamHolder destinationStreamHolder;
 
                     try
                     {
                         _rwl.EnterReadLock();
 
-                        destinationStream = _tranceiverStreamMap[channel];
+                        destinationStreamHolder = _tranceiverStreamHolderMap[channelKey];
                     }
                     finally
                     {
                         _rwl.ExitReadLock();
                     }
 
-                    destinationStream.ReceiverStream.Write(receivedBytes[_channelSize..bytesRead]);
+                    destinationStreamHolder.WriteToReceiverStream(chunkLength, receivedBytes.Slice(_headerSize, bytesChunkRead));
                 }
                 catch (Exception ex)
                 {
@@ -198,7 +210,7 @@ public partial class StreamMultiplexer
         {
             _rwl.EnterWriteLock();
 
-            _tranceiverStreamMap[channelKey] = tranceiverStream;
+            _tranceiverStreamHolderMap[channelKey] = new(tranceiverStream);
             _registerQueue.Post((channelKey, tranceiverStream));
         }
         finally
@@ -215,7 +227,7 @@ public partial class StreamMultiplexer
 
             TranceiverStream tranceiverStream = new(new BlockingMemoryStream(bufferSize), new BlockingMemoryStream(bufferSize));
 
-            _tranceiverStreamMap[channelKey] = tranceiverStream;
+            _tranceiverStreamHolderMap[channelKey] = new(tranceiverStream);
             _registerQueue.Post((channelKey, tranceiverStream));
 
             return tranceiverStream;
@@ -235,9 +247,9 @@ public partial class StreamMultiplexer
             while (true)
             {
                 channelKey = Guid.NewGuid();
-                if (!_tranceiverStreamMap.ContainsKey(channelKey))
+                if (!_tranceiverStreamHolderMap.ContainsKey(channelKey))
                 {
-                    _tranceiverStreamMap[channelKey] = tranceiverStream;
+                    _tranceiverStreamHolderMap[channelKey] = new(tranceiverStream);
                     _registerQueue.Post((channelKey, tranceiverStream));
                     return channelKey;
                 }
@@ -255,10 +267,10 @@ public partial class StreamMultiplexer
         {
             _rwl.EnterWriteLock();
 
-            if (_tranceiverStreamMap.TryGetValue(channelKey, out TranceiverStream? tranceiverStream))
+            if (_tranceiverStreamHolderMap.TryGetValue(channelKey, out var tranceiverStreamHolder))
             {
-                tranceiverStream.Dispose();
-                return _tranceiverStreamMap.Remove(channelKey);
+                tranceiverStreamHolder.Dispose();
+                return _tranceiverStreamHolderMap.Remove(channelKey);
             }
             return false;
         }
@@ -274,7 +286,7 @@ public partial class StreamMultiplexer
         {
             _rwl.EnterReadLock();
 
-            return _tranceiverStreamMap[channelKey];
+            return _tranceiverStreamHolderMap[channelKey].TranceiverStream;
         }
         finally
         {
@@ -288,7 +300,7 @@ public partial class StreamMultiplexer
         {
             _rwl.EnterReadLock();
 
-            return _tranceiverStreamMap.ContainsKey(channelKey);
+            return _tranceiverStreamHolderMap.ContainsKey(channelKey);
         }
         finally
         {
@@ -306,7 +318,7 @@ public partial class StreamMultiplexer
 
                 _cts.Cancel();
                 _mainTranceiverStream?.Dispose();
-                foreach (var pipe in _tranceiverStreamMap.Values)
+                foreach (var pipe in _tranceiverStreamHolderMap.Values)
                 {
                     pipe.Dispose();
                 }

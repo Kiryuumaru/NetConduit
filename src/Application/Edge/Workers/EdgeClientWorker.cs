@@ -31,8 +31,6 @@ internal class EdgeClientWorker(ILogger<EdgeClientWorker> logger, IServiceProvid
 
     public static readonly Guid MockChannelKey = new("00000000-0000-0000-0000-000000001234");
 
-    private readonly int _bufferSize = 16384;
-
     protected override Task ExecuteAsync(CancellationToken stoppingToken)
     {
         RoutineExecutor.Execute(TimeSpan.FromSeconds(1), true, Routine, ex => _logger.LogError("Error: {Error}", ex.Message), stoppingToken);
@@ -82,15 +80,20 @@ internal class EdgeClientWorker(ILogger<EdgeClientWorker> logger, IServiceProvid
 
         _logger.LogInformation("Stream pipe {ServerHost}:{ServerPort} started", tcpHost, tcpPort);
 
+        int aveLent = 10;
+        TimeSpan logSpan = TimeSpan.FromSeconds(1);
+        DateTimeOffset lastLog = DateTimeOffset.UtcNow;
+        List<double> aveLi = [];
+
         return Task.Run(async () =>
         {
-            var mockStream = streamMultiplexer.Set(MockChannelKey, _bufferSize);
+            var mockStream = streamMultiplexer.Set(MockChannelKey, EdgeDefaults.EdgeCommsBufferSize);
 
-            Memory<byte> receivedBytes = new byte[_bufferSize];
+            Memory<byte> receivedBytes = new byte[EdgeDefaults.EdgeCommsBufferSize];
 
             while (!stoppingToken.IsCancellationRequested && !streamMultiplexer.IsDisposedOrDisposing)
             {
-                string sendStr = StringEncoder.Random(10000);
+                string sendStr = StringEncoder.Random(10001);
                 byte[] sendBytes = Encoding.Default.GetBytes(sendStr);
 
                 try
@@ -106,11 +109,20 @@ internal class EdgeClientWorker(ILogger<EdgeClientWorker> logger, IServiceProvid
 
                     if (sendStr != receivedStr)
                     {
-                        _logger.LogError("Mismatch: {Sent} != {Received}", sendStr, receivedStr);
+                        _logger.LogError("Mismatch: {Sent} bytes != {Received} bytes", sendStr.Length, receivedStr.Length);
                     }
                     else
                     {
-                        _logger.LogInformation("Received time {TimeStamp}ms...", (receivedTime - sendTime).TotalMilliseconds);
+                        aveLi.Add((receivedTime - sendTime).TotalMilliseconds);
+                        if (aveLi.Count > aveLent)
+                        {
+                            aveLi.RemoveAt(0);
+                        }
+                        if (lastLog + logSpan < DateTimeOffset.UtcNow)
+                        {
+                            lastLog = DateTimeOffset.UtcNow;
+                            _logger.LogInformation("Received time {TimeStamp}ms...", aveLi.Average());
+                        }
                     }
                 }
                 catch (Exception ex)
@@ -118,7 +130,7 @@ internal class EdgeClientWorker(ILogger<EdgeClientWorker> logger, IServiceProvid
                     _logger.LogError("Error {ServerHost}:{ServerPort}: {Error}", tcpHost, tcpPort, ex.Message);
                 }
 
-                await Task.Delay(1000, stoppingToken);
+                await Task.Delay(50, stoppingToken);
             }
 
             _logger.LogInformation("Stream pipe {ServerHost}:{ServerPort} ended", tcpHost, tcpPort);

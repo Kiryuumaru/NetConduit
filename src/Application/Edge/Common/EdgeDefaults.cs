@@ -14,4 +14,6 @@ public static class EdgeDefaults
     public static string ServerEdgeName { get; } = "server";
 
     public static int EdgeKeySize { get; } = 64;
+
+    public static int EdgeCommsBufferSize { get; } = 16384;
 }

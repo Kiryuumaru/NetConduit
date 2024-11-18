@@ -32,8 +32,6 @@ internal class EdgeServerWorker(ILogger<EdgeServerWorker> logger, IServiceProvid
 
     public static readonly Guid MockChannelKey = new("00000000-0000-0000-0000-000000001234");
 
-    private readonly int _bufferSize = 16384;
-
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
         using var _ = _logger.BeginScopeMap(nameof(EdgeServerWorker), nameof(ExecuteAsync));
@@ -99,9 +97,9 @@ internal class EdgeServerWorker(ILogger<EdgeServerWorker> logger, IServiceProvid
 
         return Task.Run(() => {
 
-            var mockStream = streamMultiplexer.Set(MockChannelKey, _bufferSize);
+            var mockStream = streamMultiplexer.Set(MockChannelKey, EdgeDefaults.EdgeCommsBufferSize);
 
-            Span<byte> receivedBytes = stackalloc byte[_bufferSize];
+            Span<byte> receivedBytes = stackalloc byte[EdgeDefaults.EdgeCommsBufferSize];
 
             while (!stoppingToken.IsCancellationRequested && !streamMultiplexer.IsDisposedOrDisposing)
             {
