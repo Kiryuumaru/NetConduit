@@ -5,16 +5,18 @@ builder.AddProject<Projects.Presentation>("presentation-server1")
     .WithArgs("-l", "trace")
     .WithArgs("--api-urls", "http://*:21110")
     .WithArgs("--server-host", "localhost")
-    .WithArgs("--server-port", "21000");
+    .WithArgs("--server-port", "21000")
+    .WithArgs("--home", "C:\\ProgramData\\netc\\server0");
 
-for (int i = 0; i < 4; i++)
+for (int i = 0; i < 2; i++)
 {
     builder.AddProject<Projects.Presentation>($"presentation-client{i}")
         .WithArgs("client", "start")
         .WithArgs("-l", "trace")
         .WithArgs("--api-urls", $"http://*:{31110 + i}")
         .WithArgs("--server-host", "localhost")
-        .WithArgs("--server-port", "21000");
+        .WithArgs("--server-port", "21000")
+        .WithArgs("--home", $"C:\\ProgramData\\netc\\client{i}");
 }
 
 //builder.AddProject<Projects.TestTCPMocker>("relayapi1-serverapi1")
