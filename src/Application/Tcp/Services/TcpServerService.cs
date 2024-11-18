@@ -23,15 +23,15 @@ public partial class TcpServerService(ILogger<TcpServerService> logger)
     private readonly TimeSpan _livelinessSpan = TimeSpan.FromSeconds(1);
 
     private CancellationTokenSource? _cts = null;
-    private IPAddress? _ipAddress = null;
-    private int _port = 0;
+    private string? _serverHost = null;
+    private int _serverPort = 0;
 
-    public Task Start(IPAddress address, int port, Func<TcpClient, TranceiverStream, CancellationToken, Task> onClientCallback, CancellationToken stoppingToken)
+    public Task Start(string serverHost, int serverPort, Func<TcpClient, TranceiverStream, CancellationToken, Task> onClientCallback, CancellationToken stoppingToken)
     {
         using var _ = _logger.BeginScopeMap(nameof(TcpServerService), nameof(Start), new()
         {
-            ["ServerAddress"] = address,
-            ["ServerPort"] = port,
+            ["ServerHost"] = serverHost,
+            ["ServerPort"] = serverPort,
         });
 
         if (_cts != null)
@@ -39,13 +39,15 @@ public partial class TcpServerService(ILogger<TcpServerService> logger)
             throw new Exception("TCP server already started");
         }
 
-        _ipAddress = address;
-        _port = port;
+        _serverHost = serverHost;
+        _serverPort = serverPort;
 
         _cts = CancellationTokenSource.CreateLinkedTokenSource(stoppingToken);
         var ct = _cts.Token;
 
-        TcpListener server = new(address, port);
+        var serverAddress = Dns.GetHostEntry(serverHost).AddressList.Last();
+
+        TcpListener server = new(serverAddress, serverPort);
         ct.Register(() =>
         {
             server.Stop();
@@ -56,7 +58,14 @@ public partial class TcpServerService(ILogger<TcpServerService> logger)
 
         return Task.Run(async () =>
         {
-            _logger.LogTrace("TCP server {Address}:{Port} started", address, port);
+            using var _ = _logger.BeginScopeMap(nameof(TcpServerService), nameof(Start), new()
+            {
+                ["ServerAddress"] = serverAddress,
+                ["ServerHost"] = _serverHost,
+                ["ServerPort"] = _serverPort,
+            });
+
+            _logger.LogTrace("TCP server {Address}:{Port} started", serverAddress, serverPort);
 
             while (!ct.IsCancellationRequested)
             {
@@ -68,7 +77,7 @@ public partial class TcpServerService(ILogger<TcpServerService> logger)
                     TranceiverStream tranceiverStream = new(networkStream, networkStream);
                     CancellationTokenSource clientCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
 
-                    StartClient(tcpClient, networkStream, tranceiverStream, clientAddress, clientCts, onClientCallback).Forget();
+                    StartClient(tcpClient, serverAddress, networkStream, tranceiverStream, clientAddress, clientCts, onClientCallback).Forget();
                 }
                 catch (Exception ex)
                 {
@@ -76,33 +85,34 @@ public partial class TcpServerService(ILogger<TcpServerService> logger)
                     {
                         break;
                     }
-                    _logger.LogError("Error {Address}:{Port}: {ErrorMessage}", _ipAddress, _port, ex.Message);
+                    _logger.LogError("Error {Address}:{Port}: {ErrorMessage}", serverAddress, serverPort, ex.Message);
                 }
             }
 
-            _logger.LogTrace("TCP server {Address}:{Port} ended", address, port);
+            _logger.LogTrace("TCP server {Address}:{Port} ended", serverAddress, serverPort);
 
         }, ct);
     }
 
-    private async Task StartClient(TcpClient tcpClient, NetworkStream networkStream, TranceiverStream tranceiverStream, IPAddress clientAddress, CancellationTokenSource cts, Func<TcpClient, TranceiverStream, CancellationToken, Task> onClientCallback)
+    private async Task StartClient(TcpClient tcpClient, IPAddress serverAddress, NetworkStream networkStream, TranceiverStream tranceiverStream, IPAddress clientAddress, CancellationTokenSource cts, Func<TcpClient, TranceiverStream, CancellationToken, Task> onClientCallback)
     {
         using var _ = _logger.BeginScopeMap(nameof(TcpServerService), nameof(StartClient), new()
         {
-            ["ServerAddress"] = _ipAddress,
-            ["ServerPort"] = _port,
+            ["ServerAddress"] = serverAddress,
+            ["ServerHost"] = _serverHost,
+            ["ServerPort"] = _serverPort,
             ["ClientAddress"] = clientAddress,
         });
 
         try
         {
-            _logger.LogTrace("TCP server {Address}:{Port} client {ClientEndPoint} connected", _ipAddress, _port, clientAddress);
+            _logger.LogTrace("TCP server {Address}:{Port} connected to the client {ClientAddress}", serverAddress, _serverPort, clientAddress);
 
             onClientCallback.Invoke(tcpClient, tranceiverStream, cts.Token).Forget();
 
             await TcpClientHelpers.WatchLiveliness(tcpClient, networkStream, tranceiverStream, cts, _livelinessSpan);
 
-            _logger.LogTrace("TCP server {Address}:{Port} client {ClientEndPoint} disconnected", _ipAddress, _port, clientAddress);
+            _logger.LogTrace("TCP server {Address}:{Port} disconnected from the client {ClientAddress}", serverAddress, _serverPort, clientAddress);
         }
         catch (Exception ex)
         {
@@ -110,7 +120,7 @@ public partial class TcpServerService(ILogger<TcpServerService> logger)
             {
                 return;
             }
-            _logger.LogError("Error {Address}:{Port} client {ClientEndPoint}: {ErrorMessage}", _ipAddress, _port, clientAddress, ex.Message);
+            _logger.LogError("Error {Address}:{Port} client {ClientAddress}: {ErrorMessage}", serverAddress, _serverPort, clientAddress, ex.Message);
         }
     }
 

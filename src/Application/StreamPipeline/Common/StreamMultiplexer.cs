@@ -67,38 +67,42 @@ public partial class StreamMultiplexer
         return Task.Run(async () =>
         {
             await Task.WhenAll(
-                Demultiplex(),
-                Task.Run(async () =>
-                {
-                    while (!_cts.Token.IsCancellationRequested)
-                    {
-                        try
-                        {
-                            var register = await _registerQueue.ReceiveAsync(_cts.Token);
-                            if (_cts.Token.IsCancellationRequested)
-                            {
-                                break;
-                            }
-                            var channelCt = register.TranceiverStream.CancelWhenDisposed(_cts.Token);
-                            Multiplex(register.Channel, register.TranceiverStream, channelCt).Forget();
-                        }
-                        catch (Exception ex)
-                        {
-                            if (_cts.Token.IsCancellationRequested)
-                            {
-                                break;
-                            }
-                            _onError(ex);
-                        }
-                    }
-                }, _cts.Token)
+                DemultiplexAll(),
+                MultiplexAll()
             );
 
             _onStopped();
         });
     }
+    private Task MultiplexAll()
+    {
+        return Task.Run(async () =>
+        {
+            while (!_cts.Token.IsCancellationRequested)
+            {
+                try
+                {
+                    var register = await _registerQueue.ReceiveAsync(_cts.Token);
+                    if (_cts.Token.IsCancellationRequested)
+                    {
+                        break;
+                    }
+                    var channelCt = register.TranceiverStream.CancelWhenDisposed(_cts.Token);
+                    MultiplexOne(register.Channel, register.TranceiverStream, channelCt).Forget();
+                }
+                catch (Exception ex)
+                {
+                    if (_cts.Token.IsCancellationRequested)
+                    {
+                        break;
+                    }
+                    _onError(ex);
+                }
+            }
+        }, _cts.Token);
+    }
 
-    private Task Multiplex(Guid channelKey, TranceiverStream tranceiverStream, CancellationToken stoppingToken)
+    private Task MultiplexOne(Guid channelKey, TranceiverStream tranceiverStream, CancellationToken stoppingToken)
     {
         return Task.Run(() =>
         {
@@ -134,7 +138,7 @@ public partial class StreamMultiplexer
         }, stoppingToken);
     }
 
-    private Task Demultiplex()
+    private Task DemultiplexAll()
     {
         return Task.Run(() =>
         {

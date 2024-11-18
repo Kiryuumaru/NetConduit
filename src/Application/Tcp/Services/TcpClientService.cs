@@ -109,13 +109,13 @@ public partial class TcpClientService(ILogger<TcpClientService> logger)
 
         try
         {
-            _logger.LogTrace("TCP client connected to server {Host}:{Port}", serverAddress, _serverPort);
+            _logger.LogTrace("TCP client connected to the server {Host}:{Port}", serverAddress, _serverPort);
 
             onClientCallback.Invoke(tranceiverStream, cts.Token).Forget();
 
             await TcpClientHelpers.WatchLiveliness(tcpClient, networkStream, tranceiverStream, cts, _livelinessSpan);
 
-            _logger.LogTrace("TCP client disconnected from server {Host}:{Port}", serverAddress, _serverPort);
+            _logger.LogTrace("TCP client disconnected from the server {Host}:{Port}", serverAddress, _serverPort);
         }
         catch (Exception ex)
         {

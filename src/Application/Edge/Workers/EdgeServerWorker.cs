@@ -67,7 +67,7 @@ internal class EdgeServerWorker(ILogger<EdgeServerWorker> logger, IServiceProvid
         var tcpHost = _configuration.GetServerTcpHost();
         var tcpPort = _configuration.GetServerTcpPort();
 
-        await tcpServer.Start(Dns.GetHostEntry(tcpHost).AddressList.Last(), tcpPort, (tcpClient, streamTranceiver, ct) =>
+        await tcpServer.Start(tcpHost, tcpPort, (tcpClient, streamTranceiver, ct) =>
         {
             CancellationToken clientCt = streamTranceiver.CancelWhenDisposing(stoppingToken, ct);
 

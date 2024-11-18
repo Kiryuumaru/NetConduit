@@ -8,6 +8,12 @@
 	</PropertyGroup>
 
 	<ItemGroup>
+	  <Compile Remove="StreamPipeline\Pipes\**" />
+	  <EmbeddedResource Remove="StreamPipeline\Pipes\**" />
+	  <None Remove="StreamPipeline\Pipes\**" />
+	</ItemGroup>
+
+	<ItemGroup>
 		<PackageReference Include="AbsolutePathHelpers" Version="0.1.48" />
 		<PackageReference Include="DisposableHelpers" Version="1.2.59" />
 		<PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions" Version="8.0.2" />
@@ -20,10 +26,6 @@
 
 	<ItemGroup>
 		<ProjectReference Include="..\Domain\Domain.csproj" />
-	</ItemGroup>
-
-	<ItemGroup>
-	  <Folder Include="StreamPipeline\Pipes\" />
 	</ItemGroup>
 
 </Project>
