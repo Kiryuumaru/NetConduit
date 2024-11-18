@@ -93,11 +93,11 @@ internal class EdgeServerWorker(ILogger<EdgeServerWorker> logger, IServiceProvid
             ex => { _logger.LogError("Stream multiplexer {ClientAddress} error: {Error}", iPAddress, ex.Message); },
             stoppingToken);
 
+        var mockStream = streamMultiplexer.Set(MockChannelKey, EdgeDefaults.EdgeCommsBufferSize);
+
         _logger.LogInformation("Stream pipe {ClientAddress} started", iPAddress);
 
         return Task.Run(() => {
-
-            var mockStream = streamMultiplexer.Set(MockChannelKey, EdgeDefaults.EdgeCommsBufferSize);
 
             Span<byte> receivedBytes = stackalloc byte[EdgeDefaults.EdgeCommsBufferSize];
 
