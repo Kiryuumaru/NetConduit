@@ -92,7 +92,7 @@ internal class EdgeServerWorker(ILogger<EdgeServerWorker> logger, IServiceProvid
             tranceiverStream,
             () => { _logger.LogInformation("Stream multiplexer {ClientAddress} started", iPAddress); },
             () => { _logger.LogInformation("Stream multiplexer {ClientAddress} ended", iPAddress); },
-            ex => { _logger.LogError("Stream multiplexer error {ClientAddress}: {Error}", iPAddress, ex.Message); },
+            ex => { _logger.LogError("Stream multiplexer {ClientAddress} error: {Error}", iPAddress, ex.Message); },
             stoppingToken);
 
         _logger.LogInformation("Stream pipe {ClientAddress} started", iPAddress);
