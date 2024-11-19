@@ -51,7 +51,7 @@ internal class EdgeClientWorker(ILogger<EdgeClientWorker> logger, IServiceProvid
         using var scope = _serviceProvider.CreateScope();
         var tcpClient = scope.ServiceProvider.GetRequiredService<TcpClientService>();
 
-        await Task.Delay(10000, stoppingToken);
+        //await Task.Delay(10000, stoppingToken);
 
         await tcpClient.Start(tcpHost, tcpPort, (tranceiverStream, ct) =>
         {
@@ -95,7 +95,7 @@ internal class EdgeClientWorker(ILogger<EdgeClientWorker> logger, IServiceProvid
 
             while (!stoppingToken.IsCancellationRequested && !streamMultiplexer.IsDisposedOrDisposing)
             {
-                var ict = stoppingToken.WithTimeout(TimeSpan.FromSeconds(10));
+                var ict = stoppingToken.WithTimeout(TimeSpan.FromSeconds(30));
 
                 string sendStr = StringEncoder.Random(10001);
                 byte[] sendBytes = Encoding.Default.GetBytes(sendStr);

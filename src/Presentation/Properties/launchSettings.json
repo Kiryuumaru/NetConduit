@@ -1,12 +1,21 @@
-﻿{
-  "$schema": "http://json.schemastore.org/launchsettings.json",
+{
   "profiles": {
-    "default": {
+    "default-client": {
       "commandName": "Project",
-      "dotnetRunMessages": true,
+      "commandLineArgs": "client start -l trace --api-urls \"http://*:31110\" --server-host localhost --server-port 21000 --home C:\\ProgramData\\netc\\client0",
       "environmentVariables": {
         "ASPNETCORE_ENVIRONMENT": "Development"
-      }
+      },
+      "dotnetRunMessages": true
+    },
+    "default-server": {
+      "commandName": "Project",
+      "commandLineArgs": "server start -l trace --api-urls \"http://*:21110\" --server-host localhost --server-port 21000 --home C:\\ProgramData\\netc\\server0",
+      "environmentVariables": {
+        "ASPNETCORE_ENVIRONMENT": "Development"
+      },
+      "dotnetRunMessages": true
     }
-  }
+  },
+  "$schema": "http://json.schemastore.org/launchsettings.json"
 }

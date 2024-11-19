@@ -11,7 +11,7 @@ using System.Threading.Tasks;
 namespace Application.StreamPipeline.Common;
 
 [Disposable]
-public partial class BlockingMemoryStream : MemoryStream
+public partial class BlockingMemoryStream(int capacity) : MemoryStream(capacity)
 {
     private readonly ManualResetEventSlim _dataReady = new(false);
     private readonly object _lockObj = new();
@@ -27,139 +27,31 @@ public partial class BlockingMemoryStream : MemoryStream
         set => throw new NotSupportedException();
     }
 
-    public BlockingMemoryStream()
-        : base() { }
+    public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();
 
-    public BlockingMemoryStream(int capacity)
-        : base(capacity) { }
-
-    public BlockingMemoryStream(byte[] buffer)
-        : base(buffer) { }
-
-    public BlockingMemoryStream(byte[] buffer, bool writable)
-        : base(buffer, writable) { }
-
-    public BlockingMemoryStream(byte[] buffer, int index, int count)
-        : base(buffer, index, count) { }
-
-    public BlockingMemoryStream(byte[] buffer, int index, int count, bool writable)
-        : base(buffer, index, count, writable) { }
-
-    public BlockingMemoryStream(byte[] buffer, int index, int count, bool writable, bool publiclyVisible)
-        : base(buffer, index, count, writable, publiclyVisible) { }
+    public override void SetLength(long value) => throw new NotSupportedException();
 
     public override void Write(byte[] buffer, int offset, int count)
     {
-        lock (_lockObj)
-        {
-            base.Position = _writePosition;
-            base.Write(buffer, offset, count);
-            _writePosition = base.Position;
-            _dataReady.Set();
-        }
+        CoreWrite(buffer, offset, count);
     }
 
     public override int Read(byte[] buffer, int offset, int count)
     {
-        int readCount = 0;
-
-        ObjectDisposedException.ThrowIf(IsDisposed, this);
-
-        while (readCount == 0)
-        {
-            _dataReady.Wait();
-
-            if (IsDisposed)
-            {
-                break;
-            }
-
-            lock (_lockObj)
-            {
-                base.Position = _readPosition;
-                readCount = base.Read(buffer, offset, count);
-                _readPosition = base.Position;
-                if (readCount == 0)
-                {
-                    _dataReady.Reset();
-                }
-                else
-                {
-                    break;
-                }
-            }
-        }
-
-        return readCount;
+        return CoreRead(buffer, offset, count, default);
     }
 
     public override Task<int> ReadAsync(byte[] buffer, int offset, int count, CancellationToken cancellationToken)
     {
-        int readCount = 0;
-
-        ObjectDisposedException.ThrowIf(IsDisposed, this);
-
-        while (readCount == 0)
-        {
-            _dataReady.Wait(cancellationToken);
-
-            if (IsDisposed)
-            {
-                break;
-            }
-
-            lock (_lockObj)
-            {
-                base.Position = _readPosition;
-                readCount = base.Read(buffer, offset, count);
-                _readPosition = base.Position;
-                if (readCount == 0)
-                {
-                    _dataReady.Reset();
-                }
-                else
-                {
-                    break;
-                }
-            }
-        }
-
+        int readCount = CoreRead(buffer, offset, count, cancellationToken);
         return Task.FromResult(readCount);
     }
 
     public override ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancellationToken = default)
     {
-        int readCount = 0;
-
-        ObjectDisposedException.ThrowIf(IsDisposed, this);
-
-        while (readCount == 0)
-        {
-            _dataReady.Wait(cancellationToken);
-
-            if (IsDisposed)
-            {
-                break;
-            }
-
-            lock (_lockObj)
-            {
-                base.Position = _readPosition;
-                byte[] sharedBuffer = ArrayPool<byte>.Shared.Rent(buffer.Length);
-                readCount = base.Read(sharedBuffer, 0, buffer.Length);
-                sharedBuffer.AsSpan().CopyTo(buffer.Span);
-                _readPosition = base.Position;
-                if (readCount == 0)
-                {
-                    _dataReady.Reset();
-                }
-                else
-                {
-                    break;
-                }
-            }
-        }
-
+        byte[] sharedBuffer = ArrayPool<byte>.Shared.Rent(buffer.Length);
+        int readCount = CoreRead(sharedBuffer, 0, buffer.Length, cancellationToken);
+        sharedBuffer.AsSpan().CopyTo(buffer.Span);
         return ValueTask.FromResult(readCount);
     }
 
@@ -183,9 +75,57 @@ public partial class BlockingMemoryStream : MemoryStream
         base.Dispose(disposing);
     }
 
-    public override long Seek(long offset, SeekOrigin origin) =>
-        throw new NotSupportedException();
+    public int CoreRead(byte[] buffer, int offset, int count, CancellationToken cancellationToken)
+    {
+        int readCount = 0;
 
-    public override void SetLength(long value) =>
-        throw new NotSupportedException();
+        ObjectDisposedException.ThrowIf(IsDisposed, this);
+
+        while (readCount == 0)
+        {
+            _dataReady.Wait(cancellationToken);
+
+            if (IsDisposed)
+            {
+                break;
+            }
+
+            lock (_lockObj)
+            {
+                base.Position = _readPosition;
+                readCount = base.Read(buffer, offset, count);
+                _readPosition = base.Position;
+
+                if (readCount == 0)
+                {
+                    _dataReady.Reset();
+                }
+                else
+                {
+                    if (_readPosition == _writePosition)
+                    {
+                        base.SetLength(0);
+                        base.Position = 0;
+                        _readPosition = 0;
+                        _writePosition = 0;
+                    }
+
+                    break;
+                }
+            }
+        }
+
+        return readCount;
+    }
+
+    public void CoreWrite(byte[] buffer, int offset, int count)
+    {
+        lock (_lockObj)
+        {
+            base.Position = _writePosition;
+            base.Write(buffer, offset, count);
+            _writePosition = base.Position;
+            _dataReady.Set();
+        }
+    }
 }

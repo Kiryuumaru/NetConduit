@@ -8,7 +8,7 @@ namespace Application.Common;
 
 public static class TaskUtils
 {
-    public static async Task DelaySafe(int milliseconds, CancellationToken cancellationToken = default)
+    public static async Task DelayAndForget(int milliseconds, CancellationToken cancellationToken = default)
     {
         try
         {
@@ -17,7 +17,7 @@ public static class TaskUtils
         catch { }
     }
 
-    public static async Task DelaySafe(TimeSpan timeSpan, CancellationToken cancellationToken = default)
+    public static async Task DelayAndForget(TimeSpan timeSpan, CancellationToken cancellationToken = default)
     {
         try
         {

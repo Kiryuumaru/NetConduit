@@ -7,6 +7,7 @@ using Application.LocalStore.Services;
 using Application.ServiceMaster.Services;
 using Application.StreamPipeline.Services;
 using Application.Tcp.Services;
+using Application.Watchdog.Workers;
 using ApplicationBuilderHelpers;
 using Microsoft.Extensions.DependencyInjection;
 
@@ -28,6 +29,8 @@ public class Application : ApplicationDependency
 
         services.AddTransient<TcpClientService>();
         services.AddTransient<TcpServerService>();
+
+        services.AddHostedService<GCCollector>();
 
         if (applicationBuilder.Configuration.GetStartAsServerMode())
         {

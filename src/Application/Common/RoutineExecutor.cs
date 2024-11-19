@@ -30,7 +30,7 @@ public static class RoutineExecutor
             }
             else
             {
-                await Task.Delay(10);
+                await TaskUtils.DelayAndForget(10, stoppingToken);
             }
         }
     }
