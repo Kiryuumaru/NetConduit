@@ -20,6 +20,11 @@ public partial class StreamPipelineService(ILogger<StreamPipelineService> logger
 
     private CancellationTokenSource? _cts;
 
+    private StreamMultiplexer GetMux()
+    {
+        return _streamMultiplexer ?? throw new Exception($"{nameof(StreamPipelineService)} not started");
+    }
+
     public void Start(StreamMultiplexer streamMultiplexer, CancellationToken stoppingToken)
     {
         using var _ = _logger.BeginScopeMap(nameof(StreamPipelineService), nameof(Start));
@@ -37,6 +42,6 @@ public partial class StreamPipelineService(ILogger<StreamPipelineService> logger
 
     public TranceiverStream Set(Guid channelKey, int bufferSize)
     {
-        return _streamMultiplexer!.Set(channelKey, bufferSize);
+        return GetMux().Set(channelKey, bufferSize);
     }
 }

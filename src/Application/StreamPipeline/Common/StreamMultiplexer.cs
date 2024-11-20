@@ -208,6 +208,11 @@ public partial class StreamMultiplexer
         {
             _rwl.EnterWriteLock();
 
+            if (_tranceiverStreamHolderMap.ContainsKey(channelKey))
+            {
+                throw new Exception($"{channelKey} channel already exists");
+            }
+
             _tranceiverStreamHolderMap[channelKey] = new(tranceiverStream);
             _registerQueue.Post((channelKey, tranceiverStream));
         }
@@ -222,6 +227,11 @@ public partial class StreamMultiplexer
         try
         {
             _rwl.EnterWriteLock();
+
+            if (_tranceiverStreamHolderMap.ContainsKey(channelKey))
+            {
+                throw new Exception($"{channelKey} channel already exists");
+            }
 
             TranceiverStream tranceiverStream = new(new BlockingMemoryStream(bufferSize), new BlockingMemoryStream(bufferSize));
 
