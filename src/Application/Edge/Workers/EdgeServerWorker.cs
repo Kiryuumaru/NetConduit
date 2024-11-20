@@ -30,8 +30,6 @@ internal class EdgeServerWorker(ILogger<EdgeServerWorker> logger, IServiceProvid
     private readonly IServiceProvider _serviceProvider = serviceProvider;
     private readonly IConfiguration _configuration = configuration;
 
-    public static readonly Guid MockChannelKey = new("00000000-0000-0000-0000-000000001234");
-
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
         using var _ = _logger.BeginScopeMap(nameof(EdgeServerWorker), nameof(ExecuteAsync));
@@ -84,7 +82,7 @@ internal class EdgeServerWorker(ILogger<EdgeServerWorker> logger, IServiceProvid
         });
 
         using var scope = _serviceProvider.CreateScope();
-        var streamPipelineFactory = scope.ServiceProvider.GetRequiredService<StreamPipelineService>();
+        var streamPipelineFactory = scope.ServiceProvider.GetRequiredService<StreamPipelineFactory>();
 
         var streamMultiplexer = streamPipelineFactory.Start(
             tranceiverStream,
@@ -93,7 +91,7 @@ internal class EdgeServerWorker(ILogger<EdgeServerWorker> logger, IServiceProvid
             ex => { _logger.LogError("Stream multiplexer {ClientAddress} error: {Error}", iPAddress, ex.Message); },
             stoppingToken);
 
-        var mockStream = streamMultiplexer.Set(MockChannelKey, EdgeDefaults.EdgeCommsBufferSize);
+        var mockStream = streamMultiplexer.Set(EdgeDefaults.MockChannelKey, EdgeDefaults.EdgeCommsBufferSize);
 
         _logger.LogInformation("Stream pipe {ClientAddress} started", iPAddress);
 

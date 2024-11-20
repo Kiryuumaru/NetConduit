@@ -29,8 +29,6 @@ internal class EdgeClientWorker(ILogger<EdgeClientWorker> logger, IServiceProvid
     private readonly IServiceProvider _serviceProvider = serviceProvider;
     private readonly IConfiguration _configuration = configuration;
 
-    public static readonly Guid MockChannelKey = new("00000000-0000-0000-0000-000000001234");
-
     protected override Task ExecuteAsync(CancellationToken stoppingToken)
     {
         RoutineExecutor.Execute(TimeSpan.FromSeconds(1), true, Routine, ex => _logger.LogError("Error: {Error}", ex.Message), stoppingToken);
@@ -51,7 +49,7 @@ internal class EdgeClientWorker(ILogger<EdgeClientWorker> logger, IServiceProvid
         using var scope = _serviceProvider.CreateScope();
         var tcpClient = scope.ServiceProvider.GetRequiredService<TcpClientService>();
 
-        //await Task.Delay(10000, stoppingToken);
+        await Task.Delay(10000, stoppingToken);
 
         await tcpClient.Start(tcpHost, tcpPort, (tranceiverStream, ct) =>
         {
@@ -71,7 +69,7 @@ internal class EdgeClientWorker(ILogger<EdgeClientWorker> logger, IServiceProvid
         });
 
         using var scope = _serviceProvider.CreateScope();
-        var streamPipelineFactory = scope.ServiceProvider.GetRequiredService<StreamPipelineService>();
+        var streamPipelineFactory = scope.ServiceProvider.GetRequiredService<StreamPipelineFactory>();
 
         var streamMultiplexer = streamPipelineFactory.Start(
             tranceiverStream,
@@ -79,6 +77,8 @@ internal class EdgeClientWorker(ILogger<EdgeClientWorker> logger, IServiceProvid
             () => { _logger.LogInformation("Stream multiplexer {ServerHost}:{ServerPort} ended", tcpHost, tcpPort); },
             ex => { _logger.LogError("Stream multiplexer {ServerHost}:{ServerPort} error: {Error}", tcpHost, tcpPort, ex.Message); },
             stoppingToken);
+
+        var mockStream = streamMultiplexer.Set(EdgeDefaults.MockChannelKey, EdgeDefaults.EdgeCommsBufferSize);
 
         _logger.LogInformation("Stream pipe {ServerHost}:{ServerPort} started", tcpHost, tcpPort);
 
@@ -89,13 +89,11 @@ internal class EdgeClientWorker(ILogger<EdgeClientWorker> logger, IServiceProvid
 
         return Task.Run(async () =>
         {
-            var mockStream = streamMultiplexer.Set(MockChannelKey, EdgeDefaults.EdgeCommsBufferSize);
-
             Memory<byte> receivedBytes = new byte[EdgeDefaults.EdgeCommsBufferSize];
 
             while (!stoppingToken.IsCancellationRequested && !streamMultiplexer.IsDisposedOrDisposing)
             {
-                var ict = stoppingToken.WithTimeout(TimeSpan.FromSeconds(30));
+                var ict = stoppingToken.WithTimeout(TimeSpan.FromMinutes(5));
 
                 string sendStr = StringEncoder.Random(10001);
                 byte[] sendBytes = Encoding.Default.GetBytes(sendStr);
