@@ -8,7 +8,12 @@ namespace Application.StreamPipeline.Common;
 
 public static class StreamPipelineDefaults
 {
+    //public const int StreamMultiplexerChunkSize = 256;
+    //public const int StreamMultiplexerChunkSize = 512;
+    //public const int StreamMultiplexerChunkSize = 1024;
+    //public const int StreamMultiplexerChunkSize = 2048;
     public const int StreamMultiplexerChunkSize = 4096;
+    //public const int StreamMultiplexerChunkSize = 8196;
     //public const int StreamMultiplexerChunkSize = 16384;
     //public const int StreamMultiplexerChunkSize = 32768;
 

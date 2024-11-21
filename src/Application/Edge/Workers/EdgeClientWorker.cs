@@ -87,9 +87,20 @@ internal class EdgeClientWorker(ILogger<EdgeClientWorker> logger, IServiceProvid
 
         //return StartMockStreamMessaging(streamPipelineService, stoppingToken);
         //return StartMockStreamRaw(streamPipelineService, tcpHost, tcpPort, stoppingToken);
+        //return Task.WhenAll(
+        //    StartMockStreamRaw(EdgeDefaults.MockChannelKey0, streamPipelineService, tcpHost, tcpPort, stoppingToken));
         return Task.WhenAll(
+            StartMockStreamRaw(EdgeDefaults.MockChannelKey0, streamPipelineService, tcpHost, tcpPort, stoppingToken),
             StartMockStreamRaw(EdgeDefaults.MockChannelKey1, streamPipelineService, tcpHost, tcpPort, stoppingToken),
-            StartMockStreamRaw(EdgeDefaults.MockChannelKey2, streamPipelineService, tcpHost, tcpPort, stoppingToken));
+            StartMockStreamRaw(EdgeDefaults.MockChannelKey2, streamPipelineService, tcpHost, tcpPort, stoppingToken),
+            StartMockStreamRaw(EdgeDefaults.MockChannelKey3, streamPipelineService, tcpHost, tcpPort, stoppingToken),
+            StartMockStreamRaw(EdgeDefaults.MockChannelKey4, streamPipelineService, tcpHost, tcpPort, stoppingToken),
+            StartMockStreamRaw(EdgeDefaults.MockChannelKey5, streamPipelineService, tcpHost, tcpPort, stoppingToken),
+            StartMockStreamRaw(EdgeDefaults.MockChannelKey6, streamPipelineService, tcpHost, tcpPort, stoppingToken),
+            StartMockStreamRaw(EdgeDefaults.MockChannelKey7, streamPipelineService, tcpHost, tcpPort, stoppingToken),
+            StartMockStreamRaw(EdgeDefaults.MockChannelKey8, streamPipelineService, tcpHost, tcpPort, stoppingToken),
+            StartMockStreamRaw(EdgeDefaults.MockChannelKey9, streamPipelineService, tcpHost, tcpPort, stoppingToken),
+            StartMockStreamMessaging(streamPipelineService, stoppingToken));
 
         //return Task.WhenAll(
         //    StartMockStreamMessaging(streamPipelineService, stoppingToken),
@@ -166,16 +177,17 @@ internal class EdgeClientWorker(ILogger<EdgeClientWorker> logger, IServiceProvid
             }, stoppingToken));
     }
 
+    int mockStreamRawAveLent = 40;
+    TimeSpan mockStreamRawLogSpan = TimeSpan.FromSeconds(1);
+    DateTimeOffset mockStreamRawLastLog = DateTimeOffset.MinValue;
+    List<double> mockStreamRawAveLi = [];
+    SemaphoreSlim aveLocker = new(1);
     private Task StartMockStreamRaw(Guid guid, StreamPipelineService streamPipelineService, string tcpHost, int tcpPort, CancellationToken stoppingToken)
     {
         var mockStream = streamPipelineService.Set(guid, EdgeDefaults.EdgeCommsBufferSize);
 
         _logger.LogInformation("Stream pipe {ServerHost}:{ServerPort} started", tcpHost, tcpPort);
 
-        int aveLent = 10;
-        TimeSpan logSpan = TimeSpan.FromSeconds(1);
-        DateTimeOffset lastLog = DateTimeOffset.MinValue;
-        List<double> aveLi = [];
 
         return Task.Run(async () =>
         {
@@ -186,6 +198,7 @@ internal class EdgeClientWorker(ILogger<EdgeClientWorker> logger, IServiceProvid
                 var ict = stoppingToken.WithTimeout(TimeSpan.FromMinutes(5));
 
                 string sendStr = StringEncoder.Random(10001);
+                //string sendStr = StringEncoder.Random(Random.Shared.Next(10000));
                 byte[] sendBytes = Encoding.Default.GetBytes(sendStr);
 
                 try
@@ -205,15 +218,24 @@ internal class EdgeClientWorker(ILogger<EdgeClientWorker> logger, IServiceProvid
                     }
                     else
                     {
-                        aveLi.Add((receivedTime - sendTime).TotalMilliseconds);
-                        if (aveLi.Count > aveLent)
+                        try
                         {
-                            aveLi.RemoveAt(0);
+                            await aveLocker.WaitAsync(stoppingToken);
+
+                            mockStreamRawAveLi.Add((receivedTime - sendTime).TotalMilliseconds);
+                            while (mockStreamRawAveLi.Count > mockStreamRawAveLent)
+                            {
+                                mockStreamRawAveLi.RemoveAt(0);
+                            }
+                            if (mockStreamRawLastLog + mockStreamRawLogSpan < DateTimeOffset.UtcNow)
+                            {
+                                mockStreamRawLastLog = DateTimeOffset.UtcNow;
+                                _logger.LogInformation("Received time {TimeStamp:0.###}ms", mockStreamRawAveLi.Average());
+                            }
                         }
-                        if (lastLog + logSpan < DateTimeOffset.UtcNow)
+                        finally
                         {
-                            lastLog = DateTimeOffset.UtcNow;
-                            _logger.LogInformation("Received time {TimeStamp:0.###}ms", aveLi.Average());
+                            aveLocker.Release();
                         }
                     }
                 }

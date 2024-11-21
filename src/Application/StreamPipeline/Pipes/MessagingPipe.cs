@@ -24,6 +24,9 @@ public class MessagingPipe<T>(ILogger<MessagingPipe<T>> logger) : BasePipe
     private JsonSerializerOptions? _jsonSerializerOptions = null;
     private Func<MessagingPipePayload<T>, Task>? _onMessageCallback = null;
 
+    private const string _paddingValue = "endofchunk";
+    private const int _paddingSize = 10;
+
     private async Task StartSend(TranceiverStream tranceiverStream, CancellationToken stoppingToken)
     {
         using var _ = _logger.BeginScopeMap(nameof(MessagingPipe<T>), nameof(StartSend), new()

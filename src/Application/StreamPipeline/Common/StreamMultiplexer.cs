@@ -42,10 +42,22 @@ public partial class StreamMultiplexer
     private readonly Action<Exception> _onError;
     private readonly CancellationTokenSource _cts;
 
-    private const int _channelSize = 16;
-    private const int _lengthSize = 8;
-    private const int _headerSize = _channelSize + _lengthSize;
+    private const string _paddingValue = "endofchunk";
+    private const int _paddingSize = 10;
+
+    private const int _channelKeySize = 16;
+    private const int _packetLengthSize = 8;
+    private const int _chunkLengthSize = 4;
+    private const int _headerSize = _paddingSize + _channelKeySize + _packetLengthSize + _chunkLengthSize;
     private const int _totalSize = _headerSize + StreamPipelineDefaults.StreamMultiplexerChunkSize;
+
+    private const int _paddingPos = 0;
+    private const int _channelKeyPos = _paddingPos + _paddingSize;
+    private const int _packetLengthPos = _channelKeyPos + _channelKeySize;
+    private const int _chunkLengthPos = _packetLengthPos + _packetLengthSize;
+    private const int _chunkPos = _chunkLengthPos + _chunkLengthSize;
+
+    private readonly byte[] _padding;
 
     private StreamMultiplexer(
         TranceiverStream mainTranceiverStream,
@@ -59,6 +71,13 @@ public partial class StreamMultiplexer
         _onStopped = onStopped;
         _onError = onError;
         _cts = CancellationTokenSource.CreateLinkedTokenSource(stoppingToken, _mainTranceiverStream.CancelWhenDisposing(stoppingToken));
+
+        _padding = Encoding.Default.GetBytes(_paddingValue);
+
+        if (_padding.Length != _paddingSize)
+        {
+            throw new Exception("Padding incorrect size");
+        }
     }
 
     public Task Start()
@@ -107,8 +126,8 @@ public partial class StreamMultiplexer
     {
         return Task.Run(() =>
         {
-            Span<byte> channelBytes = stackalloc byte[_channelSize];
-            Span<byte> lengthBytes = stackalloc byte[_lengthSize];
+            Span<byte> paddingBytes = _padding.AsSpan();
+            Span<byte> channelBytes = stackalloc byte[_channelKeySize];
             Span<byte> receivedBytes = stackalloc byte[_totalSize];
 
             MemoryMarshal.Write(channelBytes, in channelKey);
@@ -117,16 +136,18 @@ public partial class StreamMultiplexer
             {
                 try
                 {
-                    channelBytes.CopyTo(receivedBytes[.._channelSize]);
+                    paddingBytes.CopyTo(receivedBytes[.._paddingSize]);
+                    channelBytes.CopyTo(receivedBytes.Slice(_channelKeyPos, _channelKeySize));
 
-                    var bytesChunkRead = tranceiverStream.SenderStream.Read(receivedBytes.Slice(_headerSize, StreamPipelineDefaults.StreamMultiplexerChunkSize));
+                    var bytesChunkRead = tranceiverStream.SenderStream.Read(receivedBytes.Slice(_chunkPos, StreamPipelineDefaults.StreamMultiplexerChunkSize));
                     if (stoppingToken.IsCancellationRequested)
                     {
                         break;
                     }
 
                     long length = (tranceiverStream.SenderStream.Length - tranceiverStream.SenderStream.Position) + bytesChunkRead;
-                    BinaryPrimitives.WriteInt64LittleEndian(receivedBytes.Slice(_channelSize, _lengthSize), length);
+                    BinaryPrimitives.WriteInt64LittleEndian(receivedBytes.Slice(_packetLengthPos, _packetLengthSize), length);
+                    BinaryPrimitives.WriteInt32LittleEndian(receivedBytes.Slice(_chunkLengthPos, _chunkLengthSize), bytesChunkRead);
 
                     _mainTranceiverStream.Write(receivedBytes[..(_headerSize + bytesChunkRead)]);
                 }
@@ -149,30 +170,35 @@ public partial class StreamMultiplexer
     {
         return Task.Run(() =>
         {
-            Span<byte> receivedBytes = stackalloc byte[_totalSize];
+            Span<byte> paddingBytes = _padding.AsSpan();
+            Span<byte> headerBytes = stackalloc byte[_headerSize];
+            Span<byte> receivedBytes = stackalloc byte[StreamPipelineDefaults.StreamMultiplexerChunkSize];
 
             while (!_cts.Token.IsCancellationRequested)
             {
                 try
                 {
-                    var bytesAllRead = _mainTranceiverStream.Read(receivedBytes);
+                    _mainTranceiverStream.ReadExactly(headerBytes);
                     if (_cts.Token.IsCancellationRequested)
                     {
                         break;
                     }
-                    if (bytesAllRead == 0)
+                    if (!headerBytes[.._paddingSize].SequenceEqual(paddingBytes))
                     {
-                        _cts.Token.WaitHandle.WaitOne(100);
-                        continue;
-                    }
-                    if (_headerSize > bytesAllRead)
-                    {
-                        throw new Exception("Sender received bytes smaller than the header size");
+                        throw new Exception("Sender received corrupted header bytes");
                     }
 
-                    int bytesChunkRead = bytesAllRead - _headerSize;
-                    Guid channelKey = new(receivedBytes[.._channelSize]);
-                    long chunkLength = BinaryPrimitives.ReadInt64LittleEndian(receivedBytes.Slice(_channelSize, _lengthSize));
+                    Guid channelKey = new(headerBytes.Slice(_channelKeyPos, _channelKeySize));
+                    long packetLength = BinaryPrimitives.ReadInt64LittleEndian(headerBytes.Slice(_packetLengthPos, _packetLengthSize));
+                    int chunkLength = BinaryPrimitives.ReadInt32LittleEndian(headerBytes.Slice(_chunkLengthPos, _chunkLengthSize));
+
+                    var chunkBytes = receivedBytes[.. chunkLength];
+
+                    var bytesAllRead = _mainTranceiverStream.Read(chunkBytes);
+                    if (bytesAllRead != chunkLength)
+                    {
+                        throw new Exception("Sender received corrupted chunk bytes");
+                    }
 
                     ChunkedTranceiverStreamHolder destinationStreamHolder;
 
@@ -187,7 +213,7 @@ public partial class StreamMultiplexer
                         _rwl.ExitReadLock();
                     }
 
-                    destinationStreamHolder.WriteToReceiverStream(chunkLength, receivedBytes.Slice(_headerSize, bytesChunkRead));
+                    destinationStreamHolder.WriteToReceiverStream(packetLength, chunkBytes);
                 }
                 catch (Exception ex)
                 {

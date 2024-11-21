@@ -98,8 +98,17 @@ internal class EdgeServerWorker(ILogger<EdgeServerWorker> logger, IServiceProvid
 
         //return StartMockStreamMessaging(streamPipelineService, stoppingToken);
         return Task.WhenAll(
+            StartMockStreamRaw(EdgeDefaults.MockChannelKey0, streamPipelineService, iPAddress, tranceiverStream, stoppingToken),
             StartMockStreamRaw(EdgeDefaults.MockChannelKey1, streamPipelineService, iPAddress, tranceiverStream, stoppingToken),
-            StartMockStreamRaw(EdgeDefaults.MockChannelKey2, streamPipelineService, iPAddress, tranceiverStream, stoppingToken));
+            StartMockStreamRaw(EdgeDefaults.MockChannelKey2, streamPipelineService, iPAddress, tranceiverStream, stoppingToken),
+            StartMockStreamRaw(EdgeDefaults.MockChannelKey3, streamPipelineService, iPAddress, tranceiverStream, stoppingToken),
+            StartMockStreamRaw(EdgeDefaults.MockChannelKey4, streamPipelineService, iPAddress, tranceiverStream, stoppingToken),
+            StartMockStreamRaw(EdgeDefaults.MockChannelKey5, streamPipelineService, iPAddress, tranceiverStream, stoppingToken),
+            StartMockStreamRaw(EdgeDefaults.MockChannelKey6, streamPipelineService, iPAddress, tranceiverStream, stoppingToken),
+            StartMockStreamRaw(EdgeDefaults.MockChannelKey7, streamPipelineService, iPAddress, tranceiverStream, stoppingToken),
+            StartMockStreamRaw(EdgeDefaults.MockChannelKey8, streamPipelineService, iPAddress, tranceiverStream, stoppingToken),
+            StartMockStreamRaw(EdgeDefaults.MockChannelKey9, streamPipelineService, iPAddress, tranceiverStream, stoppingToken),
+            StartMockStreamMessaging(streamPipelineService, stoppingToken));
 
         //return Task.WhenAll(
         //    StartMockStreamMessaging(streamPipelineService, stoppingToken),
@@ -144,9 +153,9 @@ internal class EdgeServerWorker(ILogger<EdgeServerWorker> logger, IServiceProvid
 
                     mockStream.Write(receivedBytes[..bytesread]);
 
-                    string receivedStr = Encoding.Default.GetString(receivedBytes[..bytesread]);
+                    //string receivedStr = Encoding.Default.GetString(receivedBytes[..bytesread]);
 
-                    _logger.LogInformation("received {DAT} bytes", receivedStr.Length);
+                    //_logger.LogInformation("received {DAT} bytes", receivedStr.Length);
                 }
                 catch (Exception ex)
                 {
