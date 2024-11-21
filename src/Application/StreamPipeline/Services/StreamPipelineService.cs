@@ -1,5 +1,6 @@
 ﻿using Application.Common;
 using Application.StreamPipeline.Common;
+using Application.StreamPipeline.Pipes;
 using DisposableHelpers.Attributes;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
@@ -7,14 +8,16 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text;
+using System.Text.Json;
 using System.Threading.Tasks;
 
 namespace Application.StreamPipeline.Services;
 
 [Disposable]
-public partial class StreamPipelineService(ILogger<StreamPipelineService> logger)
+public partial class StreamPipelineService(ILogger<StreamPipelineService> logger, IServiceProvider serviceProvider)
 {
     private readonly ILogger<StreamPipelineService> _logger = logger;
+    private readonly IServiceProvider _serviceProvider = serviceProvider;
 
     private StreamMultiplexer? _streamMultiplexer = null;
 
@@ -28,6 +31,11 @@ public partial class StreamPipelineService(ILogger<StreamPipelineService> logger
     public void Start(StreamMultiplexer streamMultiplexer, CancellationToken stoppingToken)
     {
         using var _ = _logger.BeginScopeMap(nameof(StreamPipelineService), nameof(Start));
+
+        if (_streamMultiplexer != null)
+        {
+            throw new Exception($"{nameof(StreamPipelineService)} already started");
+        }
 
         _cts = CancellationTokenSource.CreateLinkedTokenSource(
             stoppingToken,
@@ -43,5 +51,15 @@ public partial class StreamPipelineService(ILogger<StreamPipelineService> logger
     public TranceiverStream Set(Guid channelKey, int bufferSize)
     {
         return GetMux().Set(channelKey, bufferSize);
+    }
+
+    public MessagingPipe<T> SetMessagingPipe<T>(Guid channelKey, string channelName, JsonSerializerOptions? jsonSerializerOptions = null)
+    {
+        var messagingPipe = _serviceProvider.GetRequiredService<MessagingPipe<T>>();
+        var tranceiverStream = GetMux().Set(channelKey, StreamPipelineDefaults.EdgeCommsBufferSize);
+        messagingPipe.SetPipeName(channelName);
+        messagingPipe.SetJsonSerializerOptions(jsonSerializerOptions);
+        messagingPipe.Start(tranceiverStream, _cts!.Token).Forget();
+        return messagingPipe;
     }
 }

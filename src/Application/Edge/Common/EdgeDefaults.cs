@@ -18,4 +18,5 @@ public static class EdgeDefaults
     public const int EdgeCommsBufferSize = 16384;
 
     public static readonly Guid MockChannelKey = new("00000000-0000-0000-0000-000000001234");
+    public static readonly Guid MockMsgChannelKey = new("00000000-0000-0000-0000-000000001235");
 }

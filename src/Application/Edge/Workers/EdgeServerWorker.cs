@@ -2,6 +2,7 @@
 using Application.Configuration.Extensions;
 using Application.Edge.Common;
 using Application.Edge.Interfaces;
+using Application.Edge.Models;
 using Application.Edge.Services;
 using Application.StreamPipeline.Common;
 using Application.StreamPipeline.Services;
@@ -81,17 +82,37 @@ internal class EdgeServerWorker(ILogger<EdgeServerWorker> logger, IServiceProvid
             ["ClientAddress"] = iPAddress
         });
 
-        using var scope = _serviceProvider.CreateScope();
+        var scope = _serviceProvider.CreateScope();
+
+        stoppingToken.Register(scope.Dispose);
+
         var streamPipelineFactory = scope.ServiceProvider.GetRequiredService<StreamPipelineFactory>();
 
-        var streamMultiplexer = streamPipelineFactory.Start(
+        var streamPipelineService = streamPipelineFactory.Start(
             tranceiverStream,
             () => { _logger.LogInformation("Stream multiplexer {ClientAddress} started", iPAddress); },
             () => { _logger.LogInformation("Stream multiplexer {ClientAddress} ended", iPAddress); },
             ex => { _logger.LogError("Stream multiplexer {ClientAddress} error: {Error}", iPAddress, ex.Message); },
             stoppingToken);
 
-        var mockStream = streamMultiplexer.Set(EdgeDefaults.MockChannelKey, EdgeDefaults.EdgeCommsBufferSize);
+        return Task.WhenAll(
+            StartMockStreamMessaging(streamPipelineService, stoppingToken),
+            StartMockStreamRaw(streamPipelineService, iPAddress, tranceiverStream, stoppingToken));
+    }
+
+    private Task StartMockStreamMessaging(StreamPipelineService streamPipelineService, CancellationToken stoppingToken)
+    {
+        var mockStream = streamPipelineService.SetMessagingPipe<MockPayload>(EdgeDefaults.MockMsgChannelKey, "MOOCK");
+
+        return Task.Run(async () =>
+        {
+            await Task.Delay(100000);
+        }, stoppingToken);
+    }
+
+    private Task StartMockStreamRaw(StreamPipelineService streamPipelineService, IPAddress iPAddress, TranceiverStream tranceiverStream, CancellationToken stoppingToken)
+    {
+        var mockStream = streamPipelineService.Set(EdgeDefaults.MockChannelKey, EdgeDefaults.EdgeCommsBufferSize);
 
         _logger.LogInformation("Stream pipe {ClientAddress} started", iPAddress);
 
@@ -99,7 +120,7 @@ internal class EdgeServerWorker(ILogger<EdgeServerWorker> logger, IServiceProvid
         {
             Span<byte> receivedBytes = stackalloc byte[EdgeDefaults.EdgeCommsBufferSize];
 
-            while (!stoppingToken.IsCancellationRequested && !streamMultiplexer.IsDisposedOrDisposing)
+            while (!stoppingToken.IsCancellationRequested && !streamPipelineService.IsDisposedOrDisposing)
             {
                 try
                 {

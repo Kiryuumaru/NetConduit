@@ -5,6 +5,7 @@ using Application.Edge.Services;
 using Application.Edge.Workers;
 using Application.LocalStore.Services;
 using Application.ServiceMaster.Services;
+using Application.StreamPipeline.Pipes;
 using Application.StreamPipeline.Services;
 using Application.Tcp.Services;
 using Application.Watchdog.Workers;
@@ -27,6 +28,7 @@ public class Application : ApplicationDependency
 
         services.AddScoped<StreamPipelineService>();
         services.AddScoped<StreamPipelineFactory>();
+        services.AddTransient(typeof(MessagingPipe<>));
 
         services.AddTransient<TcpClientService>();
         services.AddTransient<TcpServerService>();
