@@ -2,6 +2,7 @@
 using Application.Edge.Common;
 using Application.StreamPipeline.Abstraction;
 using Application.StreamPipeline.Common;
+using Application.StreamPipeline.Models;
 using Application.StreamPipeline.Services;
 using Microsoft.Extensions.Logging;
 using System;
@@ -17,11 +18,11 @@ namespace Application.StreamPipeline.Pipes;
 public class MessagingPipe<T>(ILogger<MessagingPipe<T>> logger) : BasePipe
 {
     private readonly ILogger<MessagingPipe<T>> _logger = logger;
-    private readonly BufferBlock<(Guid Guid, T message)> _messageQueue = new();
+    private readonly BufferBlock<MessagingPipePayload<T>> _messageQueue = new();
 
     private string? _messagingPipeName = null;
     private JsonSerializerOptions? _jsonSerializerOptions = null;
-    private Func<Guid, T, Task>? _onMessageCallback = null;
+    private Func<MessagingPipePayload<T>, Task>? _onMessageCallback = null;
 
     private async Task StartSend(TranceiverStream tranceiverStream, CancellationToken stoppingToken)
     {
@@ -36,26 +37,20 @@ public class MessagingPipe<T>(ILogger<MessagingPipe<T>> logger) : BasePipe
         {
             try
             {
-                var (guid, message) = await _messageQueue.ReceiveAsync(stoppingToken);
+                var messagingPipePayload = await _messageQueue.ReceiveAsync(stoppingToken);
                 if (stoppingToken.IsCancellationRequested)
                 {
                     break;
                 }
 
-                _logger.LogTrace("MessagingPipe {MessagingPipeName} sending message to stream...", _messagingPipeName);
+                //_logger.LogTrace("MessagingPipe {MessagingPipeName} sending message to stream...", _messagingPipeName);
 
-                var messagePayload = new
-                {
-                    guid,
-                    message
-                };
-
-                var serializedMessage = JsonSerializer.Serialize(messagePayload, _jsonSerializerOptions);
+                var serializedMessage = JsonSerializer.Serialize(messagingPipePayload, _jsonSerializerOptions);
                 byte[] sendBytes = Encoding.Default.GetBytes(serializedMessage);
 
                 await tranceiverStream.WriteAsync(sendBytes, stoppingToken);
 
-                _logger.LogTrace("MessagingPipe {MessagingPipeName} message sent to stream", _messagingPipeName);
+                //_logger.LogTrace("MessagingPipe {MessagingPipeName} message sent to stream", _messagingPipeName);
             }
             catch (Exception ex)
             {
@@ -87,20 +82,24 @@ public class MessagingPipe<T>(ILogger<MessagingPipe<T>> logger) : BasePipe
                     break;
                 }
 
-                _logger.LogTrace("MessagingPipe {MessagingPipeName} received message from stream", _messagingPipeName);
+                //_logger.LogTrace("MessagingPipe {MessagingPipeName} received message from stream", _messagingPipeName);
 
                 string receivedStr = Encoding.Default.GetString(receivedBytes[..bytesRead].Span);
 
-                if (JsonSerializer.Deserialize<JsonDocument>(receivedStr) is not JsonDocument messagePayloadJson ||
-                    !messagePayloadJson.RootElement.TryGetProperty("guid", out var guidJson) ||
-                    !messagePayloadJson.RootElement.TryGetProperty("message", out var messageJson) ||
-                    guidJson.TryGetGuid(out var guid) ||
-                    messageJson.Deserialize<T>(_jsonSerializerOptions) is not T message)
+                try
                 {
-                    throw new Exception("Message is not json");
-                }
+                    if (JsonSerializer.Deserialize<MessagingPipePayload<T>>(receivedStr) is not MessagingPipePayload<T> messagingPipePayload)
+                    {
+                        throw new Exception($"Message is not {nameof(MessagingPipePayload<T>)}");
+                    }
 
-                _onMessageCallback?.Invoke(guid, message);
+                    _onMessageCallback?.Invoke(messagingPipePayload);
+                }
+                catch
+                {
+                    _logger.LogError("SSSSSSSSSSSSSSSSSSSS: {Error}", receivedStr);
+                    throw;
+                }
             }
             catch (Exception ex)
             {
@@ -141,20 +140,24 @@ public class MessagingPipe<T>(ILogger<MessagingPipe<T>> logger) : BasePipe
     public Guid Send(T message)
     {
         Guid msgGuid = Guid.NewGuid();
-        _messageQueue.Post((msgGuid, message));
+        _messageQueue.Post(new MessagingPipePayload<T>()
+        {
+            MessageGuid = msgGuid,
+            Message = message
+        });
         return msgGuid;
     }
 
-    public void OnMessage(Func<Guid, T, Task> onMessageCallback)
+    public void OnMessage(Func<MessagingPipePayload<T>, Task> onMessageCallback)
     {
         _onMessageCallback = onMessageCallback;
     }
 
-    public void OnMessage(Action<Guid, T> onMessageCallback)
+    public void OnMessage(Action<MessagingPipePayload<T>> onMessageCallback)
     {
-        _onMessageCallback = (guid, msg) =>
+        _onMessageCallback = msgPayload =>
         {
-            onMessageCallback(guid, msg);
+            onMessageCallback(msgPayload);
             return Task.CompletedTask;
         };
     }

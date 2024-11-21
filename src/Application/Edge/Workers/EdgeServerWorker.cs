@@ -21,6 +21,7 @@ using System.Linq;
 using System.Net;
 using System.Net.Sockets;
 using System.Text;
+using System.Text.Json;
 using System.Threading.Tasks;
 
 namespace Application.Edge.Workers;
@@ -95,19 +96,26 @@ internal class EdgeServerWorker(ILogger<EdgeServerWorker> logger, IServiceProvid
             ex => { _logger.LogError("Stream multiplexer {ClientAddress} error: {Error}", iPAddress, ex.Message); },
             stoppingToken);
 
-        return Task.WhenAll(
-            StartMockStreamMessaging(streamPipelineService, stoppingToken),
-            StartMockStreamRaw(streamPipelineService, iPAddress, tranceiverStream, stoppingToken));
+        return StartMockStreamMessaging(streamPipelineService, stoppingToken);
+
+        //return Task.WhenAll(
+        //    StartMockStreamMessaging(streamPipelineService, stoppingToken),
+        //    StartMockStreamRaw(streamPipelineService, iPAddress, tranceiverStream, stoppingToken));
     }
 
     private Task StartMockStreamMessaging(StreamPipelineService streamPipelineService, CancellationToken stoppingToken)
     {
         var mockStream = streamPipelineService.SetMessagingPipe<MockPayload>(EdgeDefaults.MockMsgChannelKey, "MOOCK");
 
-        return Task.Run(async () =>
+        mockStream.OnMessage(payload =>
         {
-            await Task.Delay(100000);
-        }, stoppingToken);
+            mockStream.Send(new()
+            {
+                MockMessage = JsonSerializer.Serialize(payload)
+            });
+        });
+
+        return Task.CompletedTask;
     }
 
     private Task StartMockStreamRaw(StreamPipelineService streamPipelineService, IPAddress iPAddress, TranceiverStream tranceiverStream, CancellationToken stoppingToken)

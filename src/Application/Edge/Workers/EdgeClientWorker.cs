@@ -5,6 +5,7 @@ using Application.Edge.Interfaces;
 using Application.Edge.Models;
 using Application.Edge.Services;
 using Application.StreamPipeline.Common;
+using Application.StreamPipeline.Models;
 using Application.StreamPipeline.Services;
 using Application.Tcp.Services;
 using Domain.Edge.Dtos;
@@ -15,11 +16,13 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using System;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.ComponentModel;
 using System.Linq;
 using System.Net;
 using System.Text;
+using System.Text.Json;
 using System.Threading.Tasks;
 
 namespace Application.Edge.Workers;
@@ -82,19 +85,81 @@ internal class EdgeClientWorker(ILogger<EdgeClientWorker> logger, IServiceProvid
             ex => { _logger.LogError("Stream multiplexer {ServerHost}:{ServerPort} error: {Error}", tcpHost, tcpPort, ex.Message); },
             stoppingToken);
 
-        return Task.WhenAll(
-            StartMockStreamMessaging(streamPipelineService, stoppingToken),
-            StartMockStreamRaw(streamPipelineService, tcpHost, tcpPort, stoppingToken));
+        return StartMockStreamMessaging(streamPipelineService, stoppingToken);
+
+        //return Task.WhenAll(
+        //    StartMockStreamMessaging(streamPipelineService, stoppingToken),
+        //    StartMockStreamRaw(streamPipelineService, tcpHost, tcpPort, stoppingToken));
     }
 
     private Task StartMockStreamMessaging(StreamPipelineService streamPipelineService, CancellationToken stoppingToken)
     {
         var mockStream = streamPipelineService.SetMessagingPipe<MockPayload>(EdgeDefaults.MockMsgChannelKey, "MOOCK");
 
-        return Task.Run(async () =>
+        int aveLent = 10;
+        TimeSpan logSpan = TimeSpan.FromSeconds(1);
+        DateTimeOffset lastLog = DateTimeOffset.MinValue;
+        List<double> aveLi = [];
+        ConcurrentDictionary<Guid, (MockPayload payload, DateTimeOffset time)> mapMock = [];
+
+        mockStream.OnMessage(payload =>
         {
-            await Task.Delay(100000);
-        }, stoppingToken);
+            var now = DateTimeOffset.UtcNow;
+            if (JsonSerializer.Deserialize<MessagingPipePayload<MockPayload>>(payload.Message.MockMessage) is not MessagingPipePayload<MockPayload> clientPayload)
+            {
+                _logger.LogError("Unknown payload received guid {PayloadMessageGuid}", payload.MessageGuid);
+                return;
+            }
+            if (!mapMock.TryGetValue(clientPayload.MessageGuid, out var mock))
+            {
+                _logger.LogError("Unknown payload received guid {PayloadMessageGuid}", clientPayload.MessageGuid);
+                return;
+            }
+            if (mock.payload.MockMessage != clientPayload.Message.MockMessage)
+            {
+                _logger.LogError("Unknown payload received value {PayloadMessageGuid}", payload.MessageGuid);
+            }
+
+            aveLi.Add((now - mock.time).TotalMilliseconds);
+            if (aveLi.Count > aveLent)
+            {
+                aveLi.RemoveAt(0);
+            }
+            if (lastLog + logSpan < DateTimeOffset.UtcNow)
+            {
+                lastLog = DateTimeOffset.UtcNow;
+                _logger.LogInformation("Messaging mock time {TimeStamp:0.###}ms", aveLi.Average());
+            }
+
+            mapMock.Remove(clientPayload.MessageGuid, out _);
+        });
+
+        return Task.WhenAll(
+            Task.Run(async () =>
+            {
+                while (!stoppingToken.IsCancellationRequested)
+                {
+                    string mockVal = StringEncoder.Random(1999);
+                    var payload = new MockPayload() { MockMessage = mockVal };
+                    var now = DateTimeOffset.UtcNow;
+                    var guid = mockStream.Send(payload);
+
+                    mapMock[guid] = (payload, now);
+
+                    await Task.Delay(50);
+                }
+
+            }, stoppingToken),
+            Task.Run(async () =>
+            {
+                while (!stoppingToken.IsCancellationRequested)
+                {
+                    _logger.LogInformation("Mock messaging map count: {MapCount}", mapMock.Count);
+
+                    await Task.Delay(2000);
+                }
+
+            }, stoppingToken));
     }
 
     private Task StartMockStreamRaw(StreamPipelineService streamPipelineService, string tcpHost, int tcpPort, CancellationToken stoppingToken)
@@ -105,7 +170,7 @@ internal class EdgeClientWorker(ILogger<EdgeClientWorker> logger, IServiceProvid
 
         int aveLent = 10;
         TimeSpan logSpan = TimeSpan.FromSeconds(1);
-        DateTimeOffset lastLog = DateTimeOffset.UtcNow;
+        DateTimeOffset lastLog = DateTimeOffset.MinValue;
         List<double> aveLi = [];
 
         return Task.Run(async () =>
