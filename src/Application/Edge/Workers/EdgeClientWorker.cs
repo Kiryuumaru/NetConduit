@@ -99,8 +99,7 @@ internal class EdgeClientWorker(ILogger<EdgeClientWorker> logger, IServiceProvid
             StartMockStreamRaw(EdgeDefaults.MockChannelKey6, streamPipelineService, tcpHost, tcpPort, stoppingToken),
             StartMockStreamRaw(EdgeDefaults.MockChannelKey7, streamPipelineService, tcpHost, tcpPort, stoppingToken),
             StartMockStreamRaw(EdgeDefaults.MockChannelKey8, streamPipelineService, tcpHost, tcpPort, stoppingToken),
-            StartMockStreamRaw(EdgeDefaults.MockChannelKey9, streamPipelineService, tcpHost, tcpPort, stoppingToken),
-            StartMockStreamMessaging(streamPipelineService, stoppingToken));
+            StartMockStreamRaw(EdgeDefaults.MockChannelKey9, streamPipelineService, tcpHost, tcpPort, stoppingToken));
 
         //return Task.WhenAll(
         //    StartMockStreamMessaging(streamPipelineService, stoppingToken),

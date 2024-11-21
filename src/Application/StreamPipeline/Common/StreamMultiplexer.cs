@@ -178,6 +178,7 @@ public partial class StreamMultiplexer
             {
                 try
                 {
+                    headerBytes[.._paddingSize].Clear();
                     _mainTranceiverStream.ReadExactly(headerBytes);
                     if (_cts.Token.IsCancellationRequested)
                     {

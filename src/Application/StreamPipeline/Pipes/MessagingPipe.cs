@@ -89,20 +89,12 @@ public class MessagingPipe<T>(ILogger<MessagingPipe<T>> logger) : BasePipe
 
                 string receivedStr = Encoding.Default.GetString(receivedBytes[..bytesRead].Span);
 
-                try
+                if (JsonSerializer.Deserialize<MessagingPipePayload<T>>(receivedStr) is not MessagingPipePayload<T> messagingPipePayload)
                 {
-                    if (JsonSerializer.Deserialize<MessagingPipePayload<T>>(receivedStr) is not MessagingPipePayload<T> messagingPipePayload)
-                    {
-                        throw new Exception($"Message is not {nameof(MessagingPipePayload<T>)}");
-                    }
+                    throw new Exception($"Message is not {nameof(MessagingPipePayload<T>)}");
+                }
 
-                    _onMessageCallback?.Invoke(messagingPipePayload);
-                }
-                catch
-                {
-                    _logger.LogError("SSSSSSSSSSSSSSSSSSSS: {Error}", receivedStr);
-                    throw;
-                }
+                _onMessageCallback?.Invoke(messagingPipePayload);
             }
             catch (Exception ex)
             {
