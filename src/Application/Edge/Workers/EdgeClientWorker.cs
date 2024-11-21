@@ -85,7 +85,11 @@ internal class EdgeClientWorker(ILogger<EdgeClientWorker> logger, IServiceProvid
             ex => { _logger.LogError("Stream multiplexer {ServerHost}:{ServerPort} error: {Error}", tcpHost, tcpPort, ex.Message); },
             stoppingToken);
 
-        return StartMockStreamMessaging(streamPipelineService, stoppingToken);
+        //return StartMockStreamMessaging(streamPipelineService, stoppingToken);
+        //return StartMockStreamRaw(streamPipelineService, tcpHost, tcpPort, stoppingToken);
+        return Task.WhenAll(
+            StartMockStreamRaw(EdgeDefaults.MockChannelKey1, streamPipelineService, tcpHost, tcpPort, stoppingToken),
+            StartMockStreamRaw(EdgeDefaults.MockChannelKey2, streamPipelineService, tcpHost, tcpPort, stoppingToken));
 
         //return Task.WhenAll(
         //    StartMockStreamMessaging(streamPipelineService, stoppingToken),
@@ -162,9 +166,9 @@ internal class EdgeClientWorker(ILogger<EdgeClientWorker> logger, IServiceProvid
             }, stoppingToken));
     }
 
-    private Task StartMockStreamRaw(StreamPipelineService streamPipelineService, string tcpHost, int tcpPort, CancellationToken stoppingToken)
+    private Task StartMockStreamRaw(Guid guid, StreamPipelineService streamPipelineService, string tcpHost, int tcpPort, CancellationToken stoppingToken)
     {
-        var mockStream = streamPipelineService.Set(EdgeDefaults.MockChannelKey, EdgeDefaults.EdgeCommsBufferSize);
+        var mockStream = streamPipelineService.Set(guid, EdgeDefaults.EdgeCommsBufferSize);
 
         _logger.LogInformation("Stream pipe {ServerHost}:{ServerPort} started", tcpHost, tcpPort);
 

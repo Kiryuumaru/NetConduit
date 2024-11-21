@@ -96,7 +96,10 @@ internal class EdgeServerWorker(ILogger<EdgeServerWorker> logger, IServiceProvid
             ex => { _logger.LogError("Stream multiplexer {ClientAddress} error: {Error}", iPAddress, ex.Message); },
             stoppingToken);
 
-        return StartMockStreamMessaging(streamPipelineService, stoppingToken);
+        //return StartMockStreamMessaging(streamPipelineService, stoppingToken);
+        return Task.WhenAll(
+            StartMockStreamRaw(EdgeDefaults.MockChannelKey1, streamPipelineService, iPAddress, tranceiverStream, stoppingToken),
+            StartMockStreamRaw(EdgeDefaults.MockChannelKey2, streamPipelineService, iPAddress, tranceiverStream, stoppingToken));
 
         //return Task.WhenAll(
         //    StartMockStreamMessaging(streamPipelineService, stoppingToken),
@@ -118,9 +121,9 @@ internal class EdgeServerWorker(ILogger<EdgeServerWorker> logger, IServiceProvid
         return Task.CompletedTask;
     }
 
-    private Task StartMockStreamRaw(StreamPipelineService streamPipelineService, IPAddress iPAddress, TranceiverStream tranceiverStream, CancellationToken stoppingToken)
+    private Task StartMockStreamRaw(Guid guid, StreamPipelineService streamPipelineService, IPAddress iPAddress, TranceiverStream tranceiverStream, CancellationToken stoppingToken)
     {
-        var mockStream = streamPipelineService.Set(EdgeDefaults.MockChannelKey, EdgeDefaults.EdgeCommsBufferSize);
+        var mockStream = streamPipelineService.Set(guid, EdgeDefaults.EdgeCommsBufferSize);
 
         _logger.LogInformation("Stream pipe {ClientAddress} started", iPAddress);
 
