@@ -5,6 +5,7 @@ using DisposableHelpers.Attributes;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using System;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text;
@@ -18,6 +19,8 @@ public partial class StreamPipelineService(ILogger<StreamPipelineService> logger
 {
     private readonly ILogger<StreamPipelineService> _logger = logger;
     private readonly IServiceProvider _serviceProvider = serviceProvider;
+
+    private readonly ConcurrentDictionary<string, Guid> _channelNameMap = [];
 
     private StreamMultiplexer? _streamMultiplexer = null;
 
@@ -48,7 +51,7 @@ public partial class StreamPipelineService(ILogger<StreamPipelineService> logger
         _streamMultiplexer.Start().Forget();
     }
 
-    public TranceiverStream Set(Guid channelKey, int bufferSize)
+    public TranceiverStream SetRaw(Guid channelKey, int bufferSize)
     {
         return GetMux().Set(channelKey, bufferSize);
     }

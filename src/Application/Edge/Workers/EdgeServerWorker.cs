@@ -131,7 +131,7 @@ internal class EdgeServerWorker(ILogger<EdgeServerWorker> logger, IServiceProvid
 
     private Task StartMockStreamRaw(Guid guid, StreamPipelineService streamPipelineService, IPAddress iPAddress, TranceiverStream tranceiverStream, CancellationToken stoppingToken)
     {
-        var mockStream = streamPipelineService.Set(guid, EdgeDefaults.EdgeCommsBufferSize);
+        var mockStream = streamPipelineService.SetRaw(guid, EdgeDefaults.EdgeCommsBufferSize);
 
         _logger.LogInformation("Stream pipe {ClientAddress} started", iPAddress);
 

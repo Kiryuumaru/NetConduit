@@ -27,82 +27,82 @@ public class MessagingPipe<T>(ILogger<MessagingPipe<T>> logger) : BasePipe
     private const string _paddingValue = "endofchunk";
     private const int _paddingSize = 10;
 
-    private async Task StartSend(TranceiverStream tranceiverStream, CancellationToken stoppingToken)
+    private Task StartSend(TranceiverStream tranceiverStream, CancellationToken stoppingToken)
     {
-        using var _ = _logger.BeginScopeMap(nameof(MessagingPipe<T>), nameof(StartSend), new()
+        return Task.Run(async () =>
         {
-            ["MessagingPipeName"] = _messagingPipeName
-        });
-
-        _logger.LogTrace("MessagingPipe {MessagingPipeName} sender started", _messagingPipeName);
-
-        while (!stoppingToken.IsCancellationRequested && !IsDisposedOrDisposing)
-        {
-            try
+            using var _ = _logger.BeginScopeMap(nameof(MessagingPipe<T>), nameof(StartSend), new()
             {
-                var messagingPipePayload = await _messageQueue.ReceiveAsync(stoppingToken);
-                if (stoppingToken.IsCancellationRequested)
+                ["MessagingPipeName"] = _messagingPipeName
+            });
+
+            while (!stoppingToken.IsCancellationRequested && !IsDisposedOrDisposing)
+            {
+                try
                 {
-                    break;
+                    var messagingPipePayload = await _messageQueue.ReceiveAsync(stoppingToken);
+                    if (stoppingToken.IsCancellationRequested)
+                    {
+                        break;
+                    }
+
+                    //_logger.LogTrace("MessagingPipe {MessagingPipeName} sending message to stream...", _messagingPipeName);
+
+                    var serializedMessage = JsonSerializer.Serialize(messagingPipePayload, _jsonSerializerOptions);
+                    byte[] sendBytes = Encoding.Default.GetBytes(serializedMessage);
+
+                    await tranceiverStream.WriteAsync(sendBytes, stoppingToken);
+
+                    //_logger.LogTrace("MessagingPipe {MessagingPipeName} message sent to stream", _messagingPipeName);
                 }
-
-                //_logger.LogTrace("MessagingPipe {MessagingPipeName} sending message to stream...", _messagingPipeName);
-
-                var serializedMessage = JsonSerializer.Serialize(messagingPipePayload, _jsonSerializerOptions);
-                byte[] sendBytes = Encoding.Default.GetBytes(serializedMessage);
-
-                await tranceiverStream.WriteAsync(sendBytes, stoppingToken);
-
-                //_logger.LogTrace("MessagingPipe {MessagingPipeName} message sent to stream", _messagingPipeName);
+                catch (Exception ex)
+                {
+                    _logger.LogError("MessagingPipe {MessagingPipeName} sender Error: {Error}", _messagingPipeName, ex.Message);
+                }
             }
-            catch (Exception ex)
-            {
-                _logger.LogError("MessagingPipe {MessagingPipeName} sender Error: {Error}", _messagingPipeName, ex.Message);
-            }
-        }
 
-        _logger.LogTrace("MessagingPipe {MessagingPipeName} sender ended", _messagingPipeName);
+        }, stoppingToken);
     }
 
-    private async Task StartReceive(TranceiverStream tranceiverStream, CancellationToken stoppingToken)
+    private Task StartReceive(TranceiverStream tranceiverStream, CancellationToken stoppingToken)
     {
-        using var _ = _logger.BeginScopeMap(nameof(MessagingPipe<T>), nameof(StartReceive), new()
+        return Task.Run(async () =>
         {
-            ["MessagingPipeName"] = _messagingPipeName
-        });
-
-        _logger.LogTrace("MessagingPipe {MessagingPipeName} receiver started", _messagingPipeName);
-
-        Memory<byte> receivedBytes = new byte[EdgeDefaults.EdgeCommsBufferSize];
-
-        while (!stoppingToken.IsCancellationRequested && !IsDisposedOrDisposing)
-        {
-            try
+            using var _ = _logger.BeginScopeMap(nameof(MessagingPipe<T>), nameof(StartReceive), new()
             {
-                var bytesRead = await tranceiverStream.ReadAsync(receivedBytes, stoppingToken);
-                if (stoppingToken.IsCancellationRequested)
-                {
-                    break;
-                }
+                ["MessagingPipeName"] = _messagingPipeName
+            });
 
-                //_logger.LogTrace("MessagingPipe {MessagingPipeName} received message from stream", _messagingPipeName);
+            Memory<byte> receivedBytes = new byte[EdgeDefaults.EdgeCommsBufferSize];
 
-                string receivedStr = Encoding.Default.GetString(receivedBytes[..bytesRead].Span);
-
-                if (JsonSerializer.Deserialize<MessagingPipePayload<T>>(receivedStr) is not MessagingPipePayload<T> messagingPipePayload)
-                {
-                    throw new Exception($"Message is not {nameof(MessagingPipePayload<T>)}");
-                }
-
-                _onMessageCallback?.Invoke(messagingPipePayload);
-            }
-            catch (Exception ex)
+            while (!stoppingToken.IsCancellationRequested && !IsDisposedOrDisposing)
             {
-                _logger.LogError("MessagingPipe {MessagingPipeName} receiver Error: {Error}", _messagingPipeName, ex.Message);
-            }
-        }
+                try
+                {
+                    var bytesRead = await tranceiverStream.ReadAsync(receivedBytes, stoppingToken);
+                    if (stoppingToken.IsCancellationRequested)
+                    {
+                        break;
+                    }
 
-        _logger.LogTrace("MessagingPipe {MessagingPipeName} receiver ended", _messagingPipeName);
+                    //_logger.LogTrace("MessagingPipe {MessagingPipeName} received message from stream", _messagingPipeName);
+
+                    string receivedStr = Encoding.Default.GetString(receivedBytes[..bytesRead].Span);
+
+                    if (JsonSerializer.Deserialize<MessagingPipePayload<T>>(receivedStr) is not MessagingPipePayload<T> messagingPipePayload)
+                    {
+                        throw new Exception($"Message is not {nameof(MessagingPipePayload<T>)}");
+                    }
+
+                    _onMessageCallback?.Invoke(messagingPipePayload);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogError("MessagingPipe {MessagingPipeName} receiver Error: {Error}", _messagingPipeName, ex.Message);
+                }
+            }
+
+        }, stoppingToken);
     }
 
     protected override Task Execute(TranceiverStream tranceiverStream, CancellationToken stoppingToken)
