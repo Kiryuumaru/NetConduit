@@ -166,7 +166,8 @@ internal class EdgeClientWorker(ILogger<EdgeClientWorker> logger, IServiceProvid
             {
                 while (!stoppingToken.IsCancellationRequested)
                 {
-                    string mockVal = StringEncoder.Random(Random.Shared.Next(20000, 50000));
+                    //string mockVal = StringEncoder.Random(Random.Shared.Next(20000, 50000));
+                    string mockVal = StringEncoder.Random(1999);
                     var payload = new MockPayload() { MockMessage = mockVal };
                     var now = DateTimeOffset.UtcNow;
                     var guid = mockStream.Send(payload);
