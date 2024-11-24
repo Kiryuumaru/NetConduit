@@ -195,11 +195,7 @@ public partial class StreamMultiplexer
 
                     var chunkBytes = receivedBytes[.. chunkLength];
 
-                    var bytesAllRead = _mainTranceiverStream.Read(chunkBytes);
-                    if (bytesAllRead != chunkLength)
-                    {
-                        throw new Exception("Sender received corrupted chunk bytes");
-                    }
+                    _mainTranceiverStream.ReadExactly(chunkBytes);
 
                     ChunkedTranceiverStreamHolder destinationStreamHolder;
 

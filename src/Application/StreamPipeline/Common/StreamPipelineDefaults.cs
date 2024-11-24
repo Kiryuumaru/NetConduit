@@ -16,6 +16,9 @@ public static class StreamPipelineDefaults
     //public const int StreamMultiplexerChunkSize = 8196;
     //public const int StreamMultiplexerChunkSize = 16384;
     //public const int StreamMultiplexerChunkSize = 32768;
+    //public const int StreamMultiplexerChunkSize = 16777216;
+
+    public const int MessagingPipeChunkSize = 4096;
 
     public const int EdgeCommsBufferSize = 16384;
 
