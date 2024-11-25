@@ -129,6 +129,7 @@ public partial class StreamMultiplexer
             Span<byte> paddingBytes = _padding.AsSpan();
             Span<byte> channelBytes = stackalloc byte[_channelKeySize];
             Span<byte> receivedBytes = stackalloc byte[_totalSize];
+            Span<byte> packetBytes = new byte[StreamPipelineDefaults.StreamMultiplexerMaxPacketSize];
 
             MemoryMarshal.Write(channelBytes, in channelKey);
 
@@ -136,20 +137,31 @@ public partial class StreamMultiplexer
             {
                 try
                 {
-                    paddingBytes.CopyTo(receivedBytes[.._paddingSize]);
-                    channelBytes.CopyTo(receivedBytes.Slice(_channelKeyPos, _channelKeySize));
-
-                    var bytesChunkRead = tranceiverStream.SenderStream.Read(receivedBytes.Slice(_chunkPos, StreamPipelineDefaults.StreamMultiplexerChunkSize));
+                    var packetLength = tranceiverStream.SenderStream.Read(packetBytes);
                     if (stoppingToken.IsCancellationRequested)
                     {
                         break;
                     }
 
-                    long length = (tranceiverStream.SenderStream.Length - tranceiverStream.SenderStream.Position) + bytesChunkRead;
-                    BinaryPrimitives.WriteInt64LittleEndian(receivedBytes.Slice(_packetLengthPos, _packetLengthSize), length);
-                    BinaryPrimitives.WriteInt32LittleEndian(receivedBytes.Slice(_chunkLengthPos, _chunkLengthSize), bytesChunkRead);
+                    int length = packetLength;
+                    int bytesChunkWrite = 0;
 
-                    _mainTranceiverStream.Write(receivedBytes[..(_headerSize + bytesChunkRead)]);
+                    while (length > 0)
+                    {
+                        bytesChunkWrite = Math.Min(length, StreamPipelineDefaults.StreamMultiplexerChunkSize);
+
+                        paddingBytes.CopyTo(receivedBytes[.._paddingSize]);
+                        channelBytes.CopyTo(receivedBytes.Slice(_channelKeyPos, _channelKeySize));
+
+                        BinaryPrimitives.WriteInt64LittleEndian(receivedBytes.Slice(_packetLengthPos, _packetLengthSize), length);
+                        BinaryPrimitives.WriteInt32LittleEndian(receivedBytes.Slice(_chunkLengthPos, _chunkLengthSize), bytesChunkWrite);
+
+                        packetBytes.Slice(packetLength - length, bytesChunkWrite).CopyTo(receivedBytes.Slice(_chunkPos, bytesChunkWrite));
+
+                        length -= bytesChunkWrite;
+
+                        _mainTranceiverStream.Write(receivedBytes[..(_headerSize + bytesChunkWrite)]);
+                    }
                 }
                 catch (Exception ex)
                 {

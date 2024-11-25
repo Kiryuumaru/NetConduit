@@ -117,14 +117,13 @@ internal class EdgeClientWorker(ILogger<EdgeClientWorker> logger, IServiceProvid
     }
 
     int msgStreamAveLent = 100;
+    ConcurrentDictionary<Guid, (MockPayload payload, DateTimeOffset time)> msgStreamMapMock = [];
     TimeSpan msgStreamLogSpan = TimeSpan.FromSeconds(1);
     DateTimeOffset msgStreamLastLog = DateTimeOffset.MinValue;
     List<double> msgStreamAveLi = [];
     private Task StartMockStreamMessaging(Guid channelKey, StreamPipelineService streamPipelineService, CancellationToken stoppingToken)
     {
         var mockStream = streamPipelineService.SetMessagingPipe<MockPayload>(channelKey, $"MOOCK-{channelKey}");
-
-        ConcurrentDictionary<Guid, (MockPayload payload, DateTimeOffset time)> mapMock = [];
 
         mockStream.OnMessage(async payload =>
         {
@@ -137,7 +136,7 @@ internal class EdgeClientWorker(ILogger<EdgeClientWorker> logger, IServiceProvid
                 _logger.LogError("Invalid payload received {PayloadMessageGuid}", payload.MessageGuid);
                 return;
             }
-            if (!mapMock.TryGetValue(clientPayload.MessageGuid, out var mock))
+            if (!msgStreamMapMock.TryGetValue(clientPayload.MessageGuid, out var mock))
             {
                 _logger.LogError("Unknown payload received {PayloadMessageGuid}", clientPayload.MessageGuid);
                 return;
@@ -155,39 +154,30 @@ internal class EdgeClientWorker(ILogger<EdgeClientWorker> logger, IServiceProvid
             if (msgStreamLastLog + msgStreamLogSpan < now)
             {
                 msgStreamLastLog = now;
-                _logger.LogInformation("Messaging mock time {TimeStamp:0.###}ms", msgStreamAveLi.Average());
+                _logger.LogInformation("Messaging mock time {TimeStamp:0.###}ms, map count: {MapCount}", msgStreamAveLi.Average(), msgStreamMapMock.Count);
             }
 
-            mapMock.Remove(clientPayload.MessageGuid, out _);
+            msgStreamMapMock.Remove(clientPayload.MessageGuid, out _);
         });
 
-        return Task.WhenAll(
-            Task.Run(async () =>
+        return Task.Run(async () =>
+        {
+            await Task.Delay(10000);
+
+            while (!stoppingToken.IsCancellationRequested)
             {
-                while (!stoppingToken.IsCancellationRequested)
-                {
-                    //string mockVal = StringEncoder.Random(Random.Shared.Next(20000, 50000));
-                    string mockVal = StringEncoder.Random(1999);
-                    var payload = new MockPayload() { MockMessage = mockVal };
-                    var now = DateTimeOffset.UtcNow;
-                    var guid = mockStream.Send(payload);
+                string mockVal = StringEncoder.Random(Random.Shared.Next(20000, 50000));
+                //string mockVal = StringEncoder.Random(1999);
+                var payload = new MockPayload() { MockMessage = mockVal };
+                var now = DateTimeOffset.UtcNow;
+                var guid = mockStream.Send(payload);
 
-                    mapMock[guid] = (payload, now);
+                msgStreamMapMock[guid] = (payload, now);
 
-                    await Task.Delay(50);
-                }
+                await Task.Delay(10);
+            }
 
-            }, stoppingToken),
-            Task.Run(async () =>
-            {
-                while (!stoppingToken.IsCancellationRequested)
-                {
-                    _logger.LogInformation("Mock messaging map count: {MapCount}", mapMock.Count);
-
-                    await Task.Delay(2000);
-                }
-
-            }, stoppingToken));
+        }, stoppingToken);
     }
 
     int mockStreamRawAveLent = 100;
@@ -204,6 +194,8 @@ internal class EdgeClientWorker(ILogger<EdgeClientWorker> logger, IServiceProvid
 
         return Task.Run(async () =>
         {
+            await Task.Delay(10000);
+
             Memory<byte> receivedBytes = new byte[EdgeDefaults.EdgeCommsBufferSize];
 
             while (!stoppingToken.IsCancellationRequested && !streamPipelineService.IsDisposedOrDisposing)
@@ -257,7 +249,7 @@ internal class EdgeClientWorker(ILogger<EdgeClientWorker> logger, IServiceProvid
                     _logger.LogError("Error {ServerHost}:{ServerPort}: {Error}", tcpHost, tcpPort, ex.Message);
                 }
 
-                await Task.Delay(50, stoppingToken);
+                await Task.Delay(10, stoppingToken);
             }
 
             _logger.LogInformation("Stream pipe {ServerHost}:{ServerPort} ended", tcpHost, tcpPort);
