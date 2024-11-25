@@ -164,17 +164,18 @@ internal class EdgeClientWorker(ILogger<EdgeClientWorker> logger, IServiceProvid
         {
             await Task.Delay(10000);
 
+            _logger.LogInformation("Mock messaging pipe started");
+
             while (!stoppingToken.IsCancellationRequested)
             {
                 string mockVal = StringEncoder.Random(Random.Shared.Next(20000, 50000));
-                //string mockVal = StringEncoder.Random(1999);
                 var payload = new MockPayload() { MockMessage = mockVal };
                 var now = DateTimeOffset.UtcNow;
                 var guid = mockStream.Send(payload);
 
                 msgStreamMapMock[guid] = (payload, now);
 
-                await Task.Delay(10);
+                await Task.Delay(5);
             }
 
         }, stoppingToken);
@@ -195,6 +196,8 @@ internal class EdgeClientWorker(ILogger<EdgeClientWorker> logger, IServiceProvid
         return Task.Run(async () =>
         {
             await Task.Delay(10000);
+
+            _logger.LogInformation("Mock raw bytes started");
 
             Memory<byte> receivedBytes = new byte[EdgeDefaults.EdgeCommsBufferSize];
 
@@ -235,7 +238,7 @@ internal class EdgeClientWorker(ILogger<EdgeClientWorker> logger, IServiceProvid
                             if (mockStreamRawLastLog + mockStreamRawLogSpan < DateTimeOffset.UtcNow)
                             {
                                 mockStreamRawLastLog = DateTimeOffset.UtcNow;
-                                _logger.LogInformation("Received time {TimeStamp:0.###}ms", mockStreamRawAveLi.Average());
+                                _logger.LogInformation("Raw bytes received time {TimeStamp:0.###}ms", mockStreamRawAveLi.Average());
                             }
                         }
                         finally
@@ -249,7 +252,7 @@ internal class EdgeClientWorker(ILogger<EdgeClientWorker> logger, IServiceProvid
                     _logger.LogError("Error {ServerHost}:{ServerPort}: {Error}", tcpHost, tcpPort, ex.Message);
                 }
 
-                await Task.Delay(10, stoppingToken);
+                await Task.Delay(5, stoppingToken);
             }
 
             _logger.LogInformation("Stream pipe {ServerHost}:{ServerPort} ended", tcpHost, tcpPort);
