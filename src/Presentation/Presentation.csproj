@@ -1,7 +1,7 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk.Web">
 
 	<PropertyGroup>
-		<TargetFramework>net8.0</TargetFramework>
+		<TargetFramework>net9.0</TargetFramework>
 		<Nullable>enable</Nullable>
 		<ImplicitUsings>enable</ImplicitUsings>
 		<IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>
@@ -31,7 +31,7 @@
 		<ProjectReference Include="..\Application\Application.csproj" />
 		<ProjectReference Include="..\Infrastructure.Serilog\Infrastructure.Serilog.csproj" />
 		<ProjectReference Include="..\Infrastructure.SQLite.LocalStore\Infrastructure.SQLite.LocalStore.csproj" />
-		<ProjectReference Include="..\Presentation.AspireTest\Presentation.AspireTest.ServiceDefaults\Presentation.AspireTest.ServiceDefaults.csproj" />
+		<ProjectReference Include="..\Presentation.Aspire\Presentation.Aspire.ServiceDefaults\Presentation.Aspire.ServiceDefaults.csproj" />
 	</ItemGroup>
 
 </Project>

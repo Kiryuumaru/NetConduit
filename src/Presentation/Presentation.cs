@@ -4,7 +4,6 @@ using ApplicationBuilderHelpers;
 using Google.Protobuf.WellKnownTypes;
 using Microsoft.Extensions.FileProviders;
 using Microsoft.OpenApi.Models;
-using Presentation.AspireTest.ServiceDefaults;
 using Presentation.Components;
 using Presentation.Services;
 using Microsoft.Extensions.Options;
