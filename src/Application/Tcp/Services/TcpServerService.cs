@@ -20,8 +20,6 @@ public partial class TcpServerService(ILogger<TcpServerService> logger)
 {
     private readonly ILogger<TcpServerService> _logger = logger;
 
-    private readonly TimeSpan _livelinessSpan = TimeSpan.FromSeconds(1);
-
     private CancellationTokenSource? _cts = null;
     private string? _serverHost = null;
     private int _serverPort = 0;
@@ -110,9 +108,16 @@ public partial class TcpServerService(ILogger<TcpServerService> logger)
 
             onClientCallback.Invoke(tcpClient, tranceiverStream, cts.Token).Forget();
 
-            await TcpClientHelpers.WatchLiveliness(tcpClient, networkStream, tranceiverStream, cts, _livelinessSpan);
+            await TcpClientHelpers.WatchLiveliness(tcpClient, networkStream, tranceiverStream, cts, TcpDefaults.LivelinessSpan);
 
             _logger.LogTrace("TCP server {Address}:{Port} disconnected from the client {ClientAddress}", serverAddress, _serverPort, clientAddress);
+
+            cts.Cancel();
+            tcpClient.Close();
+            tcpClient.Dispose();
+            networkStream.Close();
+            networkStream.Dispose();
+            tranceiverStream.Dispose();
         }
         catch (Exception ex)
         {

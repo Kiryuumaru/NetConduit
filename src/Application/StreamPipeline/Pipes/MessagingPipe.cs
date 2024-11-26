@@ -102,6 +102,10 @@ public class MessagingPipe<T> : BasePipe
                 }
                 catch (Exception ex)
                 {
+                    if (stoppingToken.IsCancellationRequested)
+                    {
+                        break;
+                    }
                     _logger.LogError("MessagingPipe {MessagingPipeName} sender Error: {Error}", _messagingPipeName, ex.Message);
                 }
             }
@@ -140,8 +144,6 @@ public class MessagingPipe<T> : BasePipe
                         throw CorruptedHeaderBytesException.Instance;
                     }
 
-                    //_logger.LogTrace("MessagingPipe {MessagingPipeName} received message from stream", _messagingPipeName);
-
                     long packetLength = BinaryPrimitives.ReadInt64LittleEndian(headerBytes.Slice(_packetLengthPos, _packetLengthSize));
                     int chunkLength = BinaryPrimitives.ReadInt32LittleEndian(headerBytes.Slice(_chunkLengthPos, _chunkLengthSize));
 
@@ -159,11 +161,17 @@ public class MessagingPipe<T> : BasePipe
                             throw new InvalidMessagingPipePayloadException(nameof(MessagingPipePayload<T>));
                         }
 
+                        //_logger.LogTrace("MessagingPipe {MessagingPipeName} received message from stream", _messagingPipeName);
+
                         _onMessageCallback?.Invoke(messagingPipePayload)?.Forget();
                     }
                 }
                 catch (Exception ex)
                 {
+                    if (stoppingToken.IsCancellationRequested)
+                    {
+                        break;
+                    }
                     _logger.LogError("MessagingPipe {MessagingPipeName} receiver Error: {Error}", _messagingPipeName, ex.Message);
                 }
             }
@@ -185,7 +193,7 @@ public class MessagingPipe<T> : BasePipe
 
             _logger.LogInformation("MessagingPipe {MessagingPipeName} ended", _messagingPipeName);
 
-        }, stoppingToken);
+        }, ct);
     }
 
     public void SetPipeName(string name)

@@ -22,8 +22,6 @@ public partial class TcpClientService(ILogger<TcpClientService> logger)
 {
     private readonly ILogger<TcpClientService> _logger = logger;
 
-    private readonly TimeSpan _livelinessSpan = TimeSpan.FromSeconds(1);
-
     private CancellationTokenSource? _cts = null;
     private string? _serverHost = null;
     private int _serverPort = 0;
@@ -56,7 +54,7 @@ public partial class TcpClientService(ILogger<TcpClientService> logger)
 
         return Task.Run(async () =>
         {
-            _logger.LogTrace("TCP client {Host}:{Port} started", _serverHost, _serverPort);
+            _logger.LogInformation("TCP client {Host}:{Port} started", _serverHost, _serverPort);
 
             while (!ct.IsCancellationRequested)
             {
@@ -90,10 +88,10 @@ public partial class TcpClientService(ILogger<TcpClientService> logger)
                     _logger.LogError("Error {Host}:{Port}: {ErrorMessage}", _serverHost, _serverPort, ex.Message);
                 }
 
-                await Task.Delay(_livelinessSpan, ct);
+                await Task.Delay(TcpDefaults.LivelinessSpan, ct);
             }
 
-            _logger.LogTrace("TCP client {Host}:{Port} ended", _serverHost, _serverPort);
+            _logger.LogInformation("TCP client {Host}:{Port} ended", _serverHost, _serverPort);
 
         }, ct);
     }
@@ -113,9 +111,16 @@ public partial class TcpClientService(ILogger<TcpClientService> logger)
 
             onClientCallback.Invoke(tranceiverStream, cts.Token).Forget();
 
-            await TcpClientHelpers.WatchLiveliness(tcpClient, networkStream, tranceiverStream, cts, _livelinessSpan);
+            await TcpClientHelpers.WatchLiveliness(tcpClient, networkStream, tranceiverStream, cts, TcpDefaults.LivelinessSpan);
 
             _logger.LogTrace("TCP client disconnected from the server {Host}:{Port}", serverAddress, _serverPort);
+
+            cts.Cancel();
+            tcpClient.Close();
+            tcpClient.Dispose();
+            networkStream.Close();
+            networkStream.Dispose();
+            tranceiverStream.Dispose();
         }
         catch (Exception ex)
         {

@@ -86,29 +86,10 @@ internal class EdgeClientWorker(ILogger<EdgeClientWorker> logger, IServiceProvid
             stoppingToken);
 
         return Task.WhenAll(
-            StartMockStreamRaw(EdgeDefaults.MockChannelKey0, streamPipelineService, tcpHost, tcpPort, stoppingToken),
-            StartMockStreamRaw(EdgeDefaults.MockChannelKey1, streamPipelineService, tcpHost, tcpPort, stoppingToken),
-            StartMockStreamRaw(EdgeDefaults.MockChannelKey2, streamPipelineService, tcpHost, tcpPort, stoppingToken),
-            StartMockStreamRaw(EdgeDefaults.MockChannelKey3, streamPipelineService, tcpHost, tcpPort, stoppingToken),
-            StartMockStreamRaw(EdgeDefaults.MockChannelKey4, streamPipelineService, tcpHost, tcpPort, stoppingToken),
-            StartMockStreamRaw(EdgeDefaults.MockChannelKey5, streamPipelineService, tcpHost, tcpPort, stoppingToken),
-            StartMockStreamRaw(EdgeDefaults.MockChannelKey6, streamPipelineService, tcpHost, tcpPort, stoppingToken),
-            StartMockStreamRaw(EdgeDefaults.MockChannelKey7, streamPipelineService, tcpHost, tcpPort, stoppingToken),
-            StartMockStreamRaw(EdgeDefaults.MockChannelKey8, streamPipelineService, tcpHost, tcpPort, stoppingToken),
-            StartMockStreamRaw(EdgeDefaults.MockChannelKey9, streamPipelineService, tcpHost, tcpPort, stoppingToken),
-            StartMockStreamMessaging(EdgeDefaults.MockMsgChannelKey0, streamPipelineService, stoppingToken),
-            StartMockStreamMessaging(EdgeDefaults.MockMsgChannelKey1, streamPipelineService, stoppingToken),
-            StartMockStreamMessaging(EdgeDefaults.MockMsgChannelKey2, streamPipelineService, stoppingToken),
-            StartMockStreamMessaging(EdgeDefaults.MockMsgChannelKey3, streamPipelineService, stoppingToken),
-            StartMockStreamMessaging(EdgeDefaults.MockMsgChannelKey4, streamPipelineService, stoppingToken),
-            StartMockStreamMessaging(EdgeDefaults.MockMsgChannelKey5, streamPipelineService, stoppingToken),
-            StartMockStreamMessaging(EdgeDefaults.MockMsgChannelKey6, streamPipelineService, stoppingToken),
-            StartMockStreamMessaging(EdgeDefaults.MockMsgChannelKey7, streamPipelineService, stoppingToken),
-            StartMockStreamMessaging(EdgeDefaults.MockMsgChannelKey8, streamPipelineService, stoppingToken),
-            StartMockStreamMessaging(EdgeDefaults.MockMsgChannelKey9, streamPipelineService, stoppingToken));
+            StartMockStreamMessaging(EdgeDefaults.MockMsgChannelKey0, streamPipelineService, stoppingToken));
     }
 
-    int msgStreamAveLent = 100;
+    int msgStreamAveLent = 1;
     ConcurrentDictionary<Guid, (MockPayload payload, DateTimeOffset time)> msgStreamMapMock = [];
     TimeSpan msgStreamLogSpan = TimeSpan.FromSeconds(1);
     DateTimeOffset msgStreamLastLog = DateTimeOffset.MinValue;
@@ -161,20 +142,20 @@ internal class EdgeClientWorker(ILogger<EdgeClientWorker> logger, IServiceProvid
 
             while (!stoppingToken.IsCancellationRequested)
             {
-                string mockVal = StringEncoder.Random(Random.Shared.Next(20000, 50000));
+                string mockVal = StringEncoder.Random(1000);
                 var payload = new MockPayload() { MockMessage = mockVal };
                 var now = DateTimeOffset.UtcNow;
                 var guid = mockStream.Send(payload);
 
                 msgStreamMapMock[guid] = (payload, now);
 
-                await Task.Delay(5);
+                await Task.Delay(5000);
             }
 
         }, stoppingToken);
     }
 
-    int mockStreamRawAveLent = 100;
+    int mockStreamRawAveLent = 1;
     TimeSpan mockStreamRawLogSpan = TimeSpan.FromSeconds(1);
     DateTimeOffset mockStreamRawLastLog = DateTimeOffset.MinValue;
     List<double> mockStreamRawAveLi = [];

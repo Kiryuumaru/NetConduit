@@ -123,6 +123,8 @@ internal class EdgeServerWorker(ILogger<EdgeServerWorker> logger, IServiceProvid
     {
         var mockStream = streamPipelineService.SetMessagingPipe<MockPayload>(channelKey, $"MOOCK-{channelKey}");
 
+        stoppingToken.Register(mockStream.Dispose);
+
         mockStream.OnMessage(payload =>
         {
             mockStream.Send(new()

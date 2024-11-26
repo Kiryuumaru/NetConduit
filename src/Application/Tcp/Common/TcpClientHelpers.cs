@@ -35,13 +35,6 @@ internal static class TcpClientHelpers
                 catch { }
             }
 
-            cts.Cancel();
-            tcpClient.Close();
-            tcpClient.Dispose();
-            networkStream.Close();
-            networkStream.Dispose();
-            tranceiverStream.Dispose();
-
         }, cts.Token);
     }
 }

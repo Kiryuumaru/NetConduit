@@ -74,6 +74,8 @@ public partial class StreamMultiplexer
         _onError = onError;
         _cts = CancellationTokenSource.CreateLinkedTokenSource(stoppingToken, _mainTranceiverStream.CancelWhenDisposing(stoppingToken));
 
+        _cts.Token.Register(Dispose);
+
         _paddingBytes = Encoding.Default.GetBytes(_paddingValue);
         _paddingSize = _paddingBytes.Length;
 
@@ -172,6 +174,7 @@ public partial class StreamMultiplexer
                 }
                 catch (Exception ex)
                 {
+                    stoppingToken.WaitHandle.WaitOne(1000);
                     if (stoppingToken.IsCancellationRequested)
                     {
                         break;
@@ -233,11 +236,11 @@ public partial class StreamMultiplexer
                 }
                 catch (Exception ex)
                 {
+                    _cts.Token.WaitHandle.WaitOne(1000);
                     if (_cts.Token.IsCancellationRequested)
                     {
                         break;
                     }
-                    _cts.Token.WaitHandle.WaitOne(100);
                     _onError(ex);
                 }
             }

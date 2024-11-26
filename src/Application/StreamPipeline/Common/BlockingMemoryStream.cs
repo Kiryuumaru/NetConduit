@@ -14,7 +14,7 @@ namespace Application.StreamPipeline.Common;
 public partial class BlockingMemoryStream(int capacity) : MemoryStream(capacity)
 {
     private readonly ManualResetEventSlim _dataReady = new(false);
-    private readonly object _lockObj = new();
+    private readonly Lock _lockObj = new();
 
     private long _readPosition = 0;
     private long _writePosition = 0;
@@ -57,20 +57,18 @@ public partial class BlockingMemoryStream(int capacity) : MemoryStream(capacity)
 
     protected override void Dispose(bool disposing)
     {
+        CoreDispose();
+
         if (disposing)
         {
             try
             {
-                lock (_lockObj)
-                {
-                    _dataReady.Set();
-                    _dataReady.Dispose();
-                }
+                using var _ = _lockObj.EnterScope();
+                _dataReady.Set();
+                _dataReady.Dispose();
             }
             catch { }
         }
-
-        CoreDispose();
 
         base.Dispose(disposing);
     }
@@ -79,39 +77,38 @@ public partial class BlockingMemoryStream(int capacity) : MemoryStream(capacity)
     {
         int readCount = 0;
 
-        ObjectDisposedException.ThrowIf(IsDisposed, this);
+        ObjectDisposedException.ThrowIf(IsDisposedOrDisposing, this);
 
         while (readCount == 0)
         {
             _dataReady.Wait(cancellationToken);
 
-            if (IsDisposed)
+            if (IsDisposedOrDisposing)
             {
                 break;
             }
 
-            lock (_lockObj)
+            using var _ = _lockObj.EnterScope();
+
+            base.Position = _readPosition;
+            readCount = base.Read(buffer, offset, count);
+            _readPosition = base.Position;
+
+            if (readCount == 0)
             {
-                base.Position = _readPosition;
-                readCount = base.Read(buffer, offset, count);
-                _readPosition = base.Position;
-
-                if (readCount == 0)
+                _dataReady.Reset();
+            }
+            else
+            {
+                if (_readPosition == _writePosition)
                 {
-                    _dataReady.Reset();
+                    base.SetLength(0);
+                    base.Position = 0;
+                    _readPosition = 0;
+                    _writePosition = 0;
                 }
-                else
-                {
-                    if (_readPosition == _writePosition)
-                    {
-                        base.SetLength(0);
-                        base.Position = 0;
-                        _readPosition = 0;
-                        _writePosition = 0;
-                    }
 
-                    break;
-                }
+                break;
             }
         }
 
@@ -120,12 +117,13 @@ public partial class BlockingMemoryStream(int capacity) : MemoryStream(capacity)
 
     public void CoreWrite(byte[] buffer, int offset, int count)
     {
-        lock (_lockObj)
-        {
-            base.Position = _writePosition;
-            base.Write(buffer, offset, count);
-            _writePosition = base.Position;
-            _dataReady.Set();
-        }
+        ObjectDisposedException.ThrowIf(IsDisposedOrDisposing, this);
+
+        using var _ = _lockObj.EnterScope();
+
+        base.Position = _writePosition;
+        base.Write(buffer, offset, count);
+        _writePosition = base.Position;
+        _dataReady.Set();
     }
 }

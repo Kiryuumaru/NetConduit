@@ -60,9 +60,14 @@ public partial class StreamPipelineService(ILogger<StreamPipelineService> logger
     {
         var messagingPipe = _serviceProvider.GetRequiredService<MessagingPipe<T>>();
         var tranceiverStream = GetMux().Set(channelKey, StreamPipelineDefaults.EdgeCommsBufferSize);
+        var pipeToken = CancellationTokenSource.CreateLinkedTokenSource(
+            _cts!.Token,
+            CancelWhenDisposing(),
+            messagingPipe.CancelWhenDisposing(),
+            tranceiverStream.CancelWhenDisposing());
         messagingPipe.SetPipeName(channelName);
         messagingPipe.SetJsonSerializerOptions(jsonSerializerOptions);
-        messagingPipe.Start(tranceiverStream, _cts!.Token).Forget();
+        messagingPipe.Start(tranceiverStream, pipeToken.Token).Forget();
         return messagingPipe;
     }
 }
