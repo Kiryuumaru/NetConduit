@@ -185,7 +185,6 @@ internal class EdgeClientWorker(ILogger<EdgeClientWorker> logger, IServiceProvid
 
         _logger.LogInformation("Stream pipe {ServerHost}:{ServerPort} started", tcpHost, tcpPort);
 
-
         return Task.Run(async () =>
         {
             await Task.Delay(10000);
