@@ -43,21 +43,22 @@ public partial class StreamMultiplexer
     private readonly CancellationTokenSource _cts;
 
     private const string _paddingValue = "endofchunk";
-    private const int _paddingSize = 10;
 
     private const int _channelKeySize = 16;
     private const int _packetLengthSize = 8;
     private const int _chunkLengthSize = 4;
-    private const int _headerSize = _paddingSize + _channelKeySize + _packetLengthSize + _chunkLengthSize;
-    private const int _totalSize = _headerSize + StreamPipelineDefaults.StreamMultiplexerChunkSize;
 
-    private const int _paddingPos = 0;
-    private const int _channelKeyPos = _paddingPos + _paddingSize;
-    private const int _packetLengthPos = _channelKeyPos + _channelKeySize;
-    private const int _chunkLengthPos = _packetLengthPos + _packetLengthSize;
-    private const int _chunkPos = _chunkLengthPos + _chunkLengthSize;
+    private readonly byte[] _paddingBytes;
 
-    private readonly byte[] _padding;
+    private readonly int _paddingSize;
+    private readonly int _headerSize;
+    private readonly int _totalSize;
+
+    private readonly int _paddingPos;
+    private readonly int _channelKeyPos;
+    private readonly int _packetLengthPos;
+    private readonly int _chunkLengthPos;
+    private readonly int _chunkPos;
 
     private StreamMultiplexer(
         TranceiverStream mainTranceiverStream,
@@ -72,12 +73,17 @@ public partial class StreamMultiplexer
         _onError = onError;
         _cts = CancellationTokenSource.CreateLinkedTokenSource(stoppingToken, _mainTranceiverStream.CancelWhenDisposing(stoppingToken));
 
-        _padding = Encoding.Default.GetBytes(_paddingValue);
+        _paddingBytes = Encoding.Default.GetBytes(_paddingValue);
+        _paddingSize = _paddingBytes.Length;
 
-        if (_padding.Length != _paddingSize)
-        {
-            throw new Exception("Padding incorrect size");
-        }
+        _headerSize = _paddingSize + _channelKeySize + _packetLengthSize + _chunkLengthSize;
+        _totalSize = _headerSize + StreamPipelineDefaults.StreamMultiplexerChunkSize;
+
+        _paddingPos = 0;
+        _channelKeyPos = _paddingPos + _paddingSize;
+        _packetLengthPos = _channelKeyPos + _channelKeySize;
+        _chunkLengthPos = _packetLengthPos + _packetLengthSize;
+        _chunkPos = _chunkLengthPos + _chunkLengthSize;
     }
 
     public Task Start()
@@ -126,7 +132,7 @@ public partial class StreamMultiplexer
     {
         return Task.Run(() =>
         {
-            Span<byte> paddingBytes = _padding.AsSpan();
+            Span<byte> paddingBytes = _paddingBytes.AsSpan();
             Span<byte> channelBytes = stackalloc byte[_channelKeySize];
             Span<byte> receivedBytes = stackalloc byte[_totalSize];
             Span<byte> packetBytes = new byte[StreamPipelineDefaults.StreamMultiplexerMaxPacketSize];
@@ -182,7 +188,7 @@ public partial class StreamMultiplexer
     {
         return Task.Run(() =>
         {
-            Span<byte> paddingBytes = _padding.AsSpan();
+            Span<byte> paddingBytes = _paddingBytes.AsSpan();
             Span<byte> headerBytes = stackalloc byte[_headerSize];
             Span<byte> receivedBytes = stackalloc byte[StreamPipelineDefaults.StreamMultiplexerChunkSize];
 

@@ -26,30 +26,35 @@ public class MessagingPipe<T> : BasePipe
     private Func<MessagingPipePayload<T>, Task>? _onMessageCallback = null;
 
     private const string _paddingValue = "endofchunk";
-    private const int _paddingSize = 10;
 
     private const int _packetLengthSize = 8;
     private const int _chunkLengthSize = 4;
-    private const int _headerSize = _paddingSize + _packetLengthSize + _chunkLengthSize;
-    private const int _totalSize = _headerSize + StreamPipelineDefaults.MessagingPipeChunkSize;
 
-    private const int _paddingPos = 0;
-    private const int _packetLengthPos = _paddingPos + _paddingSize;
-    private const int _chunkLengthPos = _packetLengthPos + _packetLengthSize;
-    private const int _chunkPos = _chunkLengthPos + _chunkLengthSize;
+    private readonly byte[] _paddingBytes;
 
-    private readonly byte[] _padding;
+    private readonly int _paddingSize;
+    private readonly int _headerSize;
+    private readonly int _totalSize;
+
+    private readonly int _paddingPos;
+    private readonly int _packetLengthPos;
+    private readonly int _chunkLengthPos;
+    private readonly int _chunkPos;
 
     public MessagingPipe(ILogger<MessagingPipe<T>> logger)
     {
         _logger = logger;
 
-        _padding = Encoding.Default.GetBytes(_paddingValue);
+        _paddingBytes = Encoding.Default.GetBytes(_paddingValue);
+        _paddingSize = _paddingBytes.Length;
 
-        if (_padding.Length != _paddingSize)
-        {
-            throw new Exception("Padding incorrect size");
-        }
+        _headerSize = _paddingSize + _packetLengthSize + _chunkLengthSize;
+        _totalSize = _headerSize + StreamPipelineDefaults.MessagingPipeChunkSize;
+
+        _paddingPos = 0;
+        _packetLengthPos = _paddingPos + _paddingSize;
+        _chunkLengthPos = _packetLengthPos + _packetLengthSize;
+        _chunkPos = _chunkLengthPos + _chunkLengthSize;
     }
 
     private Task StartSend(TranceiverStream tranceiverStream, CancellationToken stoppingToken)
@@ -61,7 +66,7 @@ public class MessagingPipe<T> : BasePipe
                 ["MessagingPipeName"] = _messagingPipeName
             });
 
-            Span<byte> paddingBytes = _padding.AsSpan();
+            Span<byte> paddingBytes = _paddingBytes.AsSpan();
             Span<byte> headerBytes = stackalloc byte[_headerSize];
             Span<byte> sendBytes = stackalloc byte[_totalSize];
 
@@ -112,7 +117,7 @@ public class MessagingPipe<T> : BasePipe
                 ["MessagingPipeName"] = _messagingPipeName
             });
 
-            Span<byte> paddingBytes = _padding.AsSpan();
+            Span<byte> paddingBytes = _paddingBytes.AsSpan();
             Span<byte> headerBytes = stackalloc byte[_headerSize];
             Span<byte> receivedBytes = stackalloc byte[StreamPipelineDefaults.MessagingPipeChunkSize];
 
