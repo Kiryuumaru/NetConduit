@@ -1,5 +1,6 @@
 ﻿using Application.Common;
 using Application.StreamPipeline.Common;
+using Application.StreamPipeline.Exceptions;
 using Application.StreamPipeline.Models;
 using DisposableHelpers.Attributes;
 using Microsoft.Extensions.Logging;
@@ -204,7 +205,7 @@ public partial class StreamMultiplexer
                     }
                     if (!headerBytes[.._paddingSize].SequenceEqual(paddingBytes))
                     {
-                        throw new Exception("Sender received corrupted header bytes");
+                        throw CorruptedHeaderBytesException.Instance;
                     }
 
                     Guid channelKey = new(headerBytes.Slice(_channelKeyPos, _channelKeySize));

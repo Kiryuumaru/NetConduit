@@ -85,10 +85,6 @@ internal class EdgeClientWorker(ILogger<EdgeClientWorker> logger, IServiceProvid
             ex => { _logger.LogError("Stream multiplexer {ServerHost}:{ServerPort} error: {Error}", tcpHost, tcpPort, ex.Message); },
             stoppingToken);
 
-        //return StartMockStreamMessaging(streamPipelineService, stoppingToken);
-        //return StartMockStreamRaw(streamPipelineService, tcpHost, tcpPort, stoppingToken);
-        //return Task.WhenAll(
-        //    StartMockStreamRaw(EdgeDefaults.MockChannelKey0, streamPipelineService, tcpHost, tcpPort, stoppingToken));
         return Task.WhenAll(
             StartMockStreamRaw(EdgeDefaults.MockChannelKey0, streamPipelineService, tcpHost, tcpPort, stoppingToken),
             StartMockStreamRaw(EdgeDefaults.MockChannelKey1, streamPipelineService, tcpHost, tcpPort, stoppingToken),
@@ -110,10 +106,6 @@ internal class EdgeClientWorker(ILogger<EdgeClientWorker> logger, IServiceProvid
             StartMockStreamMessaging(EdgeDefaults.MockMsgChannelKey7, streamPipelineService, stoppingToken),
             StartMockStreamMessaging(EdgeDefaults.MockMsgChannelKey8, streamPipelineService, stoppingToken),
             StartMockStreamMessaging(EdgeDefaults.MockMsgChannelKey9, streamPipelineService, stoppingToken));
-
-        //return Task.WhenAll(
-        //    StartMockStreamMessaging(streamPipelineService, stoppingToken),
-        //    StartMockStreamRaw(streamPipelineService, tcpHost, tcpPort, stoppingToken));
     }
 
     int msgStreamAveLent = 100;
@@ -146,18 +138,19 @@ internal class EdgeClientWorker(ILogger<EdgeClientWorker> logger, IServiceProvid
                 _logger.LogError("Mismatch payload received value {PayloadMessageGuid}", payload.MessageGuid);
             }
 
-            msgStreamAveLi.Add((now - mock.time).TotalMilliseconds);
             while (msgStreamAveLi.Count > msgStreamAveLent)
             {
                 msgStreamAveLi.RemoveAt(0);
             }
+
+            msgStreamAveLi.Add((now - mock.time).TotalMilliseconds);
+            msgStreamMapMock.Remove(clientPayload.MessageGuid, out _);
+
             if (msgStreamLastLog + msgStreamLogSpan < now)
             {
                 msgStreamLastLog = now;
                 _logger.LogInformation("Messaging mock time {TimeStamp:0.###}ms, map count: {MapCount}", msgStreamAveLi.Average(), msgStreamMapMock.Count);
             }
-
-            msgStreamMapMock.Remove(clientPayload.MessageGuid, out _);
         });
 
         return Task.Run(async () =>

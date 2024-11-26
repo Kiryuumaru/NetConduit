@@ -2,6 +2,7 @@
 using Application.Edge.Common;
 using Application.StreamPipeline.Abstraction;
 using Application.StreamPipeline.Common;
+using Application.StreamPipeline.Exceptions;
 using Application.StreamPipeline.Models;
 using Application.StreamPipeline.Services;
 using Microsoft.Extensions.Logging;
@@ -136,7 +137,7 @@ public class MessagingPipe<T> : BasePipe
                     }
                     if (!headerBytes[.._paddingSize].SequenceEqual(paddingBytes))
                     {
-                        throw new Exception("Sender received corrupted header bytes");
+                        throw CorruptedHeaderBytesException.Instance;
                     }
 
                     //_logger.LogTrace("MessagingPipe {MessagingPipeName} received message from stream", _messagingPipeName);
@@ -152,10 +153,10 @@ public class MessagingPipe<T> : BasePipe
                     {
                         streamChunkHolder.Seek(0, SeekOrigin.Begin);
                         streamChunkHolder.SetLength(packetLength);
-                        var ss = streamChunkHolder.ToArray();
-                        if (JsonSerializer.Deserialize<MessagingPipePayload<T>>(ss, _jsonSerializerOptions) is not MessagingPipePayload<T> messagingPipePayload)
+                        var packetBytes = streamChunkHolder.ToArray();
+                        if (JsonSerializer.Deserialize<MessagingPipePayload<T>>(packetBytes, _jsonSerializerOptions) is not MessagingPipePayload<T> messagingPipePayload)
                         {
-                            throw new Exception($"Message is not {nameof(MessagingPipePayload<T>)}");
+                            throw new InvalidMessagingPipePayloadException(nameof(MessagingPipePayload<T>));
                         }
 
                         _onMessageCallback?.Invoke(messagingPipePayload)?.Forget();
