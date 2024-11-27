@@ -25,35 +25,18 @@ using System.Text;
 using System.Text.Json;
 using System.Threading.Tasks;
 
-namespace Application.Edge.Workers;
+namespace Application.Edge.Mockers;
 
-internal class EdgeClientWorker(ILogger<EdgeClientWorker> logger, IServiceProvider serviceProvider, IConfiguration configuration) : BackgroundService
+internal class EdgeClientMockWorker(ILogger<EdgeClientMockWorker> logger, IServiceProvider serviceProvider, IConfiguration configuration) : BackgroundService
 {
-    private readonly ILogger<EdgeClientWorker> _logger = logger;
+    private readonly ILogger<EdgeClientMockWorker> _logger = logger;
     private readonly IServiceProvider _serviceProvider = serviceProvider;
     private readonly IConfiguration _configuration = configuration;
 
-    protected override async Task ExecuteAsync(CancellationToken stoppingToken)
+    protected override Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        using var _ = _logger.BeginScopeMap(nameof(EdgeServerWorker), nameof(ExecuteAsync));
-
-        using var scope = _serviceProvider.CreateScope();
-        var edgeService = scope.ServiceProvider.GetRequiredService<IEdgeStoreService>();
-
-        if (!(await edgeService.Contains(EdgeDefaults.ServerEdgeId.ToString(), stoppingToken)).SuccessAndHasValue(out var contains) || !contains ||
-            !(await edgeService.GetToken(EdgeDefaults.ServerEdgeId.ToString(), stoppingToken)).SuccessAndHasValue(out var edgeConnectionEntity))
-        {
-            AddEdgeDto newServerEdge = new()
-            {
-                Id = Guid.NewGuid(),
-                Name = Environment.MachineName
-            };
-            edgeConnectionEntity = (await edgeService.Create(newServerEdge, stoppingToken)).GetValueOrThrow();
-        }
-
-        _logger.LogInformation("Client edge was initialized with handshake-token {HandshakeToken}", edgeConnectionEntity.Token);
-
         RoutineExecutor.Execute(TimeSpan.FromSeconds(1), true, Routine, ex => _logger.LogError("Error: {Error}", ex.Message), stoppingToken);
+        return Task.CompletedTask;
     }
 
     private async Task Routine(CancellationToken stoppingToken)
@@ -61,7 +44,7 @@ internal class EdgeClientWorker(ILogger<EdgeClientWorker> logger, IServiceProvid
         var tcpHost = _configuration.GetServerTcpHost();
         var tcpPort = _configuration.GetServerTcpPort();
 
-        using var _ = _logger.BeginScopeMap(nameof(EdgeClientWorker), nameof(Routine), new()
+        using var _ = _logger.BeginScopeMap(nameof(EdgeClientMockWorker), nameof(Routine), new()
         {
             ["ServerHost"] = tcpHost,
             ["ServerPort"] = tcpPort
@@ -83,7 +66,7 @@ internal class EdgeClientWorker(ILogger<EdgeClientWorker> logger, IServiceProvid
 
     private Task Start(TranceiverStream tranceiverStream, string tcpHost, int tcpPort, CancellationToken stoppingToken)
     {
-        using var _ = _logger.BeginScopeMap(nameof(EdgeClientWorker), nameof(Start), new()
+        using var _ = _logger.BeginScopeMap(nameof(EdgeClientMockWorker), nameof(Start), new()
         {
             ["ServerHost"] = tcpHost,
             ["ServerPort"] = tcpPort

@@ -3,7 +3,7 @@ using Application.Configuration.Extensions;
 using Application.Edge.Common;
 using Application.Edge.Interfaces;
 using Application.Edge.Services;
-using Application.Edge.Workers;
+using Application.Edge.Mockers;
 using Application.StreamPipeline.Common;
 using Application.StreamPipeline.Services;
 using Application.Tcp.Services;
@@ -25,9 +25,9 @@ using System.Threading.Tasks;
 
 namespace Application.Watchdog.Workers;
 
-internal class GCCollector(ILogger<EdgeClientWorker> logger) : BackgroundService
+internal class GCCollector(ILogger<EdgeClientMockWorker> logger) : BackgroundService
 {
-    private readonly ILogger<EdgeClientWorker> _logger = logger;
+    private readonly ILogger<EdgeClientMockWorker> _logger = logger;
 
     protected override Task ExecuteAsync(CancellationToken stoppingToken)
     {

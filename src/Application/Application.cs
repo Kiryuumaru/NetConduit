@@ -2,7 +2,7 @@
 using Application.Configuration.Extensions;
 using Application.Edge.Interfaces;
 using Application.Edge.Services;
-using Application.Edge.Workers;
+using Application.Edge.Mockers;
 using Application.LocalStore.Services;
 using Application.ServiceMaster.Services;
 using Application.StreamPipeline.Pipes;
@@ -11,6 +11,7 @@ using Application.Tcp.Services;
 using Application.Watchdog.Workers;
 using ApplicationBuilderHelpers;
 using Microsoft.Extensions.DependencyInjection;
+using Application.Edge.Workers;
 
 namespace Application;
 
@@ -40,12 +41,16 @@ public class Application : ApplicationDependency
             services.AddScoped<IEdgeStoreService, EdgeStoreService>();
 
             services.AddHostedService<EdgeServerWorker>();
+
+            services.AddHostedService<EdgeServerMockWorker>();
         }
         else
         {
             services.AddScoped<IEdgeStoreService, EdgeStoreApiService>();
 
             services.AddHostedService<EdgeClientWorker>();
+
+            services.AddHostedService<EdgeClientMockWorker>();
         }
     }
 }

@@ -24,17 +24,17 @@ using System.Text;
 using System.Text.Json;
 using System.Threading.Tasks;
 
-namespace Application.Edge.Workers;
+namespace Application.Edge.Mockers;
 
-internal class EdgeServerWorker(ILogger<EdgeServerWorker> logger, IServiceProvider serviceProvider, IConfiguration configuration) : BackgroundService
+internal class EdgeServerMockWorker(ILogger<EdgeServerMockWorker> logger, IServiceProvider serviceProvider, IConfiguration configuration) : BackgroundService
 {
-    private readonly ILogger<EdgeServerWorker> _logger = logger;
+    private readonly ILogger<EdgeServerMockWorker> _logger = logger;
     private readonly IServiceProvider _serviceProvider = serviceProvider;
     private readonly IConfiguration _configuration = configuration;
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        using var _ = _logger.BeginScopeMap(nameof(EdgeServerWorker), nameof(ExecuteAsync));
+        using var _ = _logger.BeginScopeMap(nameof(EdgeServerMockWorker), nameof(ExecuteAsync));
 
         using var scope = _serviceProvider.CreateScope();
         var edgeService = scope.ServiceProvider.GetRequiredService<IEdgeStoreService>();
@@ -44,8 +44,8 @@ internal class EdgeServerWorker(ILogger<EdgeServerWorker> logger, IServiceProvid
         {
             AddEdgeDto newServerEdge = new()
             {
-                Id = Guid.NewGuid(),
-                Name = Environment.MachineName
+                Id = EdgeDefaults.ServerEdgeId,
+                Name = EdgeDefaults.ServerEdgeName
             };
             edgeConnectionEntity = (await edgeService.Create(newServerEdge, stoppingToken)).GetValueOrThrow();
         }
@@ -57,7 +57,7 @@ internal class EdgeServerWorker(ILogger<EdgeServerWorker> logger, IServiceProvid
 
     private async Task Routine(CancellationToken stoppingToken)
     {
-        using var _ = _logger.BeginScopeMap(nameof(EdgeServerWorker), nameof(Routine));
+        using var _ = _logger.BeginScopeMap(nameof(EdgeServerMockWorker), nameof(Routine));
 
         using var scope = _serviceProvider.CreateScope();
         var tcpServer = scope.ServiceProvider.GetRequiredService<TcpServerService>();
@@ -78,7 +78,7 @@ internal class EdgeServerWorker(ILogger<EdgeServerWorker> logger, IServiceProvid
 
     private Task Start(IPAddress iPAddress, TranceiverStream tranceiverStream, CancellationToken stoppingToken)
     {
-        using var _ = _logger.BeginScopeMap(nameof(EdgeServerWorker), nameof(Start), new()
+        using var _ = _logger.BeginScopeMap(nameof(EdgeServerMockWorker), nameof(Start), new()
         {
             ["ClientAddress"] = iPAddress
         });
