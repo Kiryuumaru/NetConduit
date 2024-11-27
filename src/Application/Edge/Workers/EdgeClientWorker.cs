@@ -86,7 +86,26 @@ internal class EdgeClientWorker(ILogger<EdgeClientWorker> logger, IServiceProvid
             stoppingToken);
 
         return Task.WhenAll(
-            StartMockStreamMessaging(EdgeDefaults.MockMsgChannelKey0, streamPipelineService, stoppingToken));
+            StartMockStreamRaw(EdgeDefaults.MockChannelKey0, streamPipelineService, tcpHost, tcpPort, stoppingToken),
+            StartMockStreamRaw(EdgeDefaults.MockChannelKey1, streamPipelineService, tcpHost, tcpPort, stoppingToken),
+            StartMockStreamRaw(EdgeDefaults.MockChannelKey2, streamPipelineService, tcpHost, tcpPort, stoppingToken),
+            StartMockStreamRaw(EdgeDefaults.MockChannelKey3, streamPipelineService, tcpHost, tcpPort, stoppingToken),
+            StartMockStreamRaw(EdgeDefaults.MockChannelKey4, streamPipelineService, tcpHost, tcpPort, stoppingToken),
+            StartMockStreamRaw(EdgeDefaults.MockChannelKey5, streamPipelineService, tcpHost, tcpPort, stoppingToken),
+            StartMockStreamRaw(EdgeDefaults.MockChannelKey6, streamPipelineService, tcpHost, tcpPort, stoppingToken),
+            StartMockStreamRaw(EdgeDefaults.MockChannelKey7, streamPipelineService, tcpHost, tcpPort, stoppingToken),
+            StartMockStreamRaw(EdgeDefaults.MockChannelKey8, streamPipelineService, tcpHost, tcpPort, stoppingToken),
+            StartMockStreamRaw(EdgeDefaults.MockChannelKey9, streamPipelineService, tcpHost, tcpPort, stoppingToken),
+            StartMockStreamMessaging(EdgeDefaults.MockMsgChannelKey0, streamPipelineService, stoppingToken),
+            StartMockStreamMessaging(EdgeDefaults.MockMsgChannelKey1, streamPipelineService, stoppingToken),
+            StartMockStreamMessaging(EdgeDefaults.MockMsgChannelKey2, streamPipelineService, stoppingToken),
+            StartMockStreamMessaging(EdgeDefaults.MockMsgChannelKey3, streamPipelineService, stoppingToken),
+            StartMockStreamMessaging(EdgeDefaults.MockMsgChannelKey4, streamPipelineService, stoppingToken),
+            StartMockStreamMessaging(EdgeDefaults.MockMsgChannelKey5, streamPipelineService, stoppingToken),
+            StartMockStreamMessaging(EdgeDefaults.MockMsgChannelKey6, streamPipelineService, stoppingToken),
+            StartMockStreamMessaging(EdgeDefaults.MockMsgChannelKey7, streamPipelineService, stoppingToken),
+            StartMockStreamMessaging(EdgeDefaults.MockMsgChannelKey8, streamPipelineService, stoppingToken),
+            StartMockStreamMessaging(EdgeDefaults.MockMsgChannelKey9, streamPipelineService, stoppingToken));
     }
 
     int msgStreamAveLent = 1;
@@ -142,14 +161,25 @@ internal class EdgeClientWorker(ILogger<EdgeClientWorker> logger, IServiceProvid
 
             while (!stoppingToken.IsCancellationRequested)
             {
-                string mockVal = StringEncoder.Random(1000);
-                var payload = new MockPayload() { MockMessage = mockVal };
-                var now = DateTimeOffset.UtcNow;
-                var guid = mockStream.Send(payload);
+                try
+                {
+                    string mockVal = StringEncoder.Random(1000);
+                    var payload = new MockPayload() { MockMessage = mockVal };
+                    var now = DateTimeOffset.UtcNow;
+                    var guid = mockStream.Send(payload);
 
-                msgStreamMapMock[guid] = (payload, now);
+                    msgStreamMapMock[guid] = (payload, now);
 
-                await Task.Delay(5000);
+                    await Task.Delay(5000);
+                }
+                catch (Exception ex)
+                {
+                    if (stoppingToken.IsCancellationRequested)
+                    {
+                        break;
+                    }
+                    _logger.LogError("Error MessagingPipe {ChannelKey}: {Error}", channelKey, ex.Message);
+                }
             }
 
         }, stoppingToken);
@@ -222,6 +252,10 @@ internal class EdgeClientWorker(ILogger<EdgeClientWorker> logger, IServiceProvid
                 }
                 catch (Exception ex)
                 {
+                    if (stoppingToken.IsCancellationRequested)
+                    {
+                        break;
+                    }
                     _logger.LogError("Error {ServerHost}:{ServerPort}: {Error}", tcpHost, tcpPort, ex.Message);
                 }
 

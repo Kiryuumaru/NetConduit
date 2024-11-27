@@ -8,7 +8,7 @@ builder.AddProject<Projects.Presentation>("presentation-server1")
     .WithArgs("--server-port", "21000")
     .WithArgs("--home", "C:\\ProgramData\\netc\\server0");
 
-for (int i = 0; i < 1; i++)
+for (int i = 0; i < 2; i++)
 {
     builder.AddProject<Projects.Presentation>($"presentation-client{i}")
         .WithArgs("client", "start")
