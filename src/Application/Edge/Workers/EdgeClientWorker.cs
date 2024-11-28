@@ -25,6 +25,7 @@ using System.Net;
 using System.Text;
 using System.Text.Json;
 using System.Threading.Tasks;
+using Application.Edge.Mockers;
 
 namespace Application.Edge.Workers;
 
@@ -76,12 +77,96 @@ internal class EdgeClientWorker(ILogger<EdgeClientWorker> logger, IServiceProvid
 
         await Task.Delay(10000, stoppingToken);
 
-        //await tcpClient.Start(tcpHost, tcpPort, (tranceiverStream, ct) =>
-        //{
-        //    CancellationToken clientCt = tranceiverStream.CancelWhenDisposing(stoppingToken, ct);
+        await tcpClient.Start(tcpHost, tcpPort, (tranceiverStream, ct) =>
+        {
+            var clientCts = CancellationTokenSource.CreateLinkedTokenSource(
+                stoppingToken,
+                ct.Token,
+                tranceiverStream.CancelWhenDisposing());
 
-        //    return Start(tranceiverStream, tcpHost, tcpPort, clientCt);
+            return Start(tranceiverStream, tcpHost, tcpPort, clientCts);
 
-        //}, stoppingToken);
+        }, stoppingToken);
+    }
+
+    private async Task Start(TranceiverStream tranceiverStream, string tcpHost, int tcpPort, CancellationTokenSource cts)
+    {
+        using var _ = _logger.BeginScopeMap(nameof(EdgeClientWorker), nameof(Start), new()
+        {
+            ["ServerHost"] = tcpHost,
+            ["ServerPort"] = tcpPort
+        });
+
+        var scope = _serviceProvider.CreateScope();
+
+        cts.Token.Register(scope.Dispose);
+
+        var streamPipelineFactory = scope.ServiceProvider.GetRequiredService<StreamPipelineFactory>();
+
+        var streamPipelineService = streamPipelineFactory.Start(
+            tranceiverStream,
+            () => { _logger.LogInformation("Stream multiplexer {ServerHost}:{ServerPort} started", tcpHost, tcpPort); },
+            () => { _logger.LogInformation("Stream multiplexer {ServerHost}:{ServerPort} ended", tcpHost, tcpPort); },
+            ex => { _logger.LogError("Stream multiplexer {ServerHost}:{ServerPort} error: {Error}", tcpHost, tcpPort, ex.Message); },
+            cts.Token);
+
+        await ClientHandshake(tcpHost, tcpPort, streamPipelineService, cts);
+
+        if (cts.IsCancellationRequested)
+        {
+            return;
+        }
+
+        _logger.LogInformation("Steam will not starttttt {ServerHost}:{ServerPort} accepted", tcpHost, tcpPort);
+
+        await Task.Delay(999999999, cts.Token);
+    }
+
+    private Task ClientHandshake(string tcpHost, int tcpPort, StreamPipelineService streamPipelineService, CancellationTokenSource cts)
+    {
+        return Task.Run(async () =>
+        {
+            using var _ = _logger.BeginScopeMap(nameof(EdgeClientWorker), nameof(ClientHandshake), new()
+            {
+                ["ServerHost"] = tcpHost,
+                ["ServerPort"] = tcpPort
+            });
+
+            _logger.LogInformation("Attempting handshake to {ServerHost}:{ServerPort}...", tcpHost, tcpPort);
+
+            var handshakeMessaging = streamPipelineService.SetMessagingPipe<HandshakePayload>(EdgeDefaults.HandshakeChannel, $"handshake_channel");
+
+            ManualResetEventSlim acceptedEvent = new(false);
+
+            handshakeMessaging.OnMessage(payload =>
+            {
+                if (payload.Message.MockMessage == "ok")
+                {
+                    acceptedEvent.Set();
+                }
+            });
+
+            await Task.Delay(TimeSpan.FromSeconds(1), cts.Token);
+
+            handshakeMessaging.Send(new HandshakePayload() { MockMessage = "conn" });
+
+            var timeoutCt = cts.Token.WithTimeout(EdgeDefaults.HandshakeTimeout);
+
+            try
+            {
+                acceptedEvent.Wait(timeoutCt);
+            }
+            catch { }
+
+            if (timeoutCt.IsCancellationRequested)
+            {
+                _logger.LogError("Handshake {ServerHost}:{ServerPort} expired", tcpHost, tcpPort);
+                cts.Cancel();
+            }
+            else
+            {
+                _logger.LogInformation("Handshake {ServerHost}:{ServerPort} accepted", tcpHost, tcpPort);
+            }
+        });
     }
 }

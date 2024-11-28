@@ -62,16 +62,19 @@ internal class EdgeClientMockWorker(ILogger<EdgeClientMockWorker> logger, IServi
 
         await Task.Delay(10000, stoppingToken);
 
-        await tcpClient.Start(tcpHost, tcpPort, (tranceiverStream, ct) =>
-        {
-            CancellationToken clientCt = tranceiverStream.CancelWhenDisposing(stoppingToken, ct);
+        //await tcpClient.Start(tcpHost, tcpPort, (tranceiverStream, ct) =>
+        //{
+        //    var clientCts = CancellationTokenSource.CreateLinkedTokenSource(
+        //        stoppingToken,
+        //        ct.Token,
+        //        tranceiverStream.CancelWhenDisposing());
 
-            return Start(tranceiverStream, tcpHost, tcpPort, clientCt);
+        //    return Start(tranceiverStream, tcpHost, tcpPort, clientCts);
 
-        }, stoppingToken);
+        //}, stoppingToken);
     }
 
-    private Task Start(TranceiverStream tranceiverStream, string tcpHost, int tcpPort, CancellationToken stoppingToken)
+    private Task Start(TranceiverStream tranceiverStream, string tcpHost, int tcpPort, CancellationTokenSource cts)
     {
         using var _ = _logger.BeginScopeMap(nameof(EdgeClientMockWorker), nameof(Start), new()
         {
@@ -81,7 +84,7 @@ internal class EdgeClientMockWorker(ILogger<EdgeClientMockWorker> logger, IServi
 
         var scope = _serviceProvider.CreateScope();
 
-        stoppingToken.Register(scope.Dispose);
+        cts.Token.Register(scope.Dispose);
 
         var streamPipelineFactory = scope.ServiceProvider.GetRequiredService<StreamPipelineFactory>();
 
@@ -90,29 +93,29 @@ internal class EdgeClientMockWorker(ILogger<EdgeClientMockWorker> logger, IServi
             () => { _logger.LogInformation("Stream multiplexer {ServerHost}:{ServerPort} started", tcpHost, tcpPort); },
             () => { _logger.LogInformation("Stream multiplexer {ServerHost}:{ServerPort} ended", tcpHost, tcpPort); },
             ex => { _logger.LogError("Stream multiplexer {ServerHost}:{ServerPort} error: {Error}", tcpHost, tcpPort, ex.Message); },
-            stoppingToken);
+            cts.Token);
 
         return Task.WhenAll(
-            StartMockStreamRaw(EdgeDefaults.MockChannelKey0, streamPipelineService, tcpHost, tcpPort, stoppingToken),
-            StartMockStreamRaw(EdgeDefaults.MockChannelKey1, streamPipelineService, tcpHost, tcpPort, stoppingToken),
-            StartMockStreamRaw(EdgeDefaults.MockChannelKey2, streamPipelineService, tcpHost, tcpPort, stoppingToken),
-            StartMockStreamRaw(EdgeDefaults.MockChannelKey3, streamPipelineService, tcpHost, tcpPort, stoppingToken),
-            StartMockStreamRaw(EdgeDefaults.MockChannelKey4, streamPipelineService, tcpHost, tcpPort, stoppingToken),
-            StartMockStreamRaw(EdgeDefaults.MockChannelKey5, streamPipelineService, tcpHost, tcpPort, stoppingToken),
-            StartMockStreamRaw(EdgeDefaults.MockChannelKey6, streamPipelineService, tcpHost, tcpPort, stoppingToken),
-            StartMockStreamRaw(EdgeDefaults.MockChannelKey7, streamPipelineService, tcpHost, tcpPort, stoppingToken),
-            StartMockStreamRaw(EdgeDefaults.MockChannelKey8, streamPipelineService, tcpHost, tcpPort, stoppingToken),
-            StartMockStreamRaw(EdgeDefaults.MockChannelKey9, streamPipelineService, tcpHost, tcpPort, stoppingToken),
-            StartMockStreamMessaging(EdgeDefaults.MockMsgChannelKey0, streamPipelineService, stoppingToken),
-            StartMockStreamMessaging(EdgeDefaults.MockMsgChannelKey1, streamPipelineService, stoppingToken),
-            StartMockStreamMessaging(EdgeDefaults.MockMsgChannelKey2, streamPipelineService, stoppingToken),
-            StartMockStreamMessaging(EdgeDefaults.MockMsgChannelKey3, streamPipelineService, stoppingToken),
-            StartMockStreamMessaging(EdgeDefaults.MockMsgChannelKey4, streamPipelineService, stoppingToken),
-            StartMockStreamMessaging(EdgeDefaults.MockMsgChannelKey5, streamPipelineService, stoppingToken),
-            StartMockStreamMessaging(EdgeDefaults.MockMsgChannelKey6, streamPipelineService, stoppingToken),
-            StartMockStreamMessaging(EdgeDefaults.MockMsgChannelKey7, streamPipelineService, stoppingToken),
-            StartMockStreamMessaging(EdgeDefaults.MockMsgChannelKey8, streamPipelineService, stoppingToken),
-            StartMockStreamMessaging(EdgeDefaults.MockMsgChannelKey9, streamPipelineService, stoppingToken));
+            StartMockStreamRaw(EdgeDefaults.MockChannelKey0, streamPipelineService, tcpHost, tcpPort, cts.Token),
+            StartMockStreamRaw(EdgeDefaults.MockChannelKey1, streamPipelineService, tcpHost, tcpPort, cts.Token),
+            StartMockStreamRaw(EdgeDefaults.MockChannelKey2, streamPipelineService, tcpHost, tcpPort, cts.Token),
+            StartMockStreamRaw(EdgeDefaults.MockChannelKey3, streamPipelineService, tcpHost, tcpPort, cts.Token),
+            StartMockStreamRaw(EdgeDefaults.MockChannelKey4, streamPipelineService, tcpHost, tcpPort, cts.Token),
+            StartMockStreamRaw(EdgeDefaults.MockChannelKey5, streamPipelineService, tcpHost, tcpPort, cts.Token),
+            StartMockStreamRaw(EdgeDefaults.MockChannelKey6, streamPipelineService, tcpHost, tcpPort, cts.Token),
+            StartMockStreamRaw(EdgeDefaults.MockChannelKey7, streamPipelineService, tcpHost, tcpPort, cts.Token),
+            StartMockStreamRaw(EdgeDefaults.MockChannelKey8, streamPipelineService, tcpHost, tcpPort, cts.Token),
+            StartMockStreamRaw(EdgeDefaults.MockChannelKey9, streamPipelineService, tcpHost, tcpPort, cts.Token),
+            StartMockStreamMessaging(EdgeDefaults.MockMsgChannelKey0, streamPipelineService, cts.Token),
+            StartMockStreamMessaging(EdgeDefaults.MockMsgChannelKey1, streamPipelineService, cts.Token),
+            StartMockStreamMessaging(EdgeDefaults.MockMsgChannelKey2, streamPipelineService, cts.Token),
+            StartMockStreamMessaging(EdgeDefaults.MockMsgChannelKey3, streamPipelineService, cts.Token),
+            StartMockStreamMessaging(EdgeDefaults.MockMsgChannelKey4, streamPipelineService, cts.Token),
+            StartMockStreamMessaging(EdgeDefaults.MockMsgChannelKey5, streamPipelineService, cts.Token),
+            StartMockStreamMessaging(EdgeDefaults.MockMsgChannelKey6, streamPipelineService, cts.Token),
+            StartMockStreamMessaging(EdgeDefaults.MockMsgChannelKey7, streamPipelineService, cts.Token),
+            StartMockStreamMessaging(EdgeDefaults.MockMsgChannelKey8, streamPipelineService, cts.Token),
+            StartMockStreamMessaging(EdgeDefaults.MockMsgChannelKey9, streamPipelineService, cts.Token));
     }
 
     int msgStreamAveLent = 1;

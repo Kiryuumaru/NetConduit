@@ -17,14 +17,14 @@ using System.Threading.Tasks.Dataflow;
 
 namespace Application.StreamPipeline.Pipes;
 
-public class MessagingPipe<T> : BasePipe
+public class MessagingPipe<TSend, TReceive> : BasePipe
 {
-    private readonly ILogger<MessagingPipe<T>> _logger;
-    private readonly BufferBlock<MessagingPipePayload<T>> _messageQueue = new();
+    private readonly ILogger<MessagingPipe<TSend, TReceive>> _logger;
+    private readonly BufferBlock<MessagingPipePayload<TSend>> _messageQueue = new();
 
     private string? _messagingPipeName = null;
     private JsonSerializerOptions? _jsonSerializerOptions = null;
-    private Func<MessagingPipePayload<T>, Task>? _onMessageCallback = null;
+    private Func<MessagingPipePayload<TReceive>, Task>? _onMessageCallback = null;
 
     private const string _paddingValue = "endofchunk";
 
@@ -42,7 +42,7 @@ public class MessagingPipe<T> : BasePipe
     private readonly int _chunkLengthPos;
     private readonly int _chunkPos;
 
-    public MessagingPipe(ILogger<MessagingPipe<T>> logger)
+    public MessagingPipe(ILogger<MessagingPipe<TSend, TReceive>> logger)
     {
         _logger = logger;
 
@@ -62,7 +62,7 @@ public class MessagingPipe<T> : BasePipe
     {
         return Task.Run(() =>
         {
-            using var _ = _logger.BeginScopeMap(nameof(MessagingPipe<T>), nameof(StartSend), new()
+            using var _ = _logger.BeginScopeMap(nameof(MessagingPipe<TSend, TReceive>), nameof(StartSend), new()
             {
                 ["MessagingPipeName"] = _messagingPipeName
             });
@@ -117,7 +117,7 @@ public class MessagingPipe<T> : BasePipe
     {
         return Task.Run(() =>
         {
-            using var _ = _logger.BeginScopeMap(nameof(MessagingPipe<T>), nameof(StartReceive), new()
+            using var _ = _logger.BeginScopeMap(nameof(MessagingPipe<TSend, TReceive>), nameof(StartReceive), new()
             {
                 ["MessagingPipeName"] = _messagingPipeName
             });
@@ -156,9 +156,9 @@ public class MessagingPipe<T> : BasePipe
                         streamChunkHolder.Seek(0, SeekOrigin.Begin);
                         streamChunkHolder.SetLength(packetLength);
                         var packetBytes = streamChunkHolder.ToArray();
-                        if (JsonSerializer.Deserialize<MessagingPipePayload<T>>(packetBytes, _jsonSerializerOptions) is not MessagingPipePayload<T> messagingPipePayload)
+                        if (JsonSerializer.Deserialize<MessagingPipePayload<TReceive>>(packetBytes, _jsonSerializerOptions) is not MessagingPipePayload<TReceive> messagingPipePayload)
                         {
-                            throw new InvalidMessagingPipePayloadException(nameof(MessagingPipePayload<T>));
+                            throw new InvalidMessagingPipePayloadException(nameof(MessagingPipePayload<TReceive>));
                         }
 
                         //_logger.LogTrace("MessagingPipe {MessagingPipeName} received message from stream", _messagingPipeName);
@@ -206,10 +206,10 @@ public class MessagingPipe<T> : BasePipe
         _jsonSerializerOptions = jsonSerializerOptions;
     }
 
-    public Guid Send(T message)
+    public Guid Send(TSend message)
     {
         Guid msgGuid = Guid.NewGuid();
-        _messageQueue.Post(new MessagingPipePayload<T>()
+        _messageQueue.Post(new MessagingPipePayload<TSend>()
         {
             MessageGuid = msgGuid,
             Message = message
@@ -217,12 +217,12 @@ public class MessagingPipe<T> : BasePipe
         return msgGuid;
     }
 
-    public void OnMessage(Func<MessagingPipePayload<T>, Task> onMessageCallback)
+    public void OnMessage(Func<MessagingPipePayload<TReceive>, Task> onMessageCallback)
     {
         _onMessageCallback = onMessageCallback;
     }
 
-    public void OnMessage(Action<MessagingPipePayload<T>> onMessageCallback)
+    public void OnMessage(Action<MessagingPipePayload<TReceive>> onMessageCallback)
     {
         _onMessageCallback = msgPayload =>
         {

@@ -23,6 +23,4 @@ public static class StreamPipelineDefaults
     //public const int MessagingPipeChunkSize = 4096;
 
     public const int EdgeCommsBufferSize = 16384;
-
-    public static readonly Guid CommandChannelKey = new("00000000-0000-0000-0000-000000000001");
 }

@@ -46,8 +46,6 @@ public partial class StreamPipelineService(ILogger<StreamPipelineService> logger
 
         _streamMultiplexer = streamMultiplexer;
 
-        _streamMultiplexer.Set(StreamPipelineDefaults.CommandChannelKey, StreamPipelineDefaults.EdgeCommsBufferSize);
-
         _streamMultiplexer.Start().Forget();
     }
 
@@ -56,9 +54,24 @@ public partial class StreamPipelineService(ILogger<StreamPipelineService> logger
         return GetMux().Set(channelKey, bufferSize);
     }
 
-    public MessagingPipe<T> SetMessagingPipe<T>(Guid channelKey, string channelName, JsonSerializerOptions? jsonSerializerOptions = null)
+    public MessagingPipe<T, T> SetMessagingPipe<T>(Guid channelKey, string channelName, JsonSerializerOptions? jsonSerializerOptions = null)
     {
-        var messagingPipe = _serviceProvider.GetRequiredService<MessagingPipe<T>>();
+        var messagingPipe = _serviceProvider.GetRequiredService<MessagingPipe<T, T>>();
+        var tranceiverStream = GetMux().Set(channelKey, StreamPipelineDefaults.EdgeCommsBufferSize);
+        var pipeToken = CancellationTokenSource.CreateLinkedTokenSource(
+            _cts!.Token,
+            CancelWhenDisposing(),
+            messagingPipe.CancelWhenDisposing(),
+            tranceiverStream.CancelWhenDisposing());
+        messagingPipe.SetPipeName(channelName);
+        messagingPipe.SetJsonSerializerOptions(jsonSerializerOptions);
+        messagingPipe.Start(tranceiverStream, pipeToken.Token).Forget();
+        return messagingPipe;
+    }
+
+    public MessagingPipe<TSend, TReceive> SetMessagingPipe<TSend, TReceive>(Guid channelKey, string channelName, JsonSerializerOptions? jsonSerializerOptions = null)
+    {
+        var messagingPipe = _serviceProvider.GetRequiredService<MessagingPipe<TSend, TReceive>>();
         var tranceiverStream = GetMux().Set(channelKey, StreamPipelineDefaults.EdgeCommsBufferSize);
         var pipeToken = CancellationTokenSource.CreateLinkedTokenSource(
             _cts!.Token,

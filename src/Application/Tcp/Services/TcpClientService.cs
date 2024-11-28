@@ -26,7 +26,7 @@ public partial class TcpClientService(ILogger<TcpClientService> logger)
     private string? _serverHost = null;
     private int _serverPort = 0;
 
-    public Task Start(string serverHost, int serverPort, Func<TranceiverStream, CancellationToken, Task> onClientCallback, CancellationToken stoppingToken)
+    public Task Start(string serverHost, int serverPort, Func<TranceiverStream, CancellationTokenSource, Task> onClientCallback, CancellationToken stoppingToken)
     {
         using var _ = _logger.BeginScopeMap(nameof(TcpServerService), nameof(Start), new()
         {
@@ -98,7 +98,7 @@ public partial class TcpClientService(ILogger<TcpClientService> logger)
         }, _cts.Token);
     }
 
-    private async Task StartClient(TcpClient tcpClient, IPAddress serverAddress, NetworkStream networkStream, TranceiverStream tranceiverStream, Func<TranceiverStream, CancellationToken, Task> onClientCallback, CancellationTokenSource cts)
+    private async Task StartClient(TcpClient tcpClient, IPAddress serverAddress, NetworkStream networkStream, TranceiverStream tranceiverStream, Func<TranceiverStream, CancellationTokenSource, Task> onClientCallback, CancellationTokenSource cts)
     {
         using var _ = _logger.BeginScopeMap(nameof(TcpServerService), nameof(Start), new()
         {
@@ -111,7 +111,7 @@ public partial class TcpClientService(ILogger<TcpClientService> logger)
         {
             _logger.LogInformation("TCP client connected to the server {Host}:{Port}", serverAddress, _serverPort);
 
-            onClientCallback.Invoke(tranceiverStream, cts.Token).Forget();
+            onClientCallback.Invoke(tranceiverStream, cts).Forget();
 
             await TcpClientHelpers.WatchLiveliness(tcpClient, networkStream, tranceiverStream, cts, TcpDefaults.LivelinessSpan);
 
