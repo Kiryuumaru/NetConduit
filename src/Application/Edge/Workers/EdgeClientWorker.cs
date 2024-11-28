@@ -40,6 +40,7 @@ internal class EdgeClientWorker(ILogger<EdgeClientWorker> logger, IServiceProvid
 
         using var scope = _serviceProvider.CreateScope();
         var edgeLocalService = scope.ServiceProvider.GetRequiredService<IEdgeLocalStoreService>();
+        var edgeWorkerStartedService = scope.ServiceProvider.GetRequiredService<EdgeWorkerStartedService>();
 
         var edgeLocalEntity = (await edgeLocalService.GetOrCreate(() => new()
         {
@@ -53,6 +54,8 @@ internal class EdgeClientWorker(ILogger<EdgeClientWorker> logger, IServiceProvid
         }
 
         _logger.LogInformation("Client edge was initialized with ID {ClientID}", edgeLocalEntity.Id);
+
+        edgeWorkerStartedService.SetIsWorkerStarted(true);
 
         RoutineExecutor.Execute(TimeSpan.FromSeconds(1), true, Routine, ex => _logger.LogError("Error: {Error}", ex.Message), stoppingToken);
     }

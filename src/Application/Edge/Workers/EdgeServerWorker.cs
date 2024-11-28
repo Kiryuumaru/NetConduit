@@ -40,6 +40,7 @@ internal class EdgeServerWorker(ILogger<EdgeServerWorker> logger, IServiceProvid
         using var scope = _serviceProvider.CreateScope();
         var edgeLocalService = scope.ServiceProvider.GetRequiredService<IEdgeLocalStoreService>();
         var edgeHiveService = scope.ServiceProvider.GetRequiredService<IEdgeHiveStoreService>();
+        var edgeWorkerStartedService = scope.ServiceProvider.GetRequiredService<EdgeWorkerStartedService>();
 
         var edgeLocalEntity = (await edgeLocalService.GetOrCreate(() => new()
         {
@@ -61,6 +62,8 @@ internal class EdgeServerWorker(ILogger<EdgeServerWorker> logger, IServiceProvid
 
         _logger.LogInformation("Server edge was initialized with ID {ServerID}", edgeHiveEntity.Id);
         _logger.LogInformation("Server edge was initialized with handshake-token {HandshakeToken}", edgeHiveEntity.Token);
+
+        edgeWorkerStartedService.SetIsWorkerStarted(true);
 
         RoutineExecutor.Execute(TimeSpan.FromSeconds(1), true, Routine, ex => _logger.LogError("Error: {Error}", ex.Message), stoppingToken);
     }

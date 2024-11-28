@@ -39,11 +39,9 @@ internal class EdgeClientMockWorker(ILogger<EdgeClientMockWorker> logger, IServi
 
         using var scope = _serviceProvider.CreateScope();
         var edgeLocalService = scope.ServiceProvider.GetRequiredService<IEdgeLocalStoreService>();
+        var edgeWorkerStartedService = scope.ServiceProvider.GetRequiredService<EdgeWorkerStartedService>();
 
-        while (!(await edgeLocalService.Contains(stoppingToken)).SuccessAndHasValue(out var contains) || !contains)
-        {
-            await Task.Delay(1000, stoppingToken);
-        }
+        await edgeWorkerStartedService.WaitForEdgeWorkerStarted(stoppingToken);
 
         RoutineExecutor.Execute(TimeSpan.FromSeconds(1), true, Routine, ex => _logger.LogError("Error: {Error}", ex.Message), stoppingToken);
     }

@@ -21,6 +21,8 @@ public class Application : ApplicationDependency
     {
         base.AddServices(applicationBuilder, services);
 
+        services.AddHostedService<GCCollector>();
+
         services.AddTransient<LocalStoreFactoryService>();
         services.AddSingleton<LocalStoreConcurrencyService>();
 
@@ -34,7 +36,7 @@ public class Application : ApplicationDependency
         services.AddTransient<TcpClientService>();
         services.AddTransient<TcpServerService>();
 
-        services.AddHostedService<GCCollector>();
+        services.AddSingleton<EdgeWorkerStartedService>();
 
         if (applicationBuilder.Configuration.GetStartAsServerMode())
         {
