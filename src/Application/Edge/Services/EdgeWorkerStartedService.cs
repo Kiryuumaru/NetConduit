@@ -18,31 +18,6 @@ using System.Threading.Tasks;
 
 namespace Application.Edge.Services;
 
-public class EdgeWorkerStartedService
+public class EdgeWorkerStartedService : BooleanWaiter
 {
-    private readonly ManualResetEventSlim _workerStartedEvent = new(false);
-
-    public bool IsWorkerStarted { get; private set; }
-
-    public void SetIsWorkerStarted(bool isEdgeWorkerStarted)
-    {
-        IsWorkerStarted = isEdgeWorkerStarted;
-
-        if (isEdgeWorkerStarted)
-        {
-            _workerStartedEvent.Set();
-        }
-        else
-        {
-            _workerStartedEvent.Reset();
-        }
-    }
-
-    public Task WaitForEdgeWorkerStarted(CancellationToken cancellationToken)
-    {
-        return Task.Run(() =>
-        {
-            _workerStartedEvent.Wait(cancellationToken);
-        }, cancellationToken);
-    }
 }

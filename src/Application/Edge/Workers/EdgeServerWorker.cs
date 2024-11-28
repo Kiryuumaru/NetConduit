@@ -63,7 +63,7 @@ internal class EdgeServerWorker(ILogger<EdgeServerWorker> logger, IServiceProvid
         _logger.LogInformation("Server edge was initialized with ID {ServerID}", edgeHiveEntity.Id);
         _logger.LogInformation("Server edge was initialized with handshake-token {HandshakeToken}", edgeHiveEntity.Token);
 
-        edgeWorkerStartedService.SetIsWorkerStarted(true);
+        edgeWorkerStartedService.SetValue(true);
 
         RoutineExecutor.Execute(TimeSpan.FromSeconds(1), true, Routine, ex => _logger.LogError("Error: {Error}", ex.Message), stoppingToken);
     }

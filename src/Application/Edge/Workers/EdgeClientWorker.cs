@@ -55,7 +55,7 @@ internal class EdgeClientWorker(ILogger<EdgeClientWorker> logger, IServiceProvid
 
         _logger.LogInformation("Client edge was initialized with ID {ClientID}", edgeLocalEntity.Id);
 
-        edgeWorkerStartedService.SetIsWorkerStarted(true);
+        edgeWorkerStartedService.SetValue(true);
 
         RoutineExecutor.Execute(TimeSpan.FromSeconds(1), true, Routine, ex => _logger.LogError("Error: {Error}", ex.Message), stoppingToken);
     }
