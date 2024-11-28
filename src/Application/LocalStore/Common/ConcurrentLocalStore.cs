@@ -18,7 +18,7 @@ public partial class ConcurrentLocalStore(ILocalStoreService localStore)
 {
     private readonly ILocalStoreService _localStoreService = localStore;
 
-    public string Group { get; init; } = "common_store";
+    public required string Group { get; init; }
 
     public async Task<Result<bool>> Contains(string id, CancellationToken cancellationToken = default)
     {

@@ -1,4 +1,5 @@
-﻿using System;
+﻿using Domain.Edge.Enums;
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text;
@@ -8,7 +9,7 @@ namespace Domain.Edge.Dtos;
 
 public class AddEdgeDto
 {
-    public Guid? Id { get; init; }
+    public required EdgeType EdgeType { get; init; }
 
     public required string Name { get; init; }
 }

@@ -37,20 +37,12 @@ internal class EdgeServerMockWorker(ILogger<EdgeServerMockWorker> logger, IServi
         using var _ = _logger.BeginScopeMap(nameof(EdgeServerMockWorker), nameof(ExecuteAsync));
 
         using var scope = _serviceProvider.CreateScope();
-        var edgeService = scope.ServiceProvider.GetRequiredService<IEdgeStoreService>();
+        var edgeLocalService = scope.ServiceProvider.GetRequiredService<IEdgeLocalStoreService>();
 
-        if (!(await edgeService.Contains(EdgeDefaults.ServerEdgeId.ToString(), stoppingToken)).SuccessAndHasValue(out var contains) || !contains ||
-            !(await edgeService.GetToken(EdgeDefaults.ServerEdgeId.ToString(), stoppingToken)).SuccessAndHasValue(out var edgeConnectionEntity))
+        while (!(await edgeLocalService.Contains(stoppingToken)).SuccessAndHasValue(out var contains) || !contains)
         {
-            AddEdgeDto newServerEdge = new()
-            {
-                Id = EdgeDefaults.ServerEdgeId,
-                Name = EdgeDefaults.ServerEdgeName
-            };
-            edgeConnectionEntity = (await edgeService.Create(newServerEdge, stoppingToken)).GetValueOrThrow();
+            await Task.Delay(1000, stoppingToken);
         }
-
-        _logger.LogInformation("Server edge was initialized with handshake-token {HandshakeToken}", edgeConnectionEntity.Token);
 
         RoutineExecutor.Execute(TimeSpan.FromSeconds(1), true, Routine, ex => _logger.LogError("Error: {Error}", ex.Message), stoppingToken);
     }

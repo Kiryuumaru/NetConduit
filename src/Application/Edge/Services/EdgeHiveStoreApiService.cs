@@ -18,45 +18,51 @@ using System.Threading.Tasks;
 
 namespace Application.Edge.Services;
 
-public class EdgeStoreApiService(IServiceProvider serviceProvider, IConfiguration configuration) : IEdgeStoreService
+public class EdgeHiveStoreApiService(IServiceProvider serviceProvider, IConfiguration configuration) : IEdgeHiveStoreService
 {
     private readonly IServiceProvider _serviceProvider = serviceProvider;
     private readonly IConfiguration _configuration = configuration;
 
-    public Task<HttpResult<bool>> Contains(string id, CancellationToken cancellationToken = default)
+    public Task<HttpResult<GetEdgeWithTokenDto>> GetOrCreate(string id, Func<AddEdgeDto> onCreate, CancellationToken cancellationToken = default)
     {
         throw new NotImplementedException();
     }
 
-    public Task<HttpResult<GetEdgeWithTokenDto>> Create(AddEdgeDto edgeAddDto, CancellationToken cancellationToken = default)
+    Task<HttpResult<bool>> IEdgeHiveStoreService.Contains(string id, CancellationToken cancellationToken)
     {
         throw new NotImplementedException();
     }
 
-    public Task<HttpResult<GetEdgeInfoDto>> Delete(string id, CancellationToken cancellationToken = default)
+    Task<HttpResult<GetEdgeWithTokenDto>> IEdgeHiveStoreService.Create(AddEdgeDto edgeAddDto, CancellationToken cancellationToken)
     {
         throw new NotImplementedException();
     }
 
-    public Task<HttpResult<GetEdgeWithTokenDto>> Edit(string id, EditEdgeDto edgeEditDto, CancellationToken cancellationToken = default)
+    Task<HttpResult<GetEdgeInfoDto>> IEdgeHiveStoreService.Delete(string id, CancellationToken cancellationToken)
     {
         throw new NotImplementedException();
     }
 
-    public Task<HttpResult<GetEdgeInfoDto>> Get(string id, CancellationToken cancellationToken = default)
+    Task<HttpResult<GetEdgeWithTokenDto>> IEdgeHiveStoreService.Edit(string id, EditEdgeDto edgeEditDto, CancellationToken cancellationToken)
     {
         throw new NotImplementedException();
     }
 
-    public Task<HttpResult<GetEdgeInfoDto[]>> GetAll(CancellationToken cancellationToken = default)
+    Task<HttpResult<GetEdgeInfoDto>> IEdgeHiveStoreService.Get(string id, CancellationToken cancellationToken)
     {
         throw new NotImplementedException();
     }
 
-    public Task<HttpResult<GetEdgeWithTokenDto>> GetToken(string id, CancellationToken cancellationToken = default)
+    Task<HttpResult<GetEdgeInfoDto[]>> IEdgeHiveStoreService.GetAll(CancellationToken cancellationToken)
     {
         throw new NotImplementedException();
     }
+
+    Task<HttpResult<GetEdgeWithTokenDto>> IEdgeHiveStoreService.GetToken(string id, CancellationToken cancellationToken)
+    {
+        throw new NotImplementedException();
+    }
+
 
     //private string GetServerTcpEndpoint()
     //{
@@ -90,7 +96,7 @@ public class EdgeStoreApiService(IServiceProvider serviceProvider, IConfiguratio
     //    }
     //    else
     //    {
-    //        return _serviceProvider.GetRequiredService<EdgeStoreService>().Create(edgeAddDto, cancellationToken);
+    //        return _serviceProvider.GetRequiredService<EdgeHiveStoreService>().Create(edgeAddDto, cancellationToken);
     //    }
     //}
 
@@ -102,7 +108,7 @@ public class EdgeStoreApiService(IServiceProvider serviceProvider, IConfiguratio
     //    }
     //    else
     //    {
-    //        return _serviceProvider.GetRequiredService<EdgeStoreService>().Delete(id, cancellationToken);
+    //        return _serviceProvider.GetRequiredService<EdgeHiveStoreService>().Delete(id, cancellationToken);
     //    }
     //}
 
@@ -114,7 +120,7 @@ public class EdgeStoreApiService(IServiceProvider serviceProvider, IConfiguratio
     //    }
     //    else
     //    {
-    //        return _serviceProvider.GetRequiredService<EdgeStoreService>().Edit(id, edgeEditDto, cancellationToken);
+    //        return _serviceProvider.GetRequiredService<EdgeHiveStoreService>().Edit(id, edgeEditDto, cancellationToken);
     //    }
     //}
 
@@ -126,7 +132,7 @@ public class EdgeStoreApiService(IServiceProvider serviceProvider, IConfiguratio
     //    }
     //    else
     //    {
-    //        return _serviceProvider.GetRequiredService<EdgeStoreService>().Get(id, cancellationToken);
+    //        return _serviceProvider.GetRequiredService<EdgeHiveStoreService>().Get(id, cancellationToken);
     //    }
     //}
 
@@ -138,7 +144,7 @@ public class EdgeStoreApiService(IServiceProvider serviceProvider, IConfiguratio
     //    }
     //    else
     //    {
-    //        return _serviceProvider.GetRequiredService<EdgeStoreService>().GetAll(cancellationToken);
+    //        return _serviceProvider.GetRequiredService<EdgeHiveStoreService>().GetAll(cancellationToken);
     //    }
     //}
 }

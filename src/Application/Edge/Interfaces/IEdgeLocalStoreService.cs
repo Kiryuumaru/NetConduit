@@ -21,17 +21,11 @@ namespace Application.Edge.Interfaces;
 
 public interface IEdgeLocalStoreService
 {
-    Task<HttpResult<bool>> Contains(string id, CancellationToken cancellationToken = default);
-
-    Task<HttpResult<GetEdgeInfoDto[]>> GetAll(CancellationToken cancellationToken = default);
-
-    Task<HttpResult<GetEdgeInfoDto>> Get(string id, CancellationToken cancellationToken = default);
-
-    Task<HttpResult<GetEdgeWithTokenDto>> GetToken(string id, CancellationToken cancellationToken = default);
+    Task<HttpResult<GetEdgeWithTokenDto>> Get(CancellationToken cancellationToken = default);
 
     Task<HttpResult<GetEdgeWithTokenDto>> Create(AddEdgeDto edgeAddDto, CancellationToken cancellationToken = default);
 
-    Task<HttpResult<GetEdgeWithTokenDto>> Edit(string id, EditEdgeDto edgeEditDto, CancellationToken cancellationToken = default);
+    Task<HttpResult<bool>> Contains(CancellationToken cancellationToken = default);
 
-    Task<HttpResult<GetEdgeInfoDto>> Delete(string id, CancellationToken cancellationToken = default);
+    Task<HttpResult<GetEdgeWithTokenDto>> GetOrCreate(Func<AddEdgeDto> onCreate, CancellationToken cancellationToken = default);
 }

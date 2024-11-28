@@ -9,10 +9,6 @@ namespace Application.Edge.Common;
 
 public static class EdgeDefaults
 {
-    public static readonly Guid ServerEdgeId = Guid.Empty;
-
-    public const string ServerEdgeName = "server";
-
     public const int EdgeKeySize = 64;
 
     public const int EdgeCommsBufferSize = 16384;

@@ -1,6 +1,7 @@
 ﻿using Application.Common;
 using Domain.Edge.Dtos;
 using Domain.Edge.Entities;
+using Domain.Edge.Enums;
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -12,10 +13,11 @@ namespace Application.Edge.Common;
 
 public static class EdgeEntityHelpers
 {
-    public static EdgeEntity Create(string name)
+    public static EdgeEntity Create(string name, EdgeType edgeType)
     {
         return new()
         {
+            EdgeType = edgeType,
             Name = name,
             Key = RandomHelpers.ByteArray(1024)
         };

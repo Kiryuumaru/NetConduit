@@ -33,10 +33,19 @@ internal class EdgeClientMockWorker(ILogger<EdgeClientMockWorker> logger, IServi
     private readonly IServiceProvider _serviceProvider = serviceProvider;
     private readonly IConfiguration _configuration = configuration;
 
-    protected override Task ExecuteAsync(CancellationToken stoppingToken)
+    protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
+        using var _ = _logger.BeginScopeMap(nameof(EdgeServerMockWorker), nameof(ExecuteAsync));
+
+        using var scope = _serviceProvider.CreateScope();
+        var edgeLocalService = scope.ServiceProvider.GetRequiredService<IEdgeLocalStoreService>();
+
+        while (!(await edgeLocalService.Contains(stoppingToken)).SuccessAndHasValue(out var contains) || !contains)
+        {
+            await Task.Delay(1000, stoppingToken);
+        }
+
         RoutineExecutor.Execute(TimeSpan.FromSeconds(1), true, Routine, ex => _logger.LogError("Error: {Error}", ex.Message), stoppingToken);
-        return Task.CompletedTask;
     }
 
     private async Task Routine(CancellationToken stoppingToken)

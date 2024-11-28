@@ -60,11 +60,11 @@ internal partial class TCPClientMocker(ILogger<TCPClientMocker> logger)
 
                 await ns.WriteAsync(sendBytes, stoppingToken);
                 byte[] receivedBytes = new byte[4096];
-                await ns.ReadAsync(receivedBytes, stoppingToken);
+                var readBytes = await ns.ReadAsync(receivedBytes, stoppingToken);
 
                 DateTimeOffset receivedTime = DateTimeOffset.UtcNow;
 
-                string receivedStr = Encoding.Default.GetString(receivedBytes.Where(x => x != 0).ToArray());
+                string receivedStr = Encoding.Default.GetString(receivedBytes.AsSpan()[..readBytes]);
 
                 if (sendStr != receivedStr)
                 {

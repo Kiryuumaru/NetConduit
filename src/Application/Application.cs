@@ -38,16 +38,16 @@ public class Application : ApplicationDependency
 
         if (applicationBuilder.Configuration.GetStartAsServerMode())
         {
-            services.AddScoped<IEdgeStoreService, EdgeStoreService>();
-
+            services.AddScoped<IEdgeLocalStoreService, EdgeLocalStoreService>();
+            services.AddScoped<IEdgeHiveStoreService, EdgeHiveStoreService>();
             services.AddHostedService<EdgeServerWorker>();
 
             services.AddHostedService<EdgeServerMockWorker>();
         }
         else
         {
-            services.AddScoped<IEdgeStoreService, EdgeStoreApiService>();
-
+            services.AddScoped<IEdgeLocalStoreService, EdgeLocalStoreService>();
+            services.AddScoped<IEdgeHiveStoreService, EdgeHiveStoreApiService>();
             services.AddHostedService<EdgeClientWorker>();
 
             services.AddHostedService<EdgeClientMockWorker>();

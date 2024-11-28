@@ -19,7 +19,7 @@ public class LocalStoreFactoryService(IServiceProvider serviceProvider)
 {
     private readonly IServiceProvider _serviceProvider = serviceProvider;
 
-    public async Task<ConcurrentLocalStore> GetStore(string group, CancellationToken cancellationToken)
+    public async Task<ConcurrentLocalStore> GetStore(string group = "common_group", CancellationToken cancellationToken = default)
     {
         var localStoreConcurrencyService = _serviceProvider.GetRequiredService<LocalStoreConcurrencyService>();
         var ticket = await localStoreConcurrencyService.Aquire(cancellationToken);
@@ -28,12 +28,7 @@ public class LocalStoreFactoryService(IServiceProvider serviceProvider)
         {
             Group = group
         };
-        void LocalStore_Disposing(object? sender, EventArgs e)
-        {
-            localStore.Disposing -= LocalStore_Disposing;
-            ticket.Dispose();
-        }
-        localStore.Disposing += LocalStore_Disposing;
+        localStore.CancelWhenDisposing().Register(ticket.Dispose);
         return localStore;
     }
 }

@@ -19,7 +19,7 @@ using TransactionHelpers.Interface;
 
 namespace Application.Edge.Interfaces;
 
-public interface IEdgeStoreService
+public interface IEdgeHiveStoreService
 {
     Task<HttpResult<bool>> Contains(string id, CancellationToken cancellationToken = default);
 
@@ -34,4 +34,6 @@ public interface IEdgeStoreService
     Task<HttpResult<GetEdgeWithTokenDto>> Edit(string id, EditEdgeDto edgeEditDto, CancellationToken cancellationToken = default);
 
     Task<HttpResult<GetEdgeInfoDto>> Delete(string id, CancellationToken cancellationToken = default);
+
+    Task<HttpResult<GetEdgeWithTokenDto>> GetOrCreate(string id, Func<AddEdgeDto> onCreate, CancellationToken cancellationToken = default);
 }
