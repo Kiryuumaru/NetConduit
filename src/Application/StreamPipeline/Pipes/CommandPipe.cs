@@ -2,7 +2,7 @@
 using Application.StreamPipeline.Abstraction;
 using Application.StreamPipeline.Common;
 using Application.StreamPipeline.Models;
-using Domain.StreamPipeline.Enums;
+using CliWrap;
 using Domain.StreamPipeline.Exceptions;
 using Domain.StreamPipeline.Models;
 using Microsoft.Extensions.Logging;
@@ -72,10 +72,10 @@ public class CommandPipe<TCommand, TResponse>(ILogger<CommandPipe<TCommand, TRes
             {
                 _rwl.EnterWriteLock();
 
-                commandGuid = _messagingPipe.Send(new CommandPipePayload()
+                commandGuid = _messagingPipe.Send(new()
                 {
-                    PayloadType = CommandPipePayloadType.Command,
-                    RawPayload = JsonSerializer.Serialize(command, _messagingPipe.JsonSerializerOptions)
+                    Command = command,
+                    Response = default,
                 });
 
                 _commandActionMap[commandGuid] = response =>
@@ -120,56 +120,38 @@ public class CommandPipe<TCommand, TResponse>(ILogger<CommandPipe<TCommand, TRes
     {
         try
         {
-            switch (messagingPipePayload.Message.PayloadType)
+            if (messagingPipePayload.Message.Response != null)
             {
-                case CommandPipePayloadType.Command:
+                try
+                {
+                    _rwl.EnterWriteLock();
 
-                    if (JsonSerializer.Deserialize<TCommand>(messagingPipePayload.Message.RawPayload, _messagingPipe.JsonSerializerOptions) is not TCommand command)
+                    if (!_commandActionMap.TryGetValue(messagingPipePayload.MessageGuid, out var messageCallback))
                     {
-                        throw new InvalidCommandPipePayloadException(nameof(TCommand));
+                        throw new Exception($"Command guid {messagingPipePayload.MessageGuid} does not exists");
                     }
 
-                    TResponse? commandResponse = default;
-                    var commandResponseTask = _onCommandCallback?.Invoke(command);
-                    if (commandResponseTask != null)
-                    {
-                        commandResponse = await commandResponseTask;
-                    }
+                    messageCallback.Invoke(messagingPipePayload.Message.Response);
+                }
+                finally
+                {
+                    _rwl.ExitWriteLock();
+                }
+            }
+            else if (messagingPipePayload.Message.Command != null)
+            {
+                TResponse? commandResponse = default;
+                var commandResponseTask = _onCommandCallback?.Invoke(messagingPipePayload.Message.Command);
+                if (commandResponseTask != null)
+                {
+                    commandResponse = await commandResponseTask;
+                }
 
-                    _messagingPipe.Send(messagingPipePayload.MessageGuid, new CommandPipePayload()
-                    {
-                        PayloadType = CommandPipePayloadType.Response,
-                        RawPayload = JsonSerializer.Serialize(commandResponse, _messagingPipe.JsonSerializerOptions)
-                    });
-
-                    break;
-                case CommandPipePayloadType.Response:
-
-                    if (JsonSerializer.Deserialize<TResponse>(messagingPipePayload.Message.RawPayload, _messagingPipe.JsonSerializerOptions) is not TResponse receivedResponse)
-                    {
-                        throw new InvalidCommandPipePayloadException(nameof(TResponse));
-                    }
-
-                    try
-                    {
-                        _rwl.EnterWriteLock();
-
-                        if (!_commandActionMap.TryGetValue(messagingPipePayload.MessageGuid, out var messageCallback))
-                        {
-                            throw new Exception($"Command guid {messagingPipePayload.MessageGuid} does not exists");
-                        }
-
-                        messageCallback.Invoke(receivedResponse);
-                    }
-                    finally
-                    {
-                        _rwl.ExitWriteLock();
-                    }
-
-                    break;
-                default:
-
-                    throw new NotImplementedException($"{messagingPipePayload.Message.PayloadType}");
+                _messagingPipe.Send(messagingPipePayload.MessageGuid, new()
+                {
+                    Command = messagingPipePayload.Message.Command,
+                    Response = commandResponse
+                });
             }
         }
         catch (Exception ex)
