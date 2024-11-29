@@ -18,13 +18,31 @@ namespace Application.StreamPipeline.Pipes;
 
 public class CommandPipe<TCommand, TResponse>(ILogger<CommandPipe<TCommand, TResponse>> logger, MessagingPipe<CommandPipePayload<TCommand, TResponse>, CommandPipePayload<TCommand, TResponse>> messagingPipe) : BasePipe
 {
+    public class CommandCallback
+    {
+        private readonly Action<TResponse> _responseCallback;
+
+        public TCommand Command { get; }
+
+        internal CommandCallback(TCommand command, Action<TResponse> responseCallback)
+        {
+            _responseCallback = responseCallback;
+            Command = command;
+        }
+
+        public void Respond(TResponse response)
+        {
+            _responseCallback(response);
+        }
+    }
+
     private readonly ILogger<CommandPipe<TCommand, TResponse>> _logger = logger;
     private readonly MessagingPipe<CommandPipePayload<TCommand, TResponse>, CommandPipePayload<TCommand, TResponse>> _messagingPipe = messagingPipe;
 
     private readonly Dictionary<Guid, Action<TResponse>> _commandActionMap = [];
     private readonly ReaderWriterLockSlim _rwl = new();
 
-    private Func<TCommand, Task<TResponse>>? _onCommandCallback = null;
+    private Func<CommandCallback, Task>? _onCommandCallback = null;
 
     protected override Task Execute(TranceiverStream tranceiverStream, CancellationToken stoppingToken)
     {
@@ -42,17 +60,17 @@ public class CommandPipe<TCommand, TResponse>(ILogger<CommandPipe<TCommand, TRes
         _messagingPipe.SetJsonSerializerOptions(jsonSerializerOptions);
     }
 
-    public void OnCommand(Func<TCommand, Task<TResponse>> onCommandCallback)
+    public void OnCommand(Func<CommandCallback, Task> onCommandCallback)
     {
         _onCommandCallback = onCommandCallback;
     }
 
-    public void OnCommand(Func<TCommand, TResponse> onCommandCallback)
+    public void OnCommand(Action<CommandCallback> onCommandCallback)
     {
         _onCommandCallback = commandPayload =>
         {
-            var response = onCommandCallback(commandPayload);
-            return Task.FromResult(response);
+            onCommandCallback(commandPayload);
+            return Task.CompletedTask;
         };
     }
 
@@ -97,12 +115,12 @@ public class CommandPipe<TCommand, TResponse>(ILogger<CommandPipe<TCommand, TRes
                 _rwl.ExitWriteLock();
             }
 
-            if (!await commandGate.WaitForOpen(cancellationToken) &&
-                commandGuid != Guid.Empty)
+            if (!await commandGate.WaitForOpen(cancellationToken) && commandGuid != Guid.Empty)
             {
                 try
                 {
                     _rwl.EnterWriteLock();
+
                     _commandActionMap.Remove(commandGuid);
                 }
                 catch { }
@@ -124,7 +142,7 @@ public class CommandPipe<TCommand, TResponse>(ILogger<CommandPipe<TCommand, TRes
             {
                 try
                 {
-                    _rwl.EnterWriteLock();
+                    _rwl.EnterReadLock();
 
                     if (!_commandActionMap.TryGetValue(messagingPipePayload.MessageGuid, out var messageCallback))
                     {
@@ -135,23 +153,22 @@ public class CommandPipe<TCommand, TResponse>(ILogger<CommandPipe<TCommand, TRes
                 }
                 finally
                 {
-                    _rwl.ExitWriteLock();
+                    _rwl.ExitReadLock();
                 }
             }
             else if (messagingPipePayload.Message.Command != null)
             {
-                TResponse? commandResponse = default;
-                var commandResponseTask = _onCommandCallback?.Invoke(messagingPipePayload.Message.Command);
+                var commandCallback = new CommandCallback(messagingPipePayload.Message.Command,
+                    callbackResponse => _messagingPipe.Send(messagingPipePayload.MessageGuid, new()
+                    {
+                        Command = messagingPipePayload.Message.Command,
+                        Response = callbackResponse
+                    }));
+                var commandResponseTask = _onCommandCallback?.Invoke(commandCallback);
                 if (commandResponseTask != null)
                 {
-                    commandResponse = await commandResponseTask;
+                    await commandResponseTask;
                 }
-
-                _messagingPipe.Send(messagingPipePayload.MessageGuid, new()
-                {
-                    Command = messagingPipePayload.Message.Command,
-                    Response = commandResponse
-                });
             }
         }
         catch (Exception ex)

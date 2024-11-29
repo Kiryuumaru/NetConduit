@@ -13,6 +13,7 @@ using Domain.Edge.Entities;
 using Domain.Edge.Enums;
 using Domain.Edge.Models;
 using Microsoft.AspNetCore.Routing;
+using Microsoft.AspNetCore.SignalR.Protocol;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
@@ -127,7 +128,7 @@ internal class EdgeServerWorker(ILogger<EdgeServerWorker> logger, IServiceProvid
     {
         var gate = new GateKeeper();
 
-        var handshakeMessaging = streamPipelineService.SetMessagingPipe<HandshakePayload>(EdgeDefaults.HandshakeChannel, $"handshake_channel");
+        var handshakeCommand = streamPipelineService.SetCommandPipe<HandshakePayload, HandshakePayload>(EdgeDefaults.HandshakeChannel, $"handshake_channel");
 
         Task.Run(async () =>
         {
@@ -148,12 +149,12 @@ internal class EdgeServerWorker(ILogger<EdgeServerWorker> logger, IServiceProvid
 
                 var acceptGate = new GateKeeper();
 
-                handshakeMessaging.OnMessage(payload =>
+                handshakeCommand.OnCommand(callback =>
                 {
-                    if (payload.Message.MockMessage == "conn")
+                    if (callback.Command.MockMessage == "conn")
                     {
-                        handshakeMessaging.Send(new HandshakePayload() { MockMessage = "ok" });
                         acceptGate.SetOpen();
+                        callback.Respond(new HandshakePayload() { MockMessage = "ok" });
                     }
                 });
 

@@ -123,7 +123,7 @@ internal class EdgeClientWorker(ILogger<EdgeClientWorker> logger, IServiceProvid
     {
         var gate = new GateKeeper();
 
-        var handshakeMessaging = streamPipelineService.SetMessagingPipe<HandshakePayload>(EdgeDefaults.HandshakeChannel, $"handshake_channel");
+        var handshakeCommand = streamPipelineService.SetCommandPipe<HandshakePayload, HandshakePayload>(EdgeDefaults.HandshakeChannel, $"handshake_channel");
 
         Task.Run(async () =>
         {
@@ -143,21 +143,12 @@ internal class EdgeClientWorker(ILogger<EdgeClientWorker> logger, IServiceProvid
 
                 _logger.LogInformation("Attempting handshake to {ServerHost}:{ServerPort}...", tcpHost, tcpPort);
 
-                var acceptGate = new GateKeeper();
+                var handshakePayload = new HandshakePayload() { MockMessage = "conn" };
 
-                handshakeMessaging.OnMessage(payload =>
+                if (!(await handshakeCommand.Send(handshakePayload, cts.Token.WithTimeout(EdgeDefaults.HandshakeTimeout))).SuccessAndHasValue(out var handshake) ||
+                    handshake.MockMessage != "ok")
                 {
-                    if (payload.Message.MockMessage == "ok")
-                    {
-                        acceptGate.SetOpen();
-                    }
-                });
-
-                handshakeMessaging.Send(new HandshakePayload() { MockMessage = "conn" });
-
-                if (!await acceptGate.WaitForOpen(cts.Token.WithTimeout(EdgeDefaults.HandshakeTimeout)))
-                {
-                    throw new Exception("Expired");
+                    throw new Exception("Invalid handshake token");
                 }
 
                 _logger.LogInformation("Handshake {ServerHost}:{ServerPort} accepted", tcpHost, tcpPort);
