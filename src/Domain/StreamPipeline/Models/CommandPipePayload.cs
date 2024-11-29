@@ -7,9 +7,9 @@ using System.Threading.Tasks;
 
 namespace Domain.StreamPipeline.Models;
 
-public class CommandPipePayload
+public class CommandPipePayload<TCommand, TResponse>
 {
-    public required CommandPipePayloadType PayloadType { get; init; }
+    public required TCommand Command { get; init; }
 
-    public required string RawPayload { get; init; }
+    public required TResponse Response { get; init; }
 }

@@ -16,10 +16,10 @@ using TransactionHelpers;
 
 namespace Application.StreamPipeline.Pipes;
 
-public class CommandPipe<TCommand, TResponse>(ILogger<CommandPipe<TCommand, TResponse>> logger, MessagingPipe<CommandPipePayload, CommandPipePayload> messagingPipe) : BasePipe
+public class CommandPipe<TCommand, TResponse>(ILogger<CommandPipe<TCommand, TResponse>> logger, MessagingPipe<CommandPipePayload<TCommand, TResponse>, CommandPipePayload<TCommand, TResponse>> messagingPipe) : BasePipe
 {
     private readonly ILogger<CommandPipe<TCommand, TResponse>> _logger = logger;
-    private readonly MessagingPipe<CommandPipePayload, CommandPipePayload> _messagingPipe = messagingPipe;
+    private readonly MessagingPipe<CommandPipePayload<TCommand, TResponse>, CommandPipePayload<TCommand, TResponse>> _messagingPipe = messagingPipe;
 
     private readonly Dictionary<Guid, Action<TResponse>> _commandActionMap = [];
     private readonly ReaderWriterLockSlim _rwl = new();
@@ -116,7 +116,7 @@ public class CommandPipe<TCommand, TResponse>(ILogger<CommandPipe<TCommand, TRes
         });
     }
 
-    private async void OnMessageCallback(MessagingPipePayload<CommandPipePayload> messagingPipePayload)
+    private async void OnMessageCallback(MessagingPipePayload<CommandPipePayload<TCommand, TResponse>> messagingPipePayload)
     {
         try
         {
