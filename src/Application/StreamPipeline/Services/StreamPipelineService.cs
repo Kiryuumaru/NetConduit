@@ -61,11 +61,6 @@ public partial class StreamPipelineService(ILogger<StreamPipelineService> logger
         return GetMux().Set(channelKey, bufferSize);
     }
 
-    public MessagingPipe<T, T> SetMessagingPipe<T>(Guid channelKey, string channelName, JsonSerializerOptions? jsonSerializerOptions = null)
-    {
-        return SetMessagingPipe<T, T>(channelKey, channelName, jsonSerializerOptions);
-    }
-
     public MessagingPipe<TSend, TReceive> SetMessagingPipe<TSend, TReceive>(Guid channelKey, string channelName, JsonSerializerOptions? jsonSerializerOptions = null)
     {
         var messagingPipe = _serviceProvider.GetRequiredService<MessagingPipe<TSend, TReceive>>();
@@ -79,5 +74,25 @@ public partial class StreamPipelineService(ILogger<StreamPipelineService> logger
         messagingPipe.SetJsonSerializerOptions(jsonSerializerOptions);
         messagingPipe.Start(tranceiverStream, pipeToken.Token).Forget();
         return messagingPipe;
+    }
+
+    public CommandPipe<TCommand, TResponse> SetCommandPipe<TCommand, TResponse>(Guid channelKey, string channelName, JsonSerializerOptions? jsonSerializerOptions = null)
+    {
+        var messagingPipe = _serviceProvider.GetRequiredService<CommandPipe<TCommand, TResponse>>();
+        var tranceiverStream = GetMux().Set(channelKey, StreamPipelineDefaults.EdgeCommsBufferSize);
+        var pipeToken = CancellationTokenSource.CreateLinkedTokenSource(
+            _cts!.Token,
+            CancelWhenDisposing(),
+            messagingPipe.CancelWhenDisposing(),
+            tranceiverStream.CancelWhenDisposing());
+        messagingPipe.SetPipeName(channelName);
+        messagingPipe.SetJsonSerializerOptions(jsonSerializerOptions);
+        messagingPipe.Start(tranceiverStream, pipeToken.Token).Forget();
+        return messagingPipe;
+    }
+
+    public MessagingPipe<T, T> SetMessagingPipe<T>(Guid channelKey, string channelName, JsonSerializerOptions? jsonSerializerOptions = null)
+    {
+        return SetMessagingPipe<T, T>(channelKey, channelName, jsonSerializerOptions);
     }
 }
