@@ -18,6 +18,6 @@ using System.Threading.Tasks;
 
 namespace Application.Edge.Services;
 
-public class EdgeWorkerStartedService : BooleanWaiter
+public class EdgeWorkerStartedService : GateKeeper
 {
 }

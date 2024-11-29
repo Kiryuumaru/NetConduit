@@ -17,14 +17,14 @@ public partial class StreamPipelineFactory(ILogger<StreamPipelineFactory> logger
     private readonly ILogger<StreamPipelineFactory> _logger = logger;
     private readonly IServiceProvider _serviceProvider = serviceProvider;
 
-    public StreamPipelineService Start(
+    public StreamPipelineService Create(
         TranceiverStream tranceiverStream,
         Action onStarted,
         Action onStopped,
         Action<Exception> onError,
         CancellationToken stoppingToken)
     {
-        using var _ = _logger.BeginScopeMap(nameof(StreamPipelineService), nameof(Start));
+        using var _ = _logger.BeginScopeMap(nameof(StreamPipelineService), nameof(Create));
         var streamPipelineService = _serviceProvider.GetRequiredService<StreamPipelineService>();
 
         var cts = CancellationTokenSource.CreateLinkedTokenSource(
@@ -35,7 +35,7 @@ public partial class StreamPipelineFactory(ILogger<StreamPipelineFactory> logger
 
         var streamMultiplexer = StreamMultiplexer.Create(tranceiverStream, onStarted, onStopped, onError, cts.Token);
 
-        streamPipelineService.Start(streamMultiplexer, cts.Token);
+        streamPipelineService.Create(streamMultiplexer, cts.Token);
 
         return streamPipelineService;
     }

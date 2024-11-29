@@ -2,7 +2,6 @@
 using Application.Configuration.Extensions;
 using Application.Edge.Common;
 using Application.Edge.Interfaces;
-using Application.Edge.Models;
 using Application.Edge.Services;
 using Application.StreamPipeline.Common;
 using Application.StreamPipeline.Models;
@@ -26,6 +25,7 @@ using System.Text;
 using System.Text.Json;
 using System.Threading.Tasks;
 using Application.Edge.Mockers;
+using Domain.Edge.Models;
 
 namespace Application.Edge.Workers;
 
@@ -56,7 +56,7 @@ internal class EdgeClientWorker(ILogger<EdgeClientWorker> logger, IServiceProvid
 
         _logger.LogInformation("Client edge was initialized with ID {ClientID}", edgeLocalEntity.Id);
 
-        edgeWorkerStartedService.SetValue(true);
+        edgeWorkerStartedService.SetOpen(true);
 
         RoutineExecutor.Execute(TimeSpan.FromSeconds(1), true, Routine, ex => _logger.LogError("Error: {Error}", ex.Message), stoppingToken);
     }
@@ -98,75 +98,124 @@ internal class EdgeClientWorker(ILogger<EdgeClientWorker> logger, IServiceProvid
         });
 
         var scope = _serviceProvider.CreateScope();
-
         cts.Token.Register(scope.Dispose);
 
         var streamPipelineFactory = scope.ServiceProvider.GetRequiredService<StreamPipelineFactory>();
 
-        var streamPipelineService = streamPipelineFactory.Start(
+        var streamPipelineService = streamPipelineFactory.Create(
             tranceiverStream,
             () => { _logger.LogInformation("Stream multiplexer {ServerHost}:{ServerPort} started", tcpHost, tcpPort); },
             () => { _logger.LogInformation("Stream multiplexer {ServerHost}:{ServerPort} ended", tcpHost, tcpPort); },
             ex => { _logger.LogError("Stream multiplexer {ServerHost}:{ServerPort} error: {Error}", tcpHost, tcpPort, ex.Message); },
             cts.Token);
 
-        await ClientHandshake(tcpHost, tcpPort, streamPipelineService, cts);
+        var starterGate = new GateKeeper();
+        var handshakeGate = BeginHandshake(starterGate, tcpHost, tcpPort, streamPipelineService, cts);
+        var workerGate = BeginWorker(handshakeGate, tcpHost, tcpPort, streamPipelineService, cts);
 
-        if (cts.IsCancellationRequested)
-        {
-            return;
-        }
+        streamPipelineService.Start().Forget();
+        starterGate.SetOpen();
 
-        _logger.LogInformation("Steam will not starttttt {ServerHost}:{ServerPort} accepted", tcpHost, tcpPort);
-
-        await Task.Delay(999999999, cts.Token);
+        await workerGate.WaitForOpen(cts.Token);
     }
 
-    private Task ClientHandshake(string tcpHost, int tcpPort, StreamPipelineService streamPipelineService, CancellationTokenSource cts)
+    private GateKeeper BeginHandshake(GateKeeper dependent, string tcpHost, int tcpPort, StreamPipelineService streamPipelineService, CancellationTokenSource cts)
     {
-        return Task.Run(async () =>
+        var gate = new GateKeeper();
+
+        var handshakeMessaging = streamPipelineService.SetMessagingPipe<HandshakePayload>(EdgeDefaults.HandshakeChannel, $"handshake_channel");
+
+        Task.Run(async () =>
         {
-            using var _ = _logger.BeginScopeMap(nameof(EdgeClientWorker), nameof(ClientHandshake), new()
+            using var _ = _logger.BeginScopeMap(nameof(EdgeClientWorker), nameof(BeginHandshake), new()
             {
                 ["ServerHost"] = tcpHost,
                 ["ServerPort"] = tcpPort
             });
 
-            _logger.LogInformation("Attempting handshake to {ServerHost}:{ServerPort}...", tcpHost, tcpPort);
-
-            var handshakeMessaging = streamPipelineService.SetMessagingPipe<HandshakePayload>(EdgeDefaults.HandshakeChannel, $"handshake_channel");
-
-            ManualResetEventSlim acceptedEvent = new(false);
-
-            handshakeMessaging.OnMessage(payload =>
+            try
             {
-                if (payload.Message.MockMessage == "ok")
+                await dependent.WaitForOpen(cts.Token);
+                if (cts.IsCancellationRequested)
                 {
-                    acceptedEvent.Set();
+                    return;
                 }
+
+                _logger.LogInformation("Attempting handshake to {ServerHost}:{ServerPort}...", tcpHost, tcpPort);
+
+                GateKeeper acceptGate = new();
+
+                handshakeMessaging.OnMessage(payload =>
+                {
+                    if (payload.Message.MockMessage == "ok")
+                    {
+                        acceptGate.SetOpen();
+                    }
+                });
+
+                handshakeMessaging.Send(new HandshakePayload() { MockMessage = "conn" });
+
+                if (!await acceptGate.WaitForOpen(cts.Token.WithTimeout(EdgeDefaults.HandshakeTimeout)))
+                {
+                    throw new Exception("Expired");
+                }
+
+                _logger.LogInformation("Handshake {ServerHost}:{ServerPort} accepted", tcpHost, tcpPort);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError("Handshake {ServerHost}:{ServerPort} declined: {ErrorMessage}", tcpHost, tcpPort, ex.Message);
+                cts.Cancel();
+            }
+            finally
+            {
+                gate.SetOpen();
+            }
+        });
+
+        return gate;
+    }
+
+    private GateKeeper BeginWorker(GateKeeper dependent, string tcpHost, int tcpPort, StreamPipelineService streamPipelineService, CancellationTokenSource cts)
+    {
+        var gate = new GateKeeper();
+
+        Task.Run(async () =>
+        {
+            using var _ = _logger.BeginScopeMap(nameof(EdgeClientWorker), nameof(BeginWorker), new()
+            {
+                ["ServerHost"] = tcpHost,
+                ["ServerPort"] = tcpPort
             });
-
-            await Task.Delay(TimeSpan.FromSeconds(1), cts.Token);
-
-            handshakeMessaging.Send(new HandshakePayload() { MockMessage = "conn" });
-
-            var timeoutCt = cts.Token.WithTimeout(EdgeDefaults.HandshakeTimeout);
 
             try
             {
-                acceptedEvent.Wait(timeoutCt);
-            }
-            catch { }
+                await dependent.WaitForOpen(cts.Token);
+                if (cts.IsCancellationRequested)
+                {
+                    return;
+                }
 
-            if (timeoutCt.IsCancellationRequested)
+                _logger.LogInformation("Worker {ServerHost}:{ServerPort} started", tcpHost, tcpPort);
+
+                while (!cts.IsCancellationRequested)
+                {
+                    await Task.Delay(TimeSpan.FromSeconds(1));
+                }
+
+                _logger.LogInformation("Worker {ServerHost}:{ServerPort} ended", tcpHost, tcpPort);
+            }
+            catch (Exception ex)
             {
-                _logger.LogError("Handshake {ServerHost}:{ServerPort} expired", tcpHost, tcpPort);
+                _logger.LogError("Worker {ServerHost}:{ServerPort} error: {ErrorMessage}", tcpHost, tcpPort, ex.Message);
                 cts.Cancel();
             }
-            else
+            finally
             {
-                _logger.LogInformation("Handshake {ServerHost}:{ServerPort} accepted", tcpHost, tcpPort);
+                gate.SetOpen();
             }
         });
+
+        return gate;
     }
 }

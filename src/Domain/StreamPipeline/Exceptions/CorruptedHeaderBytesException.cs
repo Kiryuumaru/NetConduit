@@ -4,7 +4,7 @@ using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
 
-namespace Application.StreamPipeline.Exceptions;
+namespace Domain.StreamPipeline.Exceptions;
 
 public class CorruptedHeaderBytesException : Exception
 {
@@ -13,6 +13,6 @@ public class CorruptedHeaderBytesException : Exception
     public CorruptedHeaderBytesException()
         : base("Corrupted header bytes received")
     {
-        
+
     }
 }

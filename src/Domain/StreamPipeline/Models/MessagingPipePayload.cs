@@ -4,7 +4,7 @@ using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
 
-namespace Application.StreamPipeline.Models;
+namespace Domain.StreamPipeline.Models;
 
 public class MessagingPipePayload<T>
 {

@@ -1,8 +1,8 @@
 ﻿using Application.Common;
 using Application.StreamPipeline.Common;
-using Application.StreamPipeline.Exceptions;
 using Application.StreamPipeline.Models;
 using DisposableHelpers.Attributes;
+using Domain.StreamPipeline.Exceptions;
 using Microsoft.Extensions.Logging;
 using System;
 using System.Buffers.Binary;
@@ -307,6 +307,30 @@ public partial class StreamMultiplexer
                     return channelKey;
                 }
             }
+        }
+        finally
+        {
+            _rwl.ExitWriteLock();
+        }
+    }
+
+    public TranceiverStream GetOrSet(Guid channelKey, Func<TranceiverStream> onSet)
+    {
+        try
+        {
+            _rwl.EnterWriteLock();
+
+            if (_tranceiverStreamHolderMap.TryGetValue(channelKey, out var chunkedTranceiverStream))
+            {
+                return chunkedTranceiverStream.TranceiverStream;
+            }
+
+            chunkedTranceiverStream = new(onSet());
+
+            _tranceiverStreamHolderMap[channelKey] = chunkedTranceiverStream;
+            _registerQueue.Post((channelKey, chunkedTranceiverStream.TranceiverStream));
+
+            return chunkedTranceiverStream.TranceiverStream;
         }
         finally
         {

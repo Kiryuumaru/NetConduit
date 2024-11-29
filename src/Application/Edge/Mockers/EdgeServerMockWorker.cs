@@ -2,13 +2,13 @@
 using Application.Configuration.Extensions;
 using Application.Edge.Common;
 using Application.Edge.Interfaces;
-using Application.Edge.Models;
 using Application.Edge.Services;
 using Application.StreamPipeline.Common;
 using Application.StreamPipeline.Services;
 using Application.Tcp.Services;
 using Domain.Edge.Dtos;
 using Domain.Edge.Entities;
+using Domain.Edge.Models;
 using Microsoft.AspNetCore.Routing;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
@@ -40,7 +40,7 @@ internal class EdgeServerMockWorker(ILogger<EdgeServerMockWorker> logger, IServi
         var edgeLocalService = scope.ServiceProvider.GetRequiredService<IEdgeLocalStoreService>();
         var edgeWorkerStartedService = scope.ServiceProvider.GetRequiredService<EdgeWorkerStartedService>();
 
-        await edgeWorkerStartedService.Wait(stoppingToken);
+        await edgeWorkerStartedService.WaitForOpen(stoppingToken);
 
         RoutineExecutor.Execute(TimeSpan.FromSeconds(1), true, Routine, ex => _logger.LogError("Error: {Error}", ex.Message), stoppingToken);
     }
@@ -55,7 +55,7 @@ internal class EdgeServerMockWorker(ILogger<EdgeServerMockWorker> logger, IServi
         var tcpHost = _configuration.GetServerTcpHost();
         var tcpPort = _configuration.GetServerTcpPort();
 
-        //await tcpServer.Start(tcpHost, tcpPort, (tcpClient, tranceiverStream, ct) =>
+        //await tcpServer.Create(tcpHost, tcpPort, (tcpClient, tranceiverStream, ct) =>
         //{
         //    var clientCts = CancellationTokenSource.CreateLinkedTokenSource(
         //        stoppingToken,
@@ -64,7 +64,7 @@ internal class EdgeServerMockWorker(ILogger<EdgeServerMockWorker> logger, IServi
 
         //    IPAddress clientEndPoint = (tcpClient.Client.LocalEndPoint as IPEndPoint)?.Address!;
 
-        //    return Start(clientEndPoint, tranceiverStream, clientCts);
+        //    return Create(clientEndPoint, tranceiverStream, clientCts);
 
         //}, stoppingToken);
     }
@@ -82,7 +82,7 @@ internal class EdgeServerMockWorker(ILogger<EdgeServerMockWorker> logger, IServi
 
         var streamPipelineFactory = scope.ServiceProvider.GetRequiredService<StreamPipelineFactory>();
 
-        var streamPipelineService = streamPipelineFactory.Start(
+        var streamPipelineService = streamPipelineFactory.Create(
             tranceiverStream,
             () => { _logger.LogInformation("Stream multiplexer {ClientAddress} started", iPAddress); },
             () => { _logger.LogInformation("Stream multiplexer {ClientAddress} ended", iPAddress); },

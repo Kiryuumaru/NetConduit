@@ -18,17 +18,22 @@ using System.Threading.Tasks;
 
 namespace Application.Common;
 
-public class BooleanWaiter
+public class GateKeeper
 {
     private readonly ManualResetEventSlim _waiterEvent = new(false);
 
-    public bool Value { get; private set; }
+    public bool IsOpen { get; private set; }
 
-    public void SetValue(bool value)
+    public GateKeeper(bool initialOpenState = false)
     {
-        Value = value;
+        SetOpen(initialOpenState);
+    }
 
-        if (value)
+    public void SetOpen(bool isOpen = true)
+    {
+        IsOpen = isOpen;
+
+        if (isOpen)
         {
             _waiterEvent.Set();
         }
@@ -38,8 +43,20 @@ public class BooleanWaiter
         }
     }
 
-    public Task Wait(CancellationToken cancellationToken)
+    public Task<bool> WaitForOpen(CancellationToken cancellationToken)
     {
-        return Task.Run(() => _waiterEvent.Wait(cancellationToken), cancellationToken);
+        return Task.Run(() =>
+        {
+            try
+            {
+                _waiterEvent.Wait(cancellationToken);
+                return true;
+            }
+            catch
+            {
+                return false;
+            }
+
+        }, cancellationToken);
     }
 }

@@ -2,9 +2,10 @@
 using Application.Edge.Common;
 using Application.StreamPipeline.Abstraction;
 using Application.StreamPipeline.Common;
-using Application.StreamPipeline.Exceptions;
 using Application.StreamPipeline.Models;
 using Application.StreamPipeline.Services;
+using Domain.StreamPipeline.Exceptions;
+using Domain.StreamPipeline.Models;
 using Microsoft.Extensions.Logging;
 using System;
 using System.Buffers.Binary;

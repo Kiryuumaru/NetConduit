@@ -4,9 +4,9 @@ using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
 
-namespace Application.Edge.Models;
+namespace Domain.Edge.Models;
 
-public class MockPayload
+public class HandshakePayload
 {
     public required string MockMessage { get; init; }
 }

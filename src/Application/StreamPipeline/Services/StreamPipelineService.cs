@@ -31,13 +31,13 @@ public partial class StreamPipelineService(ILogger<StreamPipelineService> logger
         return _streamMultiplexer ?? throw new Exception($"{nameof(StreamPipelineService)} not started");
     }
 
-    public void Start(StreamMultiplexer streamMultiplexer, CancellationToken stoppingToken)
+    public void Create(StreamMultiplexer streamMultiplexer, CancellationToken stoppingToken)
     {
-        using var _ = _logger.BeginScopeMap(nameof(StreamPipelineService), nameof(Start));
+        using var _ = _logger.BeginScopeMap(nameof(StreamPipelineService), nameof(Create));
 
         if (_streamMultiplexer != null)
         {
-            throw new Exception($"{nameof(StreamPipelineService)} already started");
+            throw new Exception($"{nameof(StreamPipelineService)} already created");
         }
 
         _cts = CancellationTokenSource.CreateLinkedTokenSource(
@@ -45,8 +45,15 @@ public partial class StreamPipelineService(ILogger<StreamPipelineService> logger
             CancelWhenDisposing());
 
         _streamMultiplexer = streamMultiplexer;
+    }
 
-        _streamMultiplexer.Start().Forget();
+    public Task Start()
+    {
+        if (_streamMultiplexer == null)
+        {
+            throw new Exception($"{nameof(StreamPipelineService)} is not created");
+        }
+        return _streamMultiplexer.Start();
     }
 
     public TranceiverStream SetRaw(Guid channelKey, int bufferSize)
@@ -56,17 +63,7 @@ public partial class StreamPipelineService(ILogger<StreamPipelineService> logger
 
     public MessagingPipe<T, T> SetMessagingPipe<T>(Guid channelKey, string channelName, JsonSerializerOptions? jsonSerializerOptions = null)
     {
-        var messagingPipe = _serviceProvider.GetRequiredService<MessagingPipe<T, T>>();
-        var tranceiverStream = GetMux().Set(channelKey, StreamPipelineDefaults.EdgeCommsBufferSize);
-        var pipeToken = CancellationTokenSource.CreateLinkedTokenSource(
-            _cts!.Token,
-            CancelWhenDisposing(),
-            messagingPipe.CancelWhenDisposing(),
-            tranceiverStream.CancelWhenDisposing());
-        messagingPipe.SetPipeName(channelName);
-        messagingPipe.SetJsonSerializerOptions(jsonSerializerOptions);
-        messagingPipe.Start(tranceiverStream, pipeToken.Token).Forget();
-        return messagingPipe;
+        return SetMessagingPipe<T, T>(channelKey, channelName, jsonSerializerOptions);
     }
 
     public MessagingPipe<TSend, TReceive> SetMessagingPipe<TSend, TReceive>(Guid channelKey, string channelName, JsonSerializerOptions? jsonSerializerOptions = null)

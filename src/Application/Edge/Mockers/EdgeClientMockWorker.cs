@@ -2,7 +2,6 @@
 using Application.Configuration.Extensions;
 using Application.Edge.Common;
 using Application.Edge.Interfaces;
-using Application.Edge.Models;
 using Application.Edge.Services;
 using Application.StreamPipeline.Common;
 using Application.StreamPipeline.Models;
@@ -10,6 +9,8 @@ using Application.StreamPipeline.Services;
 using Application.Tcp.Services;
 using Domain.Edge.Dtos;
 using Domain.Edge.Entities;
+using Domain.Edge.Models;
+using Domain.StreamPipeline.Models;
 using Microsoft.AspNetCore.Routing;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
@@ -41,7 +42,7 @@ internal class EdgeClientMockWorker(ILogger<EdgeClientMockWorker> logger, IServi
         var edgeLocalService = scope.ServiceProvider.GetRequiredService<IEdgeLocalStoreService>();
         var edgeWorkerStartedService = scope.ServiceProvider.GetRequiredService<EdgeWorkerStartedService>();
 
-        await edgeWorkerStartedService.Wait(stoppingToken);
+        await edgeWorkerStartedService.WaitForOpen(stoppingToken);
 
         RoutineExecutor.Execute(TimeSpan.FromSeconds(1), true, Routine, ex => _logger.LogError("Error: {Error}", ex.Message), stoppingToken);
     }
@@ -62,14 +63,14 @@ internal class EdgeClientMockWorker(ILogger<EdgeClientMockWorker> logger, IServi
 
         await Task.Delay(10000, stoppingToken);
 
-        //await tcpClient.Start(tcpHost, tcpPort, (tranceiverStream, ct) =>
+        //await tcpClient.Create(tcpHost, tcpPort, (tranceiverStream, ct) =>
         //{
         //    var clientCts = CancellationTokenSource.CreateLinkedTokenSource(
         //        stoppingToken,
         //        ct.Token,
         //        tranceiverStream.CancelWhenDisposing());
 
-        //    return Start(tranceiverStream, tcpHost, tcpPort, clientCts);
+        //    return Create(tranceiverStream, tcpHost, tcpPort, clientCts);
 
         //}, stoppingToken);
     }
@@ -88,7 +89,7 @@ internal class EdgeClientMockWorker(ILogger<EdgeClientMockWorker> logger, IServi
 
         var streamPipelineFactory = scope.ServiceProvider.GetRequiredService<StreamPipelineFactory>();
 
-        var streamPipelineService = streamPipelineFactory.Start(
+        var streamPipelineService = streamPipelineFactory.Create(
             tranceiverStream,
             () => { _logger.LogInformation("Stream multiplexer {ServerHost}:{ServerPort} started", tcpHost, tcpPort); },
             () => { _logger.LogInformation("Stream multiplexer {ServerHost}:{ServerPort} ended", tcpHost, tcpPort); },
