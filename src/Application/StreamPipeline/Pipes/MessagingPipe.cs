@@ -211,13 +211,18 @@ public class MessagingPipe<TSend, TReceive> : BasePipe
 
     public Guid Send(TSend message)
     {
-        Guid msgGuid = Guid.NewGuid();
+        Guid messageGuid = Guid.NewGuid();
+        Send(messageGuid, message);
+        return messageGuid;
+    }
+
+    public void Send(Guid messageGuid, TSend message)
+    {
         _messageQueue.Post(new MessagingPipePayload<TSend>()
         {
-            MessageGuid = msgGuid,
+            MessageGuid = messageGuid,
             Message = message
         });
-        return msgGuid;
     }
 
     public void OnMessage(Func<MessagingPipePayload<TReceive>, Task> onMessageCallback)

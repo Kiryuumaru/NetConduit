@@ -64,7 +64,7 @@ public class CommandPipe<TCommand, TResponse>(ILogger<CommandPipe<TCommand, TRes
 
             Result<TResponse> result = new();
 
-            Guid commandGuid = Guid.NewGuid();
+            Guid commandGuid = Guid.Empty;
 
             var commandGate = new GateKeeper();
 
@@ -72,9 +72,8 @@ public class CommandPipe<TCommand, TResponse>(ILogger<CommandPipe<TCommand, TRes
             {
                 _rwl.EnterWriteLock();
 
-                _messagingPipe.Send(new CommandPipePayload()
+                commandGuid = _messagingPipe.Send(new CommandPipePayload()
                 {
-                    CommandGuid = commandGuid,
                     PayloadType = CommandPipePayloadType.Command,
                     RawPayload = JsonSerializer.Serialize(command, _messagingPipe.JsonSerializerOptions)
                 });
@@ -98,7 +97,8 @@ public class CommandPipe<TCommand, TResponse>(ILogger<CommandPipe<TCommand, TRes
                 _rwl.ExitWriteLock();
             }
 
-            if (!await commandGate.WaitForOpen(cancellationToken))
+            if (!await commandGate.WaitForOpen(cancellationToken) &&
+                commandGuid != Guid.Empty)
             {
                 try
                 {
@@ -136,9 +136,8 @@ public class CommandPipe<TCommand, TResponse>(ILogger<CommandPipe<TCommand, TRes
                         commandResponse = await commandResponseTask;
                     }
 
-                    _messagingPipe.Send(new CommandPipePayload()
+                    _messagingPipe.Send(messagingPipePayload.MessageGuid, new CommandPipePayload()
                     {
-                        CommandGuid = messagingPipePayload.Message.CommandGuid,
                         PayloadType = CommandPipePayloadType.Response,
                         RawPayload = JsonSerializer.Serialize(commandResponse, _messagingPipe.JsonSerializerOptions)
                     });
@@ -155,9 +154,9 @@ public class CommandPipe<TCommand, TResponse>(ILogger<CommandPipe<TCommand, TRes
                     {
                         _rwl.EnterWriteLock();
 
-                        if (!_commandActionMap.TryGetValue(messagingPipePayload.Message.CommandGuid, out var messageCallback))
+                        if (!_commandActionMap.TryGetValue(messagingPipePayload.MessageGuid, out var messageCallback))
                         {
-                            throw new Exception($"Command guid {messagingPipePayload.Message.CommandGuid} does not exists");
+                            throw new Exception($"Command guid {messagingPipePayload.MessageGuid} does not exists");
                         }
 
                         messageCallback.Invoke(receivedResponse);

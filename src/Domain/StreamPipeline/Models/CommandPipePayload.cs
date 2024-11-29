@@ -9,8 +9,6 @@ namespace Domain.StreamPipeline.Models;
 
 public class CommandPipePayload
 {
-    public required Guid CommandGuid { get; init; }
-
     public required CommandPipePayloadType PayloadType { get; init; }
 
     public required string RawPayload { get; init; }
