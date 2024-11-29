@@ -158,16 +158,19 @@ internal class EdgeServerWorker(ILogger<EdgeServerWorker> logger, IServiceProvid
                     }
                 });
 
-                if (!await acceptGate.WaitForOpen(cts.Token.WithTimeout(EdgeDefaults.HandshakeTimeout)))
+                if (await acceptGate.WaitForOpen(cts.Token.WithTimeout(EdgeDefaults.HandshakeTimeout)))
                 {
-                    throw new Exception("Expired");
+                    _logger.LogInformation("Handshake {ClientAddress} accepted", iPAddress);
                 }
-
-                _logger.LogInformation("Handshake {ClientAddress} accepted", iPAddress);
+                else
+                {
+                    _logger.LogInformation("Handshake {ClientAddress} declined: Expired", iPAddress);
+                    cts.Cancel();
+                }
             }
             catch (Exception ex)
             {
-                _logger.LogInformation("Handshake {ClientAddress} declined: {ErrorMessage}", iPAddress, ex.Message);
+                _logger.LogError("Handshake {ClientAddress} declined: {ErrorMessage}", iPAddress, ex.Message);
                 cts.Cancel();
             }
             finally

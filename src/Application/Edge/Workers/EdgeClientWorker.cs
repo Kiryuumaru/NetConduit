@@ -145,7 +145,9 @@ internal class EdgeClientWorker(ILogger<EdgeClientWorker> logger, IServiceProvid
 
                 var handshakePayload = new HandshakePayload() { MockMessage = "conn" };
 
-                if (!(await handshakeCommand.Send(handshakePayload, cts.Token.WithTimeout(EdgeDefaults.HandshakeTimeout))).SuccessAndHasValue(out var handshake) ||
+                var handshakeResult = await handshakeCommand.Send(handshakePayload, cts.Token.WithTimeout(EdgeDefaults.HandshakeTimeout));
+
+                if (!handshakeResult.SuccessAndHasValue(out var handshake) ||
                     handshake.MockMessage != "ok")
                 {
                     throw new Exception("Invalid handshake token");

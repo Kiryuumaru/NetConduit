@@ -108,7 +108,10 @@ public class CommandPipe<TCommand, TResponse>(ILogger<CommandPipe<TCommand, TRes
                 {
                     return result;
                 }
+
                 _logger.LogError("CommandPipe {CommandPipeName} Send Error: {Error}", _messagingPipe.Name, ex.Message);
+
+                return result.WithError(ex);
             }
             finally
             {
