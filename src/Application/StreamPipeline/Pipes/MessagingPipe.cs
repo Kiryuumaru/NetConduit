@@ -23,8 +23,6 @@ public class MessagingPipe<TSend, TReceive> : BasePipe
     private readonly ILogger<MessagingPipe<TSend, TReceive>> _logger;
     private readonly BufferBlock<MessagingPipePayload<TSend>> _messageQueue = new();
 
-    private string? _messagingPipeName = null;
-    private JsonSerializerOptions? _jsonSerializerOptions = null;
     private Func<MessagingPipePayload<TReceive>, Task>? _onMessageCallback = null;
 
     private const string _paddingValue = "endofchunk";
@@ -42,6 +40,10 @@ public class MessagingPipe<TSend, TReceive> : BasePipe
     private readonly int _packetLengthPos;
     private readonly int _chunkLengthPos;
     private readonly int _chunkPos;
+
+    public string? Name { get; private set; }
+
+    public JsonSerializerOptions? JsonSerializerOptions { get; private set; }
 
     public MessagingPipe(ILogger<MessagingPipe<TSend, TReceive>> logger)
     {
@@ -65,7 +67,7 @@ public class MessagingPipe<TSend, TReceive> : BasePipe
         {
             using var _ = _logger.BeginScopeMap(nameof(MessagingPipe<TSend, TReceive>), nameof(StartSend), new()
             {
-                ["MessagingPipeName"] = _messagingPipeName
+                ["MessagingPipeName"] = Name
             });
 
             Span<byte> paddingBytes = _paddingBytes.AsSpan();
@@ -82,9 +84,9 @@ public class MessagingPipe<TSend, TReceive> : BasePipe
                         break;
                     }
 
-                    //_logger.LogTrace("MessagingPipe {MessagingPipeName} sending message to stream...", _messagingPipeName);
+                    //_logger.LogTrace("MessagingPipe {MessagingPipeName} sending message to stream...", Name);
 
-                    var messageBytesArray = JsonSerializer.SerializeToUtf8Bytes(messagingPipePayload, _jsonSerializerOptions);
+                    var messageBytesArray = JsonSerializer.SerializeToUtf8Bytes(messagingPipePayload, JsonSerializerOptions);
                     var messageBytes = messageBytesArray.AsSpan();
                     var messageLength = messageBytesArray.LongLength;
 
@@ -99,7 +101,7 @@ public class MessagingPipe<TSend, TReceive> : BasePipe
                         tranceiverStream.Write(sendBytes[..(_headerSize + bytesChunkSend)]);
                     }
 
-                    //_logger.LogTrace("MessagingPipe {MessagingPipeName} message sent to stream", _messagingPipeName);
+                    //_logger.LogTrace("MessagingPipe {MessagingPipeName} message sent to stream", Name);
                 }
                 catch (Exception ex)
                 {
@@ -107,7 +109,7 @@ public class MessagingPipe<TSend, TReceive> : BasePipe
                     {
                         break;
                     }
-                    _logger.LogError("MessagingPipe {MessagingPipeName} sender Error: {Error}", _messagingPipeName, ex.Message);
+                    _logger.LogError("MessagingPipe {MessagingPipeName} sender Error: {Error}", Name, ex.Message);
                 }
             }
 
@@ -120,7 +122,7 @@ public class MessagingPipe<TSend, TReceive> : BasePipe
         {
             using var _ = _logger.BeginScopeMap(nameof(MessagingPipe<TSend, TReceive>), nameof(StartReceive), new()
             {
-                ["MessagingPipeName"] = _messagingPipeName
+                ["MessagingPipeName"] = Name
             });
 
             Span<byte> paddingBytes = _paddingBytes.AsSpan();
@@ -157,12 +159,12 @@ public class MessagingPipe<TSend, TReceive> : BasePipe
                         streamChunkHolder.Seek(0, SeekOrigin.Begin);
                         streamChunkHolder.SetLength(packetLength);
                         var packetBytes = streamChunkHolder.ToArray();
-                        if (JsonSerializer.Deserialize<MessagingPipePayload<TReceive>>(packetBytes, _jsonSerializerOptions) is not MessagingPipePayload<TReceive> messagingPipePayload)
+                        if (JsonSerializer.Deserialize<MessagingPipePayload<TReceive>>(packetBytes, JsonSerializerOptions) is not MessagingPipePayload<TReceive> messagingPipePayload)
                         {
                             throw new InvalidMessagingPipePayloadException(nameof(MessagingPipePayload<TReceive>));
                         }
 
-                        //_logger.LogTrace("MessagingPipe {MessagingPipeName} received message from stream", _messagingPipeName);
+                        //_logger.LogTrace("MessagingPipe {MessagingPipeName} received message from stream", Name);
 
                         _onMessageCallback?.Invoke(messagingPipePayload)?.Forget();
                     }
@@ -173,7 +175,7 @@ public class MessagingPipe<TSend, TReceive> : BasePipe
                     {
                         break;
                     }
-                    _logger.LogError("MessagingPipe {MessagingPipeName} receiver Error: {Error}", _messagingPipeName, ex.Message);
+                    _logger.LogError("MessagingPipe {MessagingPipeName} receiver Error: {Error}", Name, ex.Message);
                 }
             }
 
@@ -184,7 +186,7 @@ public class MessagingPipe<TSend, TReceive> : BasePipe
     {
         var ct = CancelWhenDisposing(stoppingToken);
 
-        _logger.LogInformation("MessagingPipe {MessagingPipeName} started", _messagingPipeName);
+        _logger.LogInformation("MessagingPipe {MessagingPipeName} started", Name);
 
         return Task.Run(async () =>
         {
@@ -192,19 +194,19 @@ public class MessagingPipe<TSend, TReceive> : BasePipe
                 StartSend(tranceiverStream, ct),
                 StartReceive(tranceiverStream, ct));
 
-            _logger.LogInformation("MessagingPipe {MessagingPipeName} ended", _messagingPipeName);
+            _logger.LogInformation("MessagingPipe {MessagingPipeName} ended", Name);
 
         }, ct);
     }
 
     public void SetPipeName(string name)
     {
-        _messagingPipeName = name;
+        Name = name;
     }
 
     public void SetJsonSerializerOptions(JsonSerializerOptions? jsonSerializerOptions)
     {
-        _jsonSerializerOptions = jsonSerializerOptions;
+        JsonSerializerOptions = jsonSerializerOptions;
     }
 
     public Guid Send(TSend message)

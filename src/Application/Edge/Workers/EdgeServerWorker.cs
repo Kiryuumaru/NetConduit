@@ -146,7 +146,7 @@ internal class EdgeServerWorker(ILogger<EdgeServerWorker> logger, IServiceProvid
 
                 _logger.LogInformation("Attempting handshake from {ClientAddress}...", iPAddress);
 
-                GateKeeper acceptGate = new();
+                var acceptGate = new GateKeeper();
 
                 handshakeMessaging.OnMessage(payload =>
                 {

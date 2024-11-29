@@ -32,6 +32,7 @@ public class Application : ApplicationDependency
         services.AddScoped<StreamPipelineService>();
         services.AddScoped<StreamPipelineFactory>();
         services.AddTransient(typeof(MessagingPipe<,>));
+        services.AddTransient(typeof(CommandPipe<,>));
 
         services.AddTransient<TcpClientService>();
         services.AddTransient<TcpServerService>();
