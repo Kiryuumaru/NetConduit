@@ -61,7 +61,7 @@ internal partial class EdgeServerHandshakeService(ILogger<EdgeServerHandshakeSer
 
                 _logger.LogInformation("Attempting handshake from {ClientAddress}...", iPAddress);
 
-                var edgeLocalEntity = (await _edgeLocalStoreService.Get(_cts.Token)).GetValueOrThrow();
+                var edgeServerEntity = (await _edgeLocalStoreService.Get(_cts.Token)).GetValueOrThrow();
                 byte[] serverPrivateKey = [];
                 byte[] serverPublicKey = [];
                 byte[] clientPublicKey = [];
@@ -72,7 +72,8 @@ internal partial class EdgeServerHandshakeService(ILogger<EdgeServerHandshakeSer
                     {
                         return;
                     }
-                    if (callback.Command.PublicKey != null && callback.Command.PublicKey.Length != 0)
+                    if (callback.Command.PublicKey != null &&
+                        callback.Command.PublicKey.Length != 0)
                     {
                         if (ServerRsa != null || ClientRsa != null)
                         {
@@ -97,7 +98,7 @@ internal partial class EdgeServerHandshakeService(ILogger<EdgeServerHandshakeSer
                             });
                         }
                     }
-                    else if (callback.Command.EncryptedEdgeToken != null &&
+                    if (callback.Command.EncryptedEdgeToken != null &&
                         callback.Command.EncryptedEdgeToken.Length != 0 &&
                         callback.Command.EncryptedHandshakeToken != null &&
                         callback.Command.EncryptedHandshakeToken.Length != 0)
@@ -110,7 +111,7 @@ internal partial class EdgeServerHandshakeService(ILogger<EdgeServerHandshakeSer
                         try
                         {
                             string decryptedHandshakeToken = SecureDataHelpers.DecryptString(callback.Command.EncryptedHandshakeToken, serverPrivateKey);
-                            if (edgeLocalEntity.Token == decryptedHandshakeToken)
+                            if (edgeServerEntity.Token == decryptedHandshakeToken)
                             {
                                 edgeEntity = EdgeEntityHelpers.Decode(SecureDataHelpers.DecryptString(callback.Command.EncryptedEdgeToken, serverPrivateKey));
                             }
