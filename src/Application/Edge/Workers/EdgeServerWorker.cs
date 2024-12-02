@@ -71,6 +71,7 @@ internal class EdgeServerWorker(ILogger<EdgeServerWorker> logger, IServiceProvid
         catch (Exception ex)
         {
             _logger.LogError("Error: {Error}", ex.Message);
+            throw;
         }
 
         edgeWorkerStartedService.SetOpen(true);
