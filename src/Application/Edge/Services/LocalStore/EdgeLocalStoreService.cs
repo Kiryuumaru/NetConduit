@@ -1,6 +1,7 @@
 ﻿using Application.Common;
 using Application.Edge.Common;
 using Application.Edge.Interfaces;
+using Application.Edge.Services.HiveStore;
 using Application.LocalStore.Common;
 using Application.LocalStore.Services;
 using Domain.Edge.Dtos;
@@ -19,7 +20,7 @@ using System.Threading.Tasks;
 using TransactionHelpers;
 using TransactionHelpers.Interface;
 
-namespace Application.Edge.Services;
+namespace Application.Edge.Services.LocalStore;
 
 public class EdgeLocalStoreService(ILogger<EdgeLocalStoreService> logger, LocalStoreFactoryService localStoreFactoryService) : IEdgeLocalStoreService
 {
@@ -34,13 +35,13 @@ public class EdgeLocalStoreService(ILogger<EdgeLocalStoreService> logger, LocalS
         return _localStoreFactoryService.GetStore(EdgeGroupStore, cancellationToken);
     }
 
-    async Task<HttpResult<GetEdgeWithTokenDto>> IEdgeLocalStoreService.Get(CancellationToken cancellationToken)
+    async Task<HttpResult<EdgeWithTokenDto>> IEdgeLocalStoreService.Get(CancellationToken cancellationToken)
     {
         using var _ = _logger.BeginScopeMap(nameof(EdgeLocalStoreService), nameof(IEdgeLocalStoreService.Get));
 
         using var store = await GetStore(cancellationToken);
 
-        HttpResult<GetEdgeWithTokenDto> result = new();
+        HttpResult<EdgeWithTokenDto> result = new();
 
         if (!result.SuccessAndHasValue(await Get(store, EdgeLocalId, cancellationToken), out EdgeEntity? edge))
         {
@@ -55,7 +56,7 @@ public class EdgeLocalStoreService(ILogger<EdgeLocalStoreService> logger, LocalS
             Key = edge.Key,
         });
 
-        result.WithValue(new GetEdgeWithTokenDto()
+        result.WithValue(new EdgeWithTokenDto()
         {
             Id = edge.Id,
             EdgeType = edge.EdgeType,
@@ -67,7 +68,7 @@ public class EdgeLocalStoreService(ILogger<EdgeLocalStoreService> logger, LocalS
         return result;
     }
 
-    async Task<HttpResult<GetEdgeWithTokenDto>> IEdgeLocalStoreService.Create(AddEdgeDto edgeAddDto, CancellationToken cancellationToken)
+    async Task<HttpResult<EdgeWithTokenDto>> IEdgeLocalStoreService.Create(AddEdgeDto edgeAddDto, CancellationToken cancellationToken)
     {
         using var _ = _logger.BeginScopeMap(nameof(EdgeLocalStoreService), nameof(IEdgeLocalStoreService.Create), new()
         {
@@ -75,7 +76,7 @@ public class EdgeLocalStoreService(ILogger<EdgeLocalStoreService> logger, LocalS
             ["EdgeName"] = edgeAddDto.Name
         });
 
-        HttpResult<GetEdgeWithTokenDto> result = new();
+        HttpResult<EdgeWithTokenDto> result = new();
 
         if (string.IsNullOrEmpty(edgeAddDto.Name))
         {
@@ -110,7 +111,7 @@ public class EdgeLocalStoreService(ILogger<EdgeLocalStoreService> logger, LocalS
             Key = newEdge.Key,
         });
 
-        result.WithValue(new GetEdgeWithTokenDto()
+        result.WithValue(new EdgeWithTokenDto()
         {
             Id = newEdge.Id,
             EdgeType = edgeAddDto.EdgeType,
@@ -144,11 +145,11 @@ public class EdgeLocalStoreService(ILogger<EdgeLocalStoreService> logger, LocalS
         return result;
     }
 
-    async Task<HttpResult<GetEdgeWithTokenDto>> IEdgeLocalStoreService.GetOrCreate(Func<AddEdgeDto> onCreate, CancellationToken cancellationToken)
+    async Task<HttpResult<EdgeWithTokenDto>> IEdgeLocalStoreService.GetOrCreate(Func<AddEdgeDto> onCreate, CancellationToken cancellationToken)
     {
         using var _ = _logger.BeginScopeMap(nameof(EdgeHiveStoreService), nameof(IEdgeLocalStoreService.GetOrCreate));
 
-        HttpResult<GetEdgeWithTokenDto> result = new();
+        HttpResult<EdgeWithTokenDto> result = new();
 
         using var store = await GetStore(cancellationToken);
 
@@ -203,7 +204,7 @@ public class EdgeLocalStoreService(ILogger<EdgeLocalStoreService> logger, LocalS
             Name = edge.Name,
             Key = edge.Key,
         });
-        result.WithValue(new GetEdgeWithTokenDto()
+        result.WithValue(new EdgeWithTokenDto()
         {
             Id = edge.Id,
             EdgeType = edge.EdgeType,

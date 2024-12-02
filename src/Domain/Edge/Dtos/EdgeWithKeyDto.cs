@@ -6,7 +6,7 @@ using System.Threading.Tasks;
 
 namespace Domain.Edge.Dtos;
 
-public class GetEdgeWithTokenDto : GetEdgeInfoDto
+public class EdgeWithKeyDto : EdgeInfoDto
 {
-    public required string Token { get; init; }
+    public required byte[] Key { get; init; }
 }

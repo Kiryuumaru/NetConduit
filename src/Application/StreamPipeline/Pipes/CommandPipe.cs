@@ -20,17 +20,17 @@ public class CommandPipe<TCommand, TResponse>(ILogger<CommandPipe<TCommand, TRes
 {
     public class CommandCallback
     {
-        private readonly Action<TResponse> _responseCallback;
+        private readonly Action<TResponse?> _responseCallback;
 
-        public TCommand Command { get; }
+        public TCommand? Command { get; }
 
-        internal CommandCallback(TCommand command, Action<TResponse> responseCallback)
+        internal CommandCallback(TCommand? command, Action<TResponse?> responseCallback)
         {
             _responseCallback = responseCallback;
             Command = command;
         }
 
-        public void Respond(TResponse response)
+        public void Respond(TResponse? response)
         {
             _responseCallback(response);
         }
@@ -39,7 +39,7 @@ public class CommandPipe<TCommand, TResponse>(ILogger<CommandPipe<TCommand, TRes
     private readonly ILogger<CommandPipe<TCommand, TResponse>> _logger = logger;
     private readonly MessagingPipe<CommandPipePayload<TCommand, TResponse>, CommandPipePayload<TCommand, TResponse>> _messagingPipe = messagingPipe;
 
-    private readonly Dictionary<Guid, Action<TResponse>> _commandActionMap = [];
+    private readonly Dictionary<Guid, Action<TResponse?>> _commandActionMap = [];
     private readonly ReaderWriterLockSlim _rwl = new();
 
     private Func<CommandCallback, Task>? _onCommandCallback = null;
@@ -92,6 +92,8 @@ public class CommandPipe<TCommand, TResponse>(ILogger<CommandPipe<TCommand, TRes
 
                 commandGuid = _messagingPipe.Send(new()
                 {
+                    HasCommand = true,
+                    HasResponse = false,
                     Command = command,
                     Response = default,
                 });
@@ -141,7 +143,23 @@ public class CommandPipe<TCommand, TResponse>(ILogger<CommandPipe<TCommand, TRes
     {
         try
         {
-            if (messagingPipePayload.Message.Response != null)
+            if (messagingPipePayload.Message.HasCommand)
+            {
+                var commandCallback = new CommandCallback(messagingPipePayload.Message.Command,
+                    callbackResponse => _messagingPipe.Send(messagingPipePayload.MessageGuid, new()
+                    {
+                        HasCommand = false,
+                        HasResponse = true,
+                        Command = default,
+                        Response = callbackResponse
+                    }));
+                var commandResponseTask = _onCommandCallback?.Invoke(commandCallback);
+                if (commandResponseTask != null)
+                {
+                    await commandResponseTask;
+                }
+            }
+            if (messagingPipePayload.Message.HasResponse)
             {
                 try
                 {
@@ -157,20 +175,6 @@ public class CommandPipe<TCommand, TResponse>(ILogger<CommandPipe<TCommand, TRes
                 finally
                 {
                     _rwl.ExitReadLock();
-                }
-            }
-            else if (messagingPipePayload.Message.Command != null)
-            {
-                var commandCallback = new CommandCallback(messagingPipePayload.Message.Command,
-                    callbackResponse => _messagingPipe.Send(messagingPipePayload.MessageGuid, new()
-                    {
-                        Command = messagingPipePayload.Message.Command,
-                        Response = callbackResponse
-                    }));
-                var commandResponseTask = _onCommandCallback?.Invoke(commandCallback);
-                if (commandResponseTask != null)
-                {
-                    await commandResponseTask;
                 }
             }
         }

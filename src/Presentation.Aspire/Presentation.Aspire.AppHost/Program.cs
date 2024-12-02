@@ -16,8 +16,18 @@ for (int i = 0; i < 1; i++)
         .WithArgs("--api-urls", $"http://*:{31110 + i}")
         .WithArgs("--server-host", "localhost")
         .WithArgs("--server-port", "21000")
-        .WithArgs("--home", $"C:\\ProgramData\\netc\\client{i}");
+        .WithArgs("--home", $"C:\\ProgramData\\netc\\client{i}")
+        .WithArgs("--server-handshake-token", "eyJrZXkiOiJ6bW1wb1FrejZ0NGhqbEl2d3dYWGVhSVo3bGQxMFk4RVFPcG5uTm51QTVBZUdjZ21DVkZsQk4yQ3BGS2lYZjhPMXNUcVFvR3h4SElHZ2diTmJ4ajhQZz09IiwiaWQiOiJmODM1YzIzNS1jNjdhLTQ1OWUtOTQyNy05MGVmZDQyMjBhYzgiLCJlZGdlVHlwZSI6MSwibmFtZSI6IkNMWU5ULVJVUElOVEEifQ==");
 }
+
+//builder.AddProject<Projects.Presentation>($"presentation-client-invalid")
+//    .WithArgs("client", "start")
+//    .WithArgs("-l", "trace")
+//    .WithArgs("--api-urls", $"http://*:41110")
+//    .WithArgs("--server-host", "localhost")
+//    .WithArgs("--server-port", "21000")
+//    .WithArgs("--home", $"C:\\ProgramData\\netc\\client-invalid")
+//    .WithArgs("--server-handshake-token", "ss");
 
 //builder.AddProject<Projects.TestTCPMocker>("relayapi1-serverapi1")
 //    .WithEnvironment("TCP_MOCKER_RELAY_TO_MOQ", "23457:localhost:23456");

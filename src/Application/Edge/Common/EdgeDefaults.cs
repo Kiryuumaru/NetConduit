@@ -13,6 +13,10 @@ public static class EdgeDefaults
 
     public const int EdgeCommsBufferSize = 16384;
 
+    public const int EdgeHandshakeRequestLength = 4096;
+
+    public const int EdgeHandshakeRSABitsLength = 4096;
+
     public static readonly Guid HandshakeChannel = new("00000000-0000-0000-0000-000000000001");
 
     public static readonly TimeSpan HandshakeTimeout = TimeSpan.FromSeconds(10);

@@ -16,14 +16,14 @@ using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 
-namespace Application.Edge.Services;
+namespace Application.Edge.Services.HiveStore;
 
 public class EdgeHiveStoreApiService(IServiceProvider serviceProvider, IConfiguration configuration) : IEdgeHiveStoreService
 {
     private readonly IServiceProvider _serviceProvider = serviceProvider;
     private readonly IConfiguration _configuration = configuration;
 
-    public Task<HttpResult<GetEdgeWithTokenDto>> GetOrCreate(string id, Func<AddEdgeDto> onCreate, CancellationToken cancellationToken = default)
+    public Task<HttpResult<EdgeWithTokenDto>> GetOrCreate(string id, Func<AddEdgeDto> onCreate, CancellationToken cancellationToken = default)
     {
         throw new NotImplementedException();
     }
@@ -33,32 +33,32 @@ public class EdgeHiveStoreApiService(IServiceProvider serviceProvider, IConfigur
         throw new NotImplementedException();
     }
 
-    Task<HttpResult<GetEdgeWithTokenDto>> IEdgeHiveStoreService.Create(AddEdgeDto edgeAddDto, CancellationToken cancellationToken)
+    Task<HttpResult<EdgeWithTokenDto>> IEdgeHiveStoreService.Create(AddEdgeDto edgeAddDto, CancellationToken cancellationToken)
     {
         throw new NotImplementedException();
     }
 
-    Task<HttpResult<GetEdgeInfoDto>> IEdgeHiveStoreService.Delete(string id, CancellationToken cancellationToken)
+    Task<HttpResult<EdgeInfoDto>> IEdgeHiveStoreService.Delete(string id, CancellationToken cancellationToken)
     {
         throw new NotImplementedException();
     }
 
-    Task<HttpResult<GetEdgeWithTokenDto>> IEdgeHiveStoreService.Edit(string id, EditEdgeDto edgeEditDto, CancellationToken cancellationToken)
+    Task<HttpResult<EdgeWithTokenDto>> IEdgeHiveStoreService.Edit(string id, EditEdgeDto edgeEditDto, CancellationToken cancellationToken)
     {
         throw new NotImplementedException();
     }
 
-    Task<HttpResult<GetEdgeInfoDto>> IEdgeHiveStoreService.Get(string id, CancellationToken cancellationToken)
+    Task<HttpResult<EdgeInfoDto>> IEdgeHiveStoreService.Get(string id, CancellationToken cancellationToken)
     {
         throw new NotImplementedException();
     }
 
-    Task<HttpResult<GetEdgeInfoDto[]>> IEdgeHiveStoreService.GetAll(CancellationToken cancellationToken)
+    Task<HttpResult<EdgeInfoDto[]>> IEdgeHiveStoreService.GetAll(CancellationToken cancellationToken)
     {
         throw new NotImplementedException();
     }
 
-    Task<HttpResult<GetEdgeWithTokenDto>> IEdgeHiveStoreService.GetToken(string id, CancellationToken cancellationToken)
+    Task<HttpResult<EdgeWithTokenDto>> IEdgeHiveStoreService.GetToken(string id, CancellationToken cancellationToken)
     {
         throw new NotImplementedException();
     }

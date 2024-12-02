@@ -26,6 +26,7 @@ using System.Text.Json;
 using System.Threading.Tasks;
 using Application.Edge.Mockers;
 using Domain.Edge.Models;
+using Application.Edge.Services.Handshake;
 
 namespace Application.Edge.Workers;
 
@@ -100,7 +101,11 @@ internal class EdgeClientWorker(ILogger<EdgeClientWorker> logger, IServiceProvid
         var scope = _serviceProvider.CreateScope();
         cts.Token.Register(scope.Dispose);
 
+        var handshakeService = scope.ServiceProvider.GetRequiredService<EdgeClientHandshakeService>();
         var streamPipelineFactory = scope.ServiceProvider.GetRequiredService<StreamPipelineFactory>();
+
+        handshakeService.CancelWhenDisposing().Register(scope.Dispose);
+        streamPipelineFactory.CancelWhenDisposing().Register(scope.Dispose);
 
         var streamPipelineService = streamPipelineFactory.Create(
             tranceiverStream,
@@ -110,63 +115,13 @@ internal class EdgeClientWorker(ILogger<EdgeClientWorker> logger, IServiceProvid
             cts.Token);
 
         var starterGate = new GateKeeper();
-        var handshakeGate = BeginHandshake(starterGate, tcpHost, tcpPort, streamPipelineService, cts);
-        var workerGate = BeginWorker(handshakeGate, tcpHost, tcpPort, streamPipelineService, cts);
+        handshakeService.Begin(starterGate, tcpHost, tcpPort, streamPipelineService, cts.Token);
+        var workerGate = BeginWorker(handshakeService.Gate, tcpHost, tcpPort, streamPipelineService, cts);
 
         streamPipelineService.Start().Forget();
         starterGate.SetOpen();
 
         await workerGate.WaitForOpen(cts.Token);
-    }
-
-    private GateKeeper BeginHandshake(GateKeeper dependent, string tcpHost, int tcpPort, StreamPipelineService streamPipelineService, CancellationTokenSource cts)
-    {
-        var gate = new GateKeeper();
-
-        var handshakeCommand = streamPipelineService.SetCommandPipe<HandshakePayload, HandshakePayload>(EdgeDefaults.HandshakeChannel, $"handshake_channel");
-
-        Task.Run(async () =>
-        {
-            using var _ = _logger.BeginScopeMap(nameof(EdgeClientWorker), nameof(BeginHandshake), new()
-            {
-                ["ServerHost"] = tcpHost,
-                ["ServerPort"] = tcpPort
-            });
-
-            try
-            {
-                await dependent.WaitForOpen(cts.Token);
-                if (cts.IsCancellationRequested)
-                {
-                    return;
-                }
-
-                _logger.LogInformation("Attempting handshake to {ServerHost}:{ServerPort}...", tcpHost, tcpPort);
-
-                var handshakePayload = new HandshakePayload() { MockMessage = "conn" };
-
-                var handshakeResult = await handshakeCommand.Send(handshakePayload, cts.Token.WithTimeout(EdgeDefaults.HandshakeTimeout));
-
-                if (!handshakeResult.SuccessAndHasValue(out var handshake) ||
-                    handshake.MockMessage != "ok")
-                {
-                    throw new Exception("Invalid handshake token");
-                }
-
-                _logger.LogInformation("Handshake {ServerHost}:{ServerPort} accepted", tcpHost, tcpPort);
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError("Handshake {ServerHost}:{ServerPort} declined: {ErrorMessage}", tcpHost, tcpPort, ex.Message);
-                cts.Cancel();
-            }
-            finally
-            {
-                gate.SetOpen();
-            }
-        });
-
-        return gate;
     }
 
     private GateKeeper BeginWorker(GateKeeper dependent, string tcpHost, int tcpPort, StreamPipelineService streamPipelineService, CancellationTokenSource cts)

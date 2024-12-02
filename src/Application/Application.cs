@@ -12,6 +12,9 @@ using Application.Watchdog.Workers;
 using ApplicationBuilderHelpers;
 using Microsoft.Extensions.DependencyInjection;
 using Application.Edge.Workers;
+using Application.Edge.Services.Handshake;
+using Application.Edge.Services.HiveStore;
+using Application.Edge.Services.LocalStore;
 
 namespace Application;
 
@@ -41,16 +44,22 @@ public class Application : ApplicationDependency
 
         if (applicationBuilder.Configuration.GetStartAsServerMode())
         {
+            services.AddScoped<EdgeServerHandshakeService>();
+
             services.AddScoped<IEdgeLocalStoreService, EdgeLocalStoreService>();
             services.AddScoped<IEdgeHiveStoreService, EdgeHiveStoreService>();
+
             services.AddHostedService<EdgeServerWorker>();
 
             services.AddHostedService<EdgeServerMockWorker>();
         }
         else
         {
+            services.AddScoped<EdgeClientHandshakeService>();
+
             services.AddScoped<IEdgeLocalStoreService, EdgeLocalStoreService>();
             services.AddScoped<IEdgeHiveStoreService, EdgeHiveStoreApiService>();
+
             services.AddHostedService<EdgeClientWorker>();
 
             services.AddHostedService<EdgeClientMockWorker>();

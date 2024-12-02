@@ -26,6 +26,9 @@ public class ClientStartCommand : BaseCommand
     [CommandOption("api-urls", Description = "API port for configurations.", EnvironmentVariable = ApplicationConfigurationExtensions.ApiUrlsKey)]
     public string ApiUrls { get; set; } = "http://*:21100";
 
+    [CommandOption("server-handshake-token", Description = "Override handshake token to use.", EnvironmentVariable = ApplicationConfigurationExtensions.HandshakeTokenKey)]
+    public string? HandshakeToken { get; set; } = null;
+
     public override async ValueTask Run(ApplicationHostBuilder<WebApplicationBuilder> appBuilder, CancellationToken stoppingToken)
     {
         appBuilder.Configuration.SetStartAsServerMode(false);
@@ -33,6 +36,11 @@ public class ClientStartCommand : BaseCommand
         appBuilder.Configuration.SetServerTcpHost(ServerHost);
         appBuilder.Configuration.SetServerTcpPort(ServerPort);
         appBuilder.Configuration.SetApiUrls(ApiUrls);
+
+        if (!string.IsNullOrEmpty(HandshakeToken))
+        {
+            appBuilder.Configuration.SetHandshakeToken(HandshakeToken);
+        }
 
         await appBuilder.Build().Run(stoppingToken);
     }

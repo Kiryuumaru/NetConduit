@@ -20,7 +20,7 @@ using System.Threading.Tasks;
 using TransactionHelpers;
 using TransactionHelpers.Interface;
 
-namespace Application.Edge.Services;
+namespace Application.Edge.Services.HiveStore;
 
 public class EdgeHiveStoreService(ILogger<EdgeHiveStoreService> logger, LocalStoreFactoryService localStoreFactoryService) : IEdgeHiveStoreService
 {
@@ -56,11 +56,11 @@ public class EdgeHiveStoreService(ILogger<EdgeHiveStoreService> logger, LocalSto
         return result;
     }
 
-    async Task<HttpResult<GetEdgeInfoDto[]>> IEdgeHiveStoreService.GetAll(CancellationToken cancellationToken)
+    async Task<HttpResult<EdgeInfoDto[]>> IEdgeHiveStoreService.GetAll(CancellationToken cancellationToken)
     {
         using var _ = _logger.BeginScopeMap(nameof(EdgeHiveStoreService), nameof(IEdgeHiveStoreService.GetAll));
 
-        HttpResult<GetEdgeInfoDto[]> result = new();
+        HttpResult<EdgeInfoDto[]> result = new();
 
         using var store = await GetStore(cancellationToken);
 
@@ -72,7 +72,7 @@ public class EdgeHiveStoreService(ILogger<EdgeHiveStoreService> logger, LocalSto
             return result;
         }
 
-        List<GetEdgeInfoDto> edgeEntities = [];
+        List<EdgeInfoDto> edgeEntities = [];
 
         foreach (var id in edgeIds)
         {
@@ -97,20 +97,20 @@ public class EdgeHiveStoreService(ILogger<EdgeHiveStoreService> logger, LocalSto
         return result;
     }
 
-    async Task<HttpResult<GetEdgeInfoDto>> IEdgeHiveStoreService.Get(string id, CancellationToken cancellationToken)
+    async Task<HttpResult<EdgeInfoDto>> IEdgeHiveStoreService.Get(string id, CancellationToken cancellationToken)
     {
         using var _ = _logger.BeginScopeMap(nameof(EdgeHiveStoreService), nameof(IEdgeHiveStoreService.Get));
 
         using var store = await GetStore(cancellationToken);
 
-        HttpResult<GetEdgeInfoDto> result = new();
+        HttpResult<EdgeInfoDto> result = new();
 
         if (!result.SuccessAndHasValue(await Get(store, id, cancellationToken), out EdgeEntity? edge))
         {
             return result;
         }
 
-        result.WithValue(new GetEdgeInfoDto()
+        result.WithValue(new EdgeInfoDto()
         {
             Id = edge.Id,
             EdgeType = edge.EdgeType,
@@ -121,13 +121,13 @@ public class EdgeHiveStoreService(ILogger<EdgeHiveStoreService> logger, LocalSto
         return result;
     }
 
-    async Task<HttpResult<GetEdgeWithTokenDto>> IEdgeHiveStoreService.GetToken(string id, CancellationToken cancellationToken)
+    async Task<HttpResult<EdgeWithTokenDto>> IEdgeHiveStoreService.GetToken(string id, CancellationToken cancellationToken)
     {
         using var _ = _logger.BeginScopeMap(nameof(EdgeHiveStoreService), nameof(IEdgeHiveStoreService.GetToken));
 
         using var store = await GetStore(cancellationToken);
 
-        HttpResult<GetEdgeWithTokenDto> result = new();
+        HttpResult<EdgeWithTokenDto> result = new();
 
         if (!result.SuccessAndHasValue(await Get(store, id, cancellationToken), out EdgeEntity? edge))
         {
@@ -142,7 +142,7 @@ public class EdgeHiveStoreService(ILogger<EdgeHiveStoreService> logger, LocalSto
             Key = edge.Key,
         });
 
-        result.WithValue(new GetEdgeWithTokenDto()
+        result.WithValue(new EdgeWithTokenDto()
         {
             Id = edge.Id,
             EdgeType = edge.EdgeType,
@@ -154,7 +154,7 @@ public class EdgeHiveStoreService(ILogger<EdgeHiveStoreService> logger, LocalSto
         return result;
     }
 
-    async Task<HttpResult<GetEdgeWithTokenDto>> IEdgeHiveStoreService.Create(AddEdgeDto edgeAddDto, CancellationToken cancellationToken)
+    async Task<HttpResult<EdgeWithTokenDto>> IEdgeHiveStoreService.Create(AddEdgeDto edgeAddDto, CancellationToken cancellationToken)
     {
         using var _ = _logger.BeginScopeMap(nameof(EdgeHiveStoreService), nameof(IEdgeHiveStoreService.Create), new()
         {
@@ -162,7 +162,7 @@ public class EdgeHiveStoreService(ILogger<EdgeHiveStoreService> logger, LocalSto
             ["EdgeName"] = edgeAddDto.Name
         });
 
-        HttpResult<GetEdgeWithTokenDto> result = new();
+        HttpResult<EdgeWithTokenDto> result = new();
 
         if (string.IsNullOrEmpty(edgeAddDto.Name))
         {
@@ -197,7 +197,7 @@ public class EdgeHiveStoreService(ILogger<EdgeHiveStoreService> logger, LocalSto
             Key = newEdge.Key,
         });
 
-        result.WithValue(new GetEdgeWithTokenDto()
+        result.WithValue(new EdgeWithTokenDto()
         {
             Id = newEdge.Id,
             EdgeType = newEdge.EdgeType,
@@ -209,14 +209,14 @@ public class EdgeHiveStoreService(ILogger<EdgeHiveStoreService> logger, LocalSto
         return result;
     }
 
-    async Task<HttpResult<GetEdgeWithTokenDto>> IEdgeHiveStoreService.Edit(string id, EditEdgeDto edgeEditDto, CancellationToken cancellationToken)
+    async Task<HttpResult<EdgeWithTokenDto>> IEdgeHiveStoreService.Edit(string id, EditEdgeDto edgeEditDto, CancellationToken cancellationToken)
     {
         using var _ = _logger.BeginScopeMap(nameof(EdgeHiveStoreService), nameof(IEdgeHiveStoreService.Edit), new()
         {
             ["EdgeId"] = id
         });
 
-        HttpResult<GetEdgeWithTokenDto> result = new();
+        HttpResult<EdgeWithTokenDto> result = new();
 
         if (string.IsNullOrEmpty(id))
         {
@@ -285,7 +285,7 @@ public class EdgeHiveStoreService(ILogger<EdgeHiveStoreService> logger, LocalSto
             Key = newEdge.Key,
         });
 
-        result.WithValue(new GetEdgeWithTokenDto()
+        result.WithValue(new EdgeWithTokenDto()
         {
             Id = newEdge.Id,
             EdgeType = edge.EdgeType,
@@ -299,14 +299,14 @@ public class EdgeHiveStoreService(ILogger<EdgeHiveStoreService> logger, LocalSto
         return result;
     }
 
-    async Task<HttpResult<GetEdgeInfoDto>> IEdgeHiveStoreService.Delete(string id, CancellationToken cancellationToken)
+    async Task<HttpResult<EdgeInfoDto>> IEdgeHiveStoreService.Delete(string id, CancellationToken cancellationToken)
     {
         using var _ = _logger.BeginScopeMap(nameof(EdgeHiveStoreService), nameof(IEdgeHiveStoreService.Delete), new()
         {
             ["EdgeId"] = id
         });
 
-        HttpResult<GetEdgeInfoDto> result = new();
+        HttpResult<EdgeInfoDto> result = new();
 
         if (string.IsNullOrEmpty(id))
         {
@@ -357,11 +357,11 @@ public class EdgeHiveStoreService(ILogger<EdgeHiveStoreService> logger, LocalSto
         return result;
     }
 
-    async Task<HttpResult<GetEdgeWithTokenDto>> IEdgeHiveStoreService.GetOrCreate(string id, Func<AddEdgeDto> onCreate, CancellationToken cancellationToken)
+    async Task<HttpResult<EdgeWithTokenDto>> IEdgeHiveStoreService.GetOrCreate(string id, Func<AddEdgeDto> onCreate, CancellationToken cancellationToken)
     {
         using var _ = _logger.BeginScopeMap(nameof(EdgeHiveStoreService), nameof(IEdgeHiveStoreService.GetOrCreate));
 
-        HttpResult<GetEdgeWithTokenDto> result = new();
+        HttpResult<EdgeWithTokenDto> result = new();
 
         using var store = await GetStore(cancellationToken);
 
@@ -417,7 +417,7 @@ public class EdgeHiveStoreService(ILogger<EdgeHiveStoreService> logger, LocalSto
             Name = edge.Name,
             Key = edge.Key,
         });
-        result.WithValue(new GetEdgeWithTokenDto()
+        result.WithValue(new EdgeWithTokenDto()
         {
             Id = edge.Id,
             EdgeType = edge.EdgeType,

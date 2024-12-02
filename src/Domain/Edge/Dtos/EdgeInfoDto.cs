@@ -7,7 +7,7 @@ using System.Threading.Tasks;
 
 namespace Domain.Edge.Dtos;
 
-public class GetEdgeInfoDto
+public class EdgeInfoDto
 {
     public required Guid Id { get; init; }
 

@@ -4,6 +4,7 @@ using Application.Edge.Common;
 using Application.Edge.Interfaces;
 using Application.Edge.Mockers;
 using Application.Edge.Services;
+using Application.Edge.Services.Handshake;
 using Application.StreamPipeline.Common;
 using Application.StreamPipeline.Models;
 using Application.StreamPipeline.Services;
@@ -95,7 +96,7 @@ internal class EdgeServerWorker(ILogger<EdgeServerWorker> logger, IServiceProvid
                 ct.Token,
                 streamTranceiver.CancelWhenDisposing());
 
-            IPAddress clientEndPoint = (tcpClient.Client.LocalEndPoint as IPEndPoint)?.Address!;
+            IPAddress clientEndPoint = (tcpClient.Client.RemoteEndPoint as IPEndPoint)?.Address!;
 
             return Start(clientEndPoint, streamTranceiver, clientCts);
 
@@ -112,7 +113,11 @@ internal class EdgeServerWorker(ILogger<EdgeServerWorker> logger, IServiceProvid
         var scope = _serviceProvider.CreateScope();
         cts.Token.Register(scope.Dispose);
 
+        var handshakeService = scope.ServiceProvider.GetRequiredService<EdgeServerHandshakeService>();
         var streamPipelineFactory = scope.ServiceProvider.GetRequiredService<StreamPipelineFactory>();
+
+        handshakeService.CancelWhenDisposing().Register(scope.Dispose);
+        streamPipelineFactory.CancelWhenDisposing().Register(scope.Dispose);
 
         var streamPipelineService = streamPipelineFactory.Create(
             tranceiverStream,
@@ -122,71 +127,13 @@ internal class EdgeServerWorker(ILogger<EdgeServerWorker> logger, IServiceProvid
             cts.Token);
 
         var starterGate = new GateKeeper();
-        var handshakeGate = BeginHandshake(starterGate, iPAddress, streamPipelineService, cts);
-        var workerGate = BeginWorker(handshakeGate, iPAddress, streamPipelineService, cts);
+        handshakeService.Begin(starterGate, iPAddress, streamPipelineService, cts.Token);
+        var workerGate = BeginWorker(handshakeService.Gate, iPAddress, streamPipelineService, cts);
 
         streamPipelineService.Start().Forget();
         starterGate.SetOpen();
 
         await workerGate.WaitForOpen(cts.Token);
-    }
-
-    private GateKeeper BeginHandshake(GateKeeper dependent, IPAddress iPAddress, StreamPipelineService streamPipelineService, CancellationTokenSource cts)
-    {
-        var gate = new GateKeeper();
-
-        var handshakeCommand = streamPipelineService.SetCommandPipe<HandshakePayload, HandshakePayload>(EdgeDefaults.HandshakeChannel, $"handshake_channel");
-
-        Task.Run(async () =>
-        {
-            using var _ = _logger.BeginScopeMap(nameof(EdgeServerWorker), nameof(BeginHandshake), new()
-            {
-                ["ClientAddress"] = iPAddress
-            });
-
-            try
-            {
-                await dependent.WaitForOpen(cts.Token);
-                if (cts.IsCancellationRequested)
-                {
-                    return;
-                }
-
-                _logger.LogInformation("Attempting handshake from {ClientAddress}...", iPAddress);
-
-                var acceptGate = new GateKeeper();
-
-                handshakeCommand.OnCommand(callback =>
-                {
-                    if (callback.Command.MockMessage == "conn")
-                    {
-                        acceptGate.SetOpen();
-                        callback.Respond(new HandshakePayload() { MockMessage = "ok" });
-                    }
-                });
-
-                if (await acceptGate.WaitForOpen(cts.Token.WithTimeout(EdgeDefaults.HandshakeTimeout)))
-                {
-                    _logger.LogInformation("Handshake {ClientAddress} accepted", iPAddress);
-                }
-                else
-                {
-                    _logger.LogInformation("Handshake {ClientAddress} declined: Expired", iPAddress);
-                    cts.Cancel();
-                }
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError("Handshake {ClientAddress} declined: {ErrorMessage}", iPAddress, ex.Message);
-                cts.Cancel();
-            }
-            finally
-            {
-                gate.SetOpen();
-            }
-        });
-
-        return gate;
     }
 
     private GateKeeper BeginWorker(GateKeeper dependent, IPAddress iPAddress, StreamPipelineService streamPipelineService, CancellationTokenSource cts)

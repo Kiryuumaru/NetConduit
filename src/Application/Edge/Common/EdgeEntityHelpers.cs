@@ -23,19 +23,19 @@ public static class EdgeEntityHelpers
         };
     }
 
-    public static string Encode(GetEdgeWithKeyDto edgeEntity)
+    public static string Encode(EdgeWithKeyDto edgeEntity)
     {
         return JsonSerializer.Serialize(edgeEntity, JsonSerializerExtension.CamelCaseNoIndentOption).Encode();
     }
 
-    public static GetEdgeWithKeyDto Decode(string token)
+    public static EdgeWithKeyDto Decode(string token)
     {
         var decoded = token.Decode();
 
-        GetEdgeWithKeyDto edgeEntity;
+        EdgeWithKeyDto edgeEntity;
         try
         {
-            edgeEntity = JsonSerializer.Deserialize<GetEdgeWithKeyDto>(decoded, JsonSerializerExtension.CamelCaseNoIndentOption) ?? throw new Exception();
+            edgeEntity = JsonSerializer.Deserialize<EdgeWithKeyDto>(decoded, JsonSerializerExtension.CamelCaseNoIndentOption) ?? throw new Exception();
         }
         catch
         {
