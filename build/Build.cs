@@ -16,8 +16,6 @@ using NukeBuildHelpers.Entry;
 using NukeBuildHelpers.Entry.Extensions;
 using NukeBuildHelpers.Runner.Abstraction;
 using NukeBuildHelpers.RunContext.Extensions;
-using Microsoft.Build.Logging;
-using static Nuke.Common.Tools.NSwag.NSwagTasks;
 
 class Build : BaseNukeBuildHelpers
 {
@@ -34,7 +32,7 @@ class Build : BaseNukeBuildHelpers
     private readonly string[] runtimeMatrix = ["linux", "win"];
     private readonly string[] archMatrix = ["x64", "arm64"];
 
-    public static int Main() => Execute<Build>(x => x.Version);
+    public static int Main() => Execute<Build>(x => x.Interactive);
 
     public Target Clean => _ => _
         .Unlisted()

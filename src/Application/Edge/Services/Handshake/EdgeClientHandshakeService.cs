@@ -113,7 +113,7 @@ internal partial class EdgeClientHandshakeService(ILogger<EdgeClientHandshakeSer
                     EncryptedHandshakeToken = encryptedHandshakeToken,
                 };
                 var handshakeEstablishResult = await handshakeCommand.Send(tokenHandshakeRequest, stoppingToken);
-                if (!handshakeRequestResult.SuccessAndHasValue(out HandshakeResponseDto? tokenHandshakeResponse) ||
+                if (!handshakeEstablishResult.SuccessAndHasValue(out HandshakeResponseDto? tokenHandshakeResponse) ||
                     tokenHandshakeResponse.EncryptedAcceptedEdgeKey == null ||
                     tokenHandshakeResponse.EncryptedAcceptedEdgeKey.Length == 0)
                 {

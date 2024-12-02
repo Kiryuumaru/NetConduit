@@ -17,7 +17,7 @@ for (int i = 0; i < 1; i++)
         .WithArgs("--server-host", "localhost")
         .WithArgs("--server-port", "21000")
         .WithArgs("--home", $"C:\\ProgramData\\netc\\client{i}")
-        .WithArgs("--server-handshake-token", "eyJrZXkiOiJ6bW1wb1FrejZ0NGhqbEl2d3dYWGVhSVo3bGQxMFk4RVFPcG5uTm51QTVBZUdjZ21DVkZsQk4yQ3BGS2lYZjhPMXNUcVFvR3h4SElHZ2diTmJ4ajhQZz09IiwiaWQiOiJmODM1YzIzNS1jNjdhLTQ1OWUtOTQyNy05MGVmZDQyMjBhYzgiLCJlZGdlVHlwZSI6MSwibmFtZSI6IkNMWU5ULVJVUElOVEEifQ==");
+        .WithArgs("--server-handshake-token", "eyJrZXkiOiJYWHcyQTAyTEU3dWNzS2I0RUMwVUNmQ3h0SW5Ta2JNUW4wUUVZeVA1M3I0cnJwWStCYm9zNGtaaUYvSDVQcFk2UU5oUEJVbHIzVEROeDNmYXZwSEhFdz09IiwiaWQiOiI0MTY3ZDJkYi03ZjIwLTQwNzAtOTlmNC1iOWFmMDdhYmY2ZDIiLCJlZGdlVHlwZSI6MSwibmFtZSI6IkNMWU5ULVJVUElOVEEifQ==");
 }
 
 //builder.AddProject<Projects.Presentation>($"presentation-client-invalid")
