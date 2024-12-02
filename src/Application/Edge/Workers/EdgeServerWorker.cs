@@ -128,7 +128,7 @@ internal class EdgeServerWorker(ILogger<EdgeServerWorker> logger, IServiceProvid
 
         var starterGate = new GateKeeper();
         handshakeService.Begin(starterGate, iPAddress, streamPipelineService, cts.Token);
-        var workerGate = BeginWorker(handshakeService.Gate, iPAddress, streamPipelineService, cts);
+        var workerGate = BeginWorker(handshakeService.AcceptGate, iPAddress, streamPipelineService, cts);
 
         streamPipelineService.Start().Forget();
         starterGate.SetOpen();

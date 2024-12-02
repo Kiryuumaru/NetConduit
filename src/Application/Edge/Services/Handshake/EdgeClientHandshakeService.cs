@@ -27,9 +27,11 @@ internal partial class EdgeClientHandshakeService(ILogger<EdgeClientHandshakeSer
 
     private CancellationTokenSource? _cts;
 
-    public GateKeeper Gate { get; } = new();
+    public GateKeeper AcceptGate { get; } = new();
 
-    public RSA? Rsa { get; private set; } = null;
+    public RSA? ClientRsa { get; private set; } = null;
+
+    public RSA? ServerRsa { get; private set; } = null;
 
     public void Begin(GateKeeper dependent, string tcpHost, int tcpPort, StreamPipelineService streamPipelineService, CancellationToken stoppingToken)
     {
@@ -116,7 +118,7 @@ internal partial class EdgeClientHandshakeService(ILogger<EdgeClientHandshakeSer
             }
             finally
             {
-                Gate.SetOpen();
+                AcceptGate.SetOpen();
             }
 
         }, stoppingToken);
@@ -126,8 +128,9 @@ internal partial class EdgeClientHandshakeService(ILogger<EdgeClientHandshakeSer
     {
         if (disposing)
         {
-            Gate.SetOpen();
-            Rsa?.Dispose();
+            AcceptGate.SetOpen();
+            ClientRsa?.Dispose();
+            ServerRsa?.Dispose();
             _cts?.Dispose();
         }
     }
