@@ -64,8 +64,8 @@ internal class EdgeServerWorker(ILogger<EdgeServerWorker> logger, IServiceProvid
             throw new Exception("Edge initialize local database error");
         }
 
-        _logger.LogInformation("Server edge was initialized with ID {ServerID}", edgeHiveEntity.Id);
-        _logger.LogInformation("Server edge was initialized with handshake-token {HandshakeToken}", edgeHiveEntity.Token);
+        _logger.LogInformation("Server edge was initialized with ID {ServerID}", edgeLocalEntity.Id);
+        _logger.LogInformation("Server edge was initialized with handshake-token {HandshakeToken}", edgeLocalEntity.Token);
 
         edgeWorkerStartedService.SetOpen(true);
 
@@ -121,7 +121,7 @@ internal class EdgeServerWorker(ILogger<EdgeServerWorker> logger, IServiceProvid
 
         var starterGate = new GateKeeper();
         handshakeService.Begin(starterGate, iPAddress, streamPipelineService, cts.Token);
-        var workerGate = BeginWorker(handshakeService.AcceptGate, iPAddress, streamPipelineService, cts);
+        var workerGate = BeginWorker(handshakeService, iPAddress, streamPipelineService, cts);
 
         streamPipelineService.Start().Forget();
         starterGate.SetOpen();
@@ -129,7 +129,7 @@ internal class EdgeServerWorker(ILogger<EdgeServerWorker> logger, IServiceProvid
         await workerGate.WaitForOpen(cts.Token);
     }
 
-    private GateKeeper BeginWorker(GateKeeper dependent, IPAddress iPAddress, StreamPipelineService streamPipelineService, CancellationTokenSource cts)
+    private GateKeeper BeginWorker(EdgeServerHandshakeService handshakeService, IPAddress iPAddress, StreamPipelineService streamPipelineService, CancellationTokenSource cts)
     {
         var gate = new GateKeeper();
 
@@ -142,7 +142,7 @@ internal class EdgeServerWorker(ILogger<EdgeServerWorker> logger, IServiceProvid
 
             try
             {
-                await dependent.WaitForOpen(cts.Token);
+                await handshakeService.AcceptGate.WaitForOpen(cts.Token);
                 if (cts.IsCancellationRequested)
                 {
                     return;

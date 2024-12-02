@@ -116,7 +116,7 @@ internal class EdgeClientWorker(ILogger<EdgeClientWorker> logger, IServiceProvid
 
         var starterGate = new GateKeeper();
         handshakeService.Begin(starterGate, tcpHost, tcpPort, streamPipelineService, cts.Token);
-        var workerGate = BeginWorker(handshakeService.AcceptGate, tcpHost, tcpPort, streamPipelineService, cts);
+        var workerGate = BeginWorker(handshakeService, tcpHost, tcpPort, streamPipelineService, cts);
 
         streamPipelineService.Start().Forget();
         starterGate.SetOpen();
@@ -124,7 +124,7 @@ internal class EdgeClientWorker(ILogger<EdgeClientWorker> logger, IServiceProvid
         await workerGate.WaitForOpen(cts.Token);
     }
 
-    private GateKeeper BeginWorker(GateKeeper dependent, string tcpHost, int tcpPort, StreamPipelineService streamPipelineService, CancellationTokenSource cts)
+    private GateKeeper BeginWorker(EdgeClientHandshakeService handshakeService, string tcpHost, int tcpPort, StreamPipelineService streamPipelineService, CancellationTokenSource cts)
     {
         var gate = new GateKeeper();
 
@@ -138,7 +138,7 @@ internal class EdgeClientWorker(ILogger<EdgeClientWorker> logger, IServiceProvid
 
             try
             {
-                await dependent.WaitForOpen(cts.Token);
+                await handshakeService.AcceptGate.WaitForOpen(cts.Token);
                 if (cts.IsCancellationRequested)
                 {
                     return;
