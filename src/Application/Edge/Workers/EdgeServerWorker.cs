@@ -46,18 +46,11 @@ internal class EdgeServerWorker(ILogger<EdgeServerWorker> logger, IServiceProvid
         var edgeHiveService = scope.ServiceProvider.GetRequiredService<IEdgeHiveStoreService>();
         var edgeWorkerStartedService = scope.ServiceProvider.GetRequiredService<EdgeWorkerStartedService>();
 
-        var edgeLocalEntity1 = (await edgeLocalService.GetOrCreate(() => new()
+        var edgeLocalEntity = (await edgeLocalService.GetOrCreate(() => new()
         {
             EdgeType = EdgeType.Server,
             Name = Environment.MachineName
-        }, stoppingToken));
-
-        foreach (var er in edgeLocalEntity1.Errors)
-        {
-            _logger.LogError("Error1111: {Error}", er.Message);
-        }
-
-        var edgeLocalEntity = edgeLocalEntity1.GetValueOrThrow();
+        }, stoppingToken)).GetValueOrThrow();
 
         var edgeHiveEntity = (await edgeHiveService.GetOrCreate(edgeLocalEntity.Id.ToString(), () => new()
         {
