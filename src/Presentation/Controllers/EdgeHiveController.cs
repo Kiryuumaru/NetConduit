@@ -23,7 +23,7 @@ public class EdgeHiveController(IEdgeHiveStoreService edgeService) : ControllerB
     /// <response code="200">Returns when the operation is successful.</response>
     /// <response code="500">Returns when an unexpected error occurs.</response>
     [HttpGet]
-    public Task<HttpResult<EdgeInfoDto[]>> GetAll()
+    public Task<HttpResult<GetEdgeInfoDto[]>> GetAll()
     {
         return _edgeApiService.GetAll();
     }
@@ -38,7 +38,7 @@ public class EdgeHiveController(IEdgeHiveStoreService edgeService) : ControllerB
     /// <response code="404">Returns when the provided ID is not found.</response>
     /// <response code="500">Returns when an unexpected error occurs.</response>
     [HttpGet("{id}")]
-    public Task<HttpResult<EdgeInfoDto>> Get(string id)
+    public Task<HttpResult<GetEdgeInfoDto>> Get(string id)
     {
         return _edgeApiService.Get(id);
     }
@@ -53,7 +53,7 @@ public class EdgeHiveController(IEdgeHiveStoreService edgeService) : ControllerB
     /// <response code="404">Returns when the provided ID is not found.</response>
     /// <response code="500">Returns when an unexpected error occurs.</response>
     [HttpGet("{id}/token")]
-    public Task<HttpResult<EdgeWithTokenDto>> GetToken(string id)
+    public Task<HttpResult<GetEdgeWithTokenDto>> GetToken(string id)
     {
         return _edgeApiService.GetToken(id);
     }
@@ -67,7 +67,7 @@ public class EdgeHiveController(IEdgeHiveStoreService edgeService) : ControllerB
     /// <response code="400">Returns when the provided data is invalid.</response>
     /// <response code="500">Returns when an unexpected error occurs.</response>
     [HttpPost]
-    public Task<HttpResult<EdgeWithTokenDto>> Create([FromBody] AddEdgeDto edge)
+    public Task<HttpResult<GetEdgeWithTokenDto>> Create([FromBody] AddEdgeDto edge)
     {
         return _edgeApiService.Create(edge);
     }
@@ -83,7 +83,7 @@ public class EdgeHiveController(IEdgeHiveStoreService edgeService) : ControllerB
     /// <response code="404">Returns when the Edge entity with the given ID is not found.</response>
     /// <response code="500">Returns when an unexpected error occurs.</response>
     [HttpPut("{id}")]
-    public Task<HttpResult<EdgeWithTokenDto>> Edit(string id, [FromBody] EditEdgeDto edge)
+    public Task<HttpResult<GetEdgeWithTokenDto>> Edit(string id, [FromBody] EditEdgeDto edge)
     {
         return _edgeApiService.Edit(id, edge);
     }
@@ -98,7 +98,7 @@ public class EdgeHiveController(IEdgeHiveStoreService edgeService) : ControllerB
     /// <response code="404">Returns when the Edge entity with the given ID is not found.</response>
     /// <response code="500">Returns when an unexpected error occurs.</response>
     [HttpDelete("{id}")]
-    public Task<HttpResult<EdgeInfoDto>> Delete(string id)
+    public Task<HttpResult<GetEdgeInfoDto>> Delete(string id)
     {
         return _edgeApiService.Delete(id);
     }

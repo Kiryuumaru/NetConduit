@@ -9,7 +9,7 @@ namespace Domain.Edge.Dtos;
 
 public class HandshakeAttemptDto
 {
-    public required EdgeWithTokenDto? EdgeWithTokenDto { get; init; }
+    public required string? EdgeToken { get; init; }
 
     public required byte[]? EncryptedHandshakeToken { get; init; }
 }

@@ -6,6 +6,7 @@ using Application.Edge.Workers;
 using Application.StreamPipeline.Services;
 using DisposableHelpers.Attributes;
 using Domain.Edge.Dtos;
+using Domain.Edge.Entities;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 using System;
@@ -63,12 +64,13 @@ internal partial class EdgeClientHandshakeService(ILogger<EdgeClientHandshakeSer
 
                 var stoppingToken = _cts.Token.WithTimeout(EdgeDefaults.HandshakeTimeout);
 
-                var edgeLocalEntity = (await _edgeLocalStoreService.Get(_cts.Token)).GetValueOrThrow();
+                var edgeTokenedEntity = (await _edgeLocalStoreService.Get(_cts.Token)).GetValueOrThrow();
+                var edgeKeyedEntity = EdgeEntityHelpers.Decode(edgeTokenedEntity.Token);
                 byte[] requestToken = RandomHelpers.ByteArray(EdgeDefaults.EdgeHandshakeRequestLength);
 
                 var initialHandshakeRequest = new HandshakeAttemptDto()
                 {
-                    EdgeWithTokenDto = edgeLocalEntity,
+                    EdgeToken = edgeTokenedEntity.Token,
                     EncryptedHandshakeToken = []
                 };
                 var handshakeRequestResult = await handshakeCommand.Send(initialHandshakeRequest, stoppingToken);
@@ -95,13 +97,12 @@ internal partial class EdgeClientHandshakeService(ILogger<EdgeClientHandshakeSer
 
                 var tokenHandshakeRequest = new HandshakeAttemptDto()
                 {
-                    EdgeWithTokenDto = null,
+                    EdgeToken = null,
                     EncryptedHandshakeToken = encryptedHandshakeTokenBytes
                 };
                 var handshakeEstablishResult = await handshakeCommand.Send(tokenHandshakeRequest, stoppingToken);
                 if (!handshakeRequestResult.SuccessAndHasValue(out HandshakeResponseDto? tokenHandshakeResponse) ||
-                    tokenHandshakeResponse.RequestAcknowledgedToken.Length == 0 ||
-                    !tokenHandshakeResponse.RequestAcknowledgedToken.SequenceEqual(requestAcknowledgedToken))
+                    !tokenHandshakeResponse.RequestAcknowledgedKey.SequenceEqual(edgeKeyedEntity.Key))
                 {
                     throw new Exception("Invalid handshake token");
                 }

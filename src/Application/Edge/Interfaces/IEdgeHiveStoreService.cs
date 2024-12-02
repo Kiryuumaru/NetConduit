@@ -23,17 +23,17 @@ public interface IEdgeHiveStoreService
 {
     Task<HttpResult<bool>> Contains(string id, CancellationToken cancellationToken = default);
 
-    Task<HttpResult<EdgeInfoDto[]>> GetAll(CancellationToken cancellationToken = default);
+    Task<HttpResult<GetEdgeInfoDto[]>> GetAll(CancellationToken cancellationToken = default);
 
-    Task<HttpResult<EdgeInfoDto>> Get(string id, CancellationToken cancellationToken = default);
+    Task<HttpResult<GetEdgeInfoDto>> Get(string id, CancellationToken cancellationToken = default);
 
-    Task<HttpResult<EdgeWithTokenDto>> GetToken(string id, CancellationToken cancellationToken = default);
+    Task<HttpResult<GetEdgeWithTokenDto>> GetToken(string id, CancellationToken cancellationToken = default);
 
-    Task<HttpResult<EdgeWithTokenDto>> Create(AddEdgeDto edgeAddDto, CancellationToken cancellationToken = default);
+    Task<HttpResult<GetEdgeWithTokenDto>> Create(AddEdgeDto edgeAddDto, CancellationToken cancellationToken = default);
 
-    Task<HttpResult<EdgeWithTokenDto>> Edit(string id, EditEdgeDto edgeEditDto, CancellationToken cancellationToken = default);
+    Task<HttpResult<GetEdgeWithTokenDto>> Edit(string id, EditEdgeDto edgeEditDto, CancellationToken cancellationToken = default);
 
-    Task<HttpResult<EdgeInfoDto>> Delete(string id, CancellationToken cancellationToken = default);
+    Task<HttpResult<GetEdgeInfoDto>> Delete(string id, CancellationToken cancellationToken = default);
 
-    Task<HttpResult<EdgeWithTokenDto>> GetOrCreate(string id, Func<AddEdgeDto> onCreate, CancellationToken cancellationToken = default);
+    Task<HttpResult<GetEdgeWithTokenDto>> GetOrCreate(string id, Func<AddEdgeDto> onCreate, CancellationToken cancellationToken = default);
 }

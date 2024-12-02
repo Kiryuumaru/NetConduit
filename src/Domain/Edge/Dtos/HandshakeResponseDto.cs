@@ -10,5 +10,5 @@ public class HandshakeResponseDto
 {
     public required byte[] PublicKey { get; init; }
 
-    public required string RequestAcknowledgedToken { get; init; }
+    public required byte[] RequestAcknowledgedKey { get; init; }
 }
