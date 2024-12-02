@@ -5,6 +5,7 @@ using System.Linq;
 using System.Security.Cryptography;
 using System.Text;
 using System.Threading.Tasks;
+using static System.Runtime.InteropServices.JavaScript.JSType;
 
 namespace Application.Common;
 
@@ -74,5 +75,15 @@ public static class SecureDataHelpers
         byte[] decryptedData = aesDecryptor.TransformFinalBlock(encryptedData, 0, encryptedData.Length);
 
         return decryptedData;
+    }
+
+    public static byte[] EncryptString(string data, byte[] publicKey)
+    {
+        return Encrypt(Encoding.Default.GetBytes(data), publicKey);
+    }
+
+    public static string DecryptString(byte[] encryptedBytes, byte[] publicKey)
+    {
+        return Encoding.Default.GetString(Decrypt(encryptedBytes, publicKey));
     }
 }

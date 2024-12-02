@@ -13,6 +13,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Security.Cryptography;
+using System.Security.Cryptography.X509Certificates;
 using System.Text;
 using System.Threading.Tasks;
 
@@ -68,43 +69,66 @@ internal partial class EdgeClientHandshakeService(ILogger<EdgeClientHandshakeSer
 
                 var edgeTokenedEntity = (await _edgeLocalStoreService.Get(_cts.Token)).GetValueOrThrow();
                 var edgeKeyedEntity = EdgeEntityHelpers.Decode(edgeTokenedEntity.Token);
-                byte[] requestToken = RandomHelpers.ByteArray(EdgeDefaults.EdgeHandshakeRequestLength);
+                ClientRsa = RSA.Create(EdgeDefaults.EdgeHandshakeRSABitsLength);
+                byte[] clientPrivateKey = ClientRsa.ExportRSAPrivateKey();
+                byte[] clientPublicKey = ClientRsa.ExportRSAPublicKey();
 
                 var initialHandshakeRequest = new HandshakeAttemptDto()
                 {
-                    EdgeToken = edgeTokenedEntity.Token,
-                    EncryptedHandshakeToken = []
+                    PublicKey = clientPublicKey,
+                    EncryptedEdgeToken = null,
+                    EncryptedHandshakeToken = null,
                 };
                 var handshakeRequestResult = await handshakeCommand.Send(initialHandshakeRequest, stoppingToken);
                 if (!handshakeRequestResult.SuccessAndHasValue(out HandshakeResponseDto? initialHandshakeResponse) ||
+                    initialHandshakeResponse.PublicKey == null ||
                     initialHandshakeResponse.PublicKey.Length == 0)
                 {
                     throw new Exception("Premature handshake sequence");
                 }
 
                 var handshakeToken = _configuration.GetHandshakeToken();
-                byte[] handshakeTokenBytes = Encoding.UTF8.GetBytes(handshakeToken);
 
-                byte[] requestAcknowledgedToken;
-                byte[] encryptedHandshakeTokenBytes;
+                ServerRsa = RSA.Create();
+
+                byte[] serverPublicKey;
+                byte[] encryptedEdgeToken;
+                byte[] encryptedHandshakeToken;
                 try
                 {
-                    requestAcknowledgedToken = SecureDataHelpers.Encrypt(requestToken, initialHandshakeResponse.PublicKey);
-                    encryptedHandshakeTokenBytes = SecureDataHelpers.Encrypt(handshakeTokenBytes, initialHandshakeResponse.PublicKey);
+                    ServerRsa.ImportRSAPublicKey(initialHandshakeResponse.PublicKey, out var serverRsaPublicKeyBytesRead);
+                    serverPublicKey = initialHandshakeResponse.PublicKey;
+                    encryptedEdgeToken = SecureDataHelpers.EncryptString(edgeTokenedEntity.Token, serverPublicKey);
+                    encryptedHandshakeToken = SecureDataHelpers.EncryptString(handshakeToken, serverPublicKey);
                 }
-                catch (Exception ex)
+                catch
                 {
                     throw new Exception("Premature handshake sequence");
                 }
 
                 var tokenHandshakeRequest = new HandshakeAttemptDto()
                 {
-                    EdgeToken = null,
-                    EncryptedHandshakeToken = encryptedHandshakeTokenBytes
+                    PublicKey = null,
+                    EncryptedEdgeToken = encryptedEdgeToken,
+                    EncryptedHandshakeToken = encryptedHandshakeToken,
                 };
                 var handshakeEstablishResult = await handshakeCommand.Send(tokenHandshakeRequest, stoppingToken);
                 if (!handshakeRequestResult.SuccessAndHasValue(out HandshakeResponseDto? tokenHandshakeResponse) ||
-                    !tokenHandshakeResponse.RequestAcknowledgedKey.SequenceEqual(edgeKeyedEntity.Key))
+                    tokenHandshakeResponse.EncryptedAcceptedEdgeKey == null ||
+                    tokenHandshakeResponse.EncryptedAcceptedEdgeKey.Length == 0)
+                {
+                    throw new Exception("Invalid handshake token");
+                }
+
+                try
+                {
+                    if (SecureDataHelpers.Decrypt(tokenHandshakeResponse.EncryptedAcceptedEdgeKey, clientPrivateKey) is not byte[] acceptedEdgeKey ||
+                        !edgeKeyedEntity.Key.SequenceEqual(acceptedEdgeKey))
+                    {
+                        throw new Exception();
+                    }
+                }
+                catch
                 {
                     throw new Exception("Invalid handshake token");
                 }
