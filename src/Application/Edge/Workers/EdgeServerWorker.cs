@@ -45,34 +45,26 @@ internal class EdgeServerWorker(ILogger<EdgeServerWorker> logger, IServiceProvid
         var edgeHiveService = scope.ServiceProvider.GetRequiredService<IEdgeHiveStoreService>();
         var edgeWorkerStartedService = scope.ServiceProvider.GetRequiredService<EdgeWorkerStartedService>();
 
-        try
+        var edgeLocalEntity = (await edgeLocalService.GetOrCreate(() => new()
         {
-            var edgeLocalEntity = (await edgeLocalService.GetOrCreate(() => new()
-            {
-                EdgeType = EdgeType.Server,
-                Name = Environment.MachineName
-            }, stoppingToken)).GetValueOrThrow();
+            EdgeType = EdgeType.Server,
+            Name = Environment.MachineName
+        }, stoppingToken)).GetValueOrThrow();
 
-            var edgeHiveEntity = (await edgeHiveService.GetOrCreate(edgeLocalEntity.Id.ToString(), () => new()
-            {
-                EdgeType = EdgeType.Server,
-                Name = Environment.MachineName
-            }, stoppingToken)).GetValueOrThrow();
-
-            if (!(await edgeLocalService.Contains(stoppingToken)).GetValueOrThrow() ||
-                !(await edgeHiveService.Contains(edgeHiveEntity.Id.ToString(), stoppingToken)).GetValueOrThrow())
-            {
-                throw new Exception("Edge initialize local database error");
-            }
-
-            _logger.LogInformation("Server edge was initialized with ID {ServerID}", edgeHiveEntity.Id);
-            _logger.LogInformation("Server edge was initialized with handshake-token {HandshakeToken}", edgeHiveEntity.Token);
-        }
-        catch (Exception ex)
+        var edgeHiveEntity = (await edgeHiveService.GetOrCreate(edgeLocalEntity.Id.ToString(), () => new()
         {
-            _logger.LogError("Error: {Error}", ex.Message);
-            throw;
+            EdgeType = EdgeType.Server,
+            Name = Environment.MachineName
+        }, stoppingToken)).GetValueOrThrow();
+
+        if (!(await edgeLocalService.Contains(stoppingToken)).GetValueOrThrow() ||
+            !(await edgeHiveService.Contains(edgeHiveEntity.Id.ToString(), stoppingToken)).GetValueOrThrow())
+        {
+            throw new Exception("Edge initialize local database error");
         }
+
+        _logger.LogInformation("Server edge was initialized with ID {ServerID}", edgeHiveEntity.Id);
+        _logger.LogInformation("Server edge was initialized with handshake-token {HandshakeToken}", edgeHiveEntity.Token);
 
         edgeWorkerStartedService.SetOpen(true);
 
