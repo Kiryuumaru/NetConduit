@@ -47,7 +47,7 @@ internal partial class TCPClientMocker(ILogger<TCPClientMocker> logger)
         while (!ct.IsCancellationRequested)
         {
             string sendStr = Guid.NewGuid().ToString();
-            byte[] sendBytes = Encoding.Default.GetBytes(sendStr);
+            byte[] sendBytes = Encoding.ASCII.GetBytes(sendStr);
 
             try
             {
@@ -59,7 +59,7 @@ internal partial class TCPClientMocker(ILogger<TCPClientMocker> logger)
 
                 DateTimeOffset receivedTime = DateTimeOffset.UtcNow;
 
-                string receivedStr = Encoding.Default.GetString(receivedBytes.AsSpan()[..readBytes]);
+                string receivedStr = Encoding.ASCII.GetString(receivedBytes.AsSpan()[..readBytes]);
 
                 if (sendStr != receivedStr)
                 {

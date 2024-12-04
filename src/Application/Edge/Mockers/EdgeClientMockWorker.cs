@@ -210,7 +210,7 @@ internal class EdgeClientMockWorker(ILogger<EdgeClientMockWorker> logger, IServi
 
                 string sendStr = RandomHelpers.Alphanumeric(10001);
                 //string sendStr = RandomHelpers.Alphanumeric(Random.Shared.Next(10000));
-                byte[] sendBytes = Encoding.Default.GetBytes(sendStr);
+                byte[] sendBytes = Encoding.ASCII.GetBytes(sendStr);
 
                 try
                 {
@@ -221,7 +221,7 @@ internal class EdgeClientMockWorker(ILogger<EdgeClientMockWorker> logger, IServi
 
                     DateTimeOffset receivedTime = DateTimeOffset.UtcNow;
 
-                    string receivedStr = Encoding.Default.GetString(receivedBytes[..bytesRead].Span);
+                    string receivedStr = Encoding.ASCII.GetString(receivedBytes[..bytesRead].Span);
 
                     if (sendStr != receivedStr)
                     {
