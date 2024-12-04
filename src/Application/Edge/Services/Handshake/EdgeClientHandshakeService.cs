@@ -64,14 +64,14 @@ internal partial class EdgeClientHandshakeService(ILogger<EdgeClientHandshakeSer
                 var stoppingToken = _cts.Token.WithTimeout(EdgeDefaults.HandshakeTimeout);
 
                 var edgeTokenedEntity = (await _edgeLocalStoreService.Get(_cts.Token)).GetValueOrThrow();
-                var edgeKeyedEntity = EdgeEntityHelpers.Decode(edgeTokenedEntity.Token);
+                var handshakeToken = _configuration.GetHandshakeToken();
 
                 ClientRsa = RSA.Create(EdgeDefaults.EdgeHandshakeRSABitsLength);
 
                 var initialHandshakeRequest = new HandshakeAttemptDto()
                 {
                     PublicKey = ClientRsa.ExportRSAPublicKey(),
-                    EncryptedEdgeToken = null,
+                    EncryptedEdgeEntity = null,
                     EncryptedHandshakeToken = null,
                 };
                 var handshakeRequestResult = await handshakeCommand.Send(initialHandshakeRequest, stoppingToken);
@@ -82,17 +82,15 @@ internal partial class EdgeClientHandshakeService(ILogger<EdgeClientHandshakeSer
                     throw new Exception("Premature initial handshake sequence");
                 }
 
-                var handshakeToken = _configuration.GetHandshakeToken();
-
                 ServerRsa = RSA.Create();
 
-                byte[] encryptedEdgeToken;
+                byte[] encryptedEdgeEntity;
                 byte[] encryptedHandshakeToken;
                 try
                 {
                     ServerRsa.ImportRSAPublicKey(initialHandshakeResponse.PublicKey, out var serverRsaPublicKeyBytesRead);
-                    encryptedEdgeToken = SecureDataHelpers.EncryptString(edgeTokenedEntity.Token, ServerRsa);
-                    encryptedHandshakeToken = SecureDataHelpers.EncryptString(handshakeToken, ServerRsa);
+                    encryptedEdgeEntity = SecureDataHelpers.Encrypt(edgeTokenedEntity, ServerRsa);
+                    encryptedHandshakeToken = SecureDataHelpers.Encrypt(handshakeToken, ServerRsa);
                 }
                 catch
                 {
@@ -102,21 +100,21 @@ internal partial class EdgeClientHandshakeService(ILogger<EdgeClientHandshakeSer
                 var tokenHandshakeRequest = new HandshakeAttemptDto()
                 {
                     PublicKey = null,
-                    EncryptedEdgeToken = encryptedEdgeToken,
+                    EncryptedEdgeEntity = encryptedEdgeEntity,
                     EncryptedHandshakeToken = encryptedHandshakeToken,
                 };
                 var handshakeEstablishResult = await handshakeCommand.Send(tokenHandshakeRequest, stoppingToken);
                 if (!handshakeEstablishResult.SuccessAndHasValue(out HandshakeResponseDto? tokenHandshakeResponse) ||
-                    tokenHandshakeResponse.EncryptedAcceptedEdgeKey == null ||
-                    tokenHandshakeResponse.EncryptedAcceptedEdgeKey.Length == 0)
+                    tokenHandshakeResponse.EncryptedAcceptedEdgeToken == null ||
+                    tokenHandshakeResponse.EncryptedAcceptedEdgeToken.Length == 0)
                 {
                     throw new Exception("Invalid handshake token");
                 }
 
                 try
                 {
-                    if (SecureDataHelpers.Decrypt(tokenHandshakeResponse.EncryptedAcceptedEdgeKey, ClientRsa) is not byte[] acceptedEdgeKey ||
-                        !edgeKeyedEntity.Key.SequenceEqual(acceptedEdgeKey))
+                    if (SecureDataHelpers.Decrypt<string>(tokenHandshakeResponse.EncryptedAcceptedEdgeToken, ClientRsa) is not string acceptedEdgeToken ||
+                        edgeTokenedEntity.Token != acceptedEdgeToken)
                     {
                         throw new Exception();
                     }

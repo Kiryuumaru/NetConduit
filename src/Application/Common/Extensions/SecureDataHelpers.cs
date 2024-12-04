@@ -1,6 +1,7 @@
 ﻿using System.Buffers.Binary;
 using System.Security.Cryptography;
 using System.Text;
+using System.Text.Json;
 
 namespace Application.Common.Extensions;
 
@@ -81,23 +82,13 @@ public static class SecureDataHelpers
         return Decrypt(encryptedBytes, rsa);
     }
 
-    public static byte[] EncryptString(string data, byte[] publicKey)
+    public static byte[] Encrypt<T>(T obj, RSA rsa, JsonSerializerOptions? jsonSerializerOptions = null)
     {
-        return Encrypt(Encoding.Default.GetBytes(data), publicKey);
+        return Encrypt(Encoding.Unicode.GetBytes(JsonSerializer.Serialize(obj, jsonSerializerOptions)), rsa);
     }
 
-    public static string DecryptString(byte[] encryptedBytes, byte[] publicKey)
+    public static T? Decrypt<T>(byte[] encryptedBytes, RSA rsa, JsonSerializerOptions? jsonSerializerOptions = null)
     {
-        return Encoding.Default.GetString(Decrypt(encryptedBytes, publicKey));
-    }
-
-    public static byte[] EncryptString(string data, RSA rsa)
-    {
-        return Encrypt(Encoding.Default.GetBytes(data), rsa);
-    }
-
-    public static string DecryptString(byte[] encryptedBytes, RSA rsa)
-    {
-        return Encoding.Default.GetString(Decrypt(encryptedBytes, rsa));
+        return JsonSerializer.Deserialize<T>(Encoding.Unicode.GetString(Decrypt(encryptedBytes, rsa)), jsonSerializerOptions);
     }
 }

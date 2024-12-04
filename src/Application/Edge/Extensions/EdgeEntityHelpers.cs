@@ -2,41 +2,21 @@
 using Domain.Edge.Dtos;
 using Domain.Edge.Entities;
 using Domain.Edge.Enums;
+using System.Text;
 using System.Text.Json;
 
 namespace Application.Edge.Extensions;
 
 public static class EdgeEntityHelpers
 {
-    public static EdgeEntity Create(string name, EdgeType edgeType)
+    public static EdgeEntity Create(string name, EdgeType edgeType, Guid? id = null, byte[]? key = null)
     {
         return new()
         {
+            Id = id ?? Guid.NewGuid(),
             EdgeType = edgeType,
             Name = name,
-            Key = RandomHelpers.ByteArray(1024)
+            Key = key ?? Encoding.ASCII.GetBytes(RandomHelpers.Alphanumeric(EdgeDefaults.EdgeKeySize))
         };
-    }
-
-    public static string Encode(GetEdgeWithKeyDto edgeEntity)
-    {
-        return JsonSerializer.Serialize(edgeEntity, JsonSerializerExtension.CamelCaseNoIndentOption).Encode();
-    }
-
-    public static GetEdgeWithKeyDto Decode(string token)
-    {
-        var decoded = token.Decode();
-
-        GetEdgeWithKeyDto edgeEntity;
-        try
-        {
-            edgeEntity = JsonSerializer.Deserialize<GetEdgeWithKeyDto>(decoded, JsonSerializerExtension.CamelCaseNoIndentOption) ?? throw new Exception();
-        }
-        catch
-        {
-            throw new Exception("Invalid edge token");
-        }
-
-        return edgeEntity;
     }
 }

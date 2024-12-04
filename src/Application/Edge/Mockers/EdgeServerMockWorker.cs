@@ -141,7 +141,7 @@ internal class EdgeServerMockWorker(ILogger<EdgeServerMockWorker> logger, IServi
 
                     mockStream.Write(receivedBytes[..bytesread]);
 
-                    //string receivedStr = Encoding.Default.GetString(receivedBytes[..bytesread]);
+                    //string receivedStr = BytesHelpers.DecodeArray(receivedBytes[..bytesread]);
 
                     //_logger.LogInformation("received {DAT} bytes", receivedStr.Length);
                 }

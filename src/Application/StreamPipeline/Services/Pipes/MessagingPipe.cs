@@ -43,7 +43,7 @@ public class MessagingPipe<TSend, TReceive> : BasePipe
     {
         _logger = logger;
 
-        _paddingBytes = Encoding.Default.GetBytes(_paddingValue);
+        _paddingBytes = Encoding.ASCII.GetBytes(_paddingValue);
         _paddingSize = _paddingBytes.Length;
 
         _headerSize = _paddingSize + _packetLengthSize + _chunkLengthSize;

@@ -163,7 +163,7 @@ internal class EdgeClientMockWorker(ILogger<EdgeClientMockWorker> logger, IServi
             {
                 try
                 {
-                    string mockVal = StringEncoder.Random(1000);
+                    string mockVal = RandomHelpers.Alphanumeric(1000);
                     var payload = new MockPayload() { MockMessage = mockVal };
                     var now = DateTimeOffset.UtcNow;
                     var guid = mockStream.Send(payload);
@@ -208,8 +208,8 @@ internal class EdgeClientMockWorker(ILogger<EdgeClientMockWorker> logger, IServi
             {
                 var ict = stoppingToken.WithTimeout(TimeSpan.FromMinutes(5));
 
-                string sendStr = StringEncoder.Random(10001);
-                //string sendStr = StringEncoder.Random(Random.Shared.Next(10000));
+                string sendStr = RandomHelpers.Alphanumeric(10001);
+                //string sendStr = RandomHelpers.Alphanumeric(Random.Shared.Next(10000));
                 byte[] sendBytes = Encoding.Default.GetBytes(sendStr);
 
                 try

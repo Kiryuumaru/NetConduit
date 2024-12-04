@@ -9,6 +9,7 @@ using Domain.Edge.Enums;
 using Microsoft.Extensions.Logging;
 using RestfulHelpers.Common;
 using System.Net;
+using System.Text;
 using TransactionHelpers;
 
 namespace Application.Edge.Services.HiveStore;
@@ -125,20 +126,12 @@ public class EdgeHiveStoreService(ILogger<EdgeHiveStoreService> logger, LocalSto
             return result;
         }
 
-        string token = EdgeEntityHelpers.Encode(new()
-        {
-            Id = edge.Id,
-            EdgeType = edge.EdgeType,
-            Name = edge.Name,
-            Key = edge.Key,
-        });
-
         result.WithValue(new GetEdgeWithTokenDto()
         {
             Id = edge.Id,
             EdgeType = edge.EdgeType,
             Name = edge.Name,
-            Token = token
+            Token = Encoding.ASCII.GetString(edge.Key)
         });
         result.WithStatusCode(HttpStatusCode.OK);
 
@@ -165,12 +158,7 @@ public class EdgeHiveStoreService(ILogger<EdgeHiveStoreService> logger, LocalSto
 
         using var store = await GetStore(cancellationToken);
 
-        EdgeEntity newEdge = new()
-        {
-            EdgeType = edgeAddDto.EdgeType,
-            Name = edgeAddDto.Name,
-            Key = RandomHelpers.ByteArray(EdgeDefaults.EdgeKeySize)
-        };
+        EdgeEntity newEdge = EdgeEntityHelpers.Create(edgeAddDto.Name, edgeAddDto.EdgeType);
 
         if (!result.Success(await store.Set(newEdge.Id.ToString(), newEdge, cancellationToken: cancellationToken)))
         {
@@ -180,20 +168,12 @@ public class EdgeHiveStoreService(ILogger<EdgeHiveStoreService> logger, LocalSto
             return result;
         }
 
-        string token = EdgeEntityHelpers.Encode(new()
-        {
-            Id = newEdge.Id,
-            EdgeType = newEdge.EdgeType,
-            Name = newEdge.Name,
-            Key = newEdge.Key,
-        });
-
         result.WithValue(new GetEdgeWithTokenDto()
         {
             Id = newEdge.Id,
             EdgeType = newEdge.EdgeType,
             Name = newEdge.Name,
-            Token = token
+            Token = Encoding.ASCII.GetString(newEdge.Key)
         });
         result.WithStatusCode(HttpStatusCode.OK);
 
@@ -252,13 +232,11 @@ public class EdgeHiveStoreService(ILogger<EdgeHiveStoreService> logger, LocalSto
             return result;
         }
 
-        EdgeEntity newEdge = new()
-        {
-            Id = edge.Id,
-            EdgeType = edge.EdgeType,
-            Name = string.IsNullOrEmpty(edgeEditDto.NewName) ? edge.Name : edgeEditDto.NewName,
-            Key = edgeEditDto.RenewToken ? RandomHelpers.ByteArray(EdgeDefaults.EdgeKeySize) : edge.Key,
-        };
+        EdgeEntity newEdge = EdgeEntityHelpers.Create(
+            string.IsNullOrEmpty(edgeEditDto.NewName) ? edge.Name : edgeEditDto.NewName,
+            edge.EdgeType,
+            edge.Id,
+            edgeEditDto.RenewToken ? null : edge.Key);
 
         if (!result.Success(await store.Set(id, newEdge, cancellationToken: cancellationToken)))
         {
@@ -268,20 +246,12 @@ public class EdgeHiveStoreService(ILogger<EdgeHiveStoreService> logger, LocalSto
             return result;
         }
 
-        string token = EdgeEntityHelpers.Encode(new()
-        {
-            Id = newEdge.Id,
-            EdgeType = newEdge.EdgeType,
-            Name = newEdge.Name,
-            Key = newEdge.Key,
-        });
-
         result.WithValue(new GetEdgeWithTokenDto()
         {
             Id = newEdge.Id,
             EdgeType = edge.EdgeType,
             Name = newEdge.Name,
-            Token = token
+            Token = Encoding.ASCII.GetString(newEdge.Key)
         });
         result.WithStatusCode(HttpStatusCode.OK);
 
@@ -364,7 +334,6 @@ public class EdgeHiveStoreService(ILogger<EdgeHiveStoreService> logger, LocalSto
         }
 
         EdgeEntity? edge = null;
-        string token;
         if (contains)
         {
             if (!result.SuccessAndHasValue(await Get(store, id, cancellationToken), out edge))
@@ -384,13 +353,7 @@ public class EdgeHiveStoreService(ILogger<EdgeHiveStoreService> logger, LocalSto
                 return result;
             }
 
-            edge = new()
-            {
-                Id = Guid.Parse(id),
-                EdgeType = edgeAddDto.EdgeType,
-                Name = edgeAddDto.Name,
-                Key = RandomHelpers.ByteArray(EdgeDefaults.EdgeKeySize)
-            };
+            edge = EdgeEntityHelpers.Create(edgeAddDto.Name, edgeAddDto.EdgeType, Guid.Parse(id));
 
             if (!result.Success(await store.Set(edge.Id.ToString(), edge, cancellationToken: cancellationToken)))
             {
@@ -401,19 +364,12 @@ public class EdgeHiveStoreService(ILogger<EdgeHiveStoreService> logger, LocalSto
             }
         }
 
-        token = EdgeEntityHelpers.Encode(new()
-        {
-            Id = edge.Id,
-            EdgeType = edge.EdgeType,
-            Name = edge.Name,
-            Key = edge.Key,
-        });
         result.WithValue(new GetEdgeWithTokenDto()
         {
             Id = edge.Id,
             EdgeType = edge.EdgeType,
             Name = edge.Name,
-            Token = token
+            Token = Encoding.ASCII.GetString(edge.Key)
         });
 
         result.WithStatusCode(HttpStatusCode.OK);

@@ -88,7 +88,7 @@ public partial class StreamMultiplexer
 
         _cts.Token.Register(Dispose);
 
-        _paddingBytes = Encoding.Default.GetBytes(_paddingValue);
+        _paddingBytes = Encoding.ASCII.GetBytes(_paddingValue);
         _paddingSize = _paddingBytes.Length;
 
         _headerSize = _paddingSize + _channelKeySize + _packetLengthSize + _chunkLengthSize;
