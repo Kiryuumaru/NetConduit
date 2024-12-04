@@ -3,6 +3,8 @@ using Application.Configuration.Extensions;
 using Application.Edge.Common;
 using Application.Edge.Interfaces;
 using Application.Edge.Workers;
+using Application.StreamPipeline.Common;
+using Application.StreamPipeline.Interfaces;
 using Application.StreamPipeline.Services;
 using DisposableHelpers.Attributes;
 using Domain.Edge.Dtos;
@@ -21,6 +23,7 @@ namespace Application.Edge.Services.Handshake;
 
 [Disposable]
 internal partial class EdgeClientHandshakeService(ILogger<EdgeClientHandshakeService> logger, IConfiguration configuration, IEdgeLocalStoreService edgeLocalStoreService)
+    : ISecureStreamFactory
 {
     private readonly ILogger<EdgeClientHandshakeService> _logger = logger;
     private readonly IConfiguration _configuration = configuration;
@@ -143,6 +146,20 @@ internal partial class EdgeClientHandshakeService(ILogger<EdgeClientHandshakeSer
             }
 
         }, stoppingToken);
+    }
+
+    public TranceiverStream CreateSecureTranceiverStream(int capacity)
+    {
+        if (_cts == null || ClientRsa == null || ServerRsa == null)
+        {
+            throw new Exception("Handshake incomplete");
+        }
+
+        var tranceiverStream = new TranceiverStream(new BlockingMemoryStream(capacity), new BlockingMemoryStream(capacity));
+
+        _cts.Token.Register(tranceiverStream.Dispose);
+
+        return tranceiverStream;
     }
 
     protected void Dispose(bool disposing)

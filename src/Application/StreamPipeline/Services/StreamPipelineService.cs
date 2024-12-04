@@ -1,5 +1,6 @@
 ﻿using Application.Common;
 using Application.StreamPipeline.Common;
+using Application.StreamPipeline.Interfaces;
 using Application.StreamPipeline.Pipes;
 using DisposableHelpers.Attributes;
 using Microsoft.Extensions.DependencyInjection;
@@ -61,38 +62,64 @@ public partial class StreamPipelineService(ILogger<StreamPipelineService> logger
         return GetMux().Set(channelKey, bufferSize);
     }
 
-    public MessagingPipe<TSend, TReceive> SetMessagingPipe<TSend, TReceive>(Guid channelKey, string channelName, JsonSerializerOptions? jsonSerializerOptions = null)
+    public MessagingPipe<TSend, TReceive> SetMessagingPipe<TSend, TReceive>(Guid channelKey, string channelName, JsonSerializerOptions? jsonSerializerOptions = null, ISecureStreamFactory? secureStreamFactory = null)
     {
         var messagingPipe = _serviceProvider.GetRequiredService<MessagingPipe<TSend, TReceive>>();
-        var tranceiverStream = GetMux().Set(channelKey, StreamPipelineDefaults.EdgeCommsBufferSize);
+
+        TranceiverStream tranceiverStream;
+        if (secureStreamFactory == null)
+        {
+            tranceiverStream = GetMux().Set(channelKey, StreamPipelineDefaults.EdgeCommsBufferSize);
+        }
+        else
+        {
+            tranceiverStream = secureStreamFactory.CreateSecureTranceiverStream(StreamPipelineDefaults.EdgeCommsBufferSize);
+            GetMux().Set(channelKey, tranceiverStream);
+        }
+
         var pipeToken = CancellationTokenSource.CreateLinkedTokenSource(
             _cts!.Token,
             CancelWhenDisposing(),
             messagingPipe.CancelWhenDisposing(),
             tranceiverStream.CancelWhenDisposing());
+
         messagingPipe.SetPipeName(channelName);
         messagingPipe.SetJsonSerializerOptions(jsonSerializerOptions);
         messagingPipe.Start(tranceiverStream, pipeToken.Token).Forget();
+
         return messagingPipe;
     }
 
-    public CommandPipe<TCommand, TResponse> SetCommandPipe<TCommand, TResponse>(Guid channelKey, string channelName, JsonSerializerOptions? jsonSerializerOptions = null)
+    public CommandPipe<TCommand, TResponse> SetCommandPipe<TCommand, TResponse>(Guid channelKey, string channelName, JsonSerializerOptions? jsonSerializerOptions = null, ISecureStreamFactory? secureStreamFactory = null)
     {
         var messagingPipe = _serviceProvider.GetRequiredService<CommandPipe<TCommand, TResponse>>();
-        var tranceiverStream = GetMux().Set(channelKey, StreamPipelineDefaults.EdgeCommsBufferSize);
+
+        TranceiverStream tranceiverStream;
+        if (secureStreamFactory == null)
+        {
+            tranceiverStream = GetMux().Set(channelKey, StreamPipelineDefaults.EdgeCommsBufferSize);
+        }
+        else
+        {
+            tranceiverStream = secureStreamFactory.CreateSecureTranceiverStream(StreamPipelineDefaults.EdgeCommsBufferSize);
+            GetMux().Set(channelKey, tranceiverStream);
+        }
+
         var pipeToken = CancellationTokenSource.CreateLinkedTokenSource(
             _cts!.Token,
             CancelWhenDisposing(),
             messagingPipe.CancelWhenDisposing(),
             tranceiverStream.CancelWhenDisposing());
+
         messagingPipe.SetPipeName(channelName);
         messagingPipe.SetJsonSerializerOptions(jsonSerializerOptions);
         messagingPipe.Start(tranceiverStream, pipeToken.Token).Forget();
+
         return messagingPipe;
     }
 
-    public MessagingPipe<T, T> SetMessagingPipe<T>(Guid channelKey, string channelName, JsonSerializerOptions? jsonSerializerOptions = null)
+    public MessagingPipe<T, T> SetMessagingPipe<T>(Guid channelKey, string channelName, JsonSerializerOptions? jsonSerializerOptions = null, ISecureStreamFactory? secureStreamFactory = null)
     {
-        return SetMessagingPipe<T, T>(channelKey, channelName, jsonSerializerOptions);
+        return SetMessagingPipe<T, T>(channelKey, channelName, jsonSerializerOptions, secureStreamFactory);
     }
 }
