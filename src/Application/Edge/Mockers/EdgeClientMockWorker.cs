@@ -50,18 +50,18 @@ internal class EdgeClientMockWorker(ILogger<EdgeClientMockWorker> logger, IServi
         using var scope = _serviceProvider.CreateScope();
         var tcpClient = scope.ServiceProvider.GetRequiredService<TcpClientService>();
 
-        await Task.Delay(10000, stoppingToken);
+        await Task.Delay(5000, stoppingToken);
 
-        //await tcpClient.Create(tcpHost, tcpPort, (tranceiverStream, ct) =>
-        //{
-        //    var clientCts = CancellationTokenSource.CreateLinkedTokenSource(
-        //        stoppingToken,
-        //        ct.Token,
-        //        tranceiverStream.CancelWhenDisposing());
+        await tcpClient.Start(tcpHost, tcpPort, (tranceiverStream, ct) =>
+        {
+            var clientCts = CancellationTokenSource.CreateLinkedTokenSource(
+                stoppingToken,
+                ct.Token,
+                tranceiverStream.CancelWhenDisposing());
 
-        //    return Create(tranceiverStream, tcpHost, tcpPort, clientCts);
+            return Start(tranceiverStream, tcpHost, tcpPort, clientCts);
 
-        //}, stoppingToken);
+        }, stoppingToken);
     }
 
     private Task Start(TranceiverStream tranceiverStream, string tcpHost, int tcpPort, CancellationTokenSource cts)
@@ -84,6 +84,12 @@ internal class EdgeClientMockWorker(ILogger<EdgeClientMockWorker> logger, IServi
             () => { _logger.LogInformation("Stream multiplexer {ServerHost}:{ServerPort} ended", tcpHost, tcpPort); },
             ex => { _logger.LogError("Stream multiplexer {ServerHost}:{ServerPort} error: {Error}", tcpHost, tcpPort, ex.Message); },
             cts.Token);
+
+        Task.Run(async () =>
+        {
+            await Task.Delay(5000);
+            streamPipelineService.Start().Forget();
+        }).Forget();
 
         return Task.WhenAll(
             StartMockStreamRaw(EdgeDefaults.MockChannelKey0, streamPipelineService, tcpHost, tcpPort, cts.Token),
@@ -108,7 +114,7 @@ internal class EdgeClientMockWorker(ILogger<EdgeClientMockWorker> logger, IServi
             StartMockStreamMessaging(EdgeDefaults.MockMsgChannelKey9, streamPipelineService, cts.Token));
     }
 
-    int msgStreamAveLent = 1;
+    int msgStreamAveLent = 10;
     ConcurrentDictionary<Guid, (MockPayload payload, DateTimeOffset time)> msgStreamMapMock = [];
     TimeSpan msgStreamLogSpan = TimeSpan.FromSeconds(1);
     DateTimeOffset msgStreamLastLog = DateTimeOffset.MinValue;
@@ -155,7 +161,7 @@ internal class EdgeClientMockWorker(ILogger<EdgeClientMockWorker> logger, IServi
 
         return Task.Run(async () =>
         {
-            await Task.Delay(10000);
+            await Task.Delay(5000);
 
             _logger.LogInformation("Mock messaging pipe started");
 
@@ -170,7 +176,7 @@ internal class EdgeClientMockWorker(ILogger<EdgeClientMockWorker> logger, IServi
 
                     msgStreamMapMock[guid] = (payload, now);
 
-                    await Task.Delay(5000);
+                    await Task.Delay(100);
                 }
                 catch (Exception ex)
                 {
@@ -185,7 +191,7 @@ internal class EdgeClientMockWorker(ILogger<EdgeClientMockWorker> logger, IServi
         }, stoppingToken);
     }
 
-    int mockStreamRawAveLent = 1;
+    int mockStreamRawAveLent = 10;
     TimeSpan mockStreamRawLogSpan = TimeSpan.FromSeconds(1);
     DateTimeOffset mockStreamRawLastLog = DateTimeOffset.MinValue;
     List<double> mockStreamRawAveLi = [];
@@ -198,7 +204,7 @@ internal class EdgeClientMockWorker(ILogger<EdgeClientMockWorker> logger, IServi
 
         return Task.Run(async () =>
         {
-            await Task.Delay(10000);
+            await Task.Delay(5000);
 
             _logger.LogInformation("Mock raw bytes started");
 
@@ -210,7 +216,7 @@ internal class EdgeClientMockWorker(ILogger<EdgeClientMockWorker> logger, IServi
 
                 string sendStr = RandomHelpers.Alphanumeric(10001);
                 //string sendStr = RandomHelpers.Alphanumeric(Random.Shared.Next(10000));
-                byte[] sendBytes = Encoding.ASCII.GetBytes(sendStr);
+                byte[] sendBytes = Encoding.Default.GetBytes(sendStr);
 
                 try
                 {
@@ -221,7 +227,7 @@ internal class EdgeClientMockWorker(ILogger<EdgeClientMockWorker> logger, IServi
 
                     DateTimeOffset receivedTime = DateTimeOffset.UtcNow;
 
-                    string receivedStr = Encoding.ASCII.GetString(receivedBytes[..bytesRead].Span);
+                    string receivedStr = Encoding.Default.GetString(receivedBytes[..bytesRead].Span);
 
                     if (sendStr != receivedStr)
                     {
@@ -259,7 +265,7 @@ internal class EdgeClientMockWorker(ILogger<EdgeClientMockWorker> logger, IServi
                     _logger.LogError("Error {ServerHost}:{ServerPort}: {Error}", tcpHost, tcpPort, ex.Message);
                 }
 
-                await Task.Delay(5, stoppingToken);
+                await Task.Delay(100, stoppingToken);
             }
 
             _logger.LogInformation("Stream pipe {ServerHost}:{ServerPort} ended", tcpHost, tcpPort);

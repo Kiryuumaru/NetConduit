@@ -44,18 +44,18 @@ internal class EdgeServerMockWorker(ILogger<EdgeServerMockWorker> logger, IServi
         var tcpHost = _configuration.GetServerTcpHost();
         var tcpPort = _configuration.GetServerTcpPort();
 
-        //await tcpServer.Create(tcpHost, tcpPort, (tcpClient, tranceiverStream, ct) =>
-        //{
-        //    var clientCts = CancellationTokenSource.CreateLinkedTokenSource(
-        //        stoppingToken,
-        //        ct.Token,
-        //        tranceiverStream.CancelWhenDisposing());
+        await tcpServer.Start(tcpHost, tcpPort, (tcpClient, tranceiverStream, ct) =>
+        {
+            var clientCts = CancellationTokenSource.CreateLinkedTokenSource(
+                stoppingToken,
+                ct.Token,
+                tranceiverStream.CancelWhenDisposing());
 
-        //    IPAddress clientEndPoint = (tcpClient.Client.LocalEndPoint as IPEndPoint)?.Address!;
+            IPAddress clientEndPoint = (tcpClient.Client.LocalEndPoint as IPEndPoint)?.Address!;
 
-        //    return Create(clientEndPoint, tranceiverStream, clientCts);
+            return Start(clientEndPoint, tranceiverStream, clientCts);
 
-        //}, stoppingToken);
+        }, stoppingToken);
     }
 
     private Task Start(IPAddress iPAddress, TranceiverStream tranceiverStream, CancellationTokenSource cts)
@@ -77,6 +77,12 @@ internal class EdgeServerMockWorker(ILogger<EdgeServerMockWorker> logger, IServi
             () => { _logger.LogInformation("Stream multiplexer {ClientAddress} ended", iPAddress); },
             ex => { _logger.LogError("Stream multiplexer {ClientAddress} error: {Error}", iPAddress, ex.Message); },
             cts.Token);
+
+        Task.Run(async () =>
+        {
+            await Task.Delay(5000);
+            streamPipelineService.Start().Forget();
+        }).Forget();
 
         return Task.WhenAll(
             StartMockStreamRaw(EdgeDefaults.MockChannelKey0, streamPipelineService, iPAddress, tranceiverStream, cts.Token),
