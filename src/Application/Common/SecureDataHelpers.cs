@@ -3,15 +3,15 @@ using System.Buffers.Binary;
 using System.Collections.Generic;
 using System.Linq;
 using System.Security.Cryptography;
+using System.Security.Cryptography.X509Certificates;
 using System.Text;
 using System.Threading.Tasks;
-using static System.Runtime.InteropServices.JavaScript.JSType;
 
 namespace Application.Common;
 
 public static class SecureDataHelpers
 {
-    public static byte[] Encrypt(byte[] data, byte[] publicKey)
+    public static byte[] Encrypt(byte[] data, RSA rsa)
     {
         using var aes = Aes.Create();
         aes.GenerateKey();
@@ -20,8 +20,6 @@ public static class SecureDataHelpers
         using var aesEncryptor = aes.CreateEncryptor();
         byte[] encryptedData = aesEncryptor.TransformFinalBlock(data, 0, data.Length);
 
-        using var rsa = RSA.Create();
-        rsa.ImportRSAPublicKey(publicKey, out _);
         byte[] encryptedKey = rsa.Encrypt(aes.Key, RSAEncryptionPadding.OaepSHA256);
 
         Span<byte> encrypted = stackalloc byte[12 + encryptedData.Length + encryptedKey.Length + aes.IV.Length];
@@ -43,11 +41,8 @@ public static class SecureDataHelpers
         return encrypted.ToArray();
     }
 
-    public static byte[] Decrypt(byte[] encryptedBytes, byte[] privateKey)
+    public static byte[] Decrypt(byte[] encryptedBytes, RSA rsa)
     {
-        using var rsa = RSA.Create();
-        rsa.ImportRSAPrivateKey(privateKey, out _);
-
         Span<byte> encrypted = encryptedBytes.AsSpan();
         Span<byte> encryptedDataHead = encrypted[..4];
         Span<byte> encryptedKeyHead = encrypted.Slice(4, 4);
@@ -77,6 +72,20 @@ public static class SecureDataHelpers
         return decryptedData;
     }
 
+    public static byte[] Encrypt(byte[] data, byte[] publicKey)
+    {
+        using var rsa = RSA.Create();
+        rsa.ImportRSAPublicKey(publicKey, out _);
+        return Encrypt(data, rsa);
+    }
+
+    public static byte[] Decrypt(byte[] encryptedBytes, byte[] privateKey)
+    {
+        using var rsa = RSA.Create();
+        rsa.ImportRSAPrivateKey(privateKey, out _);
+        return Decrypt(encryptedBytes, rsa);
+    }
+
     public static byte[] EncryptString(string data, byte[] publicKey)
     {
         return Encrypt(Encoding.Default.GetBytes(data), publicKey);
@@ -85,5 +94,15 @@ public static class SecureDataHelpers
     public static string DecryptString(byte[] encryptedBytes, byte[] publicKey)
     {
         return Encoding.Default.GetString(Decrypt(encryptedBytes, publicKey));
+    }
+
+    public static byte[] EncryptString(string data, RSA rsa)
+    {
+        return Encrypt(Encoding.Default.GetBytes(data), rsa);
+    }
+
+    public static string DecryptString(byte[] encryptedBytes, RSA rsa)
+    {
+        return Encoding.Default.GetString(Decrypt(encryptedBytes, rsa));
     }
 }

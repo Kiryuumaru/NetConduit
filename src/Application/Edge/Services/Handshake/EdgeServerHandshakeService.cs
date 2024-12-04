@@ -62,9 +62,6 @@ internal partial class EdgeServerHandshakeService(ILogger<EdgeServerHandshakeSer
                 _logger.LogInformation("Attempting handshake from {ClientAddress}...", iPAddress);
 
                 var edgeServerEntity = (await _edgeLocalStoreService.Get(_cts.Token)).GetValueOrThrow();
-                byte[] serverPrivateKey = [];
-                byte[] serverPublicKey = [];
-                byte[] clientPublicKey = [];
 
                 handshakeCommand.OnCommand(callback =>
                 {
@@ -79,21 +76,23 @@ internal partial class EdgeServerHandshakeService(ILogger<EdgeServerHandshakeSer
                         {
                             return;
                         }
+
+                        ServerRsa = RSA.Create(EdgeDefaults.EdgeHandshakeRSABitsLength);
+
+                        bool hasRsaLoaded = false;
                         try
                         {
-                            ServerRsa = RSA.Create(EdgeDefaults.EdgeHandshakeRSABitsLength);
                             ClientRsa = RSA.Create();
                             ClientRsa.ImportRSAPublicKey(callback.Command.PublicKey, out var clientRsaBytesRead);
-                            serverPrivateKey = ServerRsa.ExportRSAPrivateKey();
-                            serverPublicKey = ServerRsa.ExportRSAPublicKey();
-                            clientPublicKey = callback.Command.PublicKey;
+                            hasRsaLoaded = true;
                         }
                         catch { }
-                        if (clientPublicKey.Length != 0)
+                        
+                        if (hasRsaLoaded)
                         {
                             callback.Respond(new HandshakeResponseDto()
                             {
-                                PublicKey = serverPublicKey,
+                                PublicKey = ServerRsa.ExportRSAPublicKey(),
                                 EncryptedAcceptedEdgeKey = null
                             });
                         }
@@ -110,10 +109,10 @@ internal partial class EdgeServerHandshakeService(ILogger<EdgeServerHandshakeSer
                         GetEdgeWithKeyDto? edgeEntity = null;
                         try
                         {
-                            string decryptedHandshakeToken = SecureDataHelpers.DecryptString(callback.Command.EncryptedHandshakeToken, serverPrivateKey);
+                            string decryptedHandshakeToken = SecureDataHelpers.DecryptString(callback.Command.EncryptedHandshakeToken, ServerRsa);
                             if (edgeServerEntity.Token == decryptedHandshakeToken)
                             {
-                                edgeEntity = EdgeEntityHelpers.Decode(SecureDataHelpers.DecryptString(callback.Command.EncryptedEdgeToken, serverPrivateKey));
+                                edgeEntity = EdgeEntityHelpers.Decode(SecureDataHelpers.DecryptString(callback.Command.EncryptedEdgeToken, ServerRsa));
                             }
                         }
                         catch { }
@@ -122,7 +121,7 @@ internal partial class EdgeServerHandshakeService(ILogger<EdgeServerHandshakeSer
                             callback.Respond(new HandshakeResponseDto()
                             {
                                 PublicKey = [],
-                                EncryptedAcceptedEdgeKey = SecureDataHelpers.Encrypt(edgeEntity.Key, clientPublicKey)
+                                EncryptedAcceptedEdgeKey = SecureDataHelpers.Encrypt(edgeEntity.Key, ClientRsa)
                             });
                             AcceptGate.SetOpen();
                         }

@@ -69,13 +69,12 @@ internal partial class EdgeClientHandshakeService(ILogger<EdgeClientHandshakeSer
 
                 var edgeTokenedEntity = (await _edgeLocalStoreService.Get(_cts.Token)).GetValueOrThrow();
                 var edgeKeyedEntity = EdgeEntityHelpers.Decode(edgeTokenedEntity.Token);
+
                 ClientRsa = RSA.Create(EdgeDefaults.EdgeHandshakeRSABitsLength);
-                byte[] clientPrivateKey = ClientRsa.ExportRSAPrivateKey();
-                byte[] clientPublicKey = ClientRsa.ExportRSAPublicKey();
 
                 var initialHandshakeRequest = new HandshakeAttemptDto()
                 {
-                    PublicKey = clientPublicKey,
+                    PublicKey = ClientRsa.ExportRSAPublicKey(),
                     EncryptedEdgeToken = null,
                     EncryptedHandshakeToken = null,
                 };
@@ -91,15 +90,13 @@ internal partial class EdgeClientHandshakeService(ILogger<EdgeClientHandshakeSer
 
                 ServerRsa = RSA.Create();
 
-                byte[] serverPublicKey;
                 byte[] encryptedEdgeToken;
                 byte[] encryptedHandshakeToken;
                 try
                 {
                     ServerRsa.ImportRSAPublicKey(initialHandshakeResponse.PublicKey, out var serverRsaPublicKeyBytesRead);
-                    serverPublicKey = initialHandshakeResponse.PublicKey;
-                    encryptedEdgeToken = SecureDataHelpers.EncryptString(edgeTokenedEntity.Token, serverPublicKey);
-                    encryptedHandshakeToken = SecureDataHelpers.EncryptString(handshakeToken, serverPublicKey);
+                    encryptedEdgeToken = SecureDataHelpers.EncryptString(edgeTokenedEntity.Token, ServerRsa);
+                    encryptedHandshakeToken = SecureDataHelpers.EncryptString(handshakeToken, ServerRsa);
                 }
                 catch
                 {
@@ -122,7 +119,7 @@ internal partial class EdgeClientHandshakeService(ILogger<EdgeClientHandshakeSer
 
                 try
                 {
-                    if (SecureDataHelpers.Decrypt(tokenHandshakeResponse.EncryptedAcceptedEdgeKey, clientPrivateKey) is not byte[] acceptedEdgeKey ||
+                    if (SecureDataHelpers.Decrypt(tokenHandshakeResponse.EncryptedAcceptedEdgeKey, ClientRsa) is not byte[] acceptedEdgeKey ||
                         !edgeKeyedEntity.Key.SequenceEqual(acceptedEdgeKey))
                     {
                         throw new Exception();
