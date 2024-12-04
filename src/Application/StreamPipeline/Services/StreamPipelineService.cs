@@ -1,7 +1,7 @@
-﻿using Application.Common;
+﻿using Application.Common.Extensions;
 using Application.StreamPipeline.Common;
 using Application.StreamPipeline.Interfaces;
-using Application.StreamPipeline.Pipes;
+using Application.StreamPipeline.Services.Pipes;
 using DisposableHelpers.Attributes;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;

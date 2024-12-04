@@ -11,7 +11,7 @@ using System.Text;
 using System.Threading.Tasks;
 using TransactionHelpers;
 
-namespace Application.Common;
+namespace Application.Common.Extensions;
 
 public static class Cli
 {

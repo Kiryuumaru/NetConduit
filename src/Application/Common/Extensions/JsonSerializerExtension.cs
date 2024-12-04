@@ -8,7 +8,7 @@ using System.Text;
 using System.Text.Json;
 using System.Threading.Tasks;
 
-namespace Application.Common;
+namespace Application.Common.Extensions;
 
 public static class JsonSerializerExtension
 {

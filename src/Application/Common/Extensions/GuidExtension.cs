@@ -4,14 +4,14 @@ using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
 
-namespace Application.Common;
+namespace Application.Common.Extensions;
 
 public static class GuidEncoder
 {
     public static string Encode(string guidText)
     {
         Guid guid = new(guidText);
-        return Encode(guid);
+        return guid.Encode();
     }
 
     public static string Encode(this Guid guid)

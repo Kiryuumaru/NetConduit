@@ -1,8 +1,8 @@
-﻿using Application.Common;
+﻿using Application.Common.Extensions;
 using Application.Edge.Common;
 using Application.StreamPipeline.Abstraction;
 using Application.StreamPipeline.Common;
-using Application.StreamPipeline.Models;
+using Application.StreamPipeline.Features;
 using Application.StreamPipeline.Services;
 using Domain.StreamPipeline.Exceptions;
 using Domain.StreamPipeline.Models;
@@ -16,7 +16,7 @@ using System.Text.Json;
 using System.Threading.Tasks;
 using System.Threading.Tasks.Dataflow;
 
-namespace Application.StreamPipeline.Pipes;
+namespace Application.StreamPipeline.Services.Pipes;
 
 public class MessagingPipe<TSend, TReceive> : BasePipe
 {

@@ -4,7 +4,7 @@ using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
 
-namespace Application.Common;
+namespace Application.Common.Extensions;
 
 public static class StreamExtensions
 {
@@ -30,7 +30,7 @@ public static class StreamExtensions
             throw new ArgumentException("Has to be writable", nameof(destination));
 
         ArgumentOutOfRangeException.ThrowIfNegative(bufferSize);
-        
+
         var buffer = new byte[bufferSize];
         long totalBytesRead = 0;
         int bytesRead;
@@ -45,6 +45,6 @@ public static class StreamExtensions
     public static Task CopyToAsync(this Stream source, Stream destination, int bufferSize = 81920, Action<long>? progressCallback = null, CancellationToken cancellationToken = default)
     {
         var progress = new Progress(progressCallback);
-        return CopyToAsync(source, destination, bufferSize, progress, cancellationToken);
+        return source.CopyToAsync(destination, bufferSize, progress, cancellationToken);
     }
 }

@@ -5,7 +5,7 @@ using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
 
-namespace Application.StreamPipeline.Common;
+namespace Application.StreamPipeline.Features;
 
 internal class StreamChunkWriter(Stream stream)
 {

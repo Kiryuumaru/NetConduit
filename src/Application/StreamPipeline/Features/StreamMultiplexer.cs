@@ -1,6 +1,6 @@
-﻿using Application.Common;
+﻿using Application.Common.Extensions;
 using Application.StreamPipeline.Common;
-using Application.StreamPipeline.Models;
+using Application.StreamPipeline.Features;
 using DisposableHelpers.Attributes;
 using Domain.StreamPipeline.Exceptions;
 using Microsoft.Extensions.Logging;
@@ -23,6 +23,27 @@ namespace Application.StreamPipeline.Services;
 [Disposable]
 public partial class StreamMultiplexer
 {
+    [Disposable]
+    private partial class ChunkedTranceiverStreamHolder(TranceiverStream tranceiverStream)
+    {
+        public readonly TranceiverStream TranceiverStream = tranceiverStream;
+
+        private readonly StreamChunkWriter _streamChunkWriter = new(tranceiverStream.ReceiverStream);
+
+        public void WriteToReceiverStream(long length, ReadOnlySpan<byte> buffer)
+        {
+            _streamChunkWriter.WriteChunk(length, buffer);
+        }
+
+        protected virtual void Dispose(bool disposing)
+        {
+            if (disposing)
+            {
+                TranceiverStream.Dispose();
+            }
+        }
+    }
+
     public static StreamMultiplexer Create(
         TranceiverStream mainTranceiverStream,
         Action onStarted,

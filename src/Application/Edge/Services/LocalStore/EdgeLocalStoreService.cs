@@ -1,4 +1,4 @@
-﻿using Application.Common;
+﻿using Application.Common.Extensions;
 using Application.Edge.Common;
 using Application.Edge.Interfaces;
 using Application.Edge.Services.HiveStore;

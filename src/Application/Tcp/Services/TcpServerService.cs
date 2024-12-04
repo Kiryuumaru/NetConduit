@@ -8,10 +8,10 @@ using System.Net;
 using System.Text;
 using System.Threading.Tasks;
 using System.Net.Http;
-using Application.Common;
 using Application.StreamPipeline.Common;
 using Application.Tcp.Common;
 using Microsoft.AspNetCore.Hosting.Server;
+using Application.Common.Extensions;
 
 namespace Application.Tcp.Services;
 

@@ -6,7 +6,7 @@ using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
 
-namespace Application.Common;
+namespace Application.Common.Extensions;
 
 public static class IConfigurationExtensions
 {
@@ -14,7 +14,7 @@ public static class IConfigurationExtensions
     {
         try
         {
-            return !string.IsNullOrEmpty(GetVarRefValue(configuration, varName));
+            return !string.IsNullOrEmpty(configuration.GetVarRefValue(varName));
         }
         catch
         {
@@ -47,7 +47,7 @@ public static class IConfigurationExtensions
     {
         try
         {
-            return GetVarRefValue(configuration, varName);
+            return configuration.GetVarRefValue(varName);
         }
         catch
         {

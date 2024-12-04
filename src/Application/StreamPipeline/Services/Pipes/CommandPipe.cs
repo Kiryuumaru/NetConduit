@@ -1,7 +1,7 @@
-﻿using Application.Common;
+﻿using Application.Common.Extensions;
+using Application.Common.Features;
 using Application.StreamPipeline.Abstraction;
 using Application.StreamPipeline.Common;
-using Application.StreamPipeline.Models;
 using CliWrap;
 using Domain.StreamPipeline.Exceptions;
 using Domain.StreamPipeline.Models;
@@ -14,7 +14,7 @@ using System.Text.Json;
 using System.Threading.Tasks;
 using TransactionHelpers;
 
-namespace Application.StreamPipeline.Pipes;
+namespace Application.StreamPipeline.Services.Pipes;
 
 public class CommandPipe<TCommand, TResponse>(ILogger<CommandPipe<TCommand, TResponse>> logger, MessagingPipe<CommandPipePayload<TCommand, TResponse>, CommandPipePayload<TCommand, TResponse>> messagingPipe) : BasePipe
 {

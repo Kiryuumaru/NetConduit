@@ -1,4 +1,5 @@
-﻿using Application.Common;
+﻿using Application.Common.Extensions;
+using Application.Common.Features;
 using Application.Configuration.Extensions;
 using Application.Edge.Common;
 using Application.Edge.Interfaces;
@@ -6,7 +7,6 @@ using Application.Edge.Mockers;
 using Application.Edge.Services;
 using Application.Edge.Services.Handshake;
 using Application.StreamPipeline.Common;
-using Application.StreamPipeline.Models;
 using Application.StreamPipeline.Services;
 using Application.Tcp.Services;
 using Domain.Edge.Dtos;

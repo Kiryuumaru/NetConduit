@@ -1,5 +1,4 @@
-﻿using Application.Common;
-using Application.Configuration.Extensions;
+﻿using Application.Configuration.Extensions;
 using Application.Edge.Common;
 using Application.Edge.Interfaces;
 using Application.Edge.Services;
@@ -22,6 +21,7 @@ using System.Linq;
 using System.Net;
 using System.Text;
 using System.Threading.Tasks;
+using Application.Common.Extensions;
 
 namespace Application.Watchdog.Workers;
 

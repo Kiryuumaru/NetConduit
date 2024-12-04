@@ -3,8 +3,8 @@ using Application;
 using Application.Configuration.Extensions;
 using Serilog;
 using System.Runtime.InteropServices;
-using Application.Common;
 using Application.ServiceMaster.Services;
+using Application.Common.Extensions;
 
 namespace Presentation.Services;
 

@@ -5,7 +5,6 @@ using Application.Edge.Services;
 using Application.Edge.Mockers;
 using Application.LocalStore.Services;
 using Application.ServiceMaster.Services;
-using Application.StreamPipeline.Pipes;
 using Application.StreamPipeline.Services;
 using Application.Tcp.Services;
 using Application.Watchdog.Workers;
@@ -15,6 +14,7 @@ using Application.Edge.Workers;
 using Application.Edge.Services.Handshake;
 using Application.Edge.Services.HiveStore;
 using Application.Edge.Services.LocalStore;
+using Application.StreamPipeline.Services.Pipes;
 
 namespace Application;
 

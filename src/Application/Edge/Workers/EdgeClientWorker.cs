@@ -1,10 +1,8 @@
-﻿using Application.Common;
-using Application.Configuration.Extensions;
+﻿using Application.Configuration.Extensions;
 using Application.Edge.Common;
 using Application.Edge.Interfaces;
 using Application.Edge.Services;
 using Application.StreamPipeline.Common;
-using Application.StreamPipeline.Models;
 using Application.StreamPipeline.Services;
 using Application.Tcp.Services;
 using Domain.Edge.Enums;
@@ -27,6 +25,8 @@ using System.Threading.Tasks;
 using Application.Edge.Mockers;
 using Domain.Edge.Models;
 using Application.Edge.Services.Handshake;
+using Application.Common.Features;
+using Application.Common.Extensions;
 
 namespace Application.Edge.Workers;
 

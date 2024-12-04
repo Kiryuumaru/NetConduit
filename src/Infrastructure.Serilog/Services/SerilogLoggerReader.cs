@@ -1,6 +1,6 @@
 ﻿using AbsolutePathHelpers;
 using Application;
-using Application.Common;
+using Application.Common.Extensions;
 using Application.Configuration.Extensions;
 using Application.Logger.Interfaces;
 using Microsoft.Extensions.Configuration;

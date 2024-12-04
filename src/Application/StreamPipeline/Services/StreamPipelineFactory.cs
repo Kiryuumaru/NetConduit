@@ -1,4 +1,4 @@
-﻿using Application.Common;
+﻿using Application.Common.Extensions;
 using Application.StreamPipeline.Common;
 using DisposableHelpers.Attributes;
 using Microsoft.Extensions.DependencyInjection;

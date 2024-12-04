@@ -1,4 +1,4 @@
-﻿using Application.Common;
+﻿using Application.Common.Extensions;
 using Application.LocalStore.Interfaces;
 using DisposableHelpers.Attributes;
 using Microsoft.Extensions.DependencyInjection;

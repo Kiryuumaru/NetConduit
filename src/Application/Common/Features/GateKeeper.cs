@@ -1,5 +1,4 @@
-﻿using Application.Common;
-using Application.Configuration.Extensions;
+﻿using Application.Configuration.Extensions;
 using Application.Edge.Interfaces;
 using Domain.Edge.Dtos;
 using Domain.Edge.Entities;
@@ -16,7 +15,7 @@ using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 
-namespace Application.Common;
+namespace Application.Common.Features;
 
 public class GateKeeper
 {

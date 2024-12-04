@@ -1,4 +1,4 @@
-﻿using Application.Common;
+﻿using Application.Common.Extensions;
 using Domain.Edge.Dtos;
 using Domain.Edge.Entities;
 using Domain.Edge.Enums;

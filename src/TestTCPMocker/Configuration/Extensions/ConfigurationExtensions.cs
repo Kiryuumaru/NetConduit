@@ -1,5 +1,5 @@
 ﻿using AbsolutePathHelpers;
-using Application.Common;
+using Application.Common.Extensions;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 using System;

@@ -8,12 +8,12 @@ using System.Net;
 using System.Text;
 using System.Threading.Tasks;
 using Microsoft.Extensions.Hosting;
-using Application.Common;
 using Application.StreamPipeline.Common;
 using Microsoft.AspNetCore.Hosting.Server;
 using System.Net.Http;
 using System.IO;
 using Application.Tcp.Common;
+using Application.Common.Extensions;
 
 namespace Application.Tcp.Services;
 

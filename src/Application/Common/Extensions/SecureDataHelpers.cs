@@ -7,7 +7,7 @@ using System.Security.Cryptography.X509Certificates;
 using System.Text;
 using System.Threading.Tasks;
 
-namespace Application.Common;
+namespace Application.Common.Extensions;
 
 public static class SecureDataHelpers
 {
