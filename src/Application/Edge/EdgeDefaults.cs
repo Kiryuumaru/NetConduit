@@ -1,11 +1,4 @@
-﻿using Domain.Edge.Entities;
-using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
-
-namespace Application.Edge.Common;
+﻿namespace Application.Edge;
 
 public static class EdgeDefaults
 {

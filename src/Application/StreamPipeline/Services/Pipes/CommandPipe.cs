@@ -2,16 +2,9 @@
 using Application.Common.Features;
 using Application.StreamPipeline.Abstraction;
 using Application.StreamPipeline.Common;
-using CliWrap;
-using Domain.StreamPipeline.Exceptions;
 using Domain.StreamPipeline.Models;
 using Microsoft.Extensions.Logging;
-using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Text;
 using System.Text.Json;
-using System.Threading.Tasks;
 using TransactionHelpers;
 
 namespace Application.StreamPipeline.Services.Pipes;

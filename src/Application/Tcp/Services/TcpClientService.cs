@@ -1,18 +1,9 @@
 ﻿using DisposableHelpers.Attributes;
 using Microsoft.Extensions.Logging;
-using System;
-using System.Collections.Generic;
-using System.Linq;
 using System.Net.Sockets;
 using System.Net;
-using System.Text;
-using System.Threading.Tasks;
-using Microsoft.Extensions.Hosting;
 using Application.StreamPipeline.Common;
-using Microsoft.AspNetCore.Hosting.Server;
-using System.Net.Http;
-using System.IO;
-using Application.Tcp.Common;
+using Application.Tcp.Extensions;
 using Application.Common.Extensions;
 
 namespace Application.Tcp.Services;

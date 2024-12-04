@@ -1,12 +1,7 @@
 ﻿using AbsolutePathHelpers;
-using Application;
-using Application.Common;
 using Application.Configuration.Extensions;
 using Microsoft.Extensions.Configuration;
-using Microsoft.Extensions.DependencyInjection;
 using SQLite;
-using SQLitePCL;
-using TransactionHelpers;
 
 namespace Infrastructure.SQLite.Services;
 

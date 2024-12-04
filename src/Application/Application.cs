@@ -1,5 +1,4 @@
-﻿using Application.Common;
-using Application.Configuration.Extensions;
+﻿using Application.Configuration.Extensions;
 using Application.Edge.Interfaces;
 using Application.Edge.Services;
 using Application.Edge.Mockers;

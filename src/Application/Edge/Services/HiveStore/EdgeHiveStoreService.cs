@@ -1,24 +1,15 @@
 ﻿using Application.Common.Extensions;
-using Application.Edge.Common;
+using Application.Edge.Extensions;
 using Application.Edge.Interfaces;
 using Application.LocalStore.Common;
 using Application.LocalStore.Services;
 using Domain.Edge.Dtos;
 using Domain.Edge.Entities;
 using Domain.Edge.Enums;
-using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using RestfulHelpers.Common;
-using System;
-using System.Collections.Generic;
-using System.Linq;
 using System.Net;
-using System.Text;
-using System.Text.Json;
-using System.Threading;
-using System.Threading.Tasks;
 using TransactionHelpers;
-using TransactionHelpers.Interface;
 
 namespace Application.Edge.Services.HiveStore;
 

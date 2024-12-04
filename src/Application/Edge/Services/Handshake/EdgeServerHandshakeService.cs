@@ -1,22 +1,15 @@
 ﻿using Application.Common.Extensions;
 using Application.Common.Features;
-using Application.Edge.Common;
+using Application.Edge.Extensions;
 using Application.Edge.Interfaces;
-using Application.Edge.Workers;
 using Application.StreamPipeline.Common;
 using Application.StreamPipeline.Interfaces;
 using Application.StreamPipeline.Services;
 using DisposableHelpers.Attributes;
 using Domain.Edge.Dtos;
 using Microsoft.Extensions.Logging;
-using System;
-using System.Collections.Generic;
-using System.IO;
-using System.Linq;
 using System.Net;
 using System.Security.Cryptography;
-using System.Text;
-using System.Threading.Tasks;
 
 namespace Application.Edge.Services.Handshake;
 

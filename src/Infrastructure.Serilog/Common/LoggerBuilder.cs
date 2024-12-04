@@ -1,15 +1,6 @@
-﻿using Application;
-using ApplicationBuilderHelpers;
-using System.Reflection;
-using Serilog;
-using Serilog.Core;
-using AbsolutePathHelpers;
-using System.Xml.Linq;
+﻿using Serilog;
 using Serilog.Formatting.Compact;
 using Serilog.Events;
-using Newtonsoft.Json.Linq;
-using Application.Common;
-using Microsoft.Extensions.Hosting;
 using Serilog.Sinks.SystemConsole.Themes;
 using Application.Configuration.Extensions;
 using Microsoft.Extensions.Configuration;

@@ -1,7 +1,5 @@
 ﻿using Application.Edge.Interfaces;
-using Application.Edge.Services;
 using Domain.Edge.Dtos;
-using Domain.Edge.Entities;
 using Microsoft.AspNetCore.Mvc;
 using RestfulHelpers.Common;
 

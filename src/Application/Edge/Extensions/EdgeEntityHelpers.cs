@@ -2,14 +2,9 @@
 using Domain.Edge.Dtos;
 using Domain.Edge.Entities;
 using Domain.Edge.Enums;
-using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Text;
 using System.Text.Json;
-using System.Threading.Tasks;
 
-namespace Application.Edge.Common;
+namespace Application.Edge.Extensions;
 
 public static class EdgeEntityHelpers
 {

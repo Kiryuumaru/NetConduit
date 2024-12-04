@@ -1,18 +1,13 @@
 ﻿using AbsolutePathHelpers;
-using Application;
 using Application.Common.Extensions;
 using Application.Configuration.Extensions;
 using Application.Logger.Interfaces;
 using Microsoft.Extensions.Configuration;
-using Microsoft.Extensions.Logging;
 using Serilog;
 using Serilog.Events;
 using Serilog.Formatting.Compact.Reader;
 using Serilog.Parsing;
 using System.Globalization;
-using System.IO;
-using System.Reflection.PortableExecutable;
-using System.Runtime.InteropServices;
 
 namespace Infrastructure.Serilog.Services;
 

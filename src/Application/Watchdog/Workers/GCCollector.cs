@@ -1,26 +1,6 @@
-﻿using Application.Configuration.Extensions;
-using Application.Edge.Common;
-using Application.Edge.Interfaces;
-using Application.Edge.Services;
-using Application.Edge.Mockers;
-using Application.StreamPipeline.Common;
-using Application.StreamPipeline.Services;
-using Application.Tcp.Services;
-using Domain.Edge.Dtos;
-using Domain.Edge.Entities;
-using Microsoft.AspNetCore.Routing;
-using Microsoft.Extensions.Configuration;
-using Microsoft.Extensions.DependencyInjection;
+﻿using Application.Edge.Mockers;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
-using System;
-using System.Collections;
-using System.Collections.Generic;
-using System.ComponentModel;
-using System.Linq;
-using System.Net;
-using System.Text;
-using System.Threading.Tasks;
 using Application.Common.Extensions;
 
 namespace Application.Watchdog.Workers;

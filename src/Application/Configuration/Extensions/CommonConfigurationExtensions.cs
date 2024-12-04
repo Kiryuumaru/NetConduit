@@ -1,14 +1,8 @@
 ﻿using AbsolutePathHelpers;
-using Application.Common;
 using Application.Configuration.Exceptions;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
-using System;
-using System.Collections.Generic;
 using System.Diagnostics.CodeAnalysis;
-using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
 
 namespace Application.Configuration.Extensions;
 
@@ -64,21 +58,21 @@ public static class CommonConfigurationExtensions
     {
         if (_runtimeGuid == null)
         {
-            _runtimeGuid = Guid.Parse(configuration.GetVarRefValueOrDefault($"{Defaults.AppNameUpperSnakeCase}_RUNTIME_GUID", Guid.NewGuid().ToString()));
+            _runtimeGuid = Guid.Parse(configuration.GetVarRefValueOrDefault($"{ApplicationDefaults.AppNameUpperSnakeCase}_RUNTIME_GUID", Guid.NewGuid().ToString()));
         }
         return _runtimeGuid.Value;
     }
 
     public static bool GetMakeFileLogs(this IConfiguration configuration)
     {
-        return configuration.GetVarRefValueOrDefault($"{Defaults.AppNameUpperSnakeCase}_MAKE_LOGS", "no").Equals("yes", StringComparison.InvariantCultureIgnoreCase);
+        return configuration.GetVarRefValueOrDefault($"{ApplicationDefaults.AppNameUpperSnakeCase}_MAKE_LOGS", "no").Equals("yes", StringComparison.InvariantCultureIgnoreCase);
     }
     public static void SetMakeFileLogs(this IConfiguration configuration, bool makeFileLogs)
     {
-        configuration[$"{Defaults.AppNameUpperSnakeCase}_MAKE_LOGS"] = makeFileLogs ? "yes" : "no";
+        configuration[$"{ApplicationDefaults.AppNameUpperSnakeCase}_MAKE_LOGS"] = makeFileLogs ? "yes" : "no";
     }
 
-    public const string LoggerLevelKey = $"{Defaults.AppNameUpperSnakeCase}_LOGGER_LEVEL";
+    public const string LoggerLevelKey = $"{ApplicationDefaults.AppNameUpperSnakeCase}_LOGGER_LEVEL";
     public static LogLevel GetLoggerLevel(this IConfiguration configuration)
     {
         var loggerLevel = configuration.GetVarRefValueOrDefault(LoggerLevelKey, LogLevel.Information.ToString());
@@ -89,7 +83,7 @@ public static class CommonConfigurationExtensions
         configuration[LoggerLevelKey] = loggerLevel.ToString();
     }
 
-    public const string HomePathKey = $"{Defaults.AppNameUpperSnakeCase}_HOME_PATH";
+    public const string HomePathKey = $"{ApplicationDefaults.AppNameUpperSnakeCase}_HOME_PATH";
     public static AbsolutePath GetHomePath(this IConfiguration configuration)
     {
         return configuration.GetVarRefValue(HomePathKey);

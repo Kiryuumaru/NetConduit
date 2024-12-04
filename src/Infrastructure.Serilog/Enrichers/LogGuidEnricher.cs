@@ -1,12 +1,9 @@
-﻿using Application;
-using Application.Configuration.Extensions;
+﻿using Application.Configuration.Extensions;
 using Infrastructure.Serilog.Abstractions;
 using Infrastructure.Serilog.Common.LogEventPropertyTypes;
 using Microsoft.Extensions.Configuration;
-using Newtonsoft.Json.Linq;
 using Serilog.Core;
 using Serilog.Events;
-using System;
 
 namespace Infrastructure.Serilog.Enrichers;
 

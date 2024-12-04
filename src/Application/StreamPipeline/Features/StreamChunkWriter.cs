@@ -1,11 +1,4 @@
-﻿using DisposableHelpers.Attributes;
-using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
-
-namespace Application.StreamPipeline.Features;
+﻿namespace Application.StreamPipeline.Features;
 
 internal class StreamChunkWriter(Stream stream)
 {

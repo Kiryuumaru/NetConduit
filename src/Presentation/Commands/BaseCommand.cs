@@ -7,10 +7,6 @@ using CliFx.Exceptions;
 using CliFx.Infrastructure;
 using Infrastructure.Serilog;
 using Infrastructure.SQLite.LocalStore;
-using Microsoft.Extensions.Logging;
-using Serilog.Events;
-using System.Reflection.PortableExecutable;
-using System.Threading;
 
 namespace Presentation.Commands;
 

@@ -1,12 +1,6 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
+﻿namespace Application;
 
-namespace Application;
-
-public static class Defaults
+public static class ApplicationDefaults
 {
     public const string AppNamePascalCase = "NetConduit";
     public const string AppNameCamelCase = "netConduit";

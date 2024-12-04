@@ -1,8 +1,6 @@
 ﻿using AbsolutePathHelpers;
 using Application.Configuration.Extensions;
 using System.Runtime.InteropServices;
-using System;
-using System.Text.Json;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Configuration;
 using Application.Common.Extensions;

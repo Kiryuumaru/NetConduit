@@ -1,24 +1,16 @@
 ﻿using Application.Common.Extensions;
 using Application.Common.Features;
 using Application.Configuration.Extensions;
-using Application.Edge.Common;
+using Application.Edge.Extensions;
 using Application.Edge.Interfaces;
-using Application.Edge.Workers;
 using Application.StreamPipeline.Common;
 using Application.StreamPipeline.Interfaces;
 using Application.StreamPipeline.Services;
 using DisposableHelpers.Attributes;
 using Domain.Edge.Dtos;
-using Domain.Edge.Entities;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
-using System;
-using System.Collections.Generic;
-using System.Linq;
 using System.Security.Cryptography;
-using System.Security.Cryptography.X509Certificates;
-using System.Text;
-using System.Threading.Tasks;
 
 namespace Application.Edge.Services.Handshake;
 

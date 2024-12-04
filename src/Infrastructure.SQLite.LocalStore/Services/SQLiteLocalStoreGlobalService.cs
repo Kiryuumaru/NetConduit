@@ -1,12 +1,6 @@
-﻿using AbsolutePathHelpers;
-using Application;
-using Application.Common;
-using Infrastructure.SQLite.LocalStore.Models;
+﻿using Infrastructure.SQLite.LocalStore.Models;
 using Infrastructure.SQLite.Services;
-using Microsoft.Extensions.DependencyInjection;
 using SQLite;
-using SQLitePCL;
-using TransactionHelpers;
 
 namespace Infrastructure.SQLite.LocalStore.Services;
 

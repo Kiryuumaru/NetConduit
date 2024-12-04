@@ -1,7 +1,6 @@
 ﻿using AbsolutePathHelpers;
 using Application;
 using Application.Configuration.Extensions;
-using Serilog;
 using System.Runtime.InteropServices;
 using Application.ServiceMaster.Services;
 using Application.Common.Extensions;
@@ -36,7 +35,7 @@ internal class ClientManager(ILogger<ClientManager> logger, IConfiguration confi
         }
 
         await _serviceManager.Download(
-            Defaults.AppNameKebabCase,
+            ApplicationDefaults.AppNameKebabCase,
             $"https://github.com/Kiryuumaru/NetConduit/releases/latest/download/{folderName}.zip",
             "latest",
             async extractFactory =>
@@ -57,14 +56,14 @@ internal class ClientManager(ILogger<ClientManager> logger, IConfiguration confi
 
         _logger.LogInformation("Installing client...");
 
-        var hvccServicePath = await _serviceManager.GetCurrentServicePath(Defaults.AppNameKebabCase, cancellationToken)
+        var hvccServicePath = await _serviceManager.GetCurrentServicePath(ApplicationDefaults.AppNameKebabCase, cancellationToken)
             ?? throw new Exception("hvcc client was not downloaded");
         var hvccExecPath = hvccServicePath / "netc.exe";
 
         await _daemonManager.Install(
-            Defaults.AppNameKebabCase,
-            Defaults.AppNameReadable,
-            Defaults.AppNameDescription,
+            ApplicationDefaults.AppNameKebabCase,
+            ApplicationDefaults.AppNameReadable,
+            ApplicationDefaults.AppNameDescription,
             hvccExecPath,
             "",
             username,
@@ -72,7 +71,7 @@ internal class ClientManager(ILogger<ClientManager> logger, IConfiguration confi
             new Dictionary<string, string>
             {
                 ["ASPNETCORE_URLS"] = "http://*:23456",
-                [$"{Defaults.AppNameUpperSnakeCase}_MAKE_LOGS"] = "yes"
+                [$"{ApplicationDefaults.AppNameUpperSnakeCase}_MAKE_LOGS"] = "yes"
             },
             cancellationToken);
 
@@ -85,7 +84,7 @@ internal class ClientManager(ILogger<ClientManager> logger, IConfiguration confi
 
         _logger.LogInformation("Starting client service...");
 
-        await _daemonManager.Start(Defaults.AppNameKebabCase, cancellationToken);
+        await _daemonManager.Start(ApplicationDefaults.AppNameKebabCase, cancellationToken);
 
         _logger.LogInformation("Service client started");
     }
@@ -96,7 +95,7 @@ internal class ClientManager(ILogger<ClientManager> logger, IConfiguration confi
 
         _logger.LogInformation("Stopping client service...");
 
-        await _daemonManager.Stop(Defaults.AppNameKebabCase, cancellationToken);
+        await _daemonManager.Stop(ApplicationDefaults.AppNameKebabCase, cancellationToken);
 
         _logger.LogInformation("Service client stopped");
     }
@@ -107,7 +106,7 @@ internal class ClientManager(ILogger<ClientManager> logger, IConfiguration confi
 
         _logger.LogInformation("Uninstalling client service...");
 
-        await _daemonManager.Uninstall(Defaults.AppNameKebabCase, cancellationToken);
+        await _daemonManager.Uninstall(ApplicationDefaults.AppNameKebabCase, cancellationToken);
 
         _logger.LogInformation("Service client uninstalled");
     }

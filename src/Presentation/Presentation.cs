@@ -1,15 +1,12 @@
 ﻿using Application;
-using Application.Common;
 using ApplicationBuilderHelpers;
-using Google.Protobuf.WellKnownTypes;
-using Microsoft.Extensions.FileProviders;
 using Microsoft.OpenApi.Models;
 using Presentation.Components;
 using Presentation.Services;
 using Microsoft.Extensions.Options;
-using System.Diagnostics.CodeAnalysis;
 using System.Reflection;
 using Application.Configuration.Extensions;
+using Presentation.Aspire.ServiceDefaults;
 
 namespace Presentation;
 
@@ -34,7 +31,7 @@ internal class Presentation : Application.Application
 
         services.AddHttpClient(Options.DefaultName, client =>
         {
-            client.DefaultRequestHeaders.Add("User-Agent", Defaults.AppNamePascalCase);
+            client.DefaultRequestHeaders.Add("User-Agent", ApplicationDefaults.AppNamePascalCase);
         });
 
         services.AddRazorComponents()

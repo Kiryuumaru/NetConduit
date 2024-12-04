@@ -1,33 +1,18 @@
 ﻿using Application.Common.Extensions;
 using Application.Common.Features;
 using Application.Configuration.Extensions;
-using Application.Edge.Common;
 using Application.Edge.Interfaces;
-using Application.Edge.Mockers;
 using Application.Edge.Services;
 using Application.Edge.Services.Handshake;
 using Application.StreamPipeline.Common;
 using Application.StreamPipeline.Services;
 using Application.Tcp.Services;
-using Domain.Edge.Dtos;
-using Domain.Edge.Entities;
 using Domain.Edge.Enums;
-using Domain.Edge.Models;
-using Microsoft.AspNetCore.Routing;
-using Microsoft.AspNetCore.SignalR.Protocol;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
-using System;
-using System.Collections.Generic;
-using System.ComponentModel;
-using System.Linq;
 using System.Net;
-using System.Net.Sockets;
-using System.Text;
-using System.Text.Json;
-using System.Threading.Tasks;
 
 namespace Application.Edge.Workers;
 
