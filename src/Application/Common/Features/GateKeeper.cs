@@ -41,4 +41,13 @@ public class GateKeeper
 
         }, cancellationToken);
     }
+
+    public Task WaitForOpenOrThrow(CancellationToken cancellationToken)
+    {
+        return Task.Run(() =>
+        {
+            _waiterEvent.Wait(cancellationToken);
+
+        }, cancellationToken);
+    }
 }

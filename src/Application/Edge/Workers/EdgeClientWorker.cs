@@ -121,6 +121,10 @@ internal class EdgeClientWorker(ILogger<EdgeClientWorker> logger, IServiceProvid
                 ["ServerPort"] = tcpPort
             });
 
+            using var scope = _serviceProvider.CreateScope();
+
+            var edgeClientConnectedService = scope.ServiceProvider.GetRequiredService<EdgeClientConnectedService>();
+
             try
             {
                 await handshakeService.AcceptGate.WaitForOpen(cts.Token);
@@ -128,6 +132,8 @@ internal class EdgeClientWorker(ILogger<EdgeClientWorker> logger, IServiceProvid
                 {
                     return;
                 }
+
+                edgeClientConnectedService.SetValue(streamPipelineService);
 
                 _logger.LogInformation("Worker {ServerHost}:{ServerPort} started", tcpHost, tcpPort);
 
@@ -145,6 +151,8 @@ internal class EdgeClientWorker(ILogger<EdgeClientWorker> logger, IServiceProvid
             }
             finally
             {
+                edgeClientConnectedService.SetValue(null);
+
                 gate.SetOpen();
             }
         });

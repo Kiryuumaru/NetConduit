@@ -14,6 +14,8 @@ public static class EdgeDefaults
 
     public static readonly TimeSpan HandshakeTimeout = TimeSpan.FromSeconds(30);
 
+    public static readonly TimeSpan RelayedApiTimeout = TimeSpan.FromSeconds(10);
+
     public static readonly Guid MockChannelKey0 = new("00000000-0000-0000-0000-000000001000");
     public static readonly Guid MockChannelKey1 = new("00000000-0000-0000-0000-000000001001");
     public static readonly Guid MockChannelKey2 = new("00000000-0000-0000-0000-000000001002");

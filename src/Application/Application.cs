@@ -60,6 +60,7 @@ public class Application : ApplicationDependency
             services.AddScoped<IEdgeHiveStoreService, EdgeHiveStoreApiService>();
 
             services.AddHostedService<EdgeClientWorker>();
+            services.AddSingleton<EdgeClientConnectedService>();
 
             services.AddHostedService<EdgeClientMockWorker>();
         }
