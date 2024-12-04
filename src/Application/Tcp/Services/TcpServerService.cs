@@ -73,7 +73,9 @@ public partial class TcpServerService(ILogger<TcpServerService> logger)
                 }
                 catch (Exception ex)
                 {
-                    if (_cts.Token.IsCancellationRequested)
+                    if (_cts.Token.IsCancellationRequested ||
+                        ex is ObjectDisposedException ||
+                        ex is OperationCanceledException)
                     {
                         break;
                     }
@@ -115,7 +117,9 @@ public partial class TcpServerService(ILogger<TcpServerService> logger)
         }
         catch (Exception ex)
         {
-            if (cts.IsCancellationRequested)
+            if (cts.IsCancellationRequested ||
+                ex is ObjectDisposedException ||
+                ex is OperationCanceledException)
             {
                 return;
             }

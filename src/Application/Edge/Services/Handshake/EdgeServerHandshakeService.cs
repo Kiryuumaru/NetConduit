@@ -131,13 +131,20 @@ internal partial class EdgeServerHandshakeService(ILogger<EdgeServerHandshakeSer
                 }
                 else
                 {
-                    _logger.LogInformation("Handshake {ClientAddress} declined: Expired", iPAddress);
-                    _cts.Cancel();
+                    throw new OperationCanceledException();
                 }
             }
             catch (Exception ex)
             {
-                _logger.LogError("Handshake {ClientAddress} declined: {ErrorMessage}", iPAddress, ex.Message);
+                if (ex is ObjectDisposedException ||
+                    ex is OperationCanceledException)
+                {
+                    _logger.LogInformation("Handshake {ClientAddress} declined: Expired", iPAddress);
+                }
+                else
+                {
+                    _logger.LogError("Handshake {ClientAddress} declined: {ErrorMessage}", iPAddress, ex.Message);
+                }
                 _cts.Cancel();
             }
             finally

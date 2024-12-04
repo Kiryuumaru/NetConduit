@@ -79,7 +79,7 @@ internal partial class EdgeClientHandshakeService(ILogger<EdgeClientHandshakeSer
                     initialHandshakeResponse.PublicKey == null ||
                     initialHandshakeResponse.PublicKey.Length == 0)
                 {
-                    throw new Exception("Premature handshake sequence");
+                    throw new Exception("Premature initial handshake sequence");
                 }
 
                 var handshakeToken = _configuration.GetHandshakeToken();
@@ -96,7 +96,7 @@ internal partial class EdgeClientHandshakeService(ILogger<EdgeClientHandshakeSer
                 }
                 catch
                 {
-                    throw new Exception("Premature handshake sequence");
+                    throw new Exception("Premature establish handshake sequence");
                 }
 
                 var tokenHandshakeRequest = new HandshakeAttemptDto()
@@ -123,7 +123,7 @@ internal partial class EdgeClientHandshakeService(ILogger<EdgeClientHandshakeSer
                 }
                 catch
                 {
-                    throw new Exception("Invalid handshake token");
+                    throw new Exception("Corrupted handshake token");
                 }
 
                 _logger.LogInformation("Handshake {ServerHost}:{ServerPort} accepted", tcpHost, tcpPort);
