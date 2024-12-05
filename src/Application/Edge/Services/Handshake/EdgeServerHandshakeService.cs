@@ -2,11 +2,13 @@
 using Application.Common.Features;
 using Application.Edge.Extensions;
 using Application.Edge.Interfaces;
+using Application.Edge.Services.HiveStore;
 using Application.StreamPipeline.Common;
 using Application.StreamPipeline.Interfaces;
 using Application.StreamPipeline.Services;
 using DisposableHelpers.Attributes;
 using Domain.Edge.Dtos;
+using Domain.Edge.Enums;
 using Microsoft.Extensions.Logging;
 using System.Net;
 using System.Security.Cryptography;
@@ -14,15 +16,18 @@ using System.Security.Cryptography;
 namespace Application.Edge.Services.Handshake;
 
 [Disposable]
-internal partial class EdgeServerHandshakeService(ILogger<EdgeServerHandshakeService> logger, IEdgeLocalStoreService edgeLocalStoreService)
+internal partial class EdgeServerHandshakeService(ILogger<EdgeServerHandshakeService> logger, IEdgeHiveStoreService edgeHiveStoreService, IEdgeLocalStoreService edgeLocalStoreService)
     : ISecureStreamFactory
 {
     private readonly ILogger<EdgeServerHandshakeService> _logger = logger;
+    private readonly IEdgeHiveStoreService _edgeHiveStoreService = edgeHiveStoreService;
     private readonly IEdgeLocalStoreService _edgeLocalStoreService = edgeLocalStoreService;
 
     private CancellationTokenSource? _cts;
 
     public GateKeeper AcceptGate { get; } = new();
+
+    public ValueKeeper<Guid> EdgeClientHiveIdKeeper { get; } = new();
 
     public RSA? ClientRsa { get; private set; } = null;
 
@@ -60,7 +65,7 @@ internal partial class EdgeServerHandshakeService(ILogger<EdgeServerHandshakeSer
 
                 var edgeServerEntity = (await _edgeLocalStoreService.Get(_cts.Token)).GetValueOrThrow();
 
-                handshakeCommand.OnCommand(callback =>
+                handshakeCommand.OnCommand(async callback =>
                 {
                     if (callback.Command == null)
                     {
@@ -115,12 +120,30 @@ internal partial class EdgeServerHandshakeService(ILogger<EdgeServerHandshakeSer
                         catch { }
                         if (edgeEntity != null)
                         {
-                            callback.Respond(new HandshakeResponseDto()
+                            var addEdgeDto = new AddEdgeDto()
                             {
-                                PublicKey = [],
-                                EncryptedAcceptedEdgeToken = SecureDataHelpers.Encrypt(edgeEntity.Token, ClientRsa)
-                            });
-                            AcceptGate.SetOpen();
+                                EdgeType = EdgeType.Client,
+                                Name = edgeEntity.Name
+                            };
+                            bool hasCreated = false;
+                            if ((await _edgeHiveStoreService.GetOrCreate(edgeEntity.Id.ToString(), () =>
+                            {
+                                hasCreated = true;
+                                return addEdgeDto;
+                            })).SuccessAndHasValue(out var edgeClientEntity))
+                            {
+                                callback.Respond(new HandshakeResponseDto()
+                                {
+                                    PublicKey = [],
+                                    EncryptedAcceptedEdgeToken = SecureDataHelpers.Encrypt(edgeEntity.Token, ClientRsa)
+                                });
+                                EdgeClientHiveIdKeeper.SetValue(edgeClientEntity.Id);
+                                AcceptGate.SetOpen();
+                                if (hasCreated)
+                                {
+                                    _logger.LogInformation("New edge client {ClientAddress}:{EdgeClientId} added", iPAddress, edgeClientEntity.Id);
+                                }
+                            }
                         }
                     }
                 });
