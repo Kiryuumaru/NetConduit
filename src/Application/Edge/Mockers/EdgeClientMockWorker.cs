@@ -12,6 +12,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using System.Collections.Concurrent;
+using System.Diagnostics;
 using System.Text;
 using System.Text.Json;
 
@@ -101,21 +102,22 @@ internal class EdgeClientMockWorker(ILogger<EdgeClientMockWorker> logger, IServi
             StartMockStreamRaw(EdgeDefaults.MockChannelKey6, streamPipelineService, tcpHost, tcpPort, cts.Token),
             StartMockStreamRaw(EdgeDefaults.MockChannelKey7, streamPipelineService, tcpHost, tcpPort, cts.Token),
             StartMockStreamRaw(EdgeDefaults.MockChannelKey8, streamPipelineService, tcpHost, tcpPort, cts.Token),
-            StartMockStreamRaw(EdgeDefaults.MockChannelKey9, streamPipelineService, tcpHost, tcpPort, cts.Token),
-            StartMockStreamMessaging(EdgeDefaults.MockMsgChannelKey0, streamPipelineService, cts.Token),
-            StartMockStreamMessaging(EdgeDefaults.MockMsgChannelKey1, streamPipelineService, cts.Token),
-            StartMockStreamMessaging(EdgeDefaults.MockMsgChannelKey2, streamPipelineService, cts.Token),
-            StartMockStreamMessaging(EdgeDefaults.MockMsgChannelKey3, streamPipelineService, cts.Token),
-            StartMockStreamMessaging(EdgeDefaults.MockMsgChannelKey4, streamPipelineService, cts.Token),
-            StartMockStreamMessaging(EdgeDefaults.MockMsgChannelKey5, streamPipelineService, cts.Token),
-            StartMockStreamMessaging(EdgeDefaults.MockMsgChannelKey6, streamPipelineService, cts.Token),
-            StartMockStreamMessaging(EdgeDefaults.MockMsgChannelKey7, streamPipelineService, cts.Token),
-            StartMockStreamMessaging(EdgeDefaults.MockMsgChannelKey8, streamPipelineService, cts.Token),
-            StartMockStreamMessaging(EdgeDefaults.MockMsgChannelKey9, streamPipelineService, cts.Token));
+            StartMockStreamRaw(EdgeDefaults.MockChannelKey9, streamPipelineService, tcpHost, tcpPort, cts.Token)
+            //StartMockStreamMessaging(EdgeDefaults.MockMsgChannelKey0, streamPipelineService, cts.Token),
+            //StartMockStreamMessaging(EdgeDefaults.MockMsgChannelKey1, streamPipelineService, cts.Token),
+            //StartMockStreamMessaging(EdgeDefaults.MockMsgChannelKey2, streamPipelineService, cts.Token),
+            //StartMockStreamMessaging(EdgeDefaults.MockMsgChannelKey3, streamPipelineService, cts.Token),
+            //StartMockStreamMessaging(EdgeDefaults.MockMsgChannelKey4, streamPipelineService, cts.Token),
+            //StartMockStreamMessaging(EdgeDefaults.MockMsgChannelKey5, streamPipelineService, cts.Token),
+            //StartMockStreamMessaging(EdgeDefaults.MockMsgChannelKey6, streamPipelineService, cts.Token),
+            //StartMockStreamMessaging(EdgeDefaults.MockMsgChannelKey7, streamPipelineService, cts.Token),
+            //StartMockStreamMessaging(EdgeDefaults.MockMsgChannelKey8, streamPipelineService, cts.Token),
+            //StartMockStreamMessaging(EdgeDefaults.MockMsgChannelKey9, streamPipelineService, cts.Token)
+            );
     }
 
     int msgStreamAveLent = 10;
-    ConcurrentDictionary<Guid, (MockPayload payload, DateTimeOffset time)> msgStreamMapMock = [];
+    ConcurrentDictionary<Guid, (MockPayload payload, Stopwatch stopwatch)> msgStreamMapMock = [];
     TimeSpan msgStreamLogSpan = TimeSpan.FromSeconds(1);
     DateTimeOffset msgStreamLastLog = DateTimeOffset.MinValue;
     List<double> msgStreamAveLi = [];
@@ -125,8 +127,6 @@ internal class EdgeClientMockWorker(ILogger<EdgeClientMockWorker> logger, IServi
 
         mockStream.OnMessage(async payload =>
         {
-            var now = DateTimeOffset.UtcNow;
-
             await Task.Delay(100);
 
             if (JsonSerializer.Deserialize<MessagingPipePayload<MockPayload>>(payload.Message.MockMessage) is not MessagingPipePayload<MockPayload> clientPayload)
@@ -149,12 +149,13 @@ internal class EdgeClientMockWorker(ILogger<EdgeClientMockWorker> logger, IServi
                 msgStreamAveLi.RemoveAt(0);
             }
 
-            msgStreamAveLi.Add((now - mock.time).TotalMilliseconds);
+            mock.stopwatch.Stop();
+            msgStreamAveLi.Add(mock.stopwatch.ElapsedMilliseconds);
             msgStreamMapMock.Remove(clientPayload.MessageGuid, out _);
 
-            if (msgStreamLastLog + msgStreamLogSpan < now)
+            if (msgStreamLastLog + msgStreamLogSpan < DateTimeOffset.UtcNow)
             {
-                msgStreamLastLog = now;
+                msgStreamLastLog = DateTimeOffset.UtcNow;
                 _logger.LogInformation("Messaging mock time {TimeStamp:0.###}ms, map count: {MapCount}", msgStreamAveLi.Average(), msgStreamMapMock.Count);
             }
         });
@@ -171,10 +172,10 @@ internal class EdgeClientMockWorker(ILogger<EdgeClientMockWorker> logger, IServi
                 {
                     string mockVal = RandomHelpers.Alphanumeric(1000);
                     var payload = new MockPayload() { MockMessage = mockVal };
-                    var now = DateTimeOffset.UtcNow;
+                    var stopwatch = Stopwatch.StartNew();
                     var guid = mockStream.Send(payload);
 
-                    msgStreamMapMock[guid] = (payload, now);
+                    msgStreamMapMock[guid] = (payload, stopwatch);
 
                     await Task.Delay(100);
                 }
@@ -214,18 +215,29 @@ internal class EdgeClientMockWorker(ILogger<EdgeClientMockWorker> logger, IServi
             {
                 var ict = stoppingToken.WithTimeout(TimeSpan.FromMinutes(5));
 
-                string sendStr = RandomHelpers.Alphanumeric(10001);
+                string sendStr = RandomHelpers.Alphanumeric(101);
+                //string sendStr = RandomHelpers.Alphanumeric(10001);
                 //string sendStr = RandomHelpers.Alphanumeric(Random.Shared.Next(10000));
                 byte[] sendBytes = Encoding.Default.GetBytes(sendStr);
 
                 try
                 {
-                    DateTimeOffset sendTime = DateTimeOffset.UtcNow;
+                    var writeStopwatch = Stopwatch.StartNew();
 
                     await mockStream.WriteAsync(sendBytes, ict);
+
+                    writeStopwatch.Stop();
+                    var writeMs = writeStopwatch.ElapsedMilliseconds;
+
+                    var readStopwatch = Stopwatch.StartNew();
+
                     var bytesRead = await mockStream.ReadAsync(receivedBytes, ict);
 
-                    DateTimeOffset receivedTime = DateTimeOffset.UtcNow;
+                    readStopwatch.Stop();
+                    var readMs = readStopwatch.ElapsedMilliseconds;
+
+                    //_logger.LogInformation("Raw bytes: S {TimeStamp:0.###}ms, R {TimeStamp:0.###}ms, T {TimeStamp:0.###}ms",
+                    //    writeMs, readMs, writeMs + readMs);
 
                     string receivedStr = Encoding.Default.GetString(receivedBytes[..bytesRead].Span);
 
@@ -239,7 +251,7 @@ internal class EdgeClientMockWorker(ILogger<EdgeClientMockWorker> logger, IServi
                         {
                             await aveLocker.WaitAsync(stoppingToken);
 
-                            mockStreamRawAveLi.Add((receivedTime - sendTime).TotalMilliseconds);
+                            mockStreamRawAveLi.Add(writeMs + readMs);
                             while (mockStreamRawAveLi.Count > mockStreamRawAveLent)
                             {
                                 mockStreamRawAveLi.RemoveAt(0);
