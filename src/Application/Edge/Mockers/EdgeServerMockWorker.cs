@@ -10,6 +10,7 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
+using System.Diagnostics;
 using System.Net;
 using System.Text.Json;
 
@@ -139,6 +140,8 @@ internal class EdgeServerMockWorker(ILogger<EdgeServerMockWorker> logger, IServi
             {
                 try
                 {
+                    var sw = Stopwatch.StartNew();
+
                     var bytesread = mockStream.Read(receivedBytes);
 
                     if (bytesread == 0)
@@ -146,7 +149,15 @@ internal class EdgeServerMockWorker(ILogger<EdgeServerMockWorker> logger, IServi
                         stoppingToken.WaitHandle.WaitOne(100);
                     }
 
+                    var readMs = sw.ElapsedMilliSeconds();
+                    sw.Restart();
+
                     mockStream.Write(receivedBytes[..bytesread]);
+
+                    var writeMs = sw.ElapsedMilliSeconds();
+                    sw.Restart();
+
+                    //_logger.LogInformation("Raw bytes: S {Write:0.00}ms, R {Read:0.00}ms, T {Total:0.00}ms", writeMs, readMs, writeMs + readMs);
 
                     //string receivedStr = BytesHelpers.DecodeArray(receivedBytes[..bytesread]);
 

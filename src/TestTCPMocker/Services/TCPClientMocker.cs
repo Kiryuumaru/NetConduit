@@ -1,5 +1,7 @@
-﻿using DisposableHelpers.Attributes;
+﻿using Application.Common.Extensions;
+using DisposableHelpers.Attributes;
 using Microsoft.Extensions.Logging;
+using System.Diagnostics;
 using System.Net.Sockets;
 using System.Text;
 
@@ -44,6 +46,8 @@ internal partial class TCPClientMocker(ILogger<TCPClientMocker> logger)
 
         NetworkStream ns = client.GetStream();
 
+        await Task.Delay(5000, stoppingToken);
+
         while (!ct.IsCancellationRequested)
         {
             string sendStr = Guid.NewGuid().ToString();
@@ -51,13 +55,18 @@ internal partial class TCPClientMocker(ILogger<TCPClientMocker> logger)
 
             try
             {
-                DateTimeOffset sendTime = DateTimeOffset.UtcNow;
+                var sw = Stopwatch.StartNew();
 
                 await ns.WriteAsync(sendBytes, stoppingToken);
+
+                var writeMs = sw.ElapsedMilliSeconds();
+                sw.Restart();
+
                 byte[] receivedBytes = new byte[4096];
                 var readBytes = await ns.ReadAsync(receivedBytes, stoppingToken);
 
-                DateTimeOffset receivedTime = DateTimeOffset.UtcNow;
+                var readMs = sw.ElapsedMilliSeconds();
+                sw.Restart();
 
                 string receivedStr = Encoding.ASCII.GetString(receivedBytes.AsSpan()[..readBytes]);
 
@@ -67,7 +76,7 @@ internal partial class TCPClientMocker(ILogger<TCPClientMocker> logger)
                 }
                 else
                 {
-                    _logger.LogInformation("Received time {TimeStamp}ms...", (receivedTime - sendTime).TotalMilliseconds);
+                    _logger.LogInformation("Raw bytes: S {Write:0.00}ms, R {Read:0.00}ms, T {Total:0.00}ms", writeMs, readMs, writeMs + readMs);
                 }
             }
             catch (Exception ex)
