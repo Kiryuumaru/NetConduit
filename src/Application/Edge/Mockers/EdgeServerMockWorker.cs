@@ -85,28 +85,19 @@ internal class EdgeServerMockWorker(ILogger<EdgeServerMockWorker> logger, IServi
             streamPipelineService.Start().Forget();
         }).Forget();
 
-        return Task.WhenAll(
-            StartMockStreamRaw(EdgeDefaults.MockChannelKey0, streamPipelineService, iPAddress, tranceiverStream, cts.Token),
-            StartMockStreamRaw(EdgeDefaults.MockChannelKey1, streamPipelineService, iPAddress, tranceiverStream, cts.Token),
-            StartMockStreamRaw(EdgeDefaults.MockChannelKey2, streamPipelineService, iPAddress, tranceiverStream, cts.Token),
-            StartMockStreamRaw(EdgeDefaults.MockChannelKey3, streamPipelineService, iPAddress, tranceiverStream, cts.Token),
-            StartMockStreamRaw(EdgeDefaults.MockChannelKey4, streamPipelineService, iPAddress, tranceiverStream, cts.Token),
-            StartMockStreamRaw(EdgeDefaults.MockChannelKey5, streamPipelineService, iPAddress, tranceiverStream, cts.Token),
-            StartMockStreamRaw(EdgeDefaults.MockChannelKey6, streamPipelineService, iPAddress, tranceiverStream, cts.Token),
-            StartMockStreamRaw(EdgeDefaults.MockChannelKey7, streamPipelineService, iPAddress, tranceiverStream, cts.Token),
-            StartMockStreamRaw(EdgeDefaults.MockChannelKey8, streamPipelineService, iPAddress, tranceiverStream, cts.Token),
-            StartMockStreamRaw(EdgeDefaults.MockChannelKey9, streamPipelineService, iPAddress, tranceiverStream, cts.Token)
-            //StartMockStreamMessaging(EdgeDefaults.MockMsgChannelKey0, streamPipelineService, cts.Token),
-            //StartMockStreamMessaging(EdgeDefaults.MockMsgChannelKey1, streamPipelineService, cts.Token),
-            //StartMockStreamMessaging(EdgeDefaults.MockMsgChannelKey2, streamPipelineService, cts.Token),
-            //StartMockStreamMessaging(EdgeDefaults.MockMsgChannelKey3, streamPipelineService, cts.Token),
-            //StartMockStreamMessaging(EdgeDefaults.MockMsgChannelKey4, streamPipelineService, cts.Token),
-            //StartMockStreamMessaging(EdgeDefaults.MockMsgChannelKey5, streamPipelineService, cts.Token),
-            //StartMockStreamMessaging(EdgeDefaults.MockMsgChannelKey6, streamPipelineService, cts.Token),
-            //StartMockStreamMessaging(EdgeDefaults.MockMsgChannelKey7, streamPipelineService, cts.Token),
-            //StartMockStreamMessaging(EdgeDefaults.MockMsgChannelKey8, streamPipelineService, cts.Token),
-            //StartMockStreamMessaging(EdgeDefaults.MockMsgChannelKey9, streamPipelineService, cts.Token)
-            );
+        List<Task> moqs = [];
+        for (int i = 0; i < EdgeDefaults.RawMockChannelCount; i++)
+        {
+            var moqChannel = new Guid($"00000000-0000-0000-0000-{(EdgeDefaults.RawMockChannelKeyOffset + i):D12}");
+            moqs.Add(StartMockStreamRaw(moqChannel, streamPipelineService, iPAddress, tranceiverStream, cts.Token));
+        }
+        for (int i = 0; i < EdgeDefaults.MsgMockChannelCount; i++)
+        {
+            var moqChannel = new Guid($"00000000-0000-0000-0000-{(EdgeDefaults.MsgMockChannelKeyOffset + i):D12}");
+            moqs.Add(StartMockStreamMessaging(moqChannel, streamPipelineService, cts.Token));
+        }
+
+        return Task.WhenAll(moqs);
     }
 
     private Task StartMockStreamMessaging(Guid channelKey, StreamPipelineService streamPipelineService, CancellationToken stoppingToken)

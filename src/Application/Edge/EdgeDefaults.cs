@@ -16,24 +16,11 @@ public static class EdgeDefaults
 
     public static readonly TimeSpan RelayedApiTimeout = TimeSpan.FromSeconds(10);
 
-    public static readonly Guid MockChannelKey0 = new("00000000-0000-0000-0000-000000001000");
-    public static readonly Guid MockChannelKey1 = new("00000000-0000-0000-0000-000000001001");
-    public static readonly Guid MockChannelKey2 = new("00000000-0000-0000-0000-000000001002");
-    public static readonly Guid MockChannelKey3 = new("00000000-0000-0000-0000-000000001003");
-    public static readonly Guid MockChannelKey4 = new("00000000-0000-0000-0000-000000001004");
-    public static readonly Guid MockChannelKey5 = new("00000000-0000-0000-0000-000000001005");
-    public static readonly Guid MockChannelKey6 = new("00000000-0000-0000-0000-000000001006");
-    public static readonly Guid MockChannelKey7 = new("00000000-0000-0000-0000-000000001007");
-    public static readonly Guid MockChannelKey8 = new("00000000-0000-0000-0000-000000001008");
-    public static readonly Guid MockChannelKey9 = new("00000000-0000-0000-0000-000000001009");
-    public static readonly Guid MockMsgChannelKey0 = new("00000000-0000-0000-0000-000000002000");
-    public static readonly Guid MockMsgChannelKey1 = new("00000000-0000-0000-0000-000000002001");
-    public static readonly Guid MockMsgChannelKey2 = new("00000000-0000-0000-0000-000000002002");
-    public static readonly Guid MockMsgChannelKey3 = new("00000000-0000-0000-0000-000000002003");
-    public static readonly Guid MockMsgChannelKey4 = new("00000000-0000-0000-0000-000000002004");
-    public static readonly Guid MockMsgChannelKey5 = new("00000000-0000-0000-0000-000000002005");
-    public static readonly Guid MockMsgChannelKey6 = new("00000000-0000-0000-0000-000000002006");
-    public static readonly Guid MockMsgChannelKey7 = new("00000000-0000-0000-0000-000000002007");
-    public static readonly Guid MockMsgChannelKey8 = new("00000000-0000-0000-0000-000000002008");
-    public static readonly Guid MockMsgChannelKey9 = new("00000000-0000-0000-0000-000000002009");
+    public static readonly int RawMockChannelKeyOffset = 1000;
+    public static readonly int RawMockChannelCount = 100;
+
+    public static readonly int MsgMockChannelKeyOffset = 2000;
+    public static readonly int MsgMockChannelCount = 0;
+
+    public static readonly int MockAveCount = 5;
 }

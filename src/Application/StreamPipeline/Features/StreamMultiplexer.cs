@@ -147,7 +147,7 @@ public partial class StreamMultiplexer
     {
         return Task.Run(() =>
         {
-            Span<byte> paddingBytes = _paddingBytes.AsSpan();
+            ReadOnlySpan<byte> paddingBytes = _paddingBytes.AsSpan();
             Span<byte> channelBytes = stackalloc byte[_channelKeySize];
             Span<byte> receivedBytes = stackalloc byte[_totalSize];
             Span<byte> packetBytes = new byte[StreamPipelineDefaults.StreamMultiplexerMaxPacketSize];
@@ -204,9 +204,9 @@ public partial class StreamMultiplexer
     {
         return Task.Run(() =>
         {
-            Span<byte> paddingBytes = _paddingBytes.AsSpan();
+            ReadOnlySpan<byte> paddingBytes = _paddingBytes.AsSpan();
             Span<byte> headerBytes = stackalloc byte[_headerSize];
-            Span<byte> receivedBytes = stackalloc byte[StreamPipelineDefaults.StreamMultiplexerChunkSize];
+            Span<byte> receivedBytes = new byte[StreamPipelineDefaults.StreamMultiplexerChunkSize];
 
             while (!_cts.Token.IsCancellationRequested)
             {
