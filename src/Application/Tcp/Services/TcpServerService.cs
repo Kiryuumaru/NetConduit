@@ -69,7 +69,7 @@ public partial class TcpServerService(ILogger<TcpServerService> logger)
                     TranceiverStream tranceiverStream = new(networkStream, networkStream);
                     CancellationTokenSource clientCts = CancellationTokenSource.CreateLinkedTokenSource(_cts.Token);
 
-                    StartClient(tcpClient, serverAddress, networkStream, tranceiverStream, clientAddress, clientCts, onClientCallback).Forget();
+                    ThreadHelpers.WaitThread(() => StartClient(tcpClient, serverAddress, networkStream, tranceiverStream, clientAddress, clientCts, onClientCallback)).Forget();
                 }
                 catch (Exception ex)
                 {

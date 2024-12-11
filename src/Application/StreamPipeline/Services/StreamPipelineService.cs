@@ -57,6 +57,11 @@ public partial class StreamPipelineService(ILogger<StreamPipelineService> logger
         return GetMux().Set(channelKey, bufferSize);
     }
 
+    public void SetRaw(Guid channelKey, TranceiverStream tranceiverStream)
+    {
+        GetMux().Set(channelKey, tranceiverStream);
+    }
+
     public MessagingPipe<TSend, TReceive> SetMessagingPipe<TSend, TReceive>(Guid channelKey, string channelName, JsonSerializerOptions? jsonSerializerOptions = null, ISecureStreamFactory? secureStreamFactory = null)
     {
         var messagingPipe = _serviceProvider.GetRequiredService<MessagingPipe<TSend, TReceive>>();

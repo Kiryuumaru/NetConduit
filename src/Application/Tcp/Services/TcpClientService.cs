@@ -70,7 +70,7 @@ public partial class TcpClientService(ILogger<TcpClientService> logger)
                     NetworkStream networkStream = tcpClient.GetStream();
                     TranceiverStream tranceiverStream = new(networkStream, networkStream);
 
-                    await StartClient(tcpClient, serverAddress, networkStream, tranceiverStream, onClientCallback, clientCts);
+                    await ThreadHelpers.WaitThread(() => StartClient(tcpClient, serverAddress, networkStream, tranceiverStream, onClientCallback, clientCts));
                 }
                 catch (Exception ex)
                 {

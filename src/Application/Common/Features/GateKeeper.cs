@@ -1,4 +1,6 @@
-﻿namespace Application.Common.Features;
+﻿using Application.Common.Extensions;
+
+namespace Application.Common.Features;
 
 public class GateKeeper
 {
@@ -25,29 +27,21 @@ public class GateKeeper
         }
     }
 
-    public Task<bool> WaitForOpen(CancellationToken cancellationToken)
+    public async Task<bool> WaitForOpen(CancellationToken cancellationToken)
     {
-        return Task.Run(() =>
+        try
         {
-            try
-            {
-                _waiterEvent.Wait(cancellationToken);
-                return true;
-            }
-            catch
-            {
-                return false;
-            }
-
-        }, cancellationToken);
+            await _waiterEvent.WaitHandle.WaitHandleTask(cancellationToken);
+            return true;
+        }
+        catch
+        {
+            return false;
+        }
     }
 
     public Task WaitForOpenOrThrow(CancellationToken cancellationToken)
     {
-        return Task.Run(() =>
-        {
-            _waiterEvent.Wait(cancellationToken);
-
-        }, cancellationToken);
+        return _waiterEvent.WaitHandle.WaitHandleTask(cancellationToken);
     }
 }

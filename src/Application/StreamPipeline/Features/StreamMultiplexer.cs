@@ -108,13 +108,14 @@ public partial class StreamMultiplexer
         return Task.Run(async () =>
         {
             await Task.WhenAll(
-                DemultiplexAll(),
-                MultiplexAll()
+                MultiplexAll(),
+                DemultiplexAll()
             );
 
             _onStopped();
         });
     }
+
     private Task MultiplexAll()
     {
         return Task.Run(async () =>
@@ -145,7 +146,7 @@ public partial class StreamMultiplexer
 
     private Task MultiplexOne(Guid channelKey, TranceiverStream tranceiverStream, CancellationToken stoppingToken)
     {
-        return Task.Run(() =>
+        return ThreadHelpers.WaitThread(() =>
         {
             ReadOnlySpan<byte> paddingBytes = _paddingBytes.AsSpan();
             Span<byte> channelBytes = stackalloc byte[_channelKeySize];
@@ -197,12 +198,12 @@ public partial class StreamMultiplexer
 
             Remove(channelKey);
 
-        }, stoppingToken);
+        });
     }
 
     private Task DemultiplexAll()
     {
-        return Task.Run(() =>
+        return ThreadHelpers.WaitThread(() =>
         {
             ReadOnlySpan<byte> paddingBytes = _paddingBytes.AsSpan();
             Span<byte> headerBytes = stackalloc byte[_headerSize];

@@ -1,9 +1,12 @@
 ﻿using Application.Common.Extensions;
+using Application.Common.Features;
 using Application.Configuration.Extensions;
 using Application.Edge.Interfaces;
 using Application.Edge.Services;
 using Application.StreamPipeline.Common;
+using Application.StreamPipeline.Features;
 using Application.StreamPipeline.Services;
+using Application.StreamPipeline.Services.Pipes;
 using Application.Tcp.Services;
 using Domain.Edge.Models;
 using Domain.StreamPipeline.Models;
@@ -23,11 +26,6 @@ internal class EdgeClientMockWorker(ILogger<EdgeClientMockWorker> logger, IServi
     private readonly ILogger<EdgeClientMockWorker> _logger = logger;
     private readonly IServiceProvider _serviceProvider = serviceProvider;
     private readonly IConfiguration _configuration = configuration;
-
-    class WaiterCount
-    {
-        public int Count { get; set; }
-    }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
@@ -91,41 +89,94 @@ internal class EdgeClientMockWorker(ILogger<EdgeClientMockWorker> logger, IServi
             ex => { _logger.LogError("Stream multiplexer {ServerHost}:{ServerPort} error: {Error}", tcpHost, tcpPort, ex.Message); },
             cts.Token);
 
-        Task.Run(async () =>
+        ConcurrentDictionary<Guid, List<double>> mockStreamRawAveLi1 = [];
+        ConcurrentDictionary<Guid, List<double>> mockStreamRawAveLi2 = [];
+        ConcurrentDictionary<Guid, List<double>> mockStreamRawAveLi3 = [];
+
+        ConcurrentDictionary<Guid, (MockPayload payload, Stopwatch stopwatch)> msgStreamMapMock = [];
+        ConcurrentDictionary<Guid, List<double>> msgStreamAveLi = [];
+
+        int channelCount = 0;
+        int channelIndex = EdgeDefaults.MockChannelKeyOffset;
+        Guid NextChannel()
         {
-            await Task.Delay(5000);
+            channelCount++;
+            return new Guid($"00000000-0000-0000-0000-{channelIndex++:D12}");
+        }
+
+        Stopwatch loadingSw = Stopwatch.StartNew();
+
+        GateKeeperCounter waiterCount = new();
+
+        List<Func<Task>> moqs = [];
+        moqs.Add(async () =>
+        {
+            await waiterCount.WaitForOpen(cts.Token);
             streamPipelineService.Start().Forget();
-        }).Forget();
+            _logger.LogInformation("Loading time {LoadingTimeMs}ms for {ChannelCount} channels", loadingSw.ElapsedMilliSeconds(), channelCount);
+        });
+        moqs.Add(async () =>
+        {
+            while (!cts.IsCancellationRequested)
+            {
+                try
+                {
+                    _logger.LogInformation("Raw1: {Raw1TimeStamp:0.000}ms, Raw2: {Raw2TimeStamp:0.000}ms, Raw3: {Raw3TimeStamp:0.000}ms, Msg: {MsgTimeStamp:0.000}ms/{MapCount}",
+                        mockStreamRawAveLi1.Values.SelectMany(i => i).Average(),
+                        mockStreamRawAveLi2.Values.SelectMany(i => i).Average(),
+                        mockStreamRawAveLi3.Values.SelectMany(i => i).Average(),
+                        msgStreamAveLi.Values.SelectMany(i => i).Average(), msgStreamMapMock.Count);
+                }
+                catch { }
 
-        WaiterCount waiterCount = new();
-
-        List<Task> moqs = [];
+                await Task.Delay(1000);
+            }
+        });
         for (int i = 0; i < EdgeDefaults.RawMockChannelCount; i++)
         {
-            var moqChannel = new Guid($"00000000-0000-0000-0000-{(EdgeDefaults.RawMockChannelKeyOffset + i):D12}");
-            moqs.Add(StartMockStreamRaw(moqChannel, streamPipelineService, waiterCount, tcpHost, tcpPort, cts.Token));
+            var moqChannel = NextChannel();
+            TranceiverStream mockStream = new(
+                new BlockingMemoryStream(EdgeDefaults.EdgeCommsBufferSize),
+                new BlockingMemoryStream(EdgeDefaults.EdgeCommsBufferSize));
+            streamPipelineService.SetRaw(moqChannel, mockStream);
+            var aveList = mockStreamRawAveLi1.GetOrAdd(moqChannel, []);
+            moqs.Add(() => StartMockStreamRaw(aveList, mockStream, waiterCount, tcpHost, tcpPort, cts.Token));
+        }
+        for (int i = 0; i < EdgeDefaults.RawMockChannelCount; i++)
+        {
+            var moqChannel = NextChannel();
+            TranceiverStream mockStream = new(
+                new BlockingMemoryStream1(EdgeDefaults.EdgeCommsBufferSize),
+                new BlockingMemoryStream1(EdgeDefaults.EdgeCommsBufferSize));
+            streamPipelineService.SetRaw(moqChannel, mockStream);
+            var aveList = mockStreamRawAveLi2.GetOrAdd(moqChannel, []);
+            moqs.Add(() => StartMockStreamRaw(aveList, mockStream, waiterCount, tcpHost, tcpPort, cts.Token));
+        }
+        for (int i = 0; i < EdgeDefaults.RawMockChannelCount; i++)
+        {
+            var moqChannel = NextChannel();
+            TranceiverStream mockStream = new(
+                new BlockingMemoryStreamNew(EdgeDefaults.EdgeCommsBufferSize),
+                new BlockingMemoryStreamNew(EdgeDefaults.EdgeCommsBufferSize));
+            streamPipelineService.SetRaw(moqChannel, mockStream);
+            var aveList = mockStreamRawAveLi3.GetOrAdd(moqChannel, []);
+            moqs.Add(() => StartMockStreamRaw(aveList, mockStream, waiterCount, tcpHost, tcpPort, cts.Token));
         }
         for (int i = 0; i < EdgeDefaults.MsgMockChannelCount; i++)
         {
-            var moqChannel = new Guid($"00000000-0000-0000-0000-{(EdgeDefaults.MsgMockChannelKeyOffset + i):D12}");
-            moqs.Add(StartMockStreamMessaging(moqChannel, streamPipelineService, waiterCount, cts.Token));
+            var moqChannel = NextChannel();
+            var mockStream = streamPipelineService.SetMessagingPipe<MockPayload>(moqChannel, $"MOOCK-{moqChannel}");
+            var aveList = msgStreamAveLi.GetOrAdd(moqChannel, []);
+            moqs.Add(() => StartMockStreamMessaging(msgStreamMapMock, aveList, moqChannel, mockStream, waiterCount, cts.Token));
         }
 
-        return Task.WhenAll(moqs);
+        return Task.WhenAll(moqs.Select(i => i()));
     }
 
-    ConcurrentDictionary<Guid, (MockPayload payload, Stopwatch stopwatch)> msgStreamMapMock = [];
-    TimeSpan msgStreamLogSpan = TimeSpan.FromSeconds(1);
-    DateTimeOffset msgStreamLastLog = DateTimeOffset.MinValue;
-    ConcurrentDictionary<Guid, List<double>> msgStreamAveLi = [];
-    private Task StartMockStreamMessaging(Guid channelKey, StreamPipelineService streamPipelineService, WaiterCount waiterCount, CancellationToken stoppingToken)
+    private Task StartMockStreamMessaging(ConcurrentDictionary<Guid, (MockPayload payload, Stopwatch stopwatch)> msgStreamMapMock, List<double> aveList, Guid channelKey, MessagingPipe<MockPayload, MockPayload> mockStream, GateKeeperCounter waiterCount, CancellationToken stoppingToken)
     {
-        var mockStream = streamPipelineService.SetMessagingPipe<MockPayload>(channelKey, $"MOOCK-{channelKey}");
-
-        mockStream.OnMessage(async payload =>
+        mockStream.OnMessage(payload =>
         {
-            await Task.Delay(100);
-
             if (JsonSerializer.Deserialize<MessagingPipePayload<MockPayload>>(payload.Message.MockMessage) is not MessagingPipePayload<MockPayload> clientPayload)
             {
                 _logger.LogError("Invalid payload received {PayloadMessageGuid}", payload.MessageGuid);
@@ -143,32 +194,25 @@ internal class EdgeClientMockWorker(ILogger<EdgeClientMockWorker> logger, IServi
 
             mock.stopwatch.Stop();
 
-            var aveList = msgStreamAveLi.GetOrAdd(channelKey, []);
+            aveList.Add(mock.stopwatch.ElapsedMilliSeconds());
             while (aveList.Count > EdgeDefaults.MockAveCount)
             {
                 aveList.RemoveAt(0);
             }
 
-            aveList.Add(mock.stopwatch.ElapsedMilliSeconds());
             msgStreamMapMock.Remove(clientPayload.MessageGuid, out _);
-
-            if (msgStreamLastLog + msgStreamLogSpan < DateTimeOffset.UtcNow)
-            {
-                msgStreamLastLog = DateTimeOffset.UtcNow;
-                _logger.LogInformation("Messaging mock time {TimeStamp:0.###}ms, map count: {MapCount}", msgStreamAveLi.Values.SelectMany(i => i).Average(), msgStreamMapMock.Count);
-            }
         });
 
-        waiterCount.Count++;
+        waiterCount.Increment();
 
-        return Task.Run(async () =>
+        return ThreadHelpers.WaitThread(async () =>
         {
-            await Task.Delay(5000);
+            await Task.Delay(1000);
+
+            waiterCount.Decrement();
+            await waiterCount.WaitForOpen(stoppingToken);
 
             _logger.LogInformation("Mock messaging pipe started");
-
-            waiterCount.Count--;
-            while (waiterCount.Count != 0) { await Task.Delay(100); }
 
             while (!stoppingToken.IsCancellationRequested)
             {
@@ -177,9 +221,11 @@ internal class EdgeClientMockWorker(ILogger<EdgeClientMockWorker> logger, IServi
                     string mockVal = RandomHelpers.Alphanumeric(1000);
                     var payload = new MockPayload() { MockMessage = mockVal };
                     var stopwatch = Stopwatch.StartNew();
-                    var guid = mockStream.Send(payload);
+                    var guid = Guid.NewGuid();
 
                     msgStreamMapMock[guid] = (payload, stopwatch);
+
+                    mockStream.Send(guid, payload);
 
                     await Task.Delay(100);
                 }
@@ -193,33 +239,27 @@ internal class EdgeClientMockWorker(ILogger<EdgeClientMockWorker> logger, IServi
                 }
             }
 
-        }, stoppingToken);
+        });
     }
 
-    TimeSpan mockStreamRawLogSpan = TimeSpan.FromSeconds(1);
-    DateTimeOffset mockStreamRawLastLog = DateTimeOffset.MinValue;
-    ConcurrentDictionary<Guid, List<double>> mockStreamRawAveLi = [];
-    SemaphoreSlim aveLocker = new(1);
-    private Task StartMockStreamRaw(Guid channelKey, StreamPipelineService streamPipelineService, WaiterCount waiterCount, string tcpHost, int tcpPort, CancellationToken stoppingToken)
+    private Task StartMockStreamRaw(List<double> aveList, TranceiverStream mockStream, GateKeeperCounter waiterCount, string tcpHost, int tcpPort, CancellationToken stoppingToken)
     {
-        var mockStream = streamPipelineService.SetRaw(channelKey, EdgeDefaults.EdgeCommsBufferSize);
-
         _logger.LogInformation("Stream pipe {ServerHost}:{ServerPort} started", tcpHost, tcpPort);
 
-        waiterCount.Count++;
+        waiterCount.Increment();
 
-        return Task.Run(async () =>
-        {   
-            await Task.Delay(5000);
+        return ThreadHelpers.WaitThread(async () =>
+        {
+            await Task.Delay(1000);
+
+            waiterCount.Decrement();
+            await waiterCount.WaitForOpen(stoppingToken);
 
             _logger.LogInformation("Mock raw bytes started");
 
-            waiterCount.Count--;
-            while (waiterCount.Count != 0) { await Task.Delay(100); }
-
             Memory<byte> receivedBytes = new byte[EdgeDefaults.EdgeCommsBufferSize];
 
-            while (!stoppingToken.IsCancellationRequested && !streamPipelineService.IsDisposedOrDisposing)
+            while (!stoppingToken.IsCancellationRequested)
             {
                 var ict = stoppingToken.WithTimeout(TimeSpan.FromMinutes(99));
 
@@ -252,25 +292,10 @@ internal class EdgeClientMockWorker(ILogger<EdgeClientMockWorker> logger, IServi
                     }
                     else
                     {
-                        try
+                        aveList.Add(writeMs + readMs);
+                        while (aveList.Count > EdgeDefaults.MockAveCount)
                         {
-                            await aveLocker.WaitAsync(stoppingToken);
-
-                            var aveList = mockStreamRawAveLi.GetOrAdd(channelKey, []);
-                            aveList.Add(writeMs + readMs);
-                            while (aveList.Count > EdgeDefaults.MockAveCount)
-                            {
-                                aveList.RemoveAt(0);
-                            }
-                            if (mockStreamRawLastLog + mockStreamRawLogSpan < DateTimeOffset.UtcNow)
-                            {
-                                mockStreamRawLastLog = DateTimeOffset.UtcNow;
-                                _logger.LogInformation("Raw bytes received time {TimeStamp:0.###}ms", mockStreamRawAveLi.Values.SelectMany(i => i).Average());
-                            }
-                        }
-                        finally
-                        {
-                            aveLocker.Release();
+                            aveList.RemoveAt(0);
                         }
                     }
                 }
@@ -288,6 +313,6 @@ internal class EdgeClientMockWorker(ILogger<EdgeClientMockWorker> logger, IServi
 
             _logger.LogInformation("Stream pipe {ServerHost}:{ServerPort} ended", tcpHost, tcpPort);
 
-        }, stoppingToken);
+        });
     }
 }

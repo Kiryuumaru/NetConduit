@@ -1,4 +1,6 @@
-﻿namespace Application.Common.Features;
+﻿using Application.Common.Extensions;
+
+namespace Application.Common.Features;
 
 public class ValueKeeper<T>
 {
@@ -20,41 +22,33 @@ public class ValueKeeper<T>
         }
     }
 
-    public Task<T?> WaitForValue(CancellationToken cancellationToken)
+    public async Task<T?> WaitForValue(CancellationToken cancellationToken)
     {
-        return Task.Run(() =>
+        try
         {
-            try
-            {
-                _waiterEvent.Wait(cancellationToken);
-                return Value;
-            }
-            catch
-            {
-                return default;
-            }
-
-        }, cancellationToken);
+            await _waiterEvent.WaitHandle.WaitHandleTask(cancellationToken);
+            return Value;
+        }
+        catch
+        {
+            return default;
+        }
     }
 
-    public Task<T> WaitForValueOrThrow(CancellationToken cancellationToken)
+    public async Task<T> WaitForValueOrThrow(CancellationToken cancellationToken)
     {
-        return Task.Run(() =>
+        try
         {
-            try
+            await _waiterEvent.WaitHandle.WaitHandleTask(cancellationToken);
+            if (Value == null)
             {
-                _waiterEvent.Wait(cancellationToken);
-                if (Value == null)
-                {
-                    throw new OperationCanceledException();
-                }
-                return Value;
+                throw new OperationCanceledException();
             }
-            catch
-            {
-                throw;
-            }
-
-        }, cancellationToken);
+            return Value;
+        }
+        catch
+        {
+            throw;
+        }
     }
 }

@@ -4,6 +4,7 @@ using Application.Edge.Extensions;
 using Application.Edge.Interfaces;
 using Application.Edge.Services.HiveStore;
 using Application.StreamPipeline.Common;
+using Application.StreamPipeline.Features;
 using Application.StreamPipeline.Interfaces;
 using Application.StreamPipeline.Services;
 using DisposableHelpers.Attributes;

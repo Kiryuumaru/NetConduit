@@ -1,9 +1,12 @@
 ﻿using Application.Common.Extensions;
+using Application.Common.Features;
 using Application.Configuration.Extensions;
 using Application.Edge.Interfaces;
 using Application.Edge.Services;
 using Application.StreamPipeline.Common;
+using Application.StreamPipeline.Features;
 using Application.StreamPipeline.Services;
+using Application.StreamPipeline.Services.Pipes;
 using Application.Tcp.Services;
 using Domain.Edge.Models;
 using Microsoft.Extensions.Configuration;
@@ -79,31 +82,63 @@ internal class EdgeServerMockWorker(ILogger<EdgeServerMockWorker> logger, IServi
             ex => { _logger.LogError("Stream multiplexer {ClientAddress} error: {Error}", iPAddress, ex.Message); },
             cts.Token);
 
-        Task.Run(async () =>
-        {
-            await Task.Delay(5000);
-            streamPipelineService.Start().Forget();
-        }).Forget();
+        Stopwatch loadingSw = Stopwatch.StartNew();
+        GateKeeperCounter waiterCount = new();
 
-        List<Task> moqs = [];
+        int channelCount = 0;
+        int channelIndex = EdgeDefaults.MockChannelKeyOffset;
+        Guid NextChannel()
+        {
+            channelCount++;
+            return new Guid($"00000000-0000-0000-0000-{channelIndex++:D12}");
+        }
+
+        List<Func<Task>> moqs = [];
+        moqs.Add(async () =>
+        {
+            await waiterCount.WaitForOpen(cts.Token);
+            streamPipelineService.Start().Forget();
+            _logger.LogInformation("Loading time {LoadingTimeMs}ms for {ChannelCount} channels", loadingSw.ElapsedMilliSeconds(), channelCount);
+        });
         for (int i = 0; i < EdgeDefaults.RawMockChannelCount; i++)
         {
-            var moqChannel = new Guid($"00000000-0000-0000-0000-{(EdgeDefaults.RawMockChannelKeyOffset + i):D12}");
-            moqs.Add(StartMockStreamRaw(moqChannel, streamPipelineService, iPAddress, tranceiverStream, cts.Token));
+            var moqChannel = NextChannel();
+            TranceiverStream mockStream = new(
+                new BlockingMemoryStream(EdgeDefaults.EdgeCommsBufferSize),
+                new BlockingMemoryStream(EdgeDefaults.EdgeCommsBufferSize));
+            streamPipelineService.SetRaw(moqChannel, mockStream);
+            moqs.Add(() => StartMockStreamRaw(mockStream, waiterCount, iPAddress, tranceiverStream, cts.Token));
+        }
+        for (int i = 0; i < EdgeDefaults.RawMockChannelCount; i++)
+        {
+            var moqChannel = NextChannel();
+            TranceiverStream mockStream = new(
+                new BlockingMemoryStream1(EdgeDefaults.EdgeCommsBufferSize),
+                new BlockingMemoryStream1(EdgeDefaults.EdgeCommsBufferSize));
+            streamPipelineService.SetRaw(moqChannel, mockStream);
+            moqs.Add(() => StartMockStreamRaw(mockStream, waiterCount, iPAddress, tranceiverStream, cts.Token));
+        }
+        for (int i = 0; i < EdgeDefaults.RawMockChannelCount; i++)
+        {
+            var moqChannel = NextChannel();
+            TranceiverStream mockStream = new(
+                new BlockingMemoryStreamNew(EdgeDefaults.EdgeCommsBufferSize),
+                new BlockingMemoryStreamNew(EdgeDefaults.EdgeCommsBufferSize));
+            streamPipelineService.SetRaw(moqChannel, mockStream);
+            moqs.Add(() => StartMockStreamRaw(mockStream, waiterCount, iPAddress, tranceiverStream, cts.Token));
         }
         for (int i = 0; i < EdgeDefaults.MsgMockChannelCount; i++)
         {
-            var moqChannel = new Guid($"00000000-0000-0000-0000-{(EdgeDefaults.MsgMockChannelKeyOffset + i):D12}");
-            moqs.Add(StartMockStreamMessaging(moqChannel, streamPipelineService, cts.Token));
+            var moqChannel = NextChannel();
+            var mockStream = streamPipelineService.SetMessagingPipe<MockPayload>(moqChannel, $"MOOCK-{moqChannel}");
+            moqs.Add(() => StartMockStreamMessaging(mockStream, waiterCount, iPAddress, cts.Token));
         }
 
-        return Task.WhenAll(moqs);
+        return Task.WhenAll(moqs.Select(i => i()));
     }
 
-    private Task StartMockStreamMessaging(Guid channelKey, StreamPipelineService streamPipelineService, CancellationToken stoppingToken)
+    private async Task StartMockStreamMessaging(MessagingPipe<MockPayload, MockPayload> mockStream, GateKeeperCounter waiterCount, IPAddress iPAddress, CancellationToken stoppingToken)
     {
-        var mockStream = streamPipelineService.SetMessagingPipe<MockPayload>(channelKey, $"MOOCK-{channelKey}");
-
         stoppingToken.Register(mockStream.Dispose);
 
         mockStream.OnMessage(payload =>
@@ -114,57 +149,74 @@ internal class EdgeServerMockWorker(ILogger<EdgeServerMockWorker> logger, IServi
             });
         });
 
-        return Task.CompletedTask;
+        waiterCount.Increment();
+
+        await Task.Delay(1000, stoppingToken);
+
+        waiterCount.Decrement();
+        await waiterCount.WaitForOpen(stoppingToken);
+
+        _logger.LogInformation("Mock messaging pipe {iPAddress} started", iPAddress);
     }
 
-    private Task StartMockStreamRaw(Guid channelKey, StreamPipelineService streamPipelineService, IPAddress iPAddress, TranceiverStream tranceiverStream, CancellationToken stoppingToken)
+    private Task StartMockStreamRaw(TranceiverStream mockStream, GateKeeperCounter waiterCount, IPAddress iPAddress, TranceiverStream tranceiverStream, CancellationToken stoppingToken)
     {
-        var mockStream = streamPipelineService.SetRaw(channelKey, EdgeDefaults.EdgeCommsBufferSize);
+        _logger.LogInformation("Stream pipe {iPAddress} started", iPAddress);
 
-        _logger.LogInformation("Stream pipe {ClientAddress} started", iPAddress);
+        waiterCount.Increment();
 
-        return Task.Run(() =>
+        return Task.Run(async () =>
         {
-            Span<byte> receivedBytes = stackalloc byte[EdgeDefaults.EdgeCommsBufferSize];
+            await Task.Delay(1000, stoppingToken);
 
-            while (!stoppingToken.IsCancellationRequested && !streamPipelineService.IsDisposedOrDisposing)
+            waiterCount.Decrement();
+            await waiterCount.WaitForOpen(stoppingToken);
+
+            _logger.LogInformation("Mock raw bytes {iPAddress} started", iPAddress);
+
+            await ThreadHelpers.WaitThread(() =>
             {
-                try
+                Span<byte> receivedBytes = stackalloc byte[EdgeDefaults.EdgeCommsBufferSize];
+
+                while (!stoppingToken.IsCancellationRequested)
                 {
-                    var sw = Stopwatch.StartNew();
-
-                    var bytesread = mockStream.Read(receivedBytes);
-
-                    if (bytesread == 0)
+                    try
                     {
-                        stoppingToken.WaitHandle.WaitOne(100);
+                        var sw = Stopwatch.StartNew();
+
+                        var bytesread = mockStream.Read(receivedBytes);
+
+                        if (bytesread == 0)
+                        {
+                            stoppingToken.WaitHandle.WaitOne(100);
+                        }
+
+                        var readMs = sw.ElapsedMilliSeconds();
+                        sw.Restart();
+
+                        mockStream.Write(receivedBytes[..bytesread]);
+
+                        var writeMs = sw.ElapsedMilliSeconds();
+                        sw.Restart();
+
+                        //_logger.LogInformation("Raw bytes: S {Write:0.00}ms, R {Read:0.00}ms, T {Total:0.00}ms", writeMs, readMs, writeMs + readMs);
+
+                        //string receivedStr = BytesHelpers.DecodeArray(receivedBytes[..bytesread]);
+
+                        //_logger.LogInformation("received {DAT} bytes", receivedStr.Length);
                     }
-
-                    var readMs = sw.ElapsedMilliSeconds();
-                    sw.Restart();
-
-                    mockStream.Write(receivedBytes[..bytesread]);
-
-                    var writeMs = sw.ElapsedMilliSeconds();
-                    sw.Restart();
-
-                    //_logger.LogInformation("Raw bytes: S {Write:0.00}ms, R {Read:0.00}ms, T {Total:0.00}ms", writeMs, readMs, writeMs + readMs);
-
-                    //string receivedStr = BytesHelpers.DecodeArray(receivedBytes[..bytesread]);
-
-                    //_logger.LogInformation("received {DAT} bytes", receivedStr.Length);
-                }
-                catch (Exception ex)
-                {
-                    if (stoppingToken.IsCancellationRequested)
+                    catch (Exception ex)
                     {
-                        break;
+                        if (stoppingToken.IsCancellationRequested)
+                        {
+                            break;
+                        }
+                        _logger.LogError("Error {ClientAddress}: {Error}", iPAddress, ex.Message);
                     }
-                    _logger.LogError("Error {ClientAddress}: {Error}", iPAddress, ex.Message);
                 }
-            }
 
-            _logger.LogInformation("Stream pipe {ClientAddress} ended", iPAddress);
+                _logger.LogInformation("Stream pipe {ClientAddress} ended", iPAddress);
+            });
 
         }, stoppingToken);
     }
