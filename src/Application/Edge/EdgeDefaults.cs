@@ -16,8 +16,8 @@ public static class EdgeDefaults
 
     public static readonly TimeSpan RelayedApiTimeout = TimeSpan.FromSeconds(10);
 
-    public static readonly int RawMockChannelCount = 100;
-    public static readonly int MsgMockChannelCount = 10;
+    public static readonly int RawMockChannelCount = 20;
+    public static readonly int MsgMockChannelCount = 5;
 
     public static readonly int MockChannelKeyOffset = 1000;
     public static readonly int MockAveCount = 10;

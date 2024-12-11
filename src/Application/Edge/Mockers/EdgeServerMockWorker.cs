@@ -109,24 +109,6 @@ internal class EdgeServerMockWorker(ILogger<EdgeServerMockWorker> logger, IServi
             streamPipelineService.SetRaw(moqChannel, mockStream);
             moqs.Add(() => StartMockStreamRaw(mockStream, waiterCount, iPAddress, tranceiverStream, cts.Token));
         }
-        for (int i = 0; i < EdgeDefaults.RawMockChannelCount; i++)
-        {
-            var moqChannel = NextChannel();
-            TranceiverStream mockStream = new(
-                new BlockingMemoryStream1(EdgeDefaults.EdgeCommsBufferSize),
-                new BlockingMemoryStream1(EdgeDefaults.EdgeCommsBufferSize));
-            streamPipelineService.SetRaw(moqChannel, mockStream);
-            moqs.Add(() => StartMockStreamRaw(mockStream, waiterCount, iPAddress, tranceiverStream, cts.Token));
-        }
-        for (int i = 0; i < EdgeDefaults.RawMockChannelCount; i++)
-        {
-            var moqChannel = NextChannel();
-            TranceiverStream mockStream = new(
-                new BlockingMemoryStreamNew(EdgeDefaults.EdgeCommsBufferSize),
-                new BlockingMemoryStreamNew(EdgeDefaults.EdgeCommsBufferSize));
-            streamPipelineService.SetRaw(moqChannel, mockStream);
-            moqs.Add(() => StartMockStreamRaw(mockStream, waiterCount, iPAddress, tranceiverStream, cts.Token));
-        }
         for (int i = 0; i < EdgeDefaults.MsgMockChannelCount; i++)
         {
             var moqChannel = NextChannel();
