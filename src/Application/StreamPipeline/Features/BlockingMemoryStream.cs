@@ -1,4 +1,5 @@
 ﻿using Application.Common.Extensions;
+using Application.Common.Features;
 using Application.StreamPipeline.Common;
 using System;
 using System.Buffers;
@@ -8,7 +9,7 @@ namespace Application.StreamPipeline.Features;
 
 public partial class BlockingMemoryStream(int capacity) : AutoResetMemoryStream(capacity)
 {
-    private readonly ManualResetEventSlim _dataReady = new(false);
+    private readonly AsyncManualResetEvent _dataReady = new(false);
 
     public override int Read(byte[] buffer, int offset, int count)
     {
@@ -110,7 +111,7 @@ public partial class BlockingMemoryStream(int capacity) : AutoResetMemoryStream(
 
         while (readCount == 0)
         {
-            await _dataReady.WaitHandle.WaitAsync(cancellationToken);
+            await _dataReady.WaitAsync(cancellationToken);
 
             if (IsDisposed)
             {

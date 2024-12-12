@@ -4,7 +4,7 @@ namespace Application.Common.Features;
 
 public class GateKeeper
 {
-    private readonly ManualResetEventSlim _waiterEvent = new(false);
+    private readonly AsyncManualResetEvent _waiterEvent = new(false);
 
     public bool IsOpen { get; private set; }
 
@@ -29,6 +29,6 @@ public class GateKeeper
 
     public ValueTask<bool> WaitForOpen(CancellationToken cancellationToken)
     {
-        return _waiterEvent.WaitHandle.WaitAsync(cancellationToken);
+        return _waiterEvent.WaitAsync(cancellationToken);
     }
 }

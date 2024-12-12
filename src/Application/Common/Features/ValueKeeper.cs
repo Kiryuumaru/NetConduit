@@ -4,7 +4,7 @@ namespace Application.Common.Features;
 
 public class ValueKeeper<T>
 {
-    private readonly ManualResetEventSlim _waiterEvent = new(false);
+    private readonly AsyncManualResetEvent _waiterEvent = new(false);
 
     public T? Value { get; private set; }
 
@@ -26,7 +26,7 @@ public class ValueKeeper<T>
     {
         try
         {
-            await _waiterEvent.WaitHandle.WaitAsync(cancellationToken);
+            await _waiterEvent.WaitAsync(cancellationToken);
             return Value;
         }
         catch
@@ -39,7 +39,7 @@ public class ValueKeeper<T>
     {
         try
         {
-            await _waiterEvent.WaitHandle.WaitAsync(cancellationToken);
+            await _waiterEvent.WaitAsync(cancellationToken);
             if (Value == null)
             {
                 throw new OperationCanceledException();
