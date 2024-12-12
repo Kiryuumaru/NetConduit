@@ -55,9 +55,9 @@ internal class EdgeServerMockWorker(ILogger<EdgeServerMockWorker> logger, IServi
                 ct.Token,
                 tranceiverStream.CancelWhenDisposing());
 
-            IPAddress clientEndPoint = (tcpClient.Client.LocalEndPoint as IPEndPoint)?.Address!;
+            IPAddress iPAddress = (tcpClient.Client.LocalEndPoint as IPEndPoint)?.Address!;
 
-            return Start(clientEndPoint, tranceiverStream, clientCts);
+            return Start(iPAddress, tranceiverStream, clientCts);
 
         }, stoppingToken);
     }
@@ -123,9 +123,9 @@ internal class EdgeServerMockWorker(ILogger<EdgeServerMockWorker> logger, IServi
     {
         stoppingToken.Register(mockStream.Dispose);
 
-        mockStream.OnMessage(payload =>
+        mockStream.OnMessage(async payload =>
         {
-            mockStream.Send(new()
+            await mockStream.Send(new()
             {
                 MockMessage = JsonSerializer.Serialize(payload)
             });
@@ -156,7 +156,7 @@ internal class EdgeServerMockWorker(ILogger<EdgeServerMockWorker> logger, IServi
 
             _logger.LogInformation("Mock raw bytes {iPAddress} started", iPAddress);
 
-            await ThreadHelpers.WaitThread(() =>
+            await Task.Run(() =>
             {
                 Span<byte> receivedBytes = stackalloc byte[EdgeDefaults.EdgeCommsBufferSize];
 

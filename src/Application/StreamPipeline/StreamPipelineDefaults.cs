@@ -17,6 +17,4 @@ public static class StreamPipelineDefaults
     //public const int MessagingPipeChunkSize = 4096;
 
     public const int EdgeCommsBufferSize = 16384;
-
-    public static readonly CancellationToken ErrorWindowCancellationToken = new CancellationTokenSource(TimeSpan.FromSeconds(1)).Token;
 }

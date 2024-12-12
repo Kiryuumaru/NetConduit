@@ -70,7 +70,7 @@ public partial class TcpClientService(ILogger<TcpClientService> logger)
                     NetworkStream networkStream = tcpClient.GetStream();
                     TranceiverStream tranceiverStream = new(networkStream, networkStream);
 
-                    await ThreadHelpers.WaitThread(() => StartClient(tcpClient, serverAddress, networkStream, tranceiverStream, onClientCallback, clientCts));
+                    await StartClient(tcpClient, serverAddress, networkStream, tranceiverStream, onClientCallback, clientCts);
                 }
                 catch (Exception ex)
                 {
@@ -106,7 +106,7 @@ public partial class TcpClientService(ILogger<TcpClientService> logger)
 
             onClientCallback.Invoke(tranceiverStream, cts).Forget();
 
-            await TcpClientHelpers.WatchLiveliness(tcpClient, networkStream, tranceiverStream, cts, TcpDefaults.LivelinessSpan);
+            await TcpClientHelpers.WatchLiveliness(tcpClient, tranceiverStream, cts, TcpDefaults.LivelinessSpan);
 
             _logger.LogInformation("TCP client disconnected from the server {Host}:{Port}", serverAddress, _serverPort);
 

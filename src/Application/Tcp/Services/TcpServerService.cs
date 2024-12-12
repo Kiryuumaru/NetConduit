@@ -69,7 +69,7 @@ public partial class TcpServerService(ILogger<TcpServerService> logger)
                     TranceiverStream tranceiverStream = new(networkStream, networkStream);
                     CancellationTokenSource clientCts = CancellationTokenSource.CreateLinkedTokenSource(_cts.Token);
 
-                    ThreadHelpers.WaitThread(() => StartClient(tcpClient, serverAddress, networkStream, tranceiverStream, clientAddress, clientCts, onClientCallback)).Forget();
+                    StartClient(tcpClient, serverAddress, networkStream, tranceiverStream, clientAddress, clientCts, onClientCallback).Forget();
                 }
                 catch (Exception ex)
                 {
@@ -104,7 +104,7 @@ public partial class TcpServerService(ILogger<TcpServerService> logger)
 
             onClientCallback.Invoke(tcpClient, tranceiverStream, cts).Forget();
 
-            await TcpClientHelpers.WatchLiveliness(tcpClient, networkStream, tranceiverStream, cts, TcpDefaults.LivelinessSpan);
+            await TcpClientHelpers.WatchLiveliness(tcpClient, tranceiverStream, cts, TcpDefaults.LivelinessSpan);
 
             _logger.LogInformation("TCP server {Address}:{Port} disconnected from the client {ClientAddress}", serverAddress, _serverPort, clientAddress);
 

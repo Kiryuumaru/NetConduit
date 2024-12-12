@@ -180,7 +180,7 @@ public partial class StreamMultiplexer
             }
             catch (Exception ex)
             {
-                await stoppingToken.WaitHandle.WaitAsync(StreamPipelineDefaults.ErrorWindowCancellationToken);
+                await stoppingToken.WaitHandle.WaitAsync(1000);
                 if (stoppingToken.IsCancellationRequested)
                 {
                     break;
@@ -238,7 +238,7 @@ public partial class StreamMultiplexer
             }
             catch (Exception ex)
             {
-                await stoppingToken.WaitHandle.WaitAsync(StreamPipelineDefaults.ErrorWindowCancellationToken);
+                await stoppingToken.WaitHandle.WaitAsync(1000);
                 if (stoppingToken.IsCancellationRequested)
                 {
                     break;

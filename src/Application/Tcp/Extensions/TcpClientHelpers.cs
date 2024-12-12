@@ -1,33 +1,30 @@
 ﻿using System.Net.Sockets;
+using Application.Common.Extensions;
 using Application.StreamPipeline.Common;
 
 namespace Application.Tcp.Extensions;
 
 internal static class TcpClientHelpers
 {
-    public static Task WatchLiveliness(TcpClient tcpClient, NetworkStream networkStream, TranceiverStream tranceiverStream, CancellationTokenSource cts, TimeSpan livelinessSpan)
+    public static async Task WatchLiveliness(TcpClient tcpClient, TranceiverStream tranceiverStream, CancellationTokenSource cts, TimeSpan livelinessSpan)
     {
-        return Task.Run(() =>
+        Memory<byte> buffer = new byte[1];
+
+        while (tcpClient.Connected && !tranceiverStream.IsDisposedOrDisposing && !cts.IsCancellationRequested)
         {
-            Span<byte> buffer = stackalloc byte[1];
-
-            while (tcpClient.Connected && !tranceiverStream.IsDisposedOrDisposing && !cts.IsCancellationRequested)
+            try
             {
-                try
+                if (tcpClient.Client.Poll(0, SelectMode.SelectRead) &&
+                    await tcpClient.Client.ReceiveAsync(buffer, SocketFlags.Peek) == 0)
                 {
-                    if (tcpClient.Client.Poll(0, SelectMode.SelectRead) &&
-                        tcpClient.Client.Receive(buffer, SocketFlags.Peek) == 0)
-                    {
-                        break;
-                    }
-
-                    cts.Token.WaitHandle.WaitOne(livelinessSpan);
+                    break;
                 }
-                catch (OperationCanceledException) { }
-                catch (ObjectDisposedException) { }
-                catch { }
-            }
 
-        }, cts.Token);
+                await cts.Token.WaitHandle.WaitAsync(livelinessSpan);
+            }
+            catch (OperationCanceledException) { }
+            catch (ObjectDisposedException) { }
+            catch { }
+        }
     }
 }
