@@ -175,7 +175,7 @@ public partial class StreamMultiplexer
 
                     length -= bytesChunkWrite;
 
-                    await _mainTranceiverStream.WriteAsync(receivedBytes[..(_headerSize + bytesChunkWrite)], stoppingToken);
+                    _mainTranceiverStream.Write(receivedBytes[..(_headerSize + bytesChunkWrite)].Span);
                 }
             }
             catch (Exception ex)

@@ -90,14 +90,13 @@ public class MessagingPipe<TSend, TReceive> : BasePipe
                     BinaryPrimitives.WriteInt32LittleEndian(sendBytes.Slice(_chunkLengthPos, _chunkLengthSize).Span, bytesChunkSend);
                     messageBytes[..bytesChunkSend].CopyTo(sendBytes.Slice(_chunkPos, bytesChunkSend));
                     messageBytes = messageBytes[bytesChunkSend..];
-                    await tranceiverStream.WriteAsync(sendBytes[..(_headerSize + bytesChunkSend)], stoppingToken);
+                    tranceiverStream.Write(sendBytes[..(_headerSize + bytesChunkSend)].Span);
                 }
 
                 //_logger.LogTrace("MessagingPipe {MessagingPipeName} message sent to stream", Name);
             }
             catch (Exception ex)
             {
-                //await stoppingToken.WaitHandle.WaitAsync(StreamPipelineDefaults.ErrorWindowCancellationToken);
                 if (stoppingToken.IsCancellationRequested)
                 {
                     break;
@@ -160,7 +159,6 @@ public class MessagingPipe<TSend, TReceive> : BasePipe
             }
             catch (Exception ex)
             {
-                //await stoppingToken.WaitHandle.WaitAsync(StreamPipelineDefaults.ErrorWindowCancellationToken);
                 if (stoppingToken.IsCancellationRequested)
                 {
                     break;
