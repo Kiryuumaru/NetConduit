@@ -27,21 +27,8 @@ public class GateKeeper
         }
     }
 
-    public async Task<bool> WaitForOpen(CancellationToken cancellationToken)
+    public ValueTask<bool> WaitForOpen(CancellationToken cancellationToken)
     {
-        try
-        {
-            await _waiterEvent.WaitHandle.WaitHandleTask(cancellationToken);
-            return true;
-        }
-        catch
-        {
-            return false;
-        }
-    }
-
-    public Task WaitForOpenOrThrow(CancellationToken cancellationToken)
-    {
-        return _waiterEvent.WaitHandle.WaitHandleTask(cancellationToken);
+        return _waiterEvent.WaitHandle.WaitAsync(cancellationToken);
     }
 }

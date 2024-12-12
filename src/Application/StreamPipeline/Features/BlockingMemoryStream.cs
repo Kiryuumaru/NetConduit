@@ -78,10 +78,7 @@ public partial class BlockingMemoryStream(int capacity) : AutoResetMemoryStream(
 
         while (readCount == 0)
         {
-            if (!_dataReady.Wait(0, cancellationToken))
-            {
-                await _dataReady.WaitHandle.WaitHandleTask(cancellationToken);
-            }
+            await _dataReady.WaitHandle.WaitAsync(cancellationToken);
 
             if (IsDisposedOrDisposing)
             {

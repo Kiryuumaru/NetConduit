@@ -26,7 +26,7 @@ public class ValueKeeper<T>
     {
         try
         {
-            await _waiterEvent.WaitHandle.WaitHandleTask(cancellationToken);
+            await _waiterEvent.WaitHandle.WaitAsync(cancellationToken);
             return Value;
         }
         catch
@@ -39,7 +39,7 @@ public class ValueKeeper<T>
     {
         try
         {
-            await _waiterEvent.WaitHandle.WaitHandleTask(cancellationToken);
+            await _waiterEvent.WaitHandle.WaitAsync(cancellationToken);
             if (Value == null)
             {
                 throw new OperationCanceledException();

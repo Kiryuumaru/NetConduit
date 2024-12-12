@@ -67,41 +67,51 @@ public static class ThreadHelpers
         });
     }
 
-    public static Task WaitHandleTask(this WaitHandle waitHandle, CancellationToken cancellationToken = default)
+    public static async ValueTask<bool> WaitAsync(this WaitHandle waitHandle, CancellationToken cancellationToken = default)
     {
         if (waitHandle.WaitOne(0))
         {
-            return Task.CompletedTask;
+            return true;
         }
-        return Task.Run(async () =>
+
+        var tcs = new TaskCompletionSource();
+
+        var registeredWaitHandle = ThreadPool.RegisterWaitForSingleObject(
+            waitObject: waitHandle,
+            callBack: (o, timeout) => tcs.TrySetResult(),
+            state: null,
+            millisecondsTimeOutInterval: -1,
+            executeOnlyOnce: true);
+
+        bool cancelled = false;
+
+        if (cancellationToken.CanBeCanceled)
         {
-            var tcs = new TaskCompletionSource();
-
-            var registeredWaitHandle = ThreadPool.RegisterWaitForSingleObject(
-                waitObject: waitHandle,
-                callBack: (o, timeout) => tcs.TrySetResult(),
-                state: null,
-                millisecondsTimeOutInterval: -1,
-                executeOnlyOnce: true);
-
-            bool isCancelled = false;
-
             cancellationToken.Register(() =>
             {
-                if (tcs.TrySetCanceled())
-                {
-                    isCancelled = true;
-                }
+                cancelled = true;
+                tcs.TrySetCanceled();
                 registeredWaitHandle.Unregister(null);
             });
+        }
 
-            await tcs.Task.ContinueWith(_ => registeredWaitHandle.Unregister(null), TaskScheduler.Default);
-
-            if (isCancelled)
+        try
+        {
+            await tcs.Task.ConfigureAwait(false);
+        }
+        catch
+        {
+            if (cancelled)
             {
-                throw new TaskCanceledException();
+                return false;
             }
+            throw;
+        }
+        finally
+        {
+            registeredWaitHandle.Unregister(null);
+        }
 
-        }, cancellationToken);
+        return true;
     }
 }
