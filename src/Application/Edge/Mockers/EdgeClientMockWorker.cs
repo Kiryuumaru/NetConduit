@@ -181,7 +181,7 @@ internal class EdgeClientMockWorker(ILogger<EdgeClientMockWorker> logger, IServi
 
         waiterCount.Increment();
 
-        return ThreadHelpers.WaitThread(async () =>
+        return Task.Run(async () =>
         {
             await Task.Delay(1000);
 
@@ -201,7 +201,7 @@ internal class EdgeClientMockWorker(ILogger<EdgeClientMockWorker> logger, IServi
 
                     msgStreamMapMock[guid] = (payload, stopwatch);
 
-                    mockStream.Send(guid, payload);
+                    await mockStream.Send(guid, payload);
 
                     await Task.Delay(100);
                 }
@@ -215,7 +215,7 @@ internal class EdgeClientMockWorker(ILogger<EdgeClientMockWorker> logger, IServi
                 }
             }
 
-        });
+        }, stoppingToken);
     }
 
     private Task StartMockStreamRaw(List<double> aveList, TranceiverStream mockStream, GateKeeperCounter waiterCount, string tcpHost, int tcpPort, CancellationToken stoppingToken)
@@ -224,7 +224,7 @@ internal class EdgeClientMockWorker(ILogger<EdgeClientMockWorker> logger, IServi
 
         waiterCount.Increment();
 
-        return ThreadHelpers.WaitThread(async () =>
+        return Task.Run(async () =>
         {
             await Task.Delay(1000);
 
@@ -289,6 +289,6 @@ internal class EdgeClientMockWorker(ILogger<EdgeClientMockWorker> logger, IServi
 
             _logger.LogInformation("Stream pipe {ServerHost}:{ServerPort} ended", tcpHost, tcpPort);
 
-        });
+        }, stoppingToken);
     }
 }

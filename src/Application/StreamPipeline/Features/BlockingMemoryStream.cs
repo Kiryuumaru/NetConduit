@@ -1,6 +1,8 @@
 ﻿using Application.Common.Extensions;
 using Application.StreamPipeline.Common;
+using System;
 using System.Buffers;
+using System.Threading;
 
 namespace Application.StreamPipeline.Features;
 
@@ -8,21 +10,132 @@ public partial class BlockingMemoryStream(int capacity) : AutoResetMemoryStream(
 {
     private readonly ManualResetEventSlim _dataReady = new(false);
 
-    public override void Write(byte[] buffer, int offset, int count)
-        => CoreWrite(buffer, offset, count);
-
     public override int Read(byte[] buffer, int offset, int count)
-        => CoreRead(buffer, offset, count, default);
+    {
+        ObjectDisposedException.ThrowIf(IsDisposed, this);
+        return BlockingRead(buffer.AsSpan(offset, count));
+    }
+
+    public override int Read(Span<byte> buffer)
+    {
+        ObjectDisposedException.ThrowIf(IsDisposed, this);
+        return BlockingRead(buffer);
+    }
 
     public override Task<int> ReadAsync(byte[] buffer, int offset, int count, CancellationToken cancellationToken)
-        => CoreReadAsync(buffer, offset, count, cancellationToken).AsTask();
-
-    public override async ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancellationToken = default)
     {
-        byte[] sharedBuffer = ArrayPool<byte>.Shared.Rent(buffer.Length);
-        int readCount = await CoreReadAsync(sharedBuffer, 0, buffer.Length, cancellationToken);
-        sharedBuffer.AsSpan().CopyTo(buffer.Span);
+        ObjectDisposedException.ThrowIf(IsDisposed, this);
+        if (cancellationToken.IsCancellationRequested)
+        {
+            return Task.FromCanceled<int>(cancellationToken);
+        }
+        return BlockingReadAsync(buffer.AsMemory(offset, count), cancellationToken).AsTask();
+    }
+
+    public override ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancellationToken)
+    {
+        ObjectDisposedException.ThrowIf(IsDisposed, this);
+        if (cancellationToken.IsCancellationRequested)
+        {
+            return ValueTask.FromCanceled<int>(cancellationToken);
+        }
+        return BlockingReadAsync(buffer, cancellationToken);
+    }
+
+    public override void Write(byte[] buffer, int offset, int count)
+    {
+        ObjectDisposedException.ThrowIf(IsDisposed, this);
+        BlockingWrite(buffer.AsSpan(offset, count));
+    }
+
+    public override void Write(ReadOnlySpan<byte> buffer)
+    {
+        ObjectDisposedException.ThrowIf(IsDisposed, this);
+        BlockingWrite(buffer);
+    }
+
+    public override Task WriteAsync(byte[] buffer, int offset, int count, CancellationToken cancellationToken)
+    {
+        ObjectDisposedException.ThrowIf(IsDisposed, this);
+        if (cancellationToken.IsCancellationRequested)
+        {
+            return Task.FromCanceled(cancellationToken);
+        }
+        BlockingWrite(buffer.AsSpan(offset, count));
+        return Task.CompletedTask;
+    }
+
+    public override ValueTask WriteAsync(ReadOnlyMemory<byte> buffer, CancellationToken cancellationToken = default)
+    {
+        ObjectDisposedException.ThrowIf(IsDisposed, this);
+        if (cancellationToken.IsCancellationRequested)
+        {
+            return ValueTask.FromCanceled(cancellationToken);
+        }
+        BlockingWrite(buffer.Span);
+        return ValueTask.CompletedTask;
+    }
+
+    protected int BlockingRead(Span<byte> buffer)
+    {
+        int readCount = 0;
+
+        while (readCount == 0)
+        {
+            _dataReady.Wait();
+
+            if (IsDisposed)
+            {
+                break;
+            }
+
+            readCount = CoreRead(buffer);
+
+            if (readCount == 0)
+            {
+                _dataReady.Reset();
+            }
+            else
+            {
+                break;
+            }
+        }
+
         return readCount;
+    }
+
+    protected async ValueTask<int> BlockingReadAsync(Memory<byte> buffer, CancellationToken cancellationToken)
+    {
+        int readCount = 0;
+
+        while (readCount == 0)
+        {
+            await _dataReady.WaitHandle.WaitAsync(cancellationToken);
+
+            if (IsDisposed)
+            {
+                break;
+            }
+
+            readCount = CoreRead(buffer.Span);
+
+            if (readCount == 0)
+            {
+                _dataReady.Reset();
+            }
+            else
+            {
+                break;
+            }
+        }
+
+        return readCount;
+    }
+
+    protected void BlockingWrite(ReadOnlySpan<byte> buffer)
+    {
+        CoreWrite(buffer);
+        _dataReady.Set();
     }
 
     protected override void Dispose(bool disposing)
@@ -38,71 +151,5 @@ public partial class BlockingMemoryStream(int capacity) : AutoResetMemoryStream(
         }
 
         base.Dispose(disposing);
-    }
-
-    public int CoreRead(byte[] buffer, int offset, int count, CancellationToken cancellationToken)
-    {
-        int readCount = 0;
-
-        ObjectDisposedException.ThrowIf(IsDisposedOrDisposing, this);
-
-        while (readCount == 0)
-        {
-            _dataReady.Wait(cancellationToken);
-
-            if (IsDisposedOrDisposing)
-            {
-                break;
-            }
-
-            readCount = base.Read(buffer, offset, count);
-
-            if (readCount == 0)
-            {
-                _dataReady.Reset();
-            }
-            else
-            {
-                break;
-            }
-        }
-
-        return readCount;
-    }
-
-    public async ValueTask<int> CoreReadAsync(byte[] buffer, int offset, int count, CancellationToken cancellationToken)
-    {
-        int readCount = 0;
-
-        ObjectDisposedException.ThrowIf(IsDisposedOrDisposing, this);
-
-        while (readCount == 0)
-        {
-            await _dataReady.WaitHandle.WaitAsync(cancellationToken);
-
-            if (IsDisposedOrDisposing)
-            {
-                break;
-            }
-
-            readCount = base.Read(buffer, offset, count);
-
-            if (readCount == 0)
-            {
-                _dataReady.Reset();
-            }
-            else
-            {
-                break;
-            }
-        }
-
-        return readCount;
-    }
-
-    public void CoreWrite(byte[] buffer, int offset, int count)
-    {
-        base.Write(buffer, offset, count);
-        _dataReady.Set();
     }
 }

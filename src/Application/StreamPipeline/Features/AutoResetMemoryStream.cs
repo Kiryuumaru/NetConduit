@@ -55,7 +55,7 @@ public partial class AutoResetMemoryStream(int capacity) : Stream
         return Task.FromResult(CoreRead(buffer.AsSpan(offset, count)));
     }
 
-    public override ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancellationToken = default)
+    public override ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancellationToken)
     {
         ObjectDisposedException.ThrowIf(IsDisposed, this);
         if (cancellationToken.IsCancellationRequested)
@@ -88,7 +88,7 @@ public partial class AutoResetMemoryStream(int capacity) : Stream
         return Task.CompletedTask;
     }
 
-    public override ValueTask WriteAsync(ReadOnlyMemory<byte> buffer, CancellationToken cancellationToken = default)
+    public override ValueTask WriteAsync(ReadOnlyMemory<byte> buffer, CancellationToken cancellationToken)
     {
         ObjectDisposedException.ThrowIf(IsDisposed, this);
         if (cancellationToken.IsCancellationRequested)
@@ -129,6 +129,11 @@ public partial class AutoResetMemoryStream(int capacity) : Stream
 
     protected override void Dispose(bool disposing)
     {
+        if (disposing)
+        {
+            _memoryStream.Dispose();
+        }
+
         CoreDispose();
 
         base.Dispose(disposing);

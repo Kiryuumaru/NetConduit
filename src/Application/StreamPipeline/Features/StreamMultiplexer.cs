@@ -22,9 +22,7 @@ public partial class StreamMultiplexer
         private readonly StreamChunkWriter _streamChunkWriter = new(tranceiverStream.ReceiverStream);
 
         public void WriteToReceiverStream(long length, ReadOnlySpan<byte> buffer)
-        {
-            _streamChunkWriter.WriteChunk(length, buffer);
-        }
+            => _streamChunkWriter.WriteChunk(length, buffer);
 
         protected virtual void Dispose(bool disposing)
         {
@@ -108,156 +106,146 @@ public partial class StreamMultiplexer
         return Task.Run(async () =>
         {
             await Task.WhenAll(
-                MultiplexAll(),
-                DemultiplexAll()
+                MultiplexAll(_cts.Token),
+                DemultiplexAll(_cts.Token)
             );
 
             _onStopped();
         });
     }
 
-    private Task MultiplexAll()
+    private async Task MultiplexAll(CancellationToken stoppingToken)
     {
-        return Task.Run(async () =>
+        while (!stoppingToken.IsCancellationRequested)
         {
-            while (!_cts.Token.IsCancellationRequested)
+            try
             {
-                try
+                var register = await _registerQueue.ReceiveAsync(stoppingToken);
+                if (stoppingToken.IsCancellationRequested)
                 {
-                    var register = await _registerQueue.ReceiveAsync(_cts.Token);
-                    if (_cts.Token.IsCancellationRequested)
-                    {
-                        break;
-                    }
-                    var channelCt = register.TranceiverStream.CancelWhenDisposed(_cts.Token);
-                    MultiplexOne(register.Channel, register.TranceiverStream, channelCt).Forget();
+                    break;
                 }
-                catch (Exception ex)
-                {
-                    if (_cts.Token.IsCancellationRequested)
-                    {
-                        break;
-                    }
-                    _onError(ex);
-                }
+                var channelCt = register.TranceiverStream.CancelWhenDisposed(stoppingToken);
+                MultiplexOne(register.Channel, register.TranceiverStream, channelCt).Forget();
             }
-        }, _cts.Token);
+            catch (Exception ex)
+            {
+                if (stoppingToken.IsCancellationRequested)
+                {
+                    break;
+                }
+                _onError(ex);
+            }
+        }
     }
 
-    private Task MultiplexOne(Guid channelKey, TranceiverStream tranceiverStream, CancellationToken stoppingToken)
+    private async Task MultiplexOne(Guid channelKey, TranceiverStream tranceiverStream, CancellationToken stoppingToken)
     {
-        return ThreadHelpers.WaitThread(() =>
+        ReadOnlyMemory<byte> paddingBytes = _paddingBytes.AsMemory();
+        Memory<byte> channelBytes = new byte[_channelKeySize];
+        Memory<byte> receivedBytes = new byte[_totalSize];
+        Memory<byte> packetBytes = new byte[StreamPipelineDefaults.StreamMultiplexerMaxPacketSize];
+
+        MemoryMarshal.Write(channelBytes.Span, in channelKey);
+
+        while (!stoppingToken.IsCancellationRequested)
         {
-            ReadOnlySpan<byte> paddingBytes = _paddingBytes.AsSpan();
-            Span<byte> channelBytes = stackalloc byte[_channelKeySize];
-            Span<byte> receivedBytes = stackalloc byte[_totalSize];
-            Span<byte> packetBytes = new byte[StreamPipelineDefaults.StreamMultiplexerMaxPacketSize];
-
-            MemoryMarshal.Write(channelBytes, in channelKey);
-
-            while (!stoppingToken.IsCancellationRequested)
+            try
             {
-                try
+                var packetLength = await tranceiverStream.SenderStream.ReadAsync(packetBytes, stoppingToken);
+                if (stoppingToken.IsCancellationRequested)
                 {
-                    var packetLength = tranceiverStream.SenderStream.Read(packetBytes);
-                    if (stoppingToken.IsCancellationRequested)
-                    {
-                        break;
-                    }
-
-                    int length = packetLength;
-                    int bytesChunkWrite = 0;
-
-                    while (length > 0)
-                    {
-                        bytesChunkWrite = Math.Min(length, StreamPipelineDefaults.StreamMultiplexerChunkSize);
-
-                        paddingBytes.CopyTo(receivedBytes[.._paddingSize]);
-                        channelBytes.CopyTo(receivedBytes.Slice(_channelKeyPos, _channelKeySize));
-
-                        BinaryPrimitives.WriteInt64LittleEndian(receivedBytes.Slice(_packetLengthPos, _packetLengthSize), length);
-                        BinaryPrimitives.WriteInt32LittleEndian(receivedBytes.Slice(_chunkLengthPos, _chunkLengthSize), bytesChunkWrite);
-
-                        packetBytes.Slice(packetLength - length, bytesChunkWrite).CopyTo(receivedBytes.Slice(_chunkPos, bytesChunkWrite));
-
-                        length -= bytesChunkWrite;
-
-                        _mainTranceiverStream.Write(receivedBytes[..(_headerSize + bytesChunkWrite)]);
-                    }
+                    break;
                 }
-                catch (Exception ex)
+
+                int length = packetLength;
+                int bytesChunkWrite = 0;
+
+                while (length > 0)
                 {
-                    stoppingToken.WaitHandle.WaitOne(1000);
-                    if (stoppingToken.IsCancellationRequested)
-                    {
-                        break;
-                    }
-                    _onError(ex);
+                    bytesChunkWrite = Math.Min(length, StreamPipelineDefaults.StreamMultiplexerChunkSize);
+
+                    paddingBytes.CopyTo(receivedBytes[.._paddingSize]);
+                    channelBytes.CopyTo(receivedBytes.Slice(_channelKeyPos, _channelKeySize));
+
+                    BinaryPrimitives.WriteInt64LittleEndian(receivedBytes.Slice(_packetLengthPos, _packetLengthSize).Span, length);
+                    BinaryPrimitives.WriteInt32LittleEndian(receivedBytes.Slice(_chunkLengthPos, _chunkLengthSize).Span, bytesChunkWrite);
+
+                    packetBytes.Slice(packetLength - length, bytesChunkWrite).CopyTo(receivedBytes.Slice(_chunkPos, bytesChunkWrite));
+
+                    length -= bytesChunkWrite;
+
+                    await _mainTranceiverStream.WriteAsync(receivedBytes[..(_headerSize + bytesChunkWrite)], stoppingToken);
                 }
             }
+            catch (Exception ex)
+            {
+                await stoppingToken.WaitHandle.WaitAsync(StreamPipelineDefaults.ErrorWindowCancellationToken);
+                if (stoppingToken.IsCancellationRequested)
+                {
+                    break;
+                }
+                _onError(ex);
+            }
+        }
 
-            Remove(channelKey);
-
-        });
+        Remove(channelKey);
     }
 
-    private Task DemultiplexAll()
+    private async Task DemultiplexAll(CancellationToken stoppingToken)
     {
-        return ThreadHelpers.WaitThread(() =>
-        {
-            ReadOnlySpan<byte> paddingBytes = _paddingBytes.AsSpan();
-            Span<byte> headerBytes = stackalloc byte[_headerSize];
-            Span<byte> receivedBytes = new byte[StreamPipelineDefaults.StreamMultiplexerChunkSize];
+        ReadOnlyMemory<byte> paddingBytes = _paddingBytes.AsMemory();
+        Memory<byte> headerBytes = new byte[_headerSize];
+        Memory<byte> receivedBytes = new byte[StreamPipelineDefaults.StreamMultiplexerChunkSize];
 
-            while (!_cts.Token.IsCancellationRequested)
+        while (!stoppingToken.IsCancellationRequested)
+        {
+            try
             {
+                headerBytes[.._paddingSize].Span.Clear();
+                await _mainTranceiverStream.ReadExactlyAsync(headerBytes, stoppingToken);
+                if (stoppingToken.IsCancellationRequested)
+                {
+                    break;
+                }
+                if (!headerBytes[.._paddingSize].Span.SequenceEqual(paddingBytes.Span))
+                {
+                    throw CorruptedHeaderBytesException.Instance;
+                }
+
+                Guid channelKey = new(headerBytes.Slice(_channelKeyPos, _channelKeySize).Span);
+                long packetLength = BinaryPrimitives.ReadInt64LittleEndian(headerBytes.Slice(_packetLengthPos, _packetLengthSize).Span);
+                int chunkLength = BinaryPrimitives.ReadInt32LittleEndian(headerBytes.Slice(_chunkLengthPos, _chunkLengthSize).Span);
+
+                var chunkBytes = receivedBytes[..chunkLength];
+
+                await _mainTranceiverStream.ReadExactlyAsync(chunkBytes, stoppingToken);
+
+                ChunkedTranceiverStreamHolder destinationStreamHolder;
+
                 try
                 {
-                    headerBytes[.._paddingSize].Clear();
-                    _mainTranceiverStream.ReadExactly(headerBytes);
-                    if (_cts.Token.IsCancellationRequested)
-                    {
-                        break;
-                    }
-                    if (!headerBytes[.._paddingSize].SequenceEqual(paddingBytes))
-                    {
-                        throw CorruptedHeaderBytesException.Instance;
-                    }
+                    _rwl.EnterReadLock();
 
-                    Guid channelKey = new(headerBytes.Slice(_channelKeyPos, _channelKeySize));
-                    long packetLength = BinaryPrimitives.ReadInt64LittleEndian(headerBytes.Slice(_packetLengthPos, _packetLengthSize));
-                    int chunkLength = BinaryPrimitives.ReadInt32LittleEndian(headerBytes.Slice(_chunkLengthPos, _chunkLengthSize));
-
-                    var chunkBytes = receivedBytes[.. chunkLength];
-
-                    _mainTranceiverStream.ReadExactly(chunkBytes);
-
-                    ChunkedTranceiverStreamHolder destinationStreamHolder;
-
-                    try
-                    {
-                        _rwl.EnterReadLock();
-
-                        destinationStreamHolder = _tranceiverStreamHolderMap[channelKey];
-                    }
-                    finally
-                    {
-                        _rwl.ExitReadLock();
-                    }
-
-                    destinationStreamHolder.WriteToReceiverStream(packetLength, chunkBytes);
+                    destinationStreamHolder = _tranceiverStreamHolderMap[channelKey];
                 }
-                catch (Exception ex)
+                finally
                 {
-                    _cts.Token.WaitHandle.WaitOne(1000);
-                    if (_cts.Token.IsCancellationRequested)
-                    {
-                        break;
-                    }
-                    _onError(ex);
+                    _rwl.ExitReadLock();
                 }
+
+                destinationStreamHolder.WriteToReceiverStream(packetLength, chunkBytes.Span);
             }
-        });
+            catch (Exception ex)
+            {
+                await stoppingToken.WaitHandle.WaitAsync(StreamPipelineDefaults.ErrorWindowCancellationToken);
+                if (stoppingToken.IsCancellationRequested)
+                {
+                    break;
+                }
+                _onError(ex);
+            }
+        }
     }
 
     public void Set(Guid channelKey, TranceiverStream tranceiverStream)

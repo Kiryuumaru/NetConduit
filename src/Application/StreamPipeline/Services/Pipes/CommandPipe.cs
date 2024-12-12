@@ -67,69 +67,66 @@ public class CommandPipe<TCommand, TResponse>(ILogger<CommandPipe<TCommand, TRes
         };
     }
 
-    public Task<Result<TResponse>> Send(TCommand command, CancellationToken cancellationToken)
+    public async Task<Result<TResponse>> Send(TCommand command, CancellationToken cancellationToken)
     {
-        return Task.Run(async () =>
+        using var _ = _logger.BeginScopeMap(nameof(CommandPipe<TCommand, TResponse>), nameof(Send));
+
+        Result<TResponse> result = new();
+
+        Guid commandGuid = Guid.Empty;
+
+        var commandGate = new GateKeeper();
+
+        commandGuid = await _messagingPipe.Send(new()
         {
-            using var _ = _logger.BeginScopeMap(nameof(CommandPipe<TCommand, TResponse>), nameof(Send));
+            HasCommand = true,
+            HasResponse = false,
+            Command = command,
+            Response = default,
+        });
 
-            Result<TResponse> result = new();
+        try
+        {
+            _rwl.EnterWriteLock();
 
-            Guid commandGuid = Guid.Empty;
+            _commandActionMap[commandGuid] = response =>
+            {
+                result.WithValue(response);
+                commandGate.SetOpen();
+            };
+        }
+        catch (Exception ex)
+        {
+            if (IsDisposedOrDisposing)
+            {
+                return result;
+            }
 
-            var commandGate = new GateKeeper();
+            _logger.LogError("CommandPipe {CommandPipeName} Send Error: {Error}", _messagingPipe.Name, ex.Message);
 
+            return result.WithError(ex);
+        }
+        finally
+        {
+            _rwl.ExitWriteLock();
+        }
+
+        if (!await commandGate.WaitForOpen(cancellationToken) && commandGuid != Guid.Empty)
+        {
             try
             {
                 _rwl.EnterWriteLock();
 
-                commandGuid = _messagingPipe.Send(new()
-                {
-                    HasCommand = true,
-                    HasResponse = false,
-                    Command = command,
-                    Response = default,
-                });
-
-                _commandActionMap[commandGuid] = response =>
-                {
-                    result.WithValue(response);
-                    commandGate.SetOpen();
-                };
+                _commandActionMap.Remove(commandGuid);
             }
-            catch (Exception ex)
-            {
-                if (IsDisposedOrDisposing)
-                {
-                    return result;
-                }
-
-                _logger.LogError("CommandPipe {CommandPipeName} Send Error: {Error}", _messagingPipe.Name, ex.Message);
-
-                return result.WithError(ex);
-            }
+            catch { }
             finally
             {
                 _rwl.ExitWriteLock();
             }
+        }
 
-            if (!await commandGate.WaitForOpen(cancellationToken) && commandGuid != Guid.Empty)
-            {
-                try
-                {
-                    _rwl.EnterWriteLock();
-
-                    _commandActionMap.Remove(commandGuid);
-                }
-                catch { }
-                finally
-                {
-                    _rwl.ExitWriteLock();
-                }
-            }
-
-            return result;
-        });
+        return result;
     }
 
     private async void OnMessageCallback(MessagingPipePayload<CommandPipePayload<TCommand, TResponse>> messagingPipePayload)
