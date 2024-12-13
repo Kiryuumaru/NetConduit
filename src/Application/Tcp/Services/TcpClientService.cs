@@ -104,7 +104,7 @@ public partial class TcpClientService(ILogger<TcpClientService> logger)
         {
             _logger.LogInformation("TCP client connected to the server {Host}:{Port}", serverAddress, _serverPort);
 
-            onClientCallback.Invoke(tranceiverStream, cts).Forget();
+            Task clientCallback = onClientCallback.Invoke(tranceiverStream, cts);
 
             await TcpClientHelpers.WatchLiveliness(tcpClient, tranceiverStream, cts, TcpDefaults.LivelinessSpan);
 
@@ -116,6 +116,10 @@ public partial class TcpClientService(ILogger<TcpClientService> logger)
             networkStream.Close();
             networkStream.Dispose();
             tranceiverStream.Dispose();
+
+            await clientCallback;
+
+            _logger.LogInformation("TCP client completely cleaned up resources from the server {Host}:{Port}", serverAddress, _serverPort);
         }
         catch (Exception ex)
         {

@@ -117,13 +117,34 @@ internal class EdgeClientMockWorker(ILogger<EdgeClientMockWorker> logger, IServi
         {
             while (!cts.IsCancellationRequested)
             {
-                try
+                bool ready = true;
+
+                double rawAve1 = 0;
+                var rawTimeEnum = mockStreamRawAveLi1.Values.SelectMany(i => i);
+                if (rawTimeEnum.Any())
                 {
-                    var rawAve1 = mockStreamRawAveLi1.Values.SelectMany(i => i).Average();
-                    var msgAve1 = msgStreamAveLi.Values.SelectMany(i => i).Average();
+                    rawAve1 = rawTimeEnum.Average();
+                }
+                else if (EdgeDefaults.RawMockChannelCount != 0)
+                {
+                    ready = false;
+                }
+
+                double msgAve1 = 0;
+                var msgTimeEnum = msgStreamAveLi.Values.SelectMany(i => i);
+                if (msgTimeEnum.Any())
+                {
+                    msgAve1 = msgTimeEnum.Average();
+                }
+                else if (EdgeDefaults.MsgMockChannelCount != 0)
+                {
+                    ready = false;
+                }
+
+                if (ready)
+                {
                     _logger.LogInformation("Raw: {RawTimeStamp:0.000}ms, Msg: {MsgTimeStamp:0.000}ms/{MapCount}", rawAve1, msgAve1, msgStreamMapMock.Count);
                 }
-                catch { }
 
                 await Task.Delay(1000);
             }
@@ -248,12 +269,16 @@ internal class EdgeClientMockWorker(ILogger<EdgeClientMockWorker> logger, IServi
                 {
                     var sw = Stopwatch.StartNew();
 
-                    await mockStream.WriteAsync(sendBytes, ict);
+                    mockStream.Write(sendBytes.AsSpan());
 
                     var writeMs = sw.ElapsedMilliSeconds();
                     sw.Restart();
 
                     var bytesRead = await mockStream.ReadAsync(receivedBytes, ict);
+                    if (stoppingToken.IsCancellationRequested)
+                    {
+                        break;
+                    }
 
                     var readMs = sw.ElapsedMilliSeconds();
                     sw.Restart();

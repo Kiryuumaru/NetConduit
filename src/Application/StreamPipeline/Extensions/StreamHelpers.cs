@@ -1,47 +1,42 @@
-﻿namespace Application.StreamPipeline.Extensions;
+﻿using Application.Common.Extensions;
+
+namespace Application.StreamPipeline.Extensions;
 
 public static class StreamHelpers
 {
-    public static Task ForwardStream(Stream source, Stream destination, int bufferSize, Action<Exception> onError, CancellationToken stoppingToken)
+    public static async Task ForwardStream(Stream source, Stream destination, int bufferSize, Action<Exception> onError, CancellationToken stoppingToken)
     {
-        return Task.Run(() =>
+        Memory<byte> buffer = new byte[bufferSize];
+
+        while (!stoppingToken.IsCancellationRequested && source.CanRead && destination.CanWrite)
         {
-            Span<byte> buffer = stackalloc byte[bufferSize];
-
-            while (!stoppingToken.IsCancellationRequested && source.CanRead && destination.CanWrite)
+            try
             {
-                try
-                {
-                    int bytesRead = source.Read(buffer);
-                    if (stoppingToken.IsCancellationRequested)
-                    {
-                        break;
-                    }
-                    if (bytesRead == 0)
-                    {
-                        stoppingToken.WaitHandle.WaitOne(100);
-                        continue;
-                    }
-                    if (!destination.CanWrite)
-                    {
-                        break;
-                    }
-                    destination.Write(buffer[..bytesRead]);
-                }
-                catch (OperationCanceledException)
+                int bytesRead = await source.ReadAsync(buffer, stoppingToken);
+                if (stoppingToken.IsCancellationRequested)
                 {
                     break;
                 }
-                catch (ObjectDisposedException)
+                if (bytesRead == 0)
+                {
+                    await stoppingToken.WithTimeout(TimeSpan.FromMilliseconds(100)).WhenCanceled();
+                    continue;
+                }
+                if (!destination.CanWrite)
                 {
                     break;
                 }
-                catch (Exception ex)
-                {
-                    onError(ex);
-                }
+                destination.Write(buffer[..bytesRead].Span);
             }
-
-        }, stoppingToken);
+            catch (Exception ex)
+            {
+                if (ex is OperationCanceledException ||
+                    ex is ObjectDisposedException)
+                {
+                    break;
+                }
+                onError(ex);
+            }
+        }
     }
 }

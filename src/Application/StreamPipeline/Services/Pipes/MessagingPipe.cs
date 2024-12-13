@@ -97,7 +97,9 @@ public class MessagingPipe<TSend, TReceive> : BasePipe
             }
             catch (Exception ex)
             {
-                if (stoppingToken.IsCancellationRequested)
+                if (stoppingToken.IsCancellationRequested ||
+                    ex is ObjectDisposedException ||
+                    ex is OperationCanceledException)
                 {
                     break;
                 }
@@ -141,6 +143,10 @@ public class MessagingPipe<TSend, TReceive> : BasePipe
                 var chunkBytes = receivedBytes[..chunkLength];
 
                 await tranceiverStream.ReadExactlyAsync(chunkBytes, stoppingToken);
+                if (stoppingToken.IsCancellationRequested)
+                {
+                    break;
+                }
 
                 if (streamChunkWriter.WriteChunk(packetLength, chunkBytes.Span))
                 {
@@ -159,7 +165,9 @@ public class MessagingPipe<TSend, TReceive> : BasePipe
             }
             catch (Exception ex)
             {
-                if (stoppingToken.IsCancellationRequested)
+                if (stoppingToken.IsCancellationRequested ||
+                    ex is ObjectDisposedException ||
+                    ex is OperationCanceledException)
                 {
                     break;
                 }

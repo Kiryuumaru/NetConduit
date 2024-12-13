@@ -69,7 +69,7 @@ public partial class TcpServerService(ILogger<TcpServerService> logger)
                     TranceiverStream tranceiverStream = new(networkStream, networkStream);
                     CancellationTokenSource clientCts = CancellationTokenSource.CreateLinkedTokenSource(_cts.Token);
 
-                    StartClient(tcpClient, serverAddress, networkStream, tranceiverStream, clientAddress, clientCts, onClientCallback).Forget();
+                    StartClient(tcpClient, serverAddress, networkStream, tranceiverStream, clientAddress, clientCts, onClientCallback).WaitThread().Forget();
                 }
                 catch (Exception ex)
                 {
@@ -102,7 +102,7 @@ public partial class TcpServerService(ILogger<TcpServerService> logger)
         {
             _logger.LogInformation("TCP server {Address}:{Port} connected to the client {ClientAddress}", serverAddress, _serverPort, clientAddress);
 
-            onClientCallback.Invoke(tcpClient, tranceiverStream, cts).Forget();
+            Task clientCallback = onClientCallback.Invoke(tcpClient, tranceiverStream, cts);
 
             await TcpClientHelpers.WatchLiveliness(tcpClient, tranceiverStream, cts, TcpDefaults.LivelinessSpan);
 
@@ -114,6 +114,10 @@ public partial class TcpServerService(ILogger<TcpServerService> logger)
             networkStream.Close();
             networkStream.Dispose();
             tranceiverStream.Dispose();
+
+            await clientCallback;
+
+            _logger.LogInformation("TCP server {Address}:{Port} completely cleaned up the client {ClientAddress} resources", serverAddress, _serverPort, clientAddress);
         }
         catch (Exception ex)
         {

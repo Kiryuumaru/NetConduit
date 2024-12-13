@@ -180,12 +180,14 @@ public partial class StreamMultiplexer
             }
             catch (Exception ex)
             {
-                await stoppingToken.WithTimeout(TimeSpan.FromSeconds(1)).WhenCanceled();
-                if (stoppingToken.IsCancellationRequested)
+                if (!stoppingToken.IsCancellationRequested &&
+                    ex is not IOException &&
+                    ex is not ObjectDisposedException &&
+                    ex is not OperationCanceledException)
                 {
-                    break;
+                    _onError(ex);
                 }
-                _onError(ex);
+                break;
             }
         }
 
@@ -238,12 +240,14 @@ public partial class StreamMultiplexer
             }
             catch (Exception ex)
             {
-                await stoppingToken.WithTimeout(TimeSpan.FromSeconds(1)).WhenCanceled();
-                if (stoppingToken.IsCancellationRequested)
+                if (!stoppingToken.IsCancellationRequested &&
+                    ex is not IOException &&
+                    ex is not ObjectDisposedException &&
+                    ex is not OperationCanceledException)
                 {
-                    break;
+                    _onError(ex);
                 }
-                _onError(ex);
+                break;
             }
         }
     }

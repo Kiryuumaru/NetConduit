@@ -36,4 +36,9 @@ public static class TaskUtils
             catch { }
         }
     }
+
+    public static Task WaitThread(this Task task)
+    {
+        return ThreadHelpers.WaitThread(() => task);
+    }
 }

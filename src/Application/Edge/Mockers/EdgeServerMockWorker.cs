@@ -107,7 +107,7 @@ internal class EdgeServerMockWorker(ILogger<EdgeServerMockWorker> logger, IServi
                 new BlockingMemoryStream(EdgeDefaults.EdgeCommsBufferSize),
                 new BlockingMemoryStream(EdgeDefaults.EdgeCommsBufferSize));
             streamPipelineService.SetRaw(moqChannel, mockStream);
-            moqs.Add(() => StartMockStreamRaw(mockStream, waiterCount, iPAddress, tranceiverStream, cts.Token));
+            moqs.Add(() => StartMockStreamRaw(mockStream, waiterCount, iPAddress, cts.Token));
         }
         for (int i = 0; i < EdgeDefaults.MsgMockChannelCount; i++)
         {
@@ -119,7 +119,7 @@ internal class EdgeServerMockWorker(ILogger<EdgeServerMockWorker> logger, IServi
         return Task.WhenAll(moqs.Select(i => i()));
     }
 
-    private async Task StartMockStreamMessaging(MessagingPipe<MockPayload, MockPayload> mockStream, GateKeeperCounter waiterCount, IPAddress iPAddress, CancellationToken stoppingToken)
+    private Task StartMockStreamMessaging(MessagingPipe<MockPayload, MockPayload> mockStream, GateKeeperCounter waiterCount, IPAddress iPAddress, CancellationToken stoppingToken)
     {
         stoppingToken.Register(mockStream.Dispose);
 
@@ -133,15 +133,19 @@ internal class EdgeServerMockWorker(ILogger<EdgeServerMockWorker> logger, IServi
 
         waiterCount.Increment();
 
-        await Task.Delay(1000, stoppingToken);
+        return Task.Run(async () =>
+        {
+            await Task.Delay(1000, stoppingToken);
 
-        waiterCount.Decrement();
-        await waiterCount.WaitForOpen(stoppingToken);
+            waiterCount.Decrement();
+            await waiterCount.WaitForOpen(stoppingToken);
 
-        _logger.LogInformation("Mock messaging pipe {iPAddress} started", iPAddress);
+            _logger.LogInformation("Mock messaging pipe {iPAddress} started", iPAddress);
+
+        }, stoppingToken);
     }
 
-    private Task StartMockStreamRaw(TranceiverStream mockStream, GateKeeperCounter waiterCount, IPAddress iPAddress, TranceiverStream tranceiverStream, CancellationToken stoppingToken)
+    private Task StartMockStreamRaw(TranceiverStream mockStream, GateKeeperCounter waiterCount, IPAddress iPAddress, CancellationToken stoppingToken)
     {
         _logger.LogInformation("Stream pipe {iPAddress} started", iPAddress);
 
@@ -156,49 +160,39 @@ internal class EdgeServerMockWorker(ILogger<EdgeServerMockWorker> logger, IServi
 
             _logger.LogInformation("Mock raw bytes {iPAddress} started", iPAddress);
 
-            await Task.Run(() =>
+            Memory<byte> receivedBytes = new byte[EdgeDefaults.EdgeCommsBufferSize];
+
+            while (!stoppingToken.IsCancellationRequested)
             {
-                Span<byte> receivedBytes = stackalloc byte[EdgeDefaults.EdgeCommsBufferSize];
-
-                while (!stoppingToken.IsCancellationRequested)
+                try
                 {
-                    try
+                    var sw = Stopwatch.StartNew();
+
+                    var bytesread = await mockStream.ReadAsync(receivedBytes, stoppingToken);
+                    if (stoppingToken.IsCancellationRequested)
                     {
-                        var sw = Stopwatch.StartNew();
-
-                        var bytesread = mockStream.Read(receivedBytes);
-
-                        if (bytesread == 0)
-                        {
-                            stoppingToken.WaitHandle.WaitOne(100);
-                        }
-
-                        var readMs = sw.ElapsedMilliSeconds();
-                        sw.Restart();
-
-                        mockStream.Write(receivedBytes[..bytesread]);
-
-                        var writeMs = sw.ElapsedMilliSeconds();
-                        sw.Restart();
-
-                        //_logger.LogInformation("Raw bytes: S {Write:0.00}ms, R {Read:0.00}ms, T {Total:0.00}ms", writeMs, readMs, writeMs + readMs);
-
-                        //string receivedStr = BytesHelpers.DecodeArray(receivedBytes[..bytesread]);
-
-                        //_logger.LogInformation("received {DAT} bytes", receivedStr.Length);
+                        break;
                     }
-                    catch (Exception ex)
-                    {
-                        if (stoppingToken.IsCancellationRequested)
-                        {
-                            break;
-                        }
-                        _logger.LogError("Error {ClientAddress}: {Error}", iPAddress, ex.Message);
-                    }
+
+                    var readMs = sw.ElapsedMilliSeconds();
+                    sw.Restart();
+
+                    mockStream.Write(receivedBytes[..bytesread].Span);
+
+                    var writeMs = sw.ElapsedMilliSeconds();
+                    sw.Restart();
                 }
+                catch (Exception ex)
+                {
+                    if (stoppingToken.IsCancellationRequested)
+                    {
+                        break;
+                    }
+                    _logger.LogError("Error {ClientAddress}: {Error}", iPAddress, ex.Message);
+                }
+            }
 
-                _logger.LogInformation("Stream pipe {ClientAddress} ended", iPAddress);
-            });
+            _logger.LogInformation("Stream pipe {ClientAddress} ended", iPAddress);
 
         }, stoppingToken);
     }

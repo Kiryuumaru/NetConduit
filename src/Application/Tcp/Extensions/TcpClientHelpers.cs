@@ -20,7 +20,7 @@ internal static class TcpClientHelpers
                     break;
                 }
 
-                await cts.Token.WaitHandle.WaitAsync(livelinessSpan);
+                await cts.Token.WithTimeout(livelinessSpan).WhenCanceled();
             }
             catch (OperationCanceledException) { }
             catch (ObjectDisposedException) { }
