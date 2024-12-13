@@ -10,7 +10,12 @@ public static class CancellationTokenExtensions
     public static Task WhenCanceled(this CancellationToken cancellationToken)
     {
         var tcs = new TaskCompletionSource<bool>();
-        cancellationToken.Register(s => ((TaskCompletionSource<bool>)s!).SetResult(true), tcs);
+        CancellationTokenRegistration? reg = null;
+        reg = cancellationToken.Register(s =>
+        {
+            tcs.TrySetResult(true);
+            reg?.Unregister();
+        }, tcs);
         return tcs.Task;
     }
 }

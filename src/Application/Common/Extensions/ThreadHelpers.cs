@@ -98,7 +98,7 @@ public static class ThreadHelpers
                 cancelled = true;
                 tcs.TrySetCanceled();
                 registeredWaitHandle.Unregister(null);
-                cancellationTokenRegistration!.Value.Unregister();
+                cancellationTokenRegistration?.Unregister();
             });
         }
 
