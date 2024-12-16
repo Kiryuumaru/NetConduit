@@ -1,6 +1,6 @@
 var builder = DistributedApplication.CreateBuilder(args);
 
-builder.AddProject<Projects.Presentation>("presentation-server1")
+var server = builder.AddProject<Projects.Presentation>("presentation-server1")
     .WithArgs("server", "start")
     .WithArgs("-l", "trace")
     .WithArgs("--api-urls", "http://*:21110")
@@ -11,6 +11,7 @@ builder.AddProject<Projects.Presentation>("presentation-server1")
 for (int i = 0; i < 3; i++)
 {
     builder.AddProject<Projects.Presentation>($"presentation-client{i}")
+        .WaitFor(server)
         .WithArgs("client", "start")
         .WithArgs("-l", "trace")
         .WithArgs("--api-urls", $"http://*:{31110 + i}")

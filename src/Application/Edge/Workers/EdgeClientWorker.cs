@@ -61,8 +61,6 @@ internal class EdgeClientWorker(ILogger<EdgeClientWorker> logger, IServiceProvid
         using var scope = _serviceProvider.CreateScope();
         var tcpClient = scope.ServiceProvider.GetRequiredService<TcpClientService>();
 
-        await Task.Delay(5000, stoppingToken);
-
         await tcpClient.Start(tcpHost, tcpPort, (tranceiverStream, ct) =>
         {
             var clientCts = CancellationTokenSource.CreateLinkedTokenSource(
