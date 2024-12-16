@@ -28,7 +28,5 @@ public class GateKeeper
     }
 
     public ValueTask<bool> WaitForOpen(CancellationToken cancellationToken)
-    {
-        return _waiterEvent.WaitAsync(cancellationToken);
-    }
+        => _waiterEvent.WaitAsync(cancellationToken);
 }

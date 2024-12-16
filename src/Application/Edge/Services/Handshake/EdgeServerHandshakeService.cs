@@ -142,7 +142,7 @@ internal partial class EdgeServerHandshakeService(ILogger<EdgeServerHandshakeSer
                                 AcceptGate.SetOpen();
                                 if (hasCreated)
                                 {
-                                    _logger.LogInformation("New edge client {ClientAddress}:{EdgeClientId} added", iPAddress, edgeClientEntity.Id);
+                                    _logger.LogInformation("New edge client {ClientAddress}:{EdgeClientId} discovered", iPAddress, edgeClientEntity.Id);
                                 }
                             }
                         }
