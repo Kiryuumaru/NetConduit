@@ -66,12 +66,12 @@ public class MessagingPipe<TSend, TReceive> : BasePipe
         Memory<byte> headerBytes = new byte[_headerSize];
         Memory<byte> sendBytes = new byte[_totalSize];
 
-        while (!stoppingToken.IsCancellationRequested && !IsDisposedOrDisposing)
+        while (!stoppingToken.IsCancellationRequested && !IsDisposed)
         {
             try
             {
                 var messagingPipePayload = await _messageQueue.ReceiveAsync(stoppingToken);
-                if (stoppingToken.IsCancellationRequested)
+                if (stoppingToken.IsCancellationRequested || IsDisposed)
                 {
                     break;
                 }
@@ -122,13 +122,13 @@ public class MessagingPipe<TSend, TReceive> : BasePipe
         MemoryStream streamChunkHolder = new(StreamPipelineDefaults.MessagingPipeChunkSize);
         StreamChunkWriter streamChunkWriter = new(streamChunkHolder);
 
-        while (!stoppingToken.IsCancellationRequested && !IsDisposedOrDisposing)
+        while (!stoppingToken.IsCancellationRequested && !IsDisposed)
         {
             try
             {
                 headerBytes[.._paddingSize].Span.Clear();
                 await tranceiverStream.ReadExactlyAsync(headerBytes, stoppingToken);
-                if (stoppingToken.IsCancellationRequested)
+                if (stoppingToken.IsCancellationRequested || IsDisposed)
                 {
                     break;
                 }
@@ -143,7 +143,7 @@ public class MessagingPipe<TSend, TReceive> : BasePipe
                 var chunkBytes = receivedBytes[..chunkLength];
 
                 await tranceiverStream.ReadExactlyAsync(chunkBytes, stoppingToken);
-                if (stoppingToken.IsCancellationRequested)
+                if (stoppingToken.IsCancellationRequested || IsDisposed)
                 {
                     break;
                 }
@@ -203,10 +203,10 @@ public class MessagingPipe<TSend, TReceive> : BasePipe
         JsonSerializerOptions = jsonSerializerOptions;
     }
 
-    public async Task<Guid> Send(TSend message)
+    public async Task<Guid> Send(TSend message, CancellationToken stoppingToken = default)
     {
         Guid messageGuid = Guid.NewGuid();
-        await Send(messageGuid, message);
+        await Send(messageGuid, message, stoppingToken);
         return messageGuid;
     }
 

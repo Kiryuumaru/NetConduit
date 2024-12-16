@@ -83,7 +83,11 @@ public class CommandPipe<TCommand, TResponse>(ILogger<CommandPipe<TCommand, TRes
             HasResponse = false,
             Command = command,
             Response = default,
-        });
+        }, cancellationToken);
+        if (cancellationToken.IsCancellationRequested || IsDisposed)
+        {
+            return result;
+        }
 
         try
         {

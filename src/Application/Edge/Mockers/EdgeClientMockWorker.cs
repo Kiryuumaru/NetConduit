@@ -27,6 +27,9 @@ internal class EdgeClientMockWorker(ILogger<EdgeClientMockWorker> logger, IServi
     private readonly IServiceProvider _serviceProvider = serviceProvider;
     private readonly IConfiguration _configuration = configuration;
 
+    private readonly Lock _rawLock = new();
+    private readonly Lock _msgLock = new();
+
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
         using var _ = _logger.BeginScopeMap(nameof(EdgeClientMockWorker), nameof(ExecuteAsync));
@@ -120,25 +123,31 @@ internal class EdgeClientMockWorker(ILogger<EdgeClientMockWorker> logger, IServi
                 bool ready = true;
 
                 double rawAve1 = 0;
-                var rawTimeEnum = mockStreamRawAveLi1.Values.SelectMany(i => i);
-                if (rawTimeEnum.Any())
                 {
-                    rawAve1 = rawTimeEnum.Average();
-                }
-                else if (EdgeDefaults.RawMockChannelCount != 0)
-                {
-                    ready = false;
+                    using var _ = _rawLock.EnterScope();
+                    var rawTimeEnum = mockStreamRawAveLi1.Values.SelectMany(i => i);
+                    if (rawTimeEnum.Any())
+                    {
+                        rawAve1 = rawTimeEnum.Average();
+                    }
+                    else if (EdgeDefaults.RawMockChannelCount != 0)
+                    {
+                        ready = false;
+                    }
                 }
 
                 double msgAve1 = 0;
-                var msgTimeEnum = msgStreamAveLi.Values.SelectMany(i => i);
-                if (msgTimeEnum.Any())
                 {
-                    msgAve1 = msgTimeEnum.Average();
-                }
-                else if (EdgeDefaults.MsgMockChannelCount != 0)
-                {
-                    ready = false;
+                    using var _ = _msgLock.EnterScope();
+                    var msgTimeEnum = msgStreamAveLi.Values.SelectMany(i => i);
+                    if (msgTimeEnum.Any())
+                    {
+                        msgAve1 = msgTimeEnum.Average();
+                    }
+                    else if (EdgeDefaults.MsgMockChannelCount != 0)
+                    {
+                        ready = false;
+                    }
                 }
 
                 if (ready)
@@ -191,10 +200,13 @@ internal class EdgeClientMockWorker(ILogger<EdgeClientMockWorker> logger, IServi
 
             mock.stopwatch.Stop();
 
-            aveList.Add(mock.stopwatch.ElapsedMilliSeconds());
-            while (aveList.Count > EdgeDefaults.MockAveCount)
             {
-                aveList.RemoveAt(0);
+                using var _ = _msgLock.EnterScope();
+                aveList.Add(mock.stopwatch.ElapsedMilliSeconds());
+                while (aveList.Count > EdgeDefaults.MockAveCount)
+                {
+                    aveList.RemoveAt(0);
+                }
             }
 
             msgStreamMapMock.Remove(clientPayload.MessageGuid, out _);
@@ -222,9 +234,13 @@ internal class EdgeClientMockWorker(ILogger<EdgeClientMockWorker> logger, IServi
 
                     msgStreamMapMock[guid] = (payload, stopwatch);
 
-                    await mockStream.Send(guid, payload);
+                    await mockStream.Send(guid, payload, stoppingToken);
+                    if (stoppingToken.IsCancellationRequested)
+                    {
+                        break;
+                    }
 
-                    await Task.Delay(100);
+                    await Task.Delay(100, stoppingToken);
                 }
                 catch (Exception ex)
                 {
@@ -258,7 +274,7 @@ internal class EdgeClientMockWorker(ILogger<EdgeClientMockWorker> logger, IServi
 
             while (!stoppingToken.IsCancellationRequested)
             {
-                var ict = stoppingToken.WithTimeout(TimeSpan.FromMinutes(3));
+                var ict = stoppingToken.WithTimeout(TimeSpan.FromMinutes(1));
 
                 //string sendStr = RandomHelpers.Alphanumeric(101);
                 string sendStr = RandomHelpers.Alphanumeric(10001);
@@ -293,6 +309,7 @@ internal class EdgeClientMockWorker(ILogger<EdgeClientMockWorker> logger, IServi
                     }
                     else
                     {
+                        using var _ = _rawLock.EnterScope();
                         aveList.Add(writeMs + readMs);
                         while (aveList.Count > EdgeDefaults.MockAveCount)
                         {

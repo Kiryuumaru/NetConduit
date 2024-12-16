@@ -81,7 +81,7 @@ public partial class BlockingMemoryStream(int capacity) : AutoResetMemoryStream(
     {
         int readCount = 0;
 
-        while (readCount == 0)
+        while (readCount == 0 && !IsDisposed)
         {
             _dataReady.Wait();
 
@@ -109,7 +109,7 @@ public partial class BlockingMemoryStream(int capacity) : AutoResetMemoryStream(
     {
         int readCount = 0;
 
-        while (readCount == 0)
+        while (readCount == 0 && !cancellationToken.IsCancellationRequested && !IsDisposed)
         {
             await _dataReady.WaitAsync(cancellationToken);
 
@@ -145,12 +145,7 @@ public partial class BlockingMemoryStream(int capacity) : AutoResetMemoryStream(
 
         if (disposing)
         {
-            try
-            {
-                _dataReady.Set();
-                _dataReady.Dispose();
-            }
-            catch { }
+            _dataReady.Dispose();
         }
     }
 }

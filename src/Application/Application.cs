@@ -23,7 +23,7 @@ public class Application : ApplicationDependency
     {
         base.AddServices(applicationBuilder, services);
 
-        services.AddHostedService<GCCollector>();
+        //services.AddHostedService<GCCollector>();
 
         services.AddTransient<LocalStoreFactoryService>();
         services.AddSingleton<LocalStoreConcurrencyService>();

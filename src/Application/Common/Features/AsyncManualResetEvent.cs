@@ -71,7 +71,7 @@ public partial class AsyncManualResetEvent
 
         try
         {
-            Task delayTask = Task.Delay(timeout, cancellationToken);
+            var delayTask = Task.Delay(timeout, cancellationToken);
             var completedTask = await Task.WhenAny(_tcs.Task, delayTask).ConfigureAwait(false);
             if (completedTask == _tcs.Task)
             {
