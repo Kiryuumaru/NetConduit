@@ -113,7 +113,7 @@ public partial class BlockingMemoryStream(int capacity) : AutoResetMemoryStream(
         {
             await _dataReady.WaitAsync(cancellationToken);
 
-            if (IsDisposed)
+            if (cancellationToken.IsCancellationRequested || IsDisposed)
             {
                 break;
             }

@@ -181,7 +181,8 @@ public partial class StreamMultiplexer
             }
             catch (Exception ex)
             {
-                if (!stoppingToken.IsCancellationRequested &&
+                if (!IsDisposedOrDisposing &&
+                    !stoppingToken.IsCancellationRequested &&
                     ex is not IOException &&
                     ex is not ObjectDisposedException &&
                     ex is not OperationCanceledException)

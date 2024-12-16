@@ -97,7 +97,8 @@ public class MessagingPipe<TSend, TReceive> : BasePipe
             }
             catch (Exception ex)
             {
-                if (stoppingToken.IsCancellationRequested ||
+                if (!IsDisposedOrDisposing ||
+                    stoppingToken.IsCancellationRequested ||
                     ex is ObjectDisposedException ||
                     ex is OperationCanceledException)
                 {
@@ -165,7 +166,8 @@ public class MessagingPipe<TSend, TReceive> : BasePipe
             }
             catch (Exception ex)
             {
-                if (stoppingToken.IsCancellationRequested ||
+                if (IsDisposedOrDisposing ||
+                    stoppingToken.IsCancellationRequested ||
                     ex is ObjectDisposedException ||
                     ex is OperationCanceledException)
                 {
