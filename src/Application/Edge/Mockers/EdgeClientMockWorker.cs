@@ -87,9 +87,9 @@ internal class EdgeClientMockWorker(ILogger<EdgeClientMockWorker> logger, IServi
 
         var streamPipelineService = streamPipelineFactory.Create(
             tranceiverStream,
-            () => { _logger.LogInformation("Stream multiplexer {ServerHost}:{ServerPort} started", tcpHost, tcpPort); },
-            () => { _logger.LogInformation("Stream multiplexer {ServerHost}:{ServerPort} ended", tcpHost, tcpPort); },
-            ex => { _logger.LogError("Stream multiplexer {ServerHost}:{ServerPort} error: {Error}", tcpHost, tcpPort, ex.Message); },
+            () => _logger.LogInformation("Stream multiplexer {ServerHost}:{ServerPort} started", tcpHost, tcpPort),
+            () => _logger.LogInformation("Stream multiplexer {ServerHost}:{ServerPort} ended", tcpHost, tcpPort),
+            ex => _logger.LogError("Stream multiplexer {ServerHost}:{ServerPort} error: {Error}", tcpHost, tcpPort, ex.Message),
             cts.Token);
 
         ConcurrentDictionary<Guid, List<double>> mockStreamRawAveLi1 = [];

@@ -99,9 +99,9 @@ internal class EdgeServerWorker(ILogger<EdgeServerWorker> logger, IServiceProvid
 
         var streamPipelineService = streamPipelineFactory.Create(
             tranceiverStream,
-            () => { _logger.LogInformation("Stream multiplexer {ClientAddress} started", iPAddress); },
-            () => { _logger.LogInformation("Stream multiplexer {ClientAddress} ended", iPAddress); },
-            ex => { _logger.LogError("Stream multiplexer {ClientAddress} error: {Error}", iPAddress, ex.Message); },
+            () => _logger.LogInformation("Stream multiplexer {ClientAddress} started", iPAddress),
+            () => _logger.LogInformation("Stream multiplexer {ClientAddress} ended", iPAddress),
+            ex => _logger.LogError("Stream multiplexer {ClientAddress} error: {Error}", iPAddress, ex.Message),
             cts.Token);
 
         var starterGate = new GateKeeper();
