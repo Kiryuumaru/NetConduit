@@ -121,6 +121,11 @@ internal partial class EdgeServerHandshakeService(ILogger<EdgeServerHandshakeSer
                         catch { }
                         if (edgeEntity != null)
                         {
+                            using var _ = _logger.BeginScopeMap(nameof(EdgeServerHandshakeService), nameof(Begin), new()
+                            {
+                                ["ClientAddress"] = iPAddress,
+                                ["EdgeClientId"] = edgeEntity.Id
+                            });
                             var addEdgeDto = new AddEdgeDto()
                             {
                                 EdgeType = EdgeType.Client,
@@ -139,11 +144,11 @@ internal partial class EdgeServerHandshakeService(ILogger<EdgeServerHandshakeSer
                                     EncryptedAcceptedEdgeToken = SecureDataHelpers.Encrypt(edgeEntity.Token, ClientRsa)
                                 });
                                 EdgeClientHiveIdKeeper.SetValue(edgeClientEntity.Id);
-                                AcceptGate.SetOpen();
                                 if (hasCreated)
                                 {
-                                    _logger.LogInformation("New edge client {ClientAddress}:{EdgeClientId} discovered", iPAddress, edgeClientEntity.Id);
+                                    _logger.LogInformation("New edge client {ClientAddress}:{EdgeClientId} added", iPAddress, edgeClientEntity.Id);
                                 }
+                                AcceptGate.SetOpen();
                             }
                         }
                     }
