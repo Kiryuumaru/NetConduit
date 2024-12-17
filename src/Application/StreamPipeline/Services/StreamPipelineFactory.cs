@@ -20,6 +20,7 @@ public partial class StreamPipelineFactory(ILogger<StreamPipelineFactory> logger
         CancellationToken stoppingToken)
     {
         using var _ = _logger.BeginScopeMap(nameof(StreamPipelineService), nameof(Create));
+
         var streamPipelineService = _serviceProvider.GetRequiredService<StreamPipelineService>();
 
         var cts = CancellationTokenSource.CreateLinkedTokenSource(
@@ -28,7 +29,9 @@ public partial class StreamPipelineFactory(ILogger<StreamPipelineFactory> logger
             tranceiverStream.CancelWhenDisposing(),
             streamPipelineService.CancelWhenDisposing());
 
-        var streamMultiplexer = StreamMultiplexer.Create(tranceiverStream, onStarted, onStopped, onError, cts.Token);
+        var streamMultiplexer = StreamMultiplexer.Create(tranceiverStream, onStarted, onStopped, onError);
+
+        cts.Token.Register(streamMultiplexer.Dispose);
 
         streamPipelineService.Create(streamMultiplexer, cts.Token);
 

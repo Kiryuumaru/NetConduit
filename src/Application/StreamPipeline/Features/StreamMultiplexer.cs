@@ -39,10 +39,9 @@ public partial class StreamMultiplexer
         TranceiverStream mainTranceiverStream,
         Action onStarted,
         Action onStopped,
-        Action<Exception> onError,
-        CancellationToken stoppingToken)
+        Action<Exception> onError)
     {
-        return new(mainTranceiverStream, onStarted, onStopped, onError, stoppingToken);
+        return new(mainTranceiverStream, onStarted, onStopped, onError);
     }
 
     private readonly Dictionary<Guid, ChunkedTranceiverStreamHolder> _tranceiverStreamHolderMap = [];
@@ -77,16 +76,13 @@ public partial class StreamMultiplexer
         TranceiverStream mainTranceiverStream,
         Action onStarted,
         Action onStopped,
-        Action<Exception> onError,
-        CancellationToken stoppingToken)
+        Action<Exception> onError)
     {
         _mainTranceiverStream = mainTranceiverStream;
         _onStarted = onStarted;
         _onStopped = onStopped;
         _onError = onError;
-        _cts = CancellationTokenSource.CreateLinkedTokenSource(stoppingToken, _mainTranceiverStream.CancelWhenDisposing(stoppingToken));
-
-        _cts.Token.Register(Dispose);
+        _cts = CancellationTokenSource.CreateLinkedTokenSource(_mainTranceiverStream.CancelWhenDisposing());
 
         _paddingBytes = Encoding.ASCII.GetBytes(_paddingValue);
         _paddingSize = _paddingBytes.Length;
