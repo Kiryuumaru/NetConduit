@@ -10,6 +10,8 @@ public static class EdgeDefaults
 
     public const int EdgeHandshakeRSABitsLength = 4096;
 
+    public const string EdgeHandshakeChannelName = "handshake";
+
     public static readonly TimeSpan HandshakeTimeout = TimeSpan.FromSeconds(30);
 
     public static readonly TimeSpan RelayedApiTimeout = TimeSpan.FromSeconds(10);

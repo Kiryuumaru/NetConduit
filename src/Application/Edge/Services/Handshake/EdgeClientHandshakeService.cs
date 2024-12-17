@@ -42,7 +42,7 @@ internal partial class EdgeClientHandshakeService(ILogger<EdgeClientHandshakeSer
 
         _cts.Token.Register(Dispose);
 
-        var handshakeCommand = streamPipelineService.SetCommandPipe<HandshakeAttemptDto, HandshakeResponseDto>("handshake");
+        var handshakeCommand = streamPipelineService.SetCommandPipe<HandshakeAttemptDto, HandshakeResponseDto>(EdgeDefaults.EdgeHandshakeChannelName);
 
         Task.Run(async () =>
         {
