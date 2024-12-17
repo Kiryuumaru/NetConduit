@@ -27,7 +27,7 @@ public partial class StreamPipelineService(ILogger<StreamPipelineService> logger
         return _streamMultiplexer ?? throw new Exception($"{nameof(StreamPipelineService)} not started");
     }
 
-    public void Create(StreamMultiplexer streamMultiplexer, CancellationToken stoppingToken)
+    public void Create(StreamMultiplexer streamMultiplexer)
     {
         using var _ = _logger.BeginScopeMap(nameof(StreamPipelineService), nameof(Create));
 
@@ -36,9 +36,7 @@ public partial class StreamPipelineService(ILogger<StreamPipelineService> logger
             throw new Exception($"{nameof(StreamPipelineService)} already created");
         }
 
-        _cts = CancellationTokenSource.CreateLinkedTokenSource(
-            stoppingToken,
-            CancelWhenDisposing());
+        _cts = CancellationTokenSource.CreateLinkedTokenSource(CancelWhenDisposing());
 
         _streamMultiplexer = streamMultiplexer;
     }
@@ -84,7 +82,6 @@ public partial class StreamPipelineService(ILogger<StreamPipelineService> logger
 
         var pipeToken = CancellationTokenSource.CreateLinkedTokenSource(
             _cts!.Token,
-            CancelWhenDisposing(),
             messagingPipe.CancelWhenDisposing(),
             tranceiverStream.CancelWhenDisposing());
 
@@ -121,7 +118,6 @@ public partial class StreamPipelineService(ILogger<StreamPipelineService> logger
 
         var pipeToken = CancellationTokenSource.CreateLinkedTokenSource(
             _cts!.Token,
-            CancelWhenDisposing(),
             messagingPipe.CancelWhenDisposing(),
             tranceiverStream.CancelWhenDisposing());
 
@@ -130,5 +126,13 @@ public partial class StreamPipelineService(ILogger<StreamPipelineService> logger
         messagingPipe.Start(tranceiverStream, pipeToken.Token).Forget();
 
         return messagingPipe;
+    }
+
+    protected void Dispose(bool disposing)
+    {
+        if (disposing)
+        {
+            _cts?.Cancel();
+        }
     }
 }
