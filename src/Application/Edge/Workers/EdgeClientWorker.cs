@@ -86,16 +86,11 @@ internal class EdgeClientWorker(ILogger<EdgeClientWorker> logger, IServiceProvid
 
         var handshakeService = scope.ServiceProvider.GetRequiredService<EdgeClientHandshakeService>();
         var streamPipelineFactory = scope.ServiceProvider.GetRequiredService<StreamPipelineFactory>();
-
-        handshakeService.CancelWhenDisposing().Register(scope.Dispose);
-        streamPipelineFactory.CancelWhenDisposing().Register(scope.Dispose);
-
         var streamPipelineService = streamPipelineFactory.Create(
             tranceiverStream,
             () => _logger.LogInformation("Stream multiplexer {ServerHost}:{ServerPort} started", tcpHost, tcpPort),
             () => _logger.LogInformation("Stream multiplexer {ServerHost}:{ServerPort} ended", tcpHost, tcpPort),
-            ex => _logger.LogError("Stream multiplexer {ServerHost}:{ServerPort} error: {Error}", tcpHost, tcpPort, ex.Message),
-            cts.Token);
+            ex => _logger.LogError("Stream multiplexer {ServerHost}:{ServerPort} error: {Error}", tcpHost, tcpPort, ex.Message));
 
         var starterGate = new GateKeeper();
         handshakeService.Begin(starterGate, tcpHost, tcpPort, streamPipelineService, cts.Token);

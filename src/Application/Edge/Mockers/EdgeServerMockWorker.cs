@@ -70,17 +70,14 @@ internal class EdgeServerMockWorker(ILogger<EdgeServerMockWorker> logger, IServi
         });
 
         var scope = _serviceProvider.CreateScope();
-
         cts.Token.Register(scope.Dispose);
 
         var streamPipelineFactory = scope.ServiceProvider.GetRequiredService<StreamPipelineFactory>();
-
         var streamPipelineService = streamPipelineFactory.Create(
             tranceiverStream,
             () => _logger.LogInformation("Stream multiplexer {ClientAddress} started", iPAddress),
             () => _logger.LogInformation("Stream multiplexer {ClientAddress} ended", iPAddress),
-            ex => _logger.LogError("Stream multiplexer {ClientAddress} error: {Error}", iPAddress, ex.Message),
-            cts.Token);
+            ex => _logger.LogError("Stream multiplexer {ClientAddress} error: {Error}", iPAddress, ex.Message));
 
         Stopwatch loadingSw = Stopwatch.StartNew();
         GateKeeperCounter waiterCount = new();

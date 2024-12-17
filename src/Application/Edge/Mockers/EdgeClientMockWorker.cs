@@ -78,22 +78,18 @@ internal class EdgeClientMockWorker(ILogger<EdgeClientMockWorker> logger, IServi
         });
 
         var scope = _serviceProvider.CreateScope();
-
         cts.Token.Register(scope.Dispose);
 
         var streamPipelineFactory = scope.ServiceProvider.GetRequiredService<StreamPipelineFactory>();
-
         var streamPipelineService = streamPipelineFactory.Create(
             tranceiverStream,
             () => _logger.LogInformation("Stream multiplexer {ServerHost}:{ServerPort} started", tcpHost, tcpPort),
             () => _logger.LogInformation("Stream multiplexer {ServerHost}:{ServerPort} ended", tcpHost, tcpPort),
-            ex => _logger.LogError("Stream multiplexer {ServerHost}:{ServerPort} error: {Error}", tcpHost, tcpPort, ex.Message),
-            cts.Token);
+            ex => _logger.LogError("Stream multiplexer {ServerHost}:{ServerPort} error: {Error}", tcpHost, tcpPort, ex.Message));
 
         ConcurrentDictionary<Guid, List<double>> mockStreamRawAveLi1 = [];
-
-        ConcurrentDictionary<Guid, (MockPayload payload, Stopwatch stopwatch)> msgStreamMapMock = [];
         ConcurrentDictionary<Guid, List<double>> msgStreamAveLi = [];
+        ConcurrentDictionary<Guid, (MockPayload payload, Stopwatch stopwatch)> msgStreamMapMock = [];
 
         int channelCount = 0;
         int channelIndex = EdgeDefaults.MockChannelKeyOffset;

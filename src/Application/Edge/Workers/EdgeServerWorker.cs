@@ -94,15 +94,11 @@ internal class EdgeServerWorker(ILogger<EdgeServerWorker> logger, IServiceProvid
         var handshakeService = scope.ServiceProvider.GetRequiredService<EdgeServerHandshakeService>();
         var streamPipelineFactory = scope.ServiceProvider.GetRequiredService<StreamPipelineFactory>();
 
-        handshakeService.CancelWhenDisposing().Register(scope.Dispose);
-        streamPipelineFactory.CancelWhenDisposing().Register(scope.Dispose);
-
         var streamPipelineService = streamPipelineFactory.Create(
             tranceiverStream,
             () => _logger.LogInformation("Stream multiplexer {ClientAddress} started", iPAddress),
             () => _logger.LogInformation("Stream multiplexer {ClientAddress} ended", iPAddress),
-            ex => _logger.LogError("Stream multiplexer {ClientAddress} error: {Error}", iPAddress, ex.Message),
-            cts.Token);
+            ex => _logger.LogError("Stream multiplexer {ClientAddress} error: {Error}", iPAddress, ex.Message));
 
         var starterGate = new GateKeeper();
         handshakeService.Begin(starterGate, iPAddress, streamPipelineService, cts.Token);
