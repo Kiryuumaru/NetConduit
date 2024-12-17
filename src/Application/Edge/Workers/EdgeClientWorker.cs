@@ -99,7 +99,7 @@ internal class EdgeClientWorker(ILogger<EdgeClientWorker> logger, IServiceProvid
         streamPipelineService.Start().Forget();
         starterGate.SetOpen();
 
-        await workerGate.WaitForOpen(cts.Token);
+        await workerGate.WaitForOpen(default);
     }
 
     private GateKeeper BeginWorker(EdgeClientHandshakeService handshakeService, string tcpHost, int tcpPort, StreamPipelineService streamPipelineService, CancellationTokenSource cts)
