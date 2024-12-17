@@ -1,6 +1,9 @@
-﻿namespace Application.Common.Extensions;
+﻿using System.Security.Cryptography;
+using System.Text;
 
-public static class GuidEncoder
+namespace Application.Common.Extensions;
+
+public static class GuidExtension
 {
     public static string Encode(string guidText)
     {
@@ -22,5 +25,18 @@ public static class GuidEncoder
         encoded = encoded.Replace("-", "+");
         byte[] buffer = Convert.FromBase64String(encoded + "==");
         return new Guid(buffer);
+    }
+
+    public static Guid GenerateSeeded(string seed)
+    {
+        byte[] hashBytes = SHA1.HashData(Encoding.UTF8.GetBytes(seed));
+
+        byte[] guidBytes = new byte[16];
+        Array.Copy(hashBytes, guidBytes, 16);
+
+        guidBytes[7] = (byte)((guidBytes[7] & 0x0F) | 0x40);
+        guidBytes[8] = (byte)((guidBytes[8] & 0x3F) | 0x80);
+
+        return new Guid(guidBytes);
     }
 }

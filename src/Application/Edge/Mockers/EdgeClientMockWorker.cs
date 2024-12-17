@@ -57,8 +57,6 @@ internal class EdgeClientMockWorker(ILogger<EdgeClientMockWorker> logger, IServi
         using var scope = _serviceProvider.CreateScope();
         var tcpClient = scope.ServiceProvider.GetRequiredService<TcpClientService>();
 
-        await Task.Delay(5000, stoppingToken);
-
         await tcpClient.Start(tcpHost, tcpPort, (tranceiverStream, ct) =>
         {
             var clientCts = CancellationTokenSource.CreateLinkedTokenSource(
@@ -171,7 +169,7 @@ internal class EdgeClientMockWorker(ILogger<EdgeClientMockWorker> logger, IServi
         for (int i = 0; i < EdgeDefaults.MsgMockChannelCount; i++)
         {
             var moqChannel = NextChannel();
-            var mockStream = streamPipelineService.SetMessagingPipe<MockPayload>(moqChannel, $"MOOCK-{moqChannel}");
+            var mockStream = streamPipelineService.SetMessagingPipe<MockPayload>($"MOOCK-{moqChannel}");
             var aveList = msgStreamAveLi.GetOrAdd(moqChannel, []);
             moqs.Add(() => StartMockStreamMessaging(msgStreamMapMock, aveList, moqChannel, mockStream, waiterCount, cts.Token));
         }

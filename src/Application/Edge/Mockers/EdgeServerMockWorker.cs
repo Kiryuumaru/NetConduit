@@ -112,7 +112,7 @@ internal class EdgeServerMockWorker(ILogger<EdgeServerMockWorker> logger, IServi
         for (int i = 0; i < EdgeDefaults.MsgMockChannelCount; i++)
         {
             var moqChannel = NextChannel();
-            var mockStream = streamPipelineService.SetMessagingPipe<MockPayload>(moqChannel, $"MOOCK-{moqChannel}");
+            var mockStream = streamPipelineService.SetMessagingPipe<MockPayload>($"MOOCK-{moqChannel}");
             moqs.Add(() => StartMockStreamMessaging(mockStream, waiterCount, iPAddress, cts.Token));
         }
 
