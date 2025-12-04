@@ -227,7 +227,12 @@ public class BasicMultiplexerTests
         await writeChannel.CloseAsync(cts.Token);
         await writeChannel.DisposeAsync();
 
-        await Task.Delay(100);
+        // Wait for close to propagate to the read channel (CI can be slow)
+        var timeout = DateTime.UtcNow.AddSeconds(5);
+        while (readChannel!.State != ChannelState.Closed && DateTime.UtcNow < timeout)
+        {
+            await Task.Delay(50);
+        }
 
         Assert.Equal(ChannelState.Closed, readChannel!.State);
 
