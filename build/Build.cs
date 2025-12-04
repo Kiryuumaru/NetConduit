@@ -92,12 +92,12 @@ class Build : BaseNukeBuildHelpers
                 }
                 app.OutputDirectory.DeleteDirectory();
                 DotNetTasks.DotNetClean(_ => _
-                    .SetProject(RootDirectory / spec.ProjectName / $"{spec.ProjectName}.csproj"));
+                    .SetProject(RootDirectory / "src" / spec.ProjectName / $"{spec.ProjectName}.csproj"));
                 DotNetTasks.DotNetBuild(_ => _
-                    .SetProjectFile(RootDirectory / spec.ProjectName / $"{spec.ProjectName}.csproj")
+                    .SetProjectFile(RootDirectory / "src" / spec.ProjectName / $"{spec.ProjectName}.csproj")
                     .SetConfiguration("Release"));
                 DotNetTasks.DotNetPack(_ => _
-                    .SetProject(RootDirectory / spec.ProjectName / $"{spec.ProjectName}.csproj")
+                    .SetProject(RootDirectory / "src" / spec.ProjectName / $"{spec.ProjectName}.csproj")
                     .SetConfiguration("Release")
                     .SetNoRestore(true)
                     .SetNoBuild(true)
