@@ -92,12 +92,12 @@ class Build : BaseNukeBuildHelpers
                 }
                 app.OutputDirectory.DeleteDirectory();
                 DotNetTasks.DotNetClean(_ => _
-                    .SetProject(RootDirectory / "ApplicationBuilderHelpers" / "ApplicationBuilderHelpers.csproj"));
+                    .SetProject(RootDirectory / spec.ProjectName / $"{spec.ProjectName}.csproj"));
                 DotNetTasks.DotNetBuild(_ => _
-                    .SetProjectFile(RootDirectory / "ApplicationBuilderHelpers" / "ApplicationBuilderHelpers.csproj")
+                    .SetProjectFile(RootDirectory / spec.ProjectName / $"{spec.ProjectName}.csproj")
                     .SetConfiguration("Release"));
                 DotNetTasks.DotNetPack(_ => _
-                    .SetProject(RootDirectory / "ApplicationBuilderHelpers" / "ApplicationBuilderHelpers.csproj")
+                    .SetProject(RootDirectory / spec.ProjectName / $"{spec.ProjectName}.csproj")
                     .SetConfiguration("Release")
                     .SetNoRestore(true)
                     .SetNoBuild(true)
