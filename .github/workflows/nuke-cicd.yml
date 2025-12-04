@@ -114,6 +114,126 @@ jobs:
       NUKE_PRE_SETUP_NET_CONDUIT_WEBSOCKET_PUBLISH_CHECKOUT_FETCH_DEPTH: ${{ steps.NUKE_RUN.outputs.NUKE_PRE_SETUP_NET_CONDUIT_WEBSOCKET_PUBLISH_CHECKOUT_FETCH_DEPTH }}
       NUKE_PRE_SETUP_NET_CONDUIT_WEBSOCKET_PUBLISH_CHECKOUT_FETCH_TAGS: ${{ steps.NUKE_RUN.outputs.NUKE_PRE_SETUP_NET_CONDUIT_WEBSOCKET_PUBLISH_CHECKOUT_FETCH_TAGS }}
       NUKE_PRE_SETUP_NET_CONDUIT_WEBSOCKET_PUBLISH_CHECKOUT_SUBMODULES: ${{ steps.NUKE_RUN.outputs.NUKE_PRE_SETUP_NET_CONDUIT_WEBSOCKET_PUBLISH_CHECKOUT_SUBMODULES }}
+  NET_CONDUIT_TEST:
+    name: Test NetConduit
+    runs-on: ${{ fromJson(needs.PRE_SETUP.outputs.NUKE_PRE_SETUP_NET_CONDUIT_TEST_RUNS_ON) }}
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        fetch-depth: ${{ needs.PRE_SETUP.outputs.NUKE_PRE_SETUP_NET_CONDUIT_TEST_CHECKOUT_FETCH_DEPTH }}
+        fetch-tags: ${{ needs.PRE_SETUP.outputs.NUKE_PRE_SETUP_NET_CONDUIT_TEST_CHECKOUT_FETCH_TAGS }}
+        submodules: ${{ needs.PRE_SETUP.outputs.NUKE_PRE_SETUP_NET_CONDUIT_TEST_CHECKOUT_SUBMODULES }}
+        persist-credentials: true
+    - name: Cache Run
+      uses: actions/cache@v4
+      with:
+        path: ./.nuke/temp/cache
+        key: ${{ needs.PRE_SETUP.outputs.NUKE_PRE_SETUP_NET_CONDUIT_TEST_CACHE_KEY }}
+        restore-keys: |-
+          ${{ needs.PRE_SETUP.outputs.NUKE_PRE_SETUP_NET_CONDUIT_TEST_CACHE_RESTORE_KEY }}
+          ${{ needs.PRE_SETUP.outputs.NUKE_PRE_SETUP_NET_CONDUIT_TEST_CACHE_MAIN_RESTORE_KEY }}
+    - id: NUKE_RUN
+      name: Run Nuke net_conduit_test
+      run: ${{ needs.PRE_SETUP.outputs.NUKE_PRE_SETUP_NET_CONDUIT_TEST_RUN_SCRIPT }} Run --args "net_conduit_test"
+    - name: Upload net_conduit pre_test artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: pre_test___net_conduit___NET_CONDUIT_TEST
+        path: ./.nuke/temp/artifacts-upload/net_conduit/*
+        if-no-files-found: error
+        retention-days: 1
+    - name: Upload common pre_test artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: pre_test___$common___NET_CONDUIT_TEST
+        path: ./.nuke/temp/artifacts-upload/$common/*
+        if-no-files-found: error
+        retention-days: 1
+    needs:
+    - PRE_SETUP
+    if: "! failure() && ! cancelled() && needs.PRE_SETUP.outputs.NUKE_PRE_SETUP_NET_CONDUIT_TEST_CONDITION == 'true'"
+    env:
+      NUKE_PRE_SETUP: ${{ needs.PRE_SETUP.outputs.NUKE_PRE_SETUP }}
+  NET_CONDUIT_TCP_TEST:
+    name: Test NetConduit.Tcp
+    runs-on: ${{ fromJson(needs.PRE_SETUP.outputs.NUKE_PRE_SETUP_NET_CONDUIT_TCP_TEST_RUNS_ON) }}
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        fetch-depth: ${{ needs.PRE_SETUP.outputs.NUKE_PRE_SETUP_NET_CONDUIT_TCP_TEST_CHECKOUT_FETCH_DEPTH }}
+        fetch-tags: ${{ needs.PRE_SETUP.outputs.NUKE_PRE_SETUP_NET_CONDUIT_TCP_TEST_CHECKOUT_FETCH_TAGS }}
+        submodules: ${{ needs.PRE_SETUP.outputs.NUKE_PRE_SETUP_NET_CONDUIT_TCP_TEST_CHECKOUT_SUBMODULES }}
+        persist-credentials: true
+    - name: Cache Run
+      uses: actions/cache@v4
+      with:
+        path: ./.nuke/temp/cache
+        key: ${{ needs.PRE_SETUP.outputs.NUKE_PRE_SETUP_NET_CONDUIT_TCP_TEST_CACHE_KEY }}
+        restore-keys: |-
+          ${{ needs.PRE_SETUP.outputs.NUKE_PRE_SETUP_NET_CONDUIT_TCP_TEST_CACHE_RESTORE_KEY }}
+          ${{ needs.PRE_SETUP.outputs.NUKE_PRE_SETUP_NET_CONDUIT_TCP_TEST_CACHE_MAIN_RESTORE_KEY }}
+    - id: NUKE_RUN
+      name: Run Nuke net_conduit_tcp_test
+      run: ${{ needs.PRE_SETUP.outputs.NUKE_PRE_SETUP_NET_CONDUIT_TCP_TEST_RUN_SCRIPT }} Run --args "net_conduit_tcp_test"
+    - name: Upload net_conduit_tcp pre_test artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: pre_test___net_conduit_tcp___NET_CONDUIT_TCP_TEST
+        path: ./.nuke/temp/artifacts-upload/net_conduit_tcp/*
+        if-no-files-found: error
+        retention-days: 1
+    - name: Upload common pre_test artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: pre_test___$common___NET_CONDUIT_TCP_TEST
+        path: ./.nuke/temp/artifacts-upload/$common/*
+        if-no-files-found: error
+        retention-days: 1
+    needs:
+    - PRE_SETUP
+    if: "! failure() && ! cancelled() && needs.PRE_SETUP.outputs.NUKE_PRE_SETUP_NET_CONDUIT_TCP_TEST_CONDITION == 'true'"
+    env:
+      NUKE_PRE_SETUP: ${{ needs.PRE_SETUP.outputs.NUKE_PRE_SETUP }}
+  NET_CONDUIT_WEBSOCKET_TEST:
+    name: Test NetConduit.WebSocket
+    runs-on: ${{ fromJson(needs.PRE_SETUP.outputs.NUKE_PRE_SETUP_NET_CONDUIT_WEBSOCKET_TEST_RUNS_ON) }}
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        fetch-depth: ${{ needs.PRE_SETUP.outputs.NUKE_PRE_SETUP_NET_CONDUIT_WEBSOCKET_TEST_CHECKOUT_FETCH_DEPTH }}
+        fetch-tags: ${{ needs.PRE_SETUP.outputs.NUKE_PRE_SETUP_NET_CONDUIT_WEBSOCKET_TEST_CHECKOUT_FETCH_TAGS }}
+        submodules: ${{ needs.PRE_SETUP.outputs.NUKE_PRE_SETUP_NET_CONDUIT_WEBSOCKET_TEST_CHECKOUT_SUBMODULES }}
+        persist-credentials: true
+    - name: Cache Run
+      uses: actions/cache@v4
+      with:
+        path: ./.nuke/temp/cache
+        key: ${{ needs.PRE_SETUP.outputs.NUKE_PRE_SETUP_NET_CONDUIT_WEBSOCKET_TEST_CACHE_KEY }}
+        restore-keys: |-
+          ${{ needs.PRE_SETUP.outputs.NUKE_PRE_SETUP_NET_CONDUIT_WEBSOCKET_TEST_CACHE_RESTORE_KEY }}
+          ${{ needs.PRE_SETUP.outputs.NUKE_PRE_SETUP_NET_CONDUIT_WEBSOCKET_TEST_CACHE_MAIN_RESTORE_KEY }}
+    - id: NUKE_RUN
+      name: Run Nuke net_conduit_websocket_test
+      run: ${{ needs.PRE_SETUP.outputs.NUKE_PRE_SETUP_NET_CONDUIT_WEBSOCKET_TEST_RUN_SCRIPT }} Run --args "net_conduit_websocket_test"
+    - name: Upload net_conduit_websocket pre_test artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: pre_test___net_conduit_websocket___NET_CONDUIT_WEBSOCKET_TEST
+        path: ./.nuke/temp/artifacts-upload/net_conduit_websocket/*
+        if-no-files-found: error
+        retention-days: 1
+    - name: Upload common pre_test artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: pre_test___$common___NET_CONDUIT_WEBSOCKET_TEST
+        path: ./.nuke/temp/artifacts-upload/$common/*
+        if-no-files-found: error
+        retention-days: 1
+    needs:
+    - PRE_SETUP
+    if: "! failure() && ! cancelled() && needs.PRE_SETUP.outputs.NUKE_PRE_SETUP_NET_CONDUIT_WEBSOCKET_TEST_CONDITION == 'true'"
+    env:
+      NUKE_PRE_SETUP: ${{ needs.PRE_SETUP.outputs.NUKE_PRE_SETUP }}
   NET_CONDUIT_BUILD:
     name: Build NetConduit
     runs-on: ${{ fromJson(needs.PRE_SETUP.outputs.NUKE_PRE_SETUP_NET_CONDUIT_BUILD_RUNS_ON) }}
@@ -156,7 +276,8 @@ jobs:
         retention-days: 1
     needs:
     - PRE_SETUP
-    if: "! failure() && ! cancelled() && needs.PRE_SETUP.outputs.NUKE_PRE_SETUP_NET_CONDUIT_BUILD_CONDITION == 'true'"
+    - NET_CONDUIT_TEST
+    if: "! failure() && ! cancelled() && needs.PRE_SETUP.outputs.NUKE_PRE_SETUP_NET_CONDUIT_BUILD_CONDITION == 'true' && needs.NET_CONDUIT_TEST.result == 'success'"
     env:
       NUKE_PRE_SETUP: ${{ needs.PRE_SETUP.outputs.NUKE_PRE_SETUP }}
   NET_CONDUIT_TCP_BUILD:
@@ -201,7 +322,8 @@ jobs:
         retention-days: 1
     needs:
     - PRE_SETUP
-    if: "! failure() && ! cancelled() && needs.PRE_SETUP.outputs.NUKE_PRE_SETUP_NET_CONDUIT_TCP_BUILD_CONDITION == 'true'"
+    - NET_CONDUIT_TCP_TEST
+    if: "! failure() && ! cancelled() && needs.PRE_SETUP.outputs.NUKE_PRE_SETUP_NET_CONDUIT_TCP_BUILD_CONDITION == 'true' && needs.NET_CONDUIT_TCP_TEST.result == 'success'"
     env:
       NUKE_PRE_SETUP: ${{ needs.PRE_SETUP.outputs.NUKE_PRE_SETUP }}
   NET_CONDUIT_WEBSOCKET_BUILD:
@@ -246,160 +368,8 @@ jobs:
         retention-days: 1
     needs:
     - PRE_SETUP
-    if: "! failure() && ! cancelled() && needs.PRE_SETUP.outputs.NUKE_PRE_SETUP_NET_CONDUIT_WEBSOCKET_BUILD_CONDITION == 'true'"
-    env:
-      NUKE_PRE_SETUP: ${{ needs.PRE_SETUP.outputs.NUKE_PRE_SETUP }}
-  NET_CONDUIT_TEST:
-    name: Test NetConduit
-    runs-on: ${{ fromJson(needs.PRE_SETUP.outputs.NUKE_PRE_SETUP_NET_CONDUIT_TEST_RUNS_ON) }}
-    steps:
-    - uses: actions/checkout@v4
-      with:
-        fetch-depth: ${{ needs.PRE_SETUP.outputs.NUKE_PRE_SETUP_NET_CONDUIT_TEST_CHECKOUT_FETCH_DEPTH }}
-        fetch-tags: ${{ needs.PRE_SETUP.outputs.NUKE_PRE_SETUP_NET_CONDUIT_TEST_CHECKOUT_FETCH_TAGS }}
-        submodules: ${{ needs.PRE_SETUP.outputs.NUKE_PRE_SETUP_NET_CONDUIT_TEST_CHECKOUT_SUBMODULES }}
-        persist-credentials: true
-    - name: Download net_conduit pre_test artifacts
-      uses: actions/download-artifact@v4
-      with:
-        path: ./.nuke/temp/artifacts-download
-        pattern: pre_test___net_conduit___*
-    - name: Download net_conduit build artifacts
-      uses: actions/download-artifact@v4
-      with:
-        path: ./.nuke/temp/artifacts-download
-        pattern: build___net_conduit___*
-    - name: Cache Run
-      uses: actions/cache@v4
-      with:
-        path: ./.nuke/temp/cache
-        key: ${{ needs.PRE_SETUP.outputs.NUKE_PRE_SETUP_NET_CONDUIT_TEST_CACHE_KEY }}
-        restore-keys: |-
-          ${{ needs.PRE_SETUP.outputs.NUKE_PRE_SETUP_NET_CONDUIT_TEST_CACHE_RESTORE_KEY }}
-          ${{ needs.PRE_SETUP.outputs.NUKE_PRE_SETUP_NET_CONDUIT_TEST_CACHE_MAIN_RESTORE_KEY }}
-    - id: NUKE_RUN
-      name: Run Nuke net_conduit_test
-      run: ${{ needs.PRE_SETUP.outputs.NUKE_PRE_SETUP_NET_CONDUIT_TEST_RUN_SCRIPT }} Run --args "net_conduit_test"
-    - name: Upload net_conduit post_test artifacts
-      uses: actions/upload-artifact@v4
-      with:
-        name: post_test___net_conduit___NET_CONDUIT_TEST
-        path: ./.nuke/temp/artifacts-upload/net_conduit/*
-        if-no-files-found: error
-        retention-days: 1
-    - name: Upload common post_test artifacts
-      uses: actions/upload-artifact@v4
-      with:
-        name: post_test___$common___NET_CONDUIT_TEST
-        path: ./.nuke/temp/artifacts-upload/$common/*
-        if-no-files-found: error
-        retention-days: 1
-    needs:
-    - PRE_SETUP
-    - NET_CONDUIT_BUILD
-    if: "! failure() && ! cancelled() && needs.PRE_SETUP.outputs.NUKE_PRE_SETUP_NET_CONDUIT_TEST_CONDITION == 'true' && needs.NET_CONDUIT_BUILD.result == 'success'"
-    env:
-      NUKE_PRE_SETUP: ${{ needs.PRE_SETUP.outputs.NUKE_PRE_SETUP }}
-  NET_CONDUIT_TCP_TEST:
-    name: Test NetConduit.Tcp
-    runs-on: ${{ fromJson(needs.PRE_SETUP.outputs.NUKE_PRE_SETUP_NET_CONDUIT_TCP_TEST_RUNS_ON) }}
-    steps:
-    - uses: actions/checkout@v4
-      with:
-        fetch-depth: ${{ needs.PRE_SETUP.outputs.NUKE_PRE_SETUP_NET_CONDUIT_TCP_TEST_CHECKOUT_FETCH_DEPTH }}
-        fetch-tags: ${{ needs.PRE_SETUP.outputs.NUKE_PRE_SETUP_NET_CONDUIT_TCP_TEST_CHECKOUT_FETCH_TAGS }}
-        submodules: ${{ needs.PRE_SETUP.outputs.NUKE_PRE_SETUP_NET_CONDUIT_TCP_TEST_CHECKOUT_SUBMODULES }}
-        persist-credentials: true
-    - name: Download net_conduit_tcp pre_test artifacts
-      uses: actions/download-artifact@v4
-      with:
-        path: ./.nuke/temp/artifacts-download
-        pattern: pre_test___net_conduit_tcp___*
-    - name: Download net_conduit_tcp build artifacts
-      uses: actions/download-artifact@v4
-      with:
-        path: ./.nuke/temp/artifacts-download
-        pattern: build___net_conduit_tcp___*
-    - name: Cache Run
-      uses: actions/cache@v4
-      with:
-        path: ./.nuke/temp/cache
-        key: ${{ needs.PRE_SETUP.outputs.NUKE_PRE_SETUP_NET_CONDUIT_TCP_TEST_CACHE_KEY }}
-        restore-keys: |-
-          ${{ needs.PRE_SETUP.outputs.NUKE_PRE_SETUP_NET_CONDUIT_TCP_TEST_CACHE_RESTORE_KEY }}
-          ${{ needs.PRE_SETUP.outputs.NUKE_PRE_SETUP_NET_CONDUIT_TCP_TEST_CACHE_MAIN_RESTORE_KEY }}
-    - id: NUKE_RUN
-      name: Run Nuke net_conduit_tcp_test
-      run: ${{ needs.PRE_SETUP.outputs.NUKE_PRE_SETUP_NET_CONDUIT_TCP_TEST_RUN_SCRIPT }} Run --args "net_conduit_tcp_test"
-    - name: Upload net_conduit_tcp post_test artifacts
-      uses: actions/upload-artifact@v4
-      with:
-        name: post_test___net_conduit_tcp___NET_CONDUIT_TCP_TEST
-        path: ./.nuke/temp/artifacts-upload/net_conduit_tcp/*
-        if-no-files-found: error
-        retention-days: 1
-    - name: Upload common post_test artifacts
-      uses: actions/upload-artifact@v4
-      with:
-        name: post_test___$common___NET_CONDUIT_TCP_TEST
-        path: ./.nuke/temp/artifacts-upload/$common/*
-        if-no-files-found: error
-        retention-days: 1
-    needs:
-    - PRE_SETUP
-    - NET_CONDUIT_TCP_BUILD
-    if: "! failure() && ! cancelled() && needs.PRE_SETUP.outputs.NUKE_PRE_SETUP_NET_CONDUIT_TCP_TEST_CONDITION == 'true' && needs.NET_CONDUIT_TCP_BUILD.result == 'success'"
-    env:
-      NUKE_PRE_SETUP: ${{ needs.PRE_SETUP.outputs.NUKE_PRE_SETUP }}
-  NET_CONDUIT_WEBSOCKET_TEST:
-    name: Test NetConduit.WebSocket
-    runs-on: ${{ fromJson(needs.PRE_SETUP.outputs.NUKE_PRE_SETUP_NET_CONDUIT_WEBSOCKET_TEST_RUNS_ON) }}
-    steps:
-    - uses: actions/checkout@v4
-      with:
-        fetch-depth: ${{ needs.PRE_SETUP.outputs.NUKE_PRE_SETUP_NET_CONDUIT_WEBSOCKET_TEST_CHECKOUT_FETCH_DEPTH }}
-        fetch-tags: ${{ needs.PRE_SETUP.outputs.NUKE_PRE_SETUP_NET_CONDUIT_WEBSOCKET_TEST_CHECKOUT_FETCH_TAGS }}
-        submodules: ${{ needs.PRE_SETUP.outputs.NUKE_PRE_SETUP_NET_CONDUIT_WEBSOCKET_TEST_CHECKOUT_SUBMODULES }}
-        persist-credentials: true
-    - name: Download net_conduit_websocket pre_test artifacts
-      uses: actions/download-artifact@v4
-      with:
-        path: ./.nuke/temp/artifacts-download
-        pattern: pre_test___net_conduit_websocket___*
-    - name: Download net_conduit_websocket build artifacts
-      uses: actions/download-artifact@v4
-      with:
-        path: ./.nuke/temp/artifacts-download
-        pattern: build___net_conduit_websocket___*
-    - name: Cache Run
-      uses: actions/cache@v4
-      with:
-        path: ./.nuke/temp/cache
-        key: ${{ needs.PRE_SETUP.outputs.NUKE_PRE_SETUP_NET_CONDUIT_WEBSOCKET_TEST_CACHE_KEY }}
-        restore-keys: |-
-          ${{ needs.PRE_SETUP.outputs.NUKE_PRE_SETUP_NET_CONDUIT_WEBSOCKET_TEST_CACHE_RESTORE_KEY }}
-          ${{ needs.PRE_SETUP.outputs.NUKE_PRE_SETUP_NET_CONDUIT_WEBSOCKET_TEST_CACHE_MAIN_RESTORE_KEY }}
-    - id: NUKE_RUN
-      name: Run Nuke net_conduit_websocket_test
-      run: ${{ needs.PRE_SETUP.outputs.NUKE_PRE_SETUP_NET_CONDUIT_WEBSOCKET_TEST_RUN_SCRIPT }} Run --args "net_conduit_websocket_test"
-    - name: Upload net_conduit_websocket post_test artifacts
-      uses: actions/upload-artifact@v4
-      with:
-        name: post_test___net_conduit_websocket___NET_CONDUIT_WEBSOCKET_TEST
-        path: ./.nuke/temp/artifacts-upload/net_conduit_websocket/*
-        if-no-files-found: error
-        retention-days: 1
-    - name: Upload common post_test artifacts
-      uses: actions/upload-artifact@v4
-      with:
-        name: post_test___$common___NET_CONDUIT_WEBSOCKET_TEST
-        path: ./.nuke/temp/artifacts-upload/$common/*
-        if-no-files-found: error
-        retention-days: 1
-    needs:
-    - PRE_SETUP
-    - NET_CONDUIT_WEBSOCKET_BUILD
-    if: "! failure() && ! cancelled() && needs.PRE_SETUP.outputs.NUKE_PRE_SETUP_NET_CONDUIT_WEBSOCKET_TEST_CONDITION == 'true' && needs.NET_CONDUIT_WEBSOCKET_BUILD.result == 'success'"
+    - NET_CONDUIT_WEBSOCKET_TEST
+    if: "! failure() && ! cancelled() && needs.PRE_SETUP.outputs.NUKE_PRE_SETUP_NET_CONDUIT_WEBSOCKET_BUILD_CONDITION == 'true' && needs.NET_CONDUIT_WEBSOCKET_TEST.result == 'success'"
     env:
       NUKE_PRE_SETUP: ${{ needs.PRE_SETUP.outputs.NUKE_PRE_SETUP }}
   NET_CONDUIT_PUBLISH:
@@ -447,9 +417,9 @@ jobs:
         retention-days: 1
     needs:
     - PRE_SETUP
-    - NET_CONDUIT_BUILD
     - NET_CONDUIT_TEST
-    if: "! failure() && ! cancelled() && needs.PRE_SETUP.outputs.NUKE_PRE_SETUP_NET_CONDUIT_PUBLISH_CONDITION == 'true' && needs.NET_CONDUIT_BUILD.result == 'success' && needs.NET_CONDUIT_TEST.result == 'success'"
+    - NET_CONDUIT_BUILD
+    if: "! failure() && ! cancelled() && needs.PRE_SETUP.outputs.NUKE_PRE_SETUP_NET_CONDUIT_PUBLISH_CONDITION == 'true' && needs.NET_CONDUIT_TEST.result == 'success' && needs.NET_CONDUIT_BUILD.result == 'success'"
     env:
       NUKE_PRE_SETUP: ${{ needs.PRE_SETUP.outputs.NUKE_PRE_SETUP }}
   NET_CONDUIT_TCP_PUBLISH:
@@ -497,9 +467,9 @@ jobs:
         retention-days: 1
     needs:
     - PRE_SETUP
-    - NET_CONDUIT_TCP_BUILD
     - NET_CONDUIT_TCP_TEST
-    if: "! failure() && ! cancelled() && needs.PRE_SETUP.outputs.NUKE_PRE_SETUP_NET_CONDUIT_TCP_PUBLISH_CONDITION == 'true' && needs.NET_CONDUIT_TCP_BUILD.result == 'success' && needs.NET_CONDUIT_TCP_TEST.result == 'success'"
+    - NET_CONDUIT_TCP_BUILD
+    if: "! failure() && ! cancelled() && needs.PRE_SETUP.outputs.NUKE_PRE_SETUP_NET_CONDUIT_TCP_PUBLISH_CONDITION == 'true' && needs.NET_CONDUIT_TCP_TEST.result == 'success' && needs.NET_CONDUIT_TCP_BUILD.result == 'success'"
     env:
       NUKE_PRE_SETUP: ${{ needs.PRE_SETUP.outputs.NUKE_PRE_SETUP }}
   NET_CONDUIT_WEBSOCKET_PUBLISH:
@@ -547,9 +517,9 @@ jobs:
         retention-days: 1
     needs:
     - PRE_SETUP
-    - NET_CONDUIT_WEBSOCKET_BUILD
     - NET_CONDUIT_WEBSOCKET_TEST
-    if: "! failure() && ! cancelled() && needs.PRE_SETUP.outputs.NUKE_PRE_SETUP_NET_CONDUIT_WEBSOCKET_PUBLISH_CONDITION == 'true' && needs.NET_CONDUIT_WEBSOCKET_BUILD.result == 'success' && needs.NET_CONDUIT_WEBSOCKET_TEST.result == 'success'"
+    - NET_CONDUIT_WEBSOCKET_BUILD
+    if: "! failure() && ! cancelled() && needs.PRE_SETUP.outputs.NUKE_PRE_SETUP_NET_CONDUIT_WEBSOCKET_PUBLISH_CONDITION == 'true' && needs.NET_CONDUIT_WEBSOCKET_TEST.result == 'success' && needs.NET_CONDUIT_WEBSOCKET_BUILD.result == 'success'"
     env:
       NUKE_PRE_SETUP: ${{ needs.PRE_SETUP.outputs.NUKE_PRE_SETUP }}
   POST_SETUP:
@@ -572,12 +542,12 @@ jobs:
       run: chmod +x ./build.sh && ./build.sh PipelinePostSetup
     needs:
     - PRE_SETUP
-    - NET_CONDUIT_BUILD
-    - NET_CONDUIT_TCP_BUILD
-    - NET_CONDUIT_WEBSOCKET_BUILD
     - NET_CONDUIT_TEST
     - NET_CONDUIT_TCP_TEST
     - NET_CONDUIT_WEBSOCKET_TEST
+    - NET_CONDUIT_BUILD
+    - NET_CONDUIT_TCP_BUILD
+    - NET_CONDUIT_WEBSOCKET_BUILD
     - NET_CONDUIT_PUBLISH
     - NET_CONDUIT_TCP_PUBLISH
     - NET_CONDUIT_WEBSOCKET_PUBLISH

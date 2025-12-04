@@ -18,7 +18,6 @@
 		<Copyright>Kiryuumaru</Copyright>
 		<Description>TCP transport helper for NetConduit stream multiplexer. Provides easy TCP client/server connection handling with automatic multiplexer setup.</Description>
 		<PackageTags>multiplexer;stream;tcp;networking;async;aot</PackageTags>
-		<PackageLicenseExpression>MIT</PackageLicenseExpression>
 		<PackageProjectUrl>https://github.com/Kiryuumaru/NetConduit</PackageProjectUrl>
 		<RepositoryUrl>https://github.com/Kiryuumaru/NetConduit.git</RepositoryUrl>
 		<RepositoryType>git</RepositoryType>

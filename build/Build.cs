@@ -50,11 +50,11 @@ class Build : BaseNukeBuildHelpers
 
     TestEntry TestEntry => _ => _
         .RunnerOS(RunnerOS.Ubuntu2204)
-        .ExecuteBeforeBuild(true)
         .Matrix(DeploymentApps, (test, spec) => test
             .AppId(spec.AppId)
             .WorkflowId($"{spec.AppId}_test")
             .DisplayName($"Test {spec.ProjectName}")
+            .ExecuteBeforeBuild(true)
             .Execute(() =>
             {
                 DotNetTasks.DotNetBuild(_ => _
