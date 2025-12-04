@@ -1079,7 +1079,7 @@ public class ExtremeTests
         await using var pipe = new DuplexPipe();
         
         // Use higher initial credits to handle large frames without many round-trips
-        var channelOptions = new DefaultChannelOptions { InitialCredits = (uint)maxFrameSize * 2 };
+        var channelOptions = new DefaultChannelOptions { MaxCredits = (uint)maxFrameSize * 2 };
         
         await using var initiator = new StreamMultiplexer(pipe.Stream1, pipe.Stream1,
             new MultiplexerOptions { MaxFrameSize = maxFrameSize, DefaultChannelOptions = channelOptions });
@@ -1412,7 +1412,7 @@ public class ExtremeTests
         // Use higher credits for heavy load
         var options = new MultiplexerOptions 
         { 
-            DefaultChannelOptions = new DefaultChannelOptions { InitialCredits = 1024 * 1024 } 
+            DefaultChannelOptions = new DefaultChannelOptions { MaxCredits = 1024 * 1024 } 
         };
         
         await using var initiator = new StreamMultiplexer(pipe.Stream1, pipe.Stream1, options);
@@ -1503,9 +1503,9 @@ public class ExtremeTests
         await using var pipe = new DuplexPipe();
         
         await using var initiator = new StreamMultiplexer(pipe.Stream1, pipe.Stream1,
-            new MultiplexerOptions { DefaultChannelOptions = new DefaultChannelOptions { InitialCredits = 16 * 1024 * 1024 } });
+            new MultiplexerOptions { DefaultChannelOptions = new DefaultChannelOptions { MaxCredits = 16 * 1024 * 1024 } });
         await using var acceptor = new StreamMultiplexer(pipe.Stream2, pipe.Stream2,
-            new MultiplexerOptions { DefaultChannelOptions = new DefaultChannelOptions { InitialCredits = 16 * 1024 * 1024 } });
+            new MultiplexerOptions { DefaultChannelOptions = new DefaultChannelOptions { MaxCredits = 16 * 1024 * 1024 } });
 
         using var cts = new CancellationTokenSource(TimeSpan.FromMinutes(5));
         
@@ -1586,9 +1586,9 @@ public class ExtremeTests
         await using var pipe = new DuplexPipe();
         
         await using var initiator = new StreamMultiplexer(pipe.Stream1, pipe.Stream1,
-            new MultiplexerOptions { DefaultChannelOptions = new DefaultChannelOptions { InitialCredits = 2 * 1024 * 1024 } });
+            new MultiplexerOptions { DefaultChannelOptions = new DefaultChannelOptions { MaxCredits = 2 * 1024 * 1024 } });
         await using var acceptor = new StreamMultiplexer(pipe.Stream2, pipe.Stream2,
-            new MultiplexerOptions { DefaultChannelOptions = new DefaultChannelOptions { InitialCredits = 2 * 1024 * 1024 } });
+            new MultiplexerOptions { DefaultChannelOptions = new DefaultChannelOptions { MaxCredits = 2 * 1024 * 1024 } });
 
         using var cts = new CancellationTokenSource(TimeSpan.FromMinutes(3));
         
@@ -1689,9 +1689,9 @@ public class ExtremeTests
         await using var pipe = new DuplexPipe();
         
         await using var initiator = new StreamMultiplexer(pipe.Stream1, pipe.Stream1,
-            new MultiplexerOptions { DefaultChannelOptions = new DefaultChannelOptions { InitialCredits = 32 * 1024 * 1024 } });
+            new MultiplexerOptions { DefaultChannelOptions = new DefaultChannelOptions { MaxCredits = 32 * 1024 * 1024 } });
         await using var acceptor = new StreamMultiplexer(pipe.Stream2, pipe.Stream2,
-            new MultiplexerOptions { DefaultChannelOptions = new DefaultChannelOptions { InitialCredits = 32 * 1024 * 1024 } });
+            new MultiplexerOptions { DefaultChannelOptions = new DefaultChannelOptions { MaxCredits = 32 * 1024 * 1024 } });
 
         using var cts = new CancellationTokenSource(TimeSpan.FromMinutes(2));
         

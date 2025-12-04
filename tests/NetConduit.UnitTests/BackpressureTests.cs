@@ -10,7 +10,7 @@ public class BackpressureTests
         // Acceptor controls credits - set small initial credits
         var acceptorOptions = new MultiplexerOptions 
         { 
-            DefaultChannelOptions = new DefaultChannelOptions { InitialCredits = 1024 }
+            DefaultChannelOptions = new DefaultChannelOptions { MinCredits = 1024, MaxCredits = 1024 }
         };
         
         await using var initiator = new StreamMultiplexer(pipe.Stream1, pipe.Stream1,
@@ -83,7 +83,7 @@ public class BackpressureTests
         // Acceptor controls credits - set small initial credits
         var acceptorOptions = new MultiplexerOptions 
         { 
-            DefaultChannelOptions = new DefaultChannelOptions { InitialCredits = 100 }
+            DefaultChannelOptions = new DefaultChannelOptions { MinCredits = 100, MaxCredits = 100 }
         };
         
         await using var initiator = new StreamMultiplexer(pipe.Stream1, pipe.Stream1,
@@ -153,8 +153,8 @@ public class BackpressureTests
             new ChannelOptions 
             { 
                 ChannelId = "autogrant_channel",
-                InitialCredits = 1024,
-                CreditGrantThreshold = 0.5 // Grant at 50%
+                MinCredits = 1024,
+                MaxCredits = 1024
             },
             cts.Token);
         await acceptTask;
@@ -184,7 +184,7 @@ public class BackpressureTests
         // Acceptor controls credits - set small initial credits
         var acceptorOptions = new MultiplexerOptions 
         { 
-            DefaultChannelOptions = new DefaultChannelOptions { InitialCredits = 100 }
+            DefaultChannelOptions = new DefaultChannelOptions { MinCredits = 100, MaxCredits = 100 }
         };
         
         await using var initiator = new StreamMultiplexer(pipe.Stream1, pipe.Stream1,

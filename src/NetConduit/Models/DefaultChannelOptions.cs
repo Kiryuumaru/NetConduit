@@ -7,15 +7,16 @@ namespace NetConduit;
 public sealed class DefaultChannelOptions
 {
     /// <summary>
-    /// Initial credits (bytes) granted to sender. Default: 64KB.
+    /// Minimum credits (bytes) for adaptive flow control. Default: 64KB.
+    /// Credits will not shrink below this value.
     /// </summary>
-    public uint InitialCredits { get; init; } = 65536;
+    public uint MinCredits { get; init; } = 64 * 1024;
     
     /// <summary>
-    /// Threshold (0.0 to 1.0) of consumed credits before auto-granting more.
-    /// Default: 0.5 (grant when 50% consumed).
+    /// Maximum credits (bytes) for adaptive flow control. Default: 4MB.
+    /// Credits will not grow beyond this value.
     /// </summary>
-    public double CreditGrantThreshold { get; init; } = 0.5;
+    public uint MaxCredits { get; init; } = 4 * 1024 * 1024;
     
     /// <summary>
     /// Timeout for send operations when waiting for credits.

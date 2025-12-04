@@ -59,6 +59,7 @@ class Build : BaseNukeBuildHelpers
             {
                 DotNetTasks.DotNetBuild(_ => _
                     .SetProjectFile(RootDirectory / "tests" / spec.ProjectTestName / $"{spec.ProjectTestName}.csproj")
+                    .SetProperty("UseLocalNetConduit", false)
                     .SetConfiguration("Release"));
                 DotNetTasks.DotNetTest(_ => _
                     .SetProcessAdditionalArguments(
@@ -67,6 +68,7 @@ class Build : BaseNukeBuildHelpers
                         "RunConfiguration.CollectSourceInformation=true " +
                         "DataCollectionRunSettings.DataCollectors.DataCollector.Configuration.Format=opencovere ")
                     .SetProjectFile(RootDirectory / "tests" / spec.ProjectTestName / $"{spec.ProjectTestName}.csproj")
+                    .SetProperty("UseLocalNetConduit", false)
                     .SetConfiguration("Release"));
             }));
 
@@ -95,6 +97,7 @@ class Build : BaseNukeBuildHelpers
                     .SetProject(RootDirectory / "src" / spec.ProjectName / $"{spec.ProjectName}.csproj"));
                 DotNetTasks.DotNetBuild(_ => _
                     .SetProjectFile(RootDirectory / "src" / spec.ProjectName / $"{spec.ProjectName}.csproj")
+                    .SetProperty("UseLocalNetConduit", false)
                     .SetConfiguration("Release"));
                 DotNetTasks.DotNetPack(_ => _
                     .SetProject(RootDirectory / "src" / spec.ProjectName / $"{spec.ProjectName}.csproj")
@@ -105,6 +108,7 @@ class Build : BaseNukeBuildHelpers
                     .SetSymbolPackageFormat("snupkg")
                     .SetVersion(version)
                     .SetPackageReleaseNotes(NormalizeReleaseNotes(releaseNotes))
+                    .SetProperty("UseLocalNetConduit", false)
                     .SetOutputDirectory(app.OutputDirectory));
             }));
 
