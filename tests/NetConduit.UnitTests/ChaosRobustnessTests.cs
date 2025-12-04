@@ -847,7 +847,7 @@ public class ChaosRobustnessTests
         // Use higher credits for heavy data test
         var options = new MultiplexerOptions 
         { 
-            DefaultChannelOptions = new DefaultChannelOptions { InitialCredits = 1024 * 1024 } 
+            DefaultChannelOptions = new DefaultChannelOptions { MaxCredits = 1024 * 1024 } 
         };
         
         await using var muxA = new StreamMultiplexer(pipe.Stream1, pipe.Stream1, options);

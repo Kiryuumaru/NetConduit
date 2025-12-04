@@ -284,9 +284,9 @@ public class BenchmarkTests
         await using var pipe = new DuplexPipe();
         
         await using var initiator = new StreamMultiplexer(pipe.Stream1, pipe.Stream1,
-            new MultiplexerOptions { DefaultChannelOptions = new DefaultChannelOptions { InitialCredits = 1024 * 1024 } });
+            new MultiplexerOptions { DefaultChannelOptions = new DefaultChannelOptions { MaxCredits = 1024 * 1024 } });
         await using var acceptor = new StreamMultiplexer(pipe.Stream2, pipe.Stream2,
-            new MultiplexerOptions { DefaultChannelOptions = new DefaultChannelOptions { InitialCredits = 1024 * 1024 } });
+            new MultiplexerOptions { DefaultChannelOptions = new DefaultChannelOptions { MaxCredits = 1024 * 1024 } });
 
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(120));
         
@@ -353,9 +353,9 @@ public class BenchmarkTests
         await using var pipe = new DuplexPipe();
         
         await using var initiator = new StreamMultiplexer(pipe.Stream1, pipe.Stream1,
-            new MultiplexerOptions { DefaultChannelOptions = new DefaultChannelOptions { InitialCredits = 256 * 1024 } });
+            new MultiplexerOptions { DefaultChannelOptions = new DefaultChannelOptions { MaxCredits = 256 * 1024 } });
         await using var acceptor = new StreamMultiplexer(pipe.Stream2, pipe.Stream2,
-            new MultiplexerOptions { DefaultChannelOptions = new DefaultChannelOptions { InitialCredits = 256 * 1024 } });
+            new MultiplexerOptions { DefaultChannelOptions = new DefaultChannelOptions { MaxCredits = 256 * 1024 } });
 
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(180));
         
@@ -628,9 +628,9 @@ public class BenchmarkTests
         await using var pipe = new DuplexPipe();
         
         await using var initiator = new StreamMultiplexer(pipe.Stream1, pipe.Stream1,
-            new MultiplexerOptions { DefaultChannelOptions = new DefaultChannelOptions { InitialCredits = 512 * 1024 } });
+            new MultiplexerOptions { DefaultChannelOptions = new DefaultChannelOptions { MaxCredits = 512 * 1024 } });
         await using var acceptor = new StreamMultiplexer(pipe.Stream2, pipe.Stream2,
-            new MultiplexerOptions { DefaultChannelOptions = new DefaultChannelOptions { InitialCredits = 512 * 1024 } });
+            new MultiplexerOptions { DefaultChannelOptions = new DefaultChannelOptions { MaxCredits = 512 * 1024 } });
 
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(120));
         
@@ -808,9 +808,9 @@ public class BenchmarkTests
             await using var pipe = new DuplexPipe();
             
             await using var initiator = new StreamMultiplexer(pipe.Stream1, pipe.Stream1,
-                new MultiplexerOptions { DefaultChannelOptions = new DefaultChannelOptions { InitialCredits = (uint)credits } });
+                new MultiplexerOptions { DefaultChannelOptions = new DefaultChannelOptions { MaxCredits = (uint)credits } });
             await using var acceptor = new StreamMultiplexer(pipe.Stream2, pipe.Stream2,
-                new MultiplexerOptions { DefaultChannelOptions = new DefaultChannelOptions { InitialCredits = (uint)credits } });
+                new MultiplexerOptions { DefaultChannelOptions = new DefaultChannelOptions { MaxCredits = (uint)credits } });
 
             using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(60));
             
@@ -915,9 +915,9 @@ public class BenchmarkTests
             await using var pipe = new DuplexPipe();
             
             await using var initiator = new StreamMultiplexer(pipe.Stream1, pipe.Stream1,
-                new MultiplexerOptions { DefaultChannelOptions = new DefaultChannelOptions { InitialCredits = 1024 * 1024 } });
+                new MultiplexerOptions { DefaultChannelOptions = new DefaultChannelOptions { MaxCredits = 1024 * 1024 } });
             await using var acceptor = new StreamMultiplexer(pipe.Stream2, pipe.Stream2,
-                new MultiplexerOptions { DefaultChannelOptions = new DefaultChannelOptions { InitialCredits = 1024 * 1024 } });
+                new MultiplexerOptions { DefaultChannelOptions = new DefaultChannelOptions { MaxCredits = 1024 * 1024 } });
 
             using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(60));
             

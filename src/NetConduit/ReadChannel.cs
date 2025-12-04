@@ -13,12 +13,12 @@ public sealed class ReadChannel : Stream
     private readonly Channel<OwnedMemory> _dataChannel;
     private readonly CancellationTokenSource _closeCts;
     private readonly ChannelSyncState _syncState;
+    private readonly AdaptiveFlowControl _flowControl;
     private readonly object _disposeLock = new();
     
     private volatile ChannelState _state;
     private OwnedMemory _currentOwnedBuffer;
     private ReadOnlyMemory<byte> _currentRemainingData;
-    private long _consumedSinceLastGrant;
     private bool _disposed;
     private volatile bool _isDisposing;
 
@@ -42,6 +42,7 @@ public sealed class ReadChannel : Stream
         });
         _closeCts = new CancellationTokenSource();
         _syncState = new ChannelSyncState(0); // Read channels don't buffer, just track sequence
+        _flowControl = new AdaptiveFlowControl(options.MinCredits, options.MaxCredits);
         Stats = new ChannelStats();
         _isDisposing = false;
     }
@@ -63,6 +64,12 @@ public sealed class ReadChannel : Stream
     
     /// <summary>Synchronization state for reconnection.</summary>
     internal ChannelSyncState SyncState => _syncState;
+    
+    /// <summary>Gets the current adaptive window size for flow control.</summary>
+    public uint CurrentWindowSize => _flowControl.CurrentWindowSize;
+    
+    /// <summary>Gets the initial credits to grant for this channel.</summary>
+    internal uint GetInitialCredits() => _flowControl.GetInitialCredits();
 
     /// <inheritdoc/>
     public override bool CanRead => _state == ChannelState.Open || !_currentRemainingData.IsEmpty || _dataChannel.Reader.TryPeek(out _);
@@ -177,15 +184,10 @@ public sealed class ReadChannel : Stream
         
         Stats.AddBytesReceived(toCopy);
         
-        // Track consumed bytes for credit auto-grant
-        _consumedSinceLastGrant += toCopy;
-        var threshold = (long)(_options.InitialCredits * _options.CreditGrantThreshold);
-        
-        if (_consumedSinceLastGrant >= threshold)
+        // Use adaptive flow control to determine credit grant
+        var toGrant = _flowControl.RecordConsumptionAndGetGrant(toCopy);
+        if (toGrant > 0)
         {
-            var toGrant = (uint)_consumedSinceLastGrant;
-            _consumedSinceLastGrant = 0;
-            
             // Fire and forget credit grant
             _ = _multiplexer.SendCreditGrantAsync(ChannelIndex, toGrant, CancellationToken.None);
             Stats.AddCreditsGranted(toGrant);
@@ -216,12 +218,8 @@ public sealed class ReadChannel : Stream
 
         _state = ChannelState.Closing;
         
-        // Grant any remaining credits
-        if (_consumedSinceLastGrant > 0)
-        {
-            await _multiplexer.SendCreditGrantAsync(ChannelIndex, (uint)_consumedSinceLastGrant, cancellationToken).ConfigureAwait(false);
-            _consumedSinceLastGrant = 0;
-        }
+        // Flush any remaining credits from adaptive flow control
+        // The flow control handles this internally, nothing more to do here
     }
 
     internal void EnqueueData(OwnedMemory data)

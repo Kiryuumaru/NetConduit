@@ -8,6 +8,8 @@
 		<IsAotCompatible>true</IsAotCompatible>
 		<EnableTrimAnalyzer>true</EnableTrimAnalyzer>
 		<GenerateDocumentationFile>true</GenerateDocumentationFile>
+		<!-- Use local project reference by default; set to false for NuGet package release builds -->
+		<UseLocalNetConduit Condition="'$(UseLocalNetConduit)' == ''">true</UseLocalNetConduit>
 	</PropertyGroup>
 
 	<!-- NuGet Package Metadata -->
@@ -30,12 +32,12 @@
 		<None Include="..\..\LICENSE" Pack="true" PackagePath="\" />
 	</ItemGroup>
 
-	<ItemGroup Condition="'$(Configuration)' == 'Debug'">
-	  <ProjectReference Include="..\NetConduit\NetConduit.csproj" />
+	<ItemGroup Condition="'$(UseLocalNetConduit)' == 'true'">
+		<ProjectReference Include="..\NetConduit\NetConduit.csproj" />
 	</ItemGroup>
 
-	<ItemGroup Condition="'$(Configuration)' != 'Debug'">
-	  <PackageReference Include="NetConduit" Version="1.0.1" />
+	<ItemGroup Condition="'$(UseLocalNetConduit)' != 'true'">
+		<PackageReference Include="NetConduit" Version="1.0.1" />
 	</ItemGroup>
 
 </Project>

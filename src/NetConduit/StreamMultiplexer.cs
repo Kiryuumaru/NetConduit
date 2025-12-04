@@ -1354,8 +1354,8 @@ public sealed class StreamMultiplexer : IAsyncDisposable
         { 
             ChannelId = channelId,
             Priority = priority,
-            InitialCredits = _options.DefaultChannelOptions.InitialCredits,
-            CreditGrantThreshold = _options.DefaultChannelOptions.CreditGrantThreshold,
+            MinCredits = _options.DefaultChannelOptions.MinCredits,
+            MaxCredits = _options.DefaultChannelOptions.MaxCredits,
             SendTimeout = _options.DefaultChannelOptions.SendTimeout
         };
         
@@ -1377,8 +1377,8 @@ public sealed class StreamMultiplexer : IAsyncDisposable
         Stats.IncrementTotalChannelsOpened();
         Stats.IncrementOpenChannels();
 
-        // Send ACK with initial credits
-        await SendAckAsync(channelIndex, options.InitialCredits, ct).ConfigureAwait(false);
+        // Send ACK with initial credits from adaptive flow control
+        await SendAckAsync(channelIndex, channel.GetInitialCredits(), ct).ConfigureAwait(false);
         
         // Check if someone is waiting for this specific channel
         if (_pendingAccepts.TryRemove(channelId, out var tcs))

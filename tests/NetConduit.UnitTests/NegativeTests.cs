@@ -46,10 +46,13 @@ public class NegativeTests
     {
         await using var pipe = new DuplexPipe();
         
-        await using var initiator = new StreamMultiplexer(pipe.Stream1, pipe.Stream1,
-            new MultiplexerOptions());
-        await using var acceptor = new StreamMultiplexer(pipe.Stream2, pipe.Stream2,
-            new MultiplexerOptions());
+        // Use small credits so we'll exhaust them quickly and need to wait for grants
+        var smallCredits = new MultiplexerOptions 
+        { 
+            DefaultChannelOptions = new DefaultChannelOptions { MinCredits = 1024, MaxCredits = 1024 } 
+        };
+        await using var initiator = new StreamMultiplexer(pipe.Stream1, pipe.Stream1, smallCredits);
+        await using var acceptor = new StreamMultiplexer(pipe.Stream2, pipe.Stream2, smallCredits);
 
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
         
@@ -63,7 +66,7 @@ public class NegativeTests
         await pipe.Stream2.DisposeAsync();
         await Task.Delay(100);
 
-        // Writing should eventually fail
+        // Writing should eventually fail - we write more than credits allow to trigger credit waiting
         var failed = false;
         try
         {
@@ -329,10 +332,13 @@ public class NegativeTests
     {
         await using var pipe = new DuplexPipe();
         
-        await using var initiator = new StreamMultiplexer(pipe.Stream1, pipe.Stream1,
-            new MultiplexerOptions { DefaultChannelOptions = new DefaultChannelOptions { InitialCredits = 1024 } }); // Small credits
-        await using var acceptor = new StreamMultiplexer(pipe.Stream2, pipe.Stream2,
-            new MultiplexerOptions());
+        // Small credits on BOTH sides - acceptor's ReadChannel determines how many credits the initiator gets
+        var smallCredits = new MultiplexerOptions 
+        { 
+            DefaultChannelOptions = new DefaultChannelOptions { MinCredits = 1024, MaxCredits = 1024 } 
+        };
+        await using var initiator = new StreamMultiplexer(pipe.Stream1, pipe.Stream1, smallCredits);
+        await using var acceptor = new StreamMultiplexer(pipe.Stream2, pipe.Stream2, smallCredits);
 
         using var runCts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
         
@@ -673,9 +679,9 @@ public class NegativeTests
         await using var pipe = new DuplexPipe();
         
         await using var initiator = new StreamMultiplexer(pipe.Stream1, pipe.Stream1,
-            new MultiplexerOptions { DefaultChannelOptions = new DefaultChannelOptions { InitialCredits = 64 } }); // Very small
+            new MultiplexerOptions { DefaultChannelOptions = new DefaultChannelOptions { MinCredits = 64, MaxCredits = 64 } }); // Very small
         await using var acceptor = new StreamMultiplexer(pipe.Stream2, pipe.Stream2,
-            new MultiplexerOptions { DefaultChannelOptions = new DefaultChannelOptions { InitialCredits = 64 } });
+            new MultiplexerOptions { DefaultChannelOptions = new DefaultChannelOptions { MinCredits = 64, MaxCredits = 64 } });
 
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
         
