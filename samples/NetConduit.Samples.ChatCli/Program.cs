@@ -71,12 +71,9 @@ async Task RunServerAsync(int port, string username, CancellationToken ct)
     listener.Start();
     Console.WriteLine($"[System] Listening for connections...");
     
-    var client = await listener.AcceptTcpClientAsync(ct);
-    Console.WriteLine($"[System] Client connected from {client.Client.RemoteEndPoint}");
-    
-    var stream = client.GetStream();
     var options = new MultiplexerOptions { EnableReconnection = true };
-    await using var mux = new StreamMultiplexer(stream, stream, options);
+    await using var mux = await listener.AcceptMuxAsync(options, ct);
+    Console.WriteLine($"[System] Client connected");
     
     var runTask = await mux.StartAsync(ct);
     
@@ -109,12 +106,9 @@ async Task RunClientAsync(string host, int port, string username, CancellationTo
     Console.WriteLine($"[System] Connecting to {host}:{port} as '{username}'...");
     
     using var client = new TcpClient();
-    await client.ConnectAsync(host, port, ct);
-    Console.WriteLine("[System] Connected to server");
-    
-    var stream = client.GetStream();
     var options = new MultiplexerOptions { EnableReconnection = true };
-    await using var mux = new StreamMultiplexer(stream, stream, options);
+    await using var mux = await client.ConnectMuxAsync(host, port, options, ct);
+    Console.WriteLine("[System] Connected to server");
     
     var runTask = await mux.StartAsync(ct);
     
@@ -142,7 +136,7 @@ async Task RunClientAsync(string host, int port, string username, CancellationTo
     await RunChatLoopAsync(mux, sendChannel, receiveChannel, username, ct);
 }
 
-async Task RunChatLoopAsync(StreamMultiplexer mux, WriteChannel sendChannel, ReadChannel receiveChannel, string username, CancellationToken ct)
+async Task RunChatLoopAsync(TcpMultiplexerConnection mux, WriteChannel sendChannel, ReadChannel receiveChannel, string username, CancellationToken ct)
 {
     // Start receive loop in background
     var receiveTask = Task.Run(async () =>

@@ -1879,13 +1879,17 @@ public class ExtremeTests
             {
                 ch.Dispose();
             }
+            acceptedChannels.Clear();
         }
 
-        GC.Collect();
-        GC.WaitForPendingFinalizers();
-        GC.Collect();
-        await Task.Delay(100); // Allow more time for GC
-        GC.Collect();
+        // Force aggressive GC collection - important for CI/CD stability
+        for (int i = 0; i < 3; i++)
+        {
+            GC.Collect(GC.MaxGeneration, GCCollectionMode.Aggressive, blocking: true, compacting: true);
+            GC.WaitForPendingFinalizers();
+        }
+        await Task.Delay(200); // Allow more time for GC in CI/CD environments
+        GC.Collect(GC.MaxGeneration, GCCollectionMode.Aggressive, blocking: true, compacting: true);
         var memoryAfter = GC.GetTotalMemory(true);
         var memoryDelta = memoryAfter - memoryBefore;
 

@@ -396,4 +396,127 @@ public class WebSocketMultiplexerTests
             host.Dispose();
         }
     }
+
+    #region Extension Method Tests
+
+    [Fact(Timeout = 120000)]
+    public async Task AsMux_Extension_WrapsExistingWebSocket()
+    {
+        // Arrange
+        var (host, port, wsChannel) = await CreateServerAsync();
+        try
+        {
+            using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+
+            // Connect client which triggers server to accept
+            await using var clientConnection = await WebSocketMultiplexer.ConnectAsync($"ws://localhost:{port}/ws");
+            var serverWebSocket = await wsChannel.Reader.ReadAsync(cts.Token);
+
+            // Act - Use extension method
+            await using var serverConnection = serverWebSocket.AsMux();
+
+            var startTasks = await Task.WhenAll(clientConnection.StartAsync(cts.Token), serverConnection.StartAsync(cts.Token));
+
+            var writeChannel = await clientConnection.Multiplexer.OpenChannelAsync(new ChannelOptions { ChannelId = "test" }, cts.Token);
+            var readChannel = await serverConnection.Multiplexer.AcceptChannelAsync("test", cts.Token);
+
+            var testData = "AsMux extension test"u8.ToArray();
+            await writeChannel.WriteAsync(testData, cts.Token);
+
+            var buffer = new byte[testData.Length];
+            int totalRead = 0;
+            while (totalRead < buffer.Length)
+            {
+                int read = await readChannel.ReadAsync(buffer.AsMemory(totalRead), cts.Token);
+                if (read == 0) break;
+                totalRead += read;
+            }
+
+            // Assert
+            Assert.Equal(testData, buffer);
+            Assert.Equal(WebSocketState.Open, serverConnection.State);
+
+            await cts.CancelAsync();
+        }
+        finally
+        {
+            await host.StopAsync();
+            host.Dispose();
+        }
+    }
+
+    [Fact(Timeout = 120000)]
+    public async Task ConnectMuxAsync_Extension_ConnectsAndCreatesMultiplexer()
+    {
+        // Arrange
+        var (host, port, wsChannel) = await CreateServerAsync();
+        try
+        {
+            using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+
+            // Act - Use extension method
+            var clientWebSocket = new ClientWebSocket();
+            await using var clientConnection = await clientWebSocket.ConnectMuxAsync($"ws://localhost:{port}/ws");
+            var serverWebSocket = await wsChannel.Reader.ReadAsync(cts.Token);
+            await using var serverConnection = serverWebSocket.AsMux();
+
+            var startTasks = await Task.WhenAll(clientConnection.StartAsync(cts.Token), serverConnection.StartAsync(cts.Token));
+
+            var writeChannel = await clientConnection.Multiplexer.OpenChannelAsync(new ChannelOptions { ChannelId = "test" }, cts.Token);
+            var readChannel = await serverConnection.Multiplexer.AcceptChannelAsync("test", cts.Token);
+
+            var testData = "ConnectMuxAsync extension test"u8.ToArray();
+            await writeChannel.WriteAsync(testData, cts.Token);
+
+            var buffer = new byte[testData.Length];
+            int totalRead = 0;
+            while (totalRead < buffer.Length)
+            {
+                int read = await readChannel.ReadAsync(buffer.AsMemory(totalRead), cts.Token);
+                if (read == 0) break;
+                totalRead += read;
+            }
+
+            // Assert
+            Assert.Equal(testData, buffer);
+
+            await cts.CancelAsync();
+        }
+        finally
+        {
+            await host.StopAsync();
+            host.Dispose();
+        }
+    }
+
+    [Fact(Timeout = 120000)]
+    public async Task ConnectMuxAsync_WithUri_Extension_ConnectsAndCreatesMultiplexer()
+    {
+        // Arrange
+        var (host, port, wsChannel) = await CreateServerAsync();
+        try
+        {
+            using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+
+            // Act - Use extension method with Uri
+            var clientWebSocket = new ClientWebSocket();
+            await using var clientConnection = await clientWebSocket.ConnectMuxAsync(new Uri($"ws://localhost:{port}/ws"));
+            var serverWebSocket = await wsChannel.Reader.ReadAsync(cts.Token);
+            await using var serverConnection = serverWebSocket.AsMux();
+
+            var startTasks = await Task.WhenAll(clientConnection.StartAsync(cts.Token), serverConnection.StartAsync(cts.Token));
+
+            // Assert
+            Assert.Equal(WebSocketState.Open, clientConnection.State);
+
+            await cts.CancelAsync();
+        }
+        finally
+        {
+            await host.StopAsync();
+            host.Dispose();
+        }
+    }
+
+    #endregion
 }

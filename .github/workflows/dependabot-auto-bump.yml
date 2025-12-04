@@ -1,0 +1,44 @@
+﻿name: Dependabot Pull Request Bump
+
+on:
+  push:
+    branches:
+    - master
+    tags-ignore:
+    - bump-*
+
+concurrency: "dependabot-auto-bump"
+
+jobs:
+  dependabot:
+    runs-on: ubuntu-latest
+    if: ${{ github.event.commits[0].author.username == 'dependabot[bot]' }}
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        token: ${{ secrets.GH_PAT }}
+        fetch-depth: 2
+    - name: Detect changed projects and bump
+      run: |
+        CHANGED_FILES=$(git diff --name-only HEAD~1 HEAD)
+        BUMP_ARGS=""
+        
+        if echo "$CHANGED_FILES" | grep -q "src/NetConduit/"; then
+          BUMP_ARGS="$BUMP_ARGS;net_conduit=patch"
+        fi
+        
+        if echo "$CHANGED_FILES" | grep -q "src/NetConduit.Tcp/"; then
+          BUMP_ARGS="$BUMP_ARGS;net_conduit_tcp=patch"
+        fi
+        
+        if echo "$CHANGED_FILES" | grep -q "src/NetConduit.WebSocket/"; then
+          BUMP_ARGS="$BUMP_ARGS;net_conduit_websocket=patch"
+        fi
+        
+        if [ -n "$BUMP_ARGS" ]; then
+          chmod +x ./build.sh && ./build.sh BumpAndForget --args "${BUMP_ARGS:1}"
+        else
+          echo "No relevant project changes detected, skipping bump"
+        fi
+      env:
+        GITHUB_TOKEN: ${{ secrets.GH_PAT }}

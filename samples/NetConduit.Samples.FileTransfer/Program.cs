@@ -3,6 +3,7 @@ using System.Net;
 using System.Net.Sockets;
 using System.Text;
 using NetConduit;
+using NetConduit.Tcp;
 
 Console.WriteLine("═══════════════════════════════════════════════════════════════");
 Console.WriteLine("  NetConduit File Transfer Demo - Concurrent Multiplexed Transfers");
@@ -95,8 +96,7 @@ async Task HandleClientAsync(TcpClient client, string outputDir, CancellationTok
     
     try
     {
-        var stream = client.GetStream();
-        await using var mux = new StreamMultiplexer(stream, stream);
+        await using var mux = client.AsMux();
         
         var runTask = await mux.StartAsync(ct);
         var receiveTasks = new List<Task>();
@@ -193,11 +193,8 @@ async Task RunSenderAsync(string host, int port, string[] files, CancellationTok
     Console.WriteLine($"[Sender] Connecting to {host}:{port}");
     
     using var client = new TcpClient();
-    await client.ConnectAsync(host, port, ct);
+    await using var mux = await client.ConnectMuxAsync(host, port, null, ct);
     Console.WriteLine("[Sender] Connected!");
-    
-    var stream = client.GetStream();
-    await using var mux = new StreamMultiplexer(stream, stream);
     
     var runTask = await mux.StartAsync(ct);
     
@@ -211,7 +208,7 @@ async Task RunSenderAsync(string host, int port, string[] files, CancellationTok
     await mux.GoAwayAsync(ct);
 }
 
-async Task SendFileAsync(StreamMultiplexer mux, string filePath, int index, CancellationToken ct)
+async Task SendFileAsync(TcpMultiplexerConnection mux, string filePath, int index, CancellationToken ct)
 {
     var filename = Path.GetFileName(filePath);
     var fileInfo = new FileInfo(filePath);

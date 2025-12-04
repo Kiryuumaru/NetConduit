@@ -9,6 +9,7 @@ using System.Net;
 using System.Net.Sockets;
 using System.Text;
 using NetConduit;
+using NetConduit.Tcp;
 
 var mode = args.Length > 0 ? args[0] : "server";
 var host = args.Length > 1 ? args[1] : "127.0.0.1";
@@ -42,7 +43,7 @@ async Task RunServerAsync(string serverHost, int serverPort, CancellationToken c
     using var listener = new TcpListener(IPAddress.Parse(serverHost), serverPort);
     listener.Start();
     
-    var clients = new List<(StreamMultiplexer mux, WriteChannel video, WriteChannel audio)>();
+    var clients = new List<(TcpMultiplexerConnection mux, WriteChannel video, WriteChannel audio)>();
     var clientLock = new object();
     
     // Handle incoming connections
@@ -55,8 +56,7 @@ async Task RunServerAsync(string serverHost, int serverPort, CancellationToken c
                 var tcpClient = await listener.AcceptTcpClientAsync(cancellationToken);
                 Console.WriteLine($"[Stream Server] Client connected from {tcpClient.Client.RemoteEndPoint}");
                 
-                var stream = tcpClient.GetStream();
-                var mux = new StreamMultiplexer(stream, stream);
+                var mux = tcpClient.AsMux();
                 var runTask = await mux.StartAsync(cancellationToken);
                 
                 // Open video and audio channels for this client
@@ -96,9 +96,9 @@ async Task RunServerAsync(string serverHost, int serverPort, CancellationToken c
 }
 
 async Task StreamToClientsAsync(
-    Func<(StreamMultiplexer mux, WriteChannel video, WriteChannel audio)[]> getClients,
+    Func<(TcpMultiplexerConnection mux, WriteChannel video, WriteChannel audio)[]> getClients,
     object clientLock,
-    List<(StreamMultiplexer mux, WriteChannel video, WriteChannel audio)> clients,
+    List<(TcpMultiplexerConnection mux, WriteChannel video, WriteChannel audio)> clients,
     CancellationToken cancellationToken)
 {
     var frameNumber = 0u;
@@ -236,9 +236,9 @@ byte[] CreateAudioPacket(uint packetNumber, int size)
 async Task SendFrameAsync(
     WriteChannel channel, 
     byte[] data,
-    StreamMultiplexer mux,
+    TcpMultiplexerConnection mux,
     object clientLock,
-    List<(StreamMultiplexer mux, WriteChannel video, WriteChannel audio)> clients,
+    List<(TcpMultiplexerConnection mux, WriteChannel video, WriteChannel audio)> clients,
     CancellationToken cancellationToken)
 {
     try
@@ -266,11 +266,9 @@ async Task RunClientAsync(string clientHost, int clientPort, CancellationToken c
     try
     {
         using var tcpClient = new TcpClient();
-        await tcpClient.ConnectAsync(clientHost, clientPort, cancellationToken);
+        await using var multiplexer = await tcpClient.ConnectMuxAsync(clientHost, clientPort, null, cancellationToken);
         Console.WriteLine("[Stream Client] Connected! Receiving stream...\n");
         
-        var stream = tcpClient.GetStream();
-        await using var multiplexer = new StreamMultiplexer(stream, stream);
         var runTask = await multiplexer.StartAsync(cancellationToken);
         
         var stats = new StreamStats();
