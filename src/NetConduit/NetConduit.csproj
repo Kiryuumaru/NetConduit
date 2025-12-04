@@ -13,8 +13,9 @@
 	<!-- NuGet Package Metadata -->
 	<PropertyGroup>
 		<PackageId>NetConduit</PackageId>
-		<Version>1.0.0</Version>
 		<Authors>Kiryuumaru</Authors>
+		<Company>Kiryuumaru</Company>
+		<Copyright>Kiryuumaru</Copyright>
 		<Description>Transport-agnostic stream multiplexer for .NET. Creates multiple virtual channels over a single bidirectional stream with credit-based backpressure, priority queuing, and auto-reconnection support.</Description>
 		<PackageTags>multiplexer;stream;tcp;websocket;channels;networking;async;aot</PackageTags>
 		<PackageLicenseExpression>MIT</PackageLicenseExpression>
@@ -22,6 +23,7 @@
 		<RepositoryUrl>https://github.com/Kiryuumaru/NetConduit.git</RepositoryUrl>
 		<RepositoryType>git</RepositoryType>
 		<PackageReadmeFile>README.md</PackageReadmeFile>
+		<PackageLicenseFile>LICENSE</PackageLicenseFile>
 	</PropertyGroup>
 
 	<ItemGroup>
