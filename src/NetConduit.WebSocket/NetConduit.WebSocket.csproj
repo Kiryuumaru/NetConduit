@@ -1,0 +1,35 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+	<PropertyGroup>
+		<LangVersion>preview</LangVersion>
+		<TargetFrameworks>net8.0;net9.0;net10.0</TargetFrameworks>
+		<ImplicitUsings>enable</ImplicitUsings>
+		<Nullable>enable</Nullable>
+		<IsAotCompatible>true</IsAotCompatible>
+		<EnableTrimAnalyzer>true</EnableTrimAnalyzer>
+		<GenerateDocumentationFile>true</GenerateDocumentationFile>
+	</PropertyGroup>
+
+	<!-- NuGet Package Metadata -->
+	<PropertyGroup>
+		<PackageId>NetConduit.WebSocket</PackageId>
+		<Version>1.0.0</Version>
+		<Authors>Kiryuumaru</Authors>
+		<Description>WebSocket transport helper for NetConduit stream multiplexer. Provides easy WebSocket client/server connection handling with automatic multiplexer setup.</Description>
+		<PackageTags>multiplexer;stream;websocket;networking;async;aot</PackageTags>
+		<PackageLicenseExpression>MIT</PackageLicenseExpression>
+		<PackageProjectUrl>https://github.com/Kiryuumaru/NetConduit</PackageProjectUrl>
+		<RepositoryUrl>https://github.com/Kiryuumaru/NetConduit.git</RepositoryUrl>
+		<RepositoryType>git</RepositoryType>
+		<PackageReadmeFile>README.md</PackageReadmeFile>
+	</PropertyGroup>
+
+	<ItemGroup>
+		<None Include="..\..\README.md" Pack="true" PackagePath="\" />
+	</ItemGroup>
+
+	<ItemGroup>
+		<ProjectReference Include="..\NetConduit\NetConduit.csproj" />
+	</ItemGroup>
+
+</Project>
