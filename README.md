@@ -149,13 +149,14 @@ var dataChannel = await mux.OpenChannelAsync(new()
 
 ### Backpressure
 
-Credit-based flow control prevents fast senders from overwhelming slow receivers:
+Adaptive credit-based flow control prevents fast senders from overwhelming slow receivers:
 
 ```csharp
 var options = new ChannelOptions
 {
     ChannelId = "controlled",
-    InitialCredits = 1024 * 1024,     // 1MB buffer allowance
+    MinCredits = 64 * 1024,            // 64KB minimum buffer
+    MaxCredits = 4 * 1024 * 1024,      // 4MB maximum buffer (starts here)
     CreditGrantThreshold = 0.5,        // Auto-grant when 50% consumed
     SendTimeout = TimeSpan.FromSeconds(30)  // Timeout if credits exhausted
 };
@@ -243,7 +244,8 @@ await mux.ReconnectAsync(newReadStream, newWriteStream);
 | Option | Default | Description |
 |--------|---------|-------------|
 | `ChannelId` | *required* | Unique channel identifier (0-1024 bytes UTF-8) |
-| `InitialCredits` | 1MB | Initial send buffer allowance |
+| `MinCredits` | 64KB | Minimum buffer allowance |
+| `MaxCredits` | 4MB | Maximum buffer allowance (starts here, adapts down) |
 | `CreditGrantThreshold` | 0.5 | Auto-grant when X% consumed |
 | `SendTimeout` | 30s | Max wait for credits |
 | `Priority` | Normal (128) | Channel priority (0-255) |
