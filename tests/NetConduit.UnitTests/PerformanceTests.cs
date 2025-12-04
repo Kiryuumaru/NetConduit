@@ -194,6 +194,13 @@ public class PerformanceTests
         sw.Stop();
         await Task.Delay(500); // Wait for accept
 
+        // Force aggressive GC collection - important for CI/CD stability
+        for (int i = 0; i < 3; i++)
+        {
+            GC.Collect(GC.MaxGeneration, GCCollectionMode.Aggressive, blocking: true, compacting: true);
+            GC.WaitForPendingFinalizers();
+        }
+        await Task.Delay(200);
         var memoryAfter = GC.GetTotalMemory(true);
         var memoryPerChannel = (memoryAfter - memoryBefore) / channelCount;
         var timePerChannel = sw.Elapsed.TotalMilliseconds / channelCount;
