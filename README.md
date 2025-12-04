@@ -39,8 +39,10 @@ dotnet add package NetConduit.WebSocket
 using NetConduit;
 using NetConduit.Tcp;
 
-// Accept a TCP connection
-var connection = await TcpMultiplexer.AcceptAsync(listener);
+// Accept a TCP connection using extension method
+var listener = new TcpListener(IPAddress.Any, 5000);
+listener.Start();
+var connection = await listener.AcceptMuxAsync();
 var runTask = await connection.StartAsync();
 
 // Accept channels from clients
@@ -59,8 +61,9 @@ await foreach (var channel in connection.Multiplexer.AcceptChannelsAsync())
 using NetConduit;
 using NetConduit.Tcp;
 
-// Connect to server
-var connection = await TcpMultiplexer.ConnectAsync("localhost", 5000);
+// Connect to server using extension method
+var client = new TcpClient();
+var connection = await client.ConnectMuxAsync("localhost", 5000);
 var runTask = await connection.StartAsync();
 
 // Open a channel and send data
@@ -77,15 +80,16 @@ await channel.DisposeAsync();  // Sends FIN, closes channel gracefully
 using NetConduit;
 using NetConduit.WebSocket;
 
-// Client
-var connection = await WebSocketMultiplexer.ConnectAsync("ws://localhost:5000/ws");
+// Client using extension method
+var webSocket = new ClientWebSocket();
+var connection = await webSocket.ConnectMuxAsync("ws://localhost:5000/ws");
 var runTask = await connection.StartAsync();
 
-// Server (ASP.NET Core)
+// Server (ASP.NET Core) using extension method
 app.MapGet("/ws", async (HttpContext context) =>
 {
     var webSocket = await context.WebSockets.AcceptWebSocketAsync();
-    var connection = WebSocketMultiplexer.Accept(webSocket);
+    var connection = webSocket.AsMux();
     var runTask = await connection.StartAsync();
     // ...
 });
@@ -188,7 +192,8 @@ var transit = new MessageTransit<ChatMessage, ChatMessage>(
 // Send/receive messages
 await transit.SendAsync(new ChatMessage("Alice", "Hello!"));
 var msg = await transit.ReceiveAsync();
-Console.WriteLine($"{msg.User}: {msg.Text}");
+if (msg is not null)
+    Console.WriteLine($"{msg.User}: {msg.Text}");
 ```
 
 #### DuplexStreamTransit - Bidirectional stream

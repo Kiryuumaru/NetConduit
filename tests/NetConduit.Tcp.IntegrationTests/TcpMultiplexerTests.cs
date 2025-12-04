@@ -366,4 +366,164 @@ public class TcpMultiplexerTests
         await cts.CancelAsync();
         listener.Stop();
     }
+
+    #region Extension Method Tests
+
+    [Fact(Timeout = 120000)]
+    public async Task AcceptMuxAsync_Extension_AcceptsConnection()
+    {
+        // Arrange
+        int port = GetAvailablePort();
+        using var listener = new TcpListener(IPAddress.Loopback, port);
+        listener.Start();
+
+        // Act - Use extension method
+        var serverTask = listener.AcceptMuxAsync();
+        await using var client = await TcpMultiplexer.ConnectAsync("127.0.0.1", port);
+        await using var server = await serverTask;
+
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+
+        var startTasks = await Task.WhenAll(client.StartAsync(cts.Token), server.StartAsync(cts.Token));
+
+        // Assert
+        Assert.True(client.Connected);
+        Assert.True(server.Connected);
+
+        await cts.CancelAsync();
+        listener.Stop();
+    }
+
+    [Fact(Timeout = 120000)]
+    public async Task AsMux_Extension_WrapsExistingClient()
+    {
+        // Arrange
+        int port = GetAvailablePort();
+        using var listener = new TcpListener(IPAddress.Loopback, port);
+        listener.Start();
+
+        var serverAcceptTask = listener.AcceptTcpClientAsync();
+        var clientTcp = new TcpClient();
+        await clientTcp.ConnectAsync("127.0.0.1", port);
+        var serverTcp = await serverAcceptTask;
+
+        // Act - Use extension method
+        await using var client = clientTcp.AsMux();
+        await using var server = serverTcp.AsMux();
+
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+
+        var startTasks = await Task.WhenAll(client.StartAsync(cts.Token), server.StartAsync(cts.Token));
+
+        var writeChannel = await client.Multiplexer.OpenChannelAsync(new ChannelOptions { ChannelId = "test" }, cts.Token);
+        var readChannel = await server.Multiplexer.AcceptChannelAsync("test", cts.Token);
+
+        var testData = "AsMux extension test"u8.ToArray();
+        await writeChannel.WriteAsync(testData, cts.Token);
+
+        var buffer = new byte[testData.Length];
+        int totalRead = 0;
+        while (totalRead < buffer.Length)
+        {
+            int read = await readChannel.ReadAsync(buffer.AsMemory(totalRead), cts.Token);
+            if (read == 0) break;
+            totalRead += read;
+        }
+
+        // Assert
+        Assert.Equal(testData, buffer);
+
+        await cts.CancelAsync();
+        listener.Stop();
+    }
+
+    [Fact(Timeout = 120000)]
+    public async Task ConnectMuxAsync_Extension_ConnectsAndCreatesMultiplexer()
+    {
+        // Arrange
+        int port = GetAvailablePort();
+        using var listener = new TcpListener(IPAddress.Loopback, port);
+        listener.Start();
+
+        var serverTask = listener.AcceptMuxAsync();
+
+        // Act - Use extension method
+        var clientTcp = new TcpClient();
+        await using var client = await clientTcp.ConnectMuxAsync("127.0.0.1", port);
+        await using var server = await serverTask;
+
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+
+        var startTasks = await Task.WhenAll(client.StartAsync(cts.Token), server.StartAsync(cts.Token));
+
+        var writeChannel = await client.Multiplexer.OpenChannelAsync(new ChannelOptions { ChannelId = "test" }, cts.Token);
+        var readChannel = await server.Multiplexer.AcceptChannelAsync("test", cts.Token);
+
+        var testData = "ConnectMuxAsync extension test"u8.ToArray();
+        await writeChannel.WriteAsync(testData, cts.Token);
+
+        var buffer = new byte[testData.Length];
+        int totalRead = 0;
+        while (totalRead < buffer.Length)
+        {
+            int read = await readChannel.ReadAsync(buffer.AsMemory(totalRead), cts.Token);
+            if (read == 0) break;
+            totalRead += read;
+        }
+
+        // Assert
+        Assert.Equal(testData, buffer);
+
+        await cts.CancelAsync();
+        listener.Stop();
+    }
+
+    [Fact(Timeout = 120000)]
+    public async Task AcceptMuxAsync_Loop_AcceptsMultipleConnections()
+    {
+        // Arrange
+        int port = GetAvailablePort();
+        using var listener = new TcpListener(IPAddress.Loopback, port);
+        listener.Start();
+
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+        const int connectionCount = 3;
+        var serverConnections = new List<TcpMultiplexerConnection>();
+        var clientConnections = new List<TcpMultiplexerConnection>();
+
+        // Act - Accept multiple connections in a loop pattern
+        for (int i = 0; i < connectionCount; i++)
+        {
+            var serverTask = listener.AcceptMuxAsync(cancellationToken: cts.Token);
+            var client = await TcpMultiplexer.ConnectAsync("127.0.0.1", port, cancellationToken: cts.Token);
+            var server = await serverTask;
+
+            clientConnections.Add(client);
+            serverConnections.Add(server);
+
+            await Task.WhenAll(client.StartAsync(cts.Token), server.StartAsync(cts.Token));
+        }
+
+        // Assert - All connections should be established
+        Assert.Equal(connectionCount, serverConnections.Count);
+        Assert.Equal(connectionCount, clientConnections.Count);
+
+        foreach (var client in clientConnections)
+        {
+            Assert.True(client.Connected);
+        }
+
+        foreach (var server in serverConnections)
+        {
+            Assert.True(server.Connected);
+        }
+
+        // Cleanup
+        await cts.CancelAsync();
+        foreach (var conn in clientConnections) await conn.DisposeAsync();
+        foreach (var conn in serverConnections) await conn.DisposeAsync();
+        listener.Stop();
+    }
+
+    #endregion
 }

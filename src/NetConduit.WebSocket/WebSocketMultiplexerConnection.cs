@@ -50,6 +50,39 @@ public sealed class WebSocketMultiplexerConnection : IAsyncDisposable, IDisposab
         => Multiplexer.StartAsync(cancellationToken);
 
     /// <summary>
+    /// Opens a new channel for writing data.
+    /// </summary>
+    /// <param name="options">The channel options.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>A write channel for sending data.</returns>
+    public ValueTask<WriteChannel> OpenChannelAsync(ChannelOptions options, CancellationToken cancellationToken = default)
+        => Multiplexer.OpenChannelAsync(options, cancellationToken);
+
+    /// <summary>
+    /// Accepts a specific channel by ID.
+    /// </summary>
+    /// <param name="channelId">The channel ID to accept.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>A read channel for receiving data.</returns>
+    public ValueTask<ReadChannel> AcceptChannelAsync(string channelId, CancellationToken cancellationToken = default)
+        => Multiplexer.AcceptChannelAsync(channelId, cancellationToken);
+
+    /// <summary>
+    /// Accepts incoming channels as they arrive.
+    /// </summary>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>An async enumerable of read channels.</returns>
+    public IAsyncEnumerable<ReadChannel> AcceptChannelsAsync(CancellationToken cancellationToken = default)
+        => Multiplexer.AcceptChannelsAsync(cancellationToken);
+
+    /// <summary>
+    /// Initiates graceful shutdown of the multiplexer.
+    /// </summary>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    public ValueTask GoAwayAsync(CancellationToken cancellationToken = default)
+        => Multiplexer.GoAwayAsync(cancellationToken);
+
+    /// <summary>
     /// Closes the WebSocket connection gracefully.
     /// </summary>
     /// <param name="closeStatus">The close status.</param>

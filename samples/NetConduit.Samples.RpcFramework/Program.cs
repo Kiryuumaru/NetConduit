@@ -8,6 +8,7 @@ using System.Net.Sockets;
 using System.Text;
 using System.Text.Json;
 using NetConduit;
+using NetConduit.Tcp;
 
 var mode = args.Length > 0 ? args[0] : "server";
 var host = args.Length > 1 ? args[1] : "127.0.0.1";
@@ -53,8 +54,7 @@ async Task HandleClientAsync(TcpClient client, CancellationToken cancellationTok
 {
     try
     {
-        var stream = client.GetStream();
-        await using var multiplexer = new StreamMultiplexer(stream, stream);
+        await using var multiplexer = client.AsMux();
         var runTask = await multiplexer.StartAsync(cancellationToken);
         
         // Create response channel for sending responses back
@@ -205,11 +205,9 @@ async Task RunClientAsync(string clientHost, int clientPort, CancellationToken c
     try
     {
         using var tcpClient = new TcpClient();
-        await tcpClient.ConnectAsync(clientHost, clientPort, cancellationToken);
+        await using var multiplexer = await tcpClient.ConnectMuxAsync(clientHost, clientPort, null, cancellationToken);
         Console.WriteLine("[RPC Client] Connected!");
         
-        var stream = tcpClient.GetStream();
-        await using var multiplexer = new StreamMultiplexer(stream, stream);
         var runTask = await multiplexer.StartAsync(cancellationToken);
         
         var client = new RpcClient(multiplexer, cancellationToken);
@@ -340,13 +338,13 @@ class RpcException : Exception
 // Simple RPC Client wrapper
 class RpcClient
 {
-    private readonly StreamMultiplexer _multiplexer;
+    private readonly TcpMultiplexerConnection _multiplexer;
     private readonly CancellationToken _cancellationToken;
     private readonly Dictionary<string, TaskCompletionSource<RpcResponse>> _pendingRequests = new();
     private readonly SemaphoreSlim _lock = new(1);
     private int _requestCounter;
     
-    public RpcClient(StreamMultiplexer multiplexer, CancellationToken cancellationToken)
+    public RpcClient(TcpMultiplexerConnection multiplexer, CancellationToken cancellationToken)
     {
         _multiplexer = multiplexer;
         _cancellationToken = cancellationToken;
