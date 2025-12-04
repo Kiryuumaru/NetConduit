@@ -39,10 +39,8 @@ dotnet add package NetConduit.WebSocket
 using NetConduit;
 using NetConduit.Tcp;
 
-// Accept a TCP connection using extension method
-var listener = new TcpListener(IPAddress.Any, 5000);
-listener.Start();
-var connection = await listener.AcceptMuxAsync();
+// Accept a TCP connection
+var connection = await TcpMultiplexer.AcceptAsync(listener);
 var runTask = await connection.StartAsync();
 
 // Accept channels from clients
@@ -61,9 +59,8 @@ await foreach (var channel in connection.Multiplexer.AcceptChannelsAsync())
 using NetConduit;
 using NetConduit.Tcp;
 
-// Connect to server using extension method
-var client = new TcpClient();
-var connection = await client.ConnectMuxAsync("localhost", 5000);
+// Connect to server
+var connection = await TcpMultiplexer.ConnectAsync("localhost", 5000);
 var runTask = await connection.StartAsync();
 
 // Open a channel and send data
@@ -80,16 +77,15 @@ await channel.DisposeAsync();  // Sends FIN, closes channel gracefully
 using NetConduit;
 using NetConduit.WebSocket;
 
-// Client using extension method
-var webSocket = new ClientWebSocket();
-var connection = await webSocket.ConnectMuxAsync("ws://localhost:5000/ws");
+// Client
+var connection = await WebSocketMultiplexer.ConnectAsync("ws://localhost:5000/ws");
 var runTask = await connection.StartAsync();
 
-// Server (ASP.NET Core) using extension method
+// Server (ASP.NET Core)
 app.MapGet("/ws", async (HttpContext context) =>
 {
     var webSocket = await context.WebSockets.AcceptWebSocketAsync();
-    var connection = webSocket.AsMux();
+    var connection = WebSocketMultiplexer.Accept(webSocket);
     var runTask = await connection.StartAsync();
     // ...
 });
@@ -192,8 +188,7 @@ var transit = new MessageTransit<ChatMessage, ChatMessage>(
 // Send/receive messages
 await transit.SendAsync(new ChatMessage("Alice", "Hello!"));
 var msg = await transit.ReceiveAsync();
-if (msg is not null)
-    Console.WriteLine($"{msg.User}: {msg.Text}");
+Console.WriteLine($"{msg.User}: {msg.Text}");
 ```
 
 #### DuplexStreamTransit - Bidirectional stream
@@ -335,6 +330,47 @@ NetConduit uses several techniques for high performance:
 - `Channel<T>` for lock-free queuing
 - `stackalloc` for header serialization
 - `BinaryPrimitives` for fast encoding
+
+### Benchmarks
+
+### Raw TCP vs Multiplexed TCP Comparison
+
+Compares N separate TCP connections (Raw TCP) vs 1 TCP connection with N multiplexed channels (Mux TCP):
+
+| Channels | Data/Channel | Raw TCP | Mux TCP | Ratio | Notes |
+|----------|--------------|---------|---------|-------|-------|
+| 1 | 100 KB | 60 ms | 71 ms | 1.18x | Similar performance |
+| 1 | 1 MB | 65 ms | 99 ms | 1.52x | Similar performance |
+| 10 | 1 KB | 65 ms | 82 ms | 1.27x | Similar performance |
+| 10 | 100 KB | 65 ms | 82 ms | 1.25x | Similar performance |
+| 10 | 1 MB | 66 ms | 70 ms | 1.06x | Nearly identical |
+| 100 | 1 KB | 65 ms | 227 ms | 3.50x | Raw TCP faster |
+| 100 | 100 KB | 64 ms | 315 ms | 4.90x | Raw TCP faster |
+| 100 | 1 MB | 82 ms | 238 ms | 2.90x | Raw TCP faster |
+| 1000 | 1 KB | 1,122 ms | 1,739 ms | 1.55x | Comparable |
+| 1000 | 100 KB | 857 ms | 1,718 ms | 2.00x | Raw TCP faster |
+| 1000 | 1 MB | N/A* | 1,398 ms | - | **Mux works, Raw TCP fails** |
+
+*Raw TCP fails at 1000 connections × 1MB due to socket exhaustion
+
+**Key Insights:**
+- **Low channel counts**: Raw TCP and Mux perform similarly (1-10 channels)
+- **Resource efficiency**: Mux uses 1 TCP connection vs N connections, reducing OS overhead
+- **Extreme concurrency**: At 1000 channels with large data, Raw TCP hits OS limits while Mux succeeds
+- **Trade-off**: Mux adds multiplexing overhead but provides channel isolation and reduces connection count
+- **Best use cases**: Mux excels when you need many logical streams over limited connections (WebSocket, mobile, firewalls)
+
+### Running Benchmarks
+
+```bash
+cd benchmarks/NetConduit.Benchmarks
+dotnet run -c Release
+```
+
+Available benchmark classes:
+- `TcpVsMuxBenchmark` - Direct Raw TCP vs Multiplexed comparison
+- `ThroughputBenchmark` - Throughput with varying channel counts and data sizes
+- `ScalabilityBenchmark` - Scalability across different scenarios
 
 ## License
 
