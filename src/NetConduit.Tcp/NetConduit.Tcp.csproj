@@ -1,0 +1,37 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+	<PropertyGroup>
+		<LangVersion>preview</LangVersion>
+		<TargetFrameworks>net8.0;net9.0;net10.0</TargetFrameworks>
+		<ImplicitUsings>enable</ImplicitUsings>
+		<Nullable>enable</Nullable>
+		<IsAotCompatible>true</IsAotCompatible>
+		<EnableTrimAnalyzer>true</EnableTrimAnalyzer>
+		<GenerateDocumentationFile>true</GenerateDocumentationFile>
+	</PropertyGroup>
+
+	<!-- NuGet Package Metadata -->
+	<PropertyGroup>
+		<PackageId>NetConduit.Tcp</PackageId>
+		<Authors>Kiryuumaru</Authors>
+		<Company>Kiryuumaru</Company>
+		<Copyright>Kiryuumaru</Copyright>
+		<Description>TCP transport helper for NetConduit stream multiplexer. Provides easy TCP client/server connection handling with automatic multiplexer setup.</Description>
+		<PackageTags>multiplexer;stream;tcp;networking;async;aot</PackageTags>
+		<PackageProjectUrl>https://github.com/Kiryuumaru/NetConduit</PackageProjectUrl>
+		<RepositoryUrl>https://github.com/Kiryuumaru/NetConduit.git</RepositoryUrl>
+		<RepositoryType>git</RepositoryType>
+		<PackageReadmeFile>README.md</PackageReadmeFile>
+		<PackageLicenseFile>LICENSE</PackageLicenseFile>
+	</PropertyGroup>
+
+	<ItemGroup>
+		<None Include="..\..\README.md" Pack="true" PackagePath="\" />
+		<None Include="..\..\LICENSE" Pack="true" PackagePath="\" />
+	</ItemGroup>
+
+	<ItemGroup>
+		<ProjectReference Include="..\NetConduit\NetConduit.csproj" />
+	</ItemGroup>
+
+</Project>

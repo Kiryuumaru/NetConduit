@@ -1,189 +1,164 @@
-using System;
-using System.Collections.Generic;
 using Nuke.Common;
 using Nuke.Common.IO;
+using Nuke.Common.Tooling;
 using Nuke.Common.Tools.DotNet;
 using NukeBuildHelpers;
+using NukeBuildHelpers.Common.Attributes;
+using NukeBuildHelpers.Common.Enums;
 using NukeBuildHelpers.Entry;
 using NukeBuildHelpers.Entry.Extensions;
 using NukeBuildHelpers.Runner.Abstraction;
-using NukeBuildHelpers.RunContext.Extensions;
+using Serilog;
+using System;
+using System.Linq;
 
 class Build : BaseNukeBuildHelpers
 {
-    public override string[] EnvironmentBranches { get; } = ["master", "prerelease"];
-
-    public override string MainEnvironmentBranch { get; } = "master";
-
-    private readonly string gitRepoName = "NetConduit";
-    private readonly string gitUsername = "Kiryuumaru";
-    private readonly string appId = "net_conduit";
-    private readonly string executableName = "net_conduit";
-    private readonly string assemblyName = "netc";
-
-    private readonly string[] runtimeMatrix = ["linux", "win"];
-    private readonly string[] archMatrix = ["x64", "arm64"];
-
     public static int Main() => Execute<Build>(x => x.Interactive);
 
-    public Target Clean => _ => _
-        .Unlisted()
-        .Description("Clean all build files")
-        .Executes(delegate
+    public override string[] EnvironmentBranches { get; } = ["prerelease", "master"];
+
+    public override string MainEnvironmentBranch => "master";
+
+    DeploymentAppSpec[] DeploymentApps =>
+    [
+        new DeploymentAppSpec
         {
-            foreach (var projectFile in RootDirectory.GetFiles("**.csproj", 10))
+            AppId = "net_conduit",
+            ProjectName = "NetConduit",
+            ProjectTestName = "NetConduit.UnitTests"
+        },
+        new DeploymentAppSpec
+        {
+            AppId = "net_conduit_tcp",
+            ProjectName = "NetConduit.Tcp",
+            ProjectTestName = "NetConduit.Tcp.IntegrationTests"
+        },
+        new DeploymentAppSpec
+        {
+            AppId = "net_conduit_websocket",
+            ProjectName = "NetConduit.WebSocket",
+            ProjectTestName = "NetConduit.WebSocket.IntegrationTests"
+        }
+    ];
+
+    [SecretVariable("NUGET_AUTH_TOKEN")]
+    readonly string? NuGetAuthToken;
+
+    [SecretVariable("GITHUB_TOKEN")]
+    readonly string? GithubToken;
+
+    TestEntry TestEntry => _ => _
+        .RunnerOS(RunnerOS.Ubuntu2204)
+        .Matrix(DeploymentApps, (test, spec) => test
+            .AppId(spec.AppId)
+            .WorkflowId($"{spec.AppId}_test")
+            .DisplayName($"Test {spec.ProjectName}")
+            .ExecuteBeforeBuild(true)
+            .Execute(() =>
             {
-                if (projectFile.Name.Equals("_build.csproj"))
+                DotNetTasks.DotNetBuild(_ => _
+                    .SetProjectFile(RootDirectory / "tests" / spec.ProjectTestName / $"{spec.ProjectTestName}.csproj")
+                    .SetConfiguration("Release"));
+                DotNetTasks.DotNetTest(_ => _
+                    .SetProcessAdditionalArguments(
+                        "--logger \"GitHubActions;summary.includePassedTests=true;summary.includeSkippedTests=true\" " +
+                        "-- " +
+                        "RunConfiguration.CollectSourceInformation=true " +
+                        "DataCollectionRunSettings.DataCollectors.DataCollector.Configuration.Format=opencovere ")
+                    .SetProjectFile(RootDirectory / "tests" / spec.ProjectTestName / $"{spec.ProjectTestName}.csproj")
+                    .SetConfiguration("Release"));
+            }));
+
+    BuildEntry BuildEntry => _ => _
+        .RunnerOS(RunnerOS.Ubuntu2204)
+        .Matrix(DeploymentApps, (test, spec) => test
+            .AppId(spec.AppId)
+            .WorkflowId($"{spec.AppId}_build")
+            .DisplayName($"Build {spec.ProjectName}")
+            .Execute(context =>
+            {
+                var app = context.Apps.Values.First();
+                string version = app.AppVersion.Version.ToString()!;
+                string? releaseNotes = null;
+                if (app.BumpVersion != null)
+                {
+                    version = app.BumpVersion.Version.ToString();
+                    releaseNotes = app.BumpVersion.ReleaseNotes;
+                }
+                else if (app.PullRequestVersion != null)
+                {
+                    version = app.PullRequestVersion.Version.ToString();
+                }
+                app.OutputDirectory.DeleteDirectory();
+                DotNetTasks.DotNetClean(_ => _
+                    .SetProject(RootDirectory / "src" / spec.ProjectName / $"{spec.ProjectName}.csproj"));
+                DotNetTasks.DotNetBuild(_ => _
+                    .SetProjectFile(RootDirectory / "src" / spec.ProjectName / $"{spec.ProjectName}.csproj")
+                    .SetConfiguration("Release"));
+                DotNetTasks.DotNetPack(_ => _
+                    .SetProject(RootDirectory / "src" / spec.ProjectName / $"{spec.ProjectName}.csproj")
+                    .SetConfiguration("Release")
+                    .SetNoRestore(true)
+                    .SetNoBuild(true)
+                    .SetIncludeSymbols(true)
+                    .SetSymbolPackageFormat("snupkg")
+                    .SetVersion(version)
+                    .SetPackageReleaseNotes(NormalizeReleaseNotes(releaseNotes))
+                    .SetOutputDirectory(app.OutputDirectory));
+            }));
+
+    PublishEntry PublishEntry => _ => _
+        .RunnerOS(RunnerOS.Ubuntu2204)
+        .Matrix(DeploymentApps, (test, spec) => test
+            .AppId(spec.AppId)
+            .WorkflowId($"{spec.AppId}_publish")
+            .DisplayName($"Publish {spec.ProjectName}")
+            .Execute(async context =>
+            {
+                var app = context.Apps.Values.First();
+                if (app.RunType == RunType.Bump)
+                {
+                    DotNetTasks.DotNetNuGetPush(_ => _
+                        .SetSource("https://nuget.pkg.github.com/kiryuumaru/index.json")
+                        .SetApiKey(GithubToken)
+                        .SetTargetPath(app.OutputDirectory / "**"));
+                    DotNetTasks.DotNetNuGetPush(_ => _
+                        .SetSource("https://api.nuget.org/v3/index.json")
+                        .SetApiKey(NuGetAuthToken)
+                        .SetTargetPath(app.OutputDirectory / "**"));
+                    await AddReleaseAsset(app.OutputDirectory, app.AppId);
+                }
+            }));
+
+    Target Clean => _ => _
+        .Executes(() =>
+        {
+            foreach (var path in RootDirectory.GetFiles("**", 99).Where(i => i.Name.EndsWith(".csproj")))
+            {
+                if (path.Name == "_build.csproj")
                 {
                     continue;
                 }
-                var projectDir = projectFile.Parent;
-                Console.WriteLine("Cleaning " + projectDir.ToString());
-                (projectDir / "bin").DeleteDirectory();
-                (projectDir / "obj").DeleteDirectory();
+                Log.Information("Cleaning {path}", path);
+                (path.Parent / "bin").DeleteDirectory();
+                (path.Parent / "obj").DeleteDirectory();
             }
-            Console.WriteLine("Cleaning " + (RootDirectory / ".vs").ToString());
             (RootDirectory / ".vs").DeleteDirectory();
-            Console.WriteLine("Cleaning " + (RootDirectory / "out").ToString());
-            (RootDirectory / "out").DeleteDirectory();
         });
 
-    public BuildEntry NetConduitBuild => _ => _
-        .AppId(appId)
-        .Matrix(runtimeMatrix, (_, runtime) => _
-            .Matrix(archMatrix, (_, arch) => _
-                .WorkflowId($"build_{runtime}_{arch}")
-                .DisplayName($"Build {runtime}-{arch}")
-                .RunnerOS(runtime switch
-                {
-                    "linux" => RunnerOS.Ubuntu2204,
-                    "win" => RunnerOS.Windows2022,
-                    _ => throw new NotSupportedException()
-                })
-                .Execute(context =>
-                {
-                    string projectVersion = "0.0.0";
-                    if (context.TryGetVersionedContext(out var versionedContext))
-                    {
-                        projectVersion = versionedContext.AppVersion.Version.WithoutMetadata().ToString();
-                    }
-                    var outAssetPath = GetReleaseArchivePath(runtime, arch);
-                    var archivePath = outAssetPath.Parent / outAssetPath.NameWithoutExtension;
-                    var outPath = archivePath / outAssetPath.NameWithoutExtension;
-                    var projPath = RootDirectory / "src" / "Presentation" / "Presentation.csproj";
-
-                    DotNetTasks.DotNetBuild(_ => _
-                        .SetProjectFile(projPath)
-                        .SetVersion(projectVersion)
-                        .SetInformationalVersion(projectVersion)
-                        .SetFileVersion(projectVersion)
-                        .SetAssemblyVersion(projectVersion)
-                        .SetConfiguration("Release"));
-                    DotNetTasks.DotNetPublish(_ => _
-                        .SetProject(projPath)
-                        .SetConfiguration("Release")
-                        .EnableSelfContained()
-                        .SetRuntime($"{runtime}-{arch.ToLowerInvariant()}")
-                        .SetVersion(projectVersion)
-                        .SetInformationalVersion(projectVersion)
-                        .SetFileVersion(projectVersion)
-                        .SetAssemblyVersion(projectVersion)
-                        .EnablePublishSingleFile()
-                        .SetOutput(outPath));
-
-                    GenerateReleaseArchive(runtime, arch);
-                    GenerateOneLineInstallScript(runtime, arch);
-                })));
-
-    public PublishEntry PublishAssets => _ => _
-        .AppId(appId)
-        .RunnerOS(RunnerOS.Ubuntu2204)
-        .WorkflowId("publish")
-        .DisplayName("Publish binaries")
-        .ReleaseAsset(() =>
-        {
-            List<AbsolutePath> paths = [];
-            foreach (var runtime in runtimeMatrix)
-            {
-                foreach (var arch in archMatrix)
-                {
-                    paths.Add(GetReleaseArchivePath(runtime, arch));
-                    paths.Add(GetOneLineInstallScriptPath(runtime, arch));
-                }
-            }
-            return [.. paths];
-        });
-
-    private void GenerateOneLineInstallScript(string runtime, string arch)
+    private string? NormalizeReleaseNotes(string? releaseNotes)
     {
-        string scriptExt;
-        string execExt;
-        switch (runtime)
-        {
-            case "linux":
-                scriptExt = ".sh";
-                execExt = "";
-                break;
-            case "win":
-                scriptExt = ".ps1";
-                execExt = ".exe";
-                break;
-            default:
-                throw new Exception($"{runtime} not supported.");
-        }
-        (OutputDirectory / $"installer_{arch}{scriptExt}").WriteAllText((RootDirectory / $"installer_template{scriptExt}").ReadAllText()
-            .Replace("{{$username}}", gitUsername)
-            .Replace("{{$repo}}", gitRepoName)
-            .Replace("{{$appname}}", GetReleaseName(runtime, arch))
-            .Replace("{{$appexec}}", $"{assemblyName}{execExt}")
-            .Replace("{{$rootextract}}", GetReleaseName(runtime, arch))
-            .Replace("{{$homepath}}", $"$env:ProgramData\\{executableName}"));
+        return releaseNotes?
+            .Replace(",", "%2C")?
+            .Replace(":", "%3A")?
+            .Replace(";", "%3B");
     }
 
-    private void GenerateReleaseArchive(string runtime, string arch)
+    class DeploymentAppSpec
     {
-        var outAssetPath = GetReleaseArchivePath(runtime, arch);
-        var archivePath = outAssetPath.Parent / outAssetPath.NameWithoutExtension;
-        switch (runtime)
-        {
-            case "linux":
-                archivePath.TarGZipTo(outAssetPath);
-                break;
-            case "win":
-                archivePath.ZipTo(outAssetPath);
-                break;
-            default:
-                throw new Exception($"{runtime} not supported.");
-        }
-    }
-
-    private AbsolutePath GetOneLineInstallScriptPath(string runtime, string arch)
-    {
-        return runtime switch
-        {
-            "linux" => OutputDirectory / $"installer_{arch}.sh",
-            "win" => OutputDirectory / $"installer_{arch}.ps1",
-            _ => throw new Exception($"{runtime} not supported.")
-        };
-    }
-
-    private AbsolutePath GetReleaseArchivePath(string runtime, string arch)
-    {
-        return runtime switch
-        {
-            "linux" => GetReleasePath(runtime, arch) + ".tar.gz",
-            "win" => GetReleasePath(runtime, arch) + ".zip",
-            _ => throw new Exception($"{runtime} not supported.")
-        };
-    }
-
-    private AbsolutePath GetReleasePath(string runtime, string arch)
-    {
-        return OutputDirectory / GetReleaseName(runtime, arch);
-    }
-
-    private string GetReleaseName(string runtime, string arch)
-    {
-        return $"{executableName}-{runtime}-{arch}";
+        public required string AppId { get; set; }
+        public required string ProjectName { get; set; }
+        public required string ProjectTestName { get; set; }
     }
 }
