@@ -13,8 +13,9 @@
 		<PackageReference Include="BenchmarkDotNet" Version="0.15.8" />
 	</ItemGroup>
 
+	<!-- Force local project references for benchmarks (even in Release mode) -->
 	<ItemGroup>
-		<ProjectReference Include="..\..\src\NetConduit.Tcp\NetConduit.Tcp.csproj" />
+		<ProjectReference Include="..\..\src\NetConduit.Tcp\NetConduit.Tcp.csproj" AdditionalProperties="UseLocalNetConduit=true" />
 	</ItemGroup>
 
 </Project>

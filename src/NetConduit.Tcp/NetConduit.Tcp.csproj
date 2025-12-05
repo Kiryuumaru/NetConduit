@@ -8,8 +8,10 @@
 		<IsAotCompatible>true</IsAotCompatible>
 		<EnableTrimAnalyzer>true</EnableTrimAnalyzer>
 		<GenerateDocumentationFile>true</GenerateDocumentationFile>
-		<!-- Use local project reference by default; set to false for NuGet package release builds -->
-		<UseLocalNetConduit Condition="'$(UseLocalNetConduit)' == ''">true</UseLocalNetConduit>
+		<!-- Use local project reference for Debug builds, NuGet package for Release builds.
+		     Can be overridden by setting UseLocalNetConduit externally (e.g., from Benchmarks project) -->
+		<UseLocalNetConduit Condition="'$(UseLocalNetConduit)' == '' and '$(Configuration)' == 'Debug'">true</UseLocalNetConduit>
+		<UseLocalNetConduit Condition="'$(UseLocalNetConduit)' == '' and '$(Configuration)' != 'Debug'">false</UseLocalNetConduit>
 	</PropertyGroup>
 
 	<!-- NuGet Package Metadata -->
