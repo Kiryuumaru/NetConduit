@@ -7,6 +7,8 @@
 		<Nullable>enable</Nullable>
 		<IsAotCompatible>true</IsAotCompatible>
 		<EnableTrimAnalyzer>true</EnableTrimAnalyzer>
+		<EnablePreviewFeatures>true</EnablePreviewFeatures>
+		<NoWarn>CA2252</NoWarn>
 		<GenerateDocumentationFile>true</GenerateDocumentationFile>
 		<!-- Use local project reference for Debug builds, NuGet package for Release builds. -->
 		<UseLocalNetConduit Condition="'$(UseLocalNetConduit)' == '' and '$(Configuration)' == 'Debug'">true</UseLocalNetConduit>
@@ -15,12 +17,12 @@
 
 	<!-- NuGet Package Metadata -->
 	<PropertyGroup>
-		<PackageId>NetConduit.Tcp</PackageId>
+		<PackageId>NetConduit.Quic</PackageId>
 		<Authors>Kiryuumaru</Authors>
 		<Company>Kiryuumaru</Company>
 		<Copyright>Kiryuumaru</Copyright>
-		<Description>TCP transport helper for NetConduit stream multiplexer. Provides easy TCP client/server connection handling with automatic multiplexer setup.</Description>
-		<PackageTags>multiplexer;stream;tcp;networking;async;aot</PackageTags>
+		<Description>QUIC transport helper for NetConduit stream multiplexer (System.Net.Quic).</Description>
+		<PackageTags>multiplexer;stream;quic;networking;async;aot</PackageTags>
 		<PackageProjectUrl>https://github.com/Kiryuumaru/NetConduit</PackageProjectUrl>
 		<RepositoryUrl>https://github.com/Kiryuumaru/NetConduit.git</RepositoryUrl>
 		<RepositoryType>git</RepositoryType>

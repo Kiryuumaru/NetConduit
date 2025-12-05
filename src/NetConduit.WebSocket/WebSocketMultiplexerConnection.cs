@@ -5,15 +5,16 @@ namespace NetConduit.WebSocket;
 /// <summary>
 /// Represents a multiplexer connection over WebSocket, managing both the multiplexer and underlying WebSocket.
 /// </summary>
-public sealed class WebSocketMultiplexerConnection : IAsyncDisposable, IDisposable
+public sealed class WebSocketMultiplexerConnection : IStreamMultiplexerConnection, IDisposable
 {
+    private readonly StreamMultiplexer _multiplexer;
     private readonly System.Net.WebSockets.WebSocket _webSocket;
     private readonly WebSocketStream _stream;
     private bool _disposed;
 
     internal WebSocketMultiplexerConnection(StreamMultiplexer multiplexer, System.Net.WebSockets.WebSocket webSocket, WebSocketStream stream)
     {
-        Multiplexer = multiplexer;
+        _multiplexer = multiplexer;
         _webSocket = webSocket;
         _stream = stream;
     }
@@ -21,7 +22,13 @@ public sealed class WebSocketMultiplexerConnection : IAsyncDisposable, IDisposab
     /// <summary>
     /// The stream multiplexer.
     /// </summary>
-    public StreamMultiplexer Multiplexer { get; }
+    public StreamMultiplexer Multiplexer => _multiplexer;
+
+    /// <summary>Multiplexer options.</summary>
+    public MultiplexerOptions Options => _multiplexer.Options;
+
+    /// <summary>Multiplexer statistics.</summary>
+    public MultiplexerStats Stats => _multiplexer.Stats;
 
     /// <summary>
     /// The underlying WebSocket.
@@ -38,7 +45,7 @@ public sealed class WebSocketMultiplexerConnection : IAsyncDisposable, IDisposab
     /// </summary>
     /// <param name="cancellationToken">Cancellation token.</param>
     internal Task RunAsync(CancellationToken cancellationToken = default)
-        => Multiplexer.RunAsync(cancellationToken);
+        => _multiplexer.RunAsync(cancellationToken);
 
     /// <summary>
     /// Starts the multiplexer and waits for handshake to complete.
@@ -47,7 +54,7 @@ public sealed class WebSocketMultiplexerConnection : IAsyncDisposable, IDisposab
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>A task representing the background processing. This task completes when the multiplexer shuts down.</returns>
     public Task<Task> StartAsync(CancellationToken cancellationToken = default)
-        => Multiplexer.StartAsync(cancellationToken);
+        => _multiplexer.StartAsync(cancellationToken);
 
     /// <summary>
     /// Opens a new channel for writing data.
@@ -56,7 +63,7 @@ public sealed class WebSocketMultiplexerConnection : IAsyncDisposable, IDisposab
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>A write channel for sending data.</returns>
     public ValueTask<WriteChannel> OpenChannelAsync(ChannelOptions options, CancellationToken cancellationToken = default)
-        => Multiplexer.OpenChannelAsync(options, cancellationToken);
+        => _multiplexer.OpenChannelAsync(options, cancellationToken);
 
     /// <summary>
     /// Accepts a specific channel by ID.
@@ -65,7 +72,7 @@ public sealed class WebSocketMultiplexerConnection : IAsyncDisposable, IDisposab
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>A read channel for receiving data.</returns>
     public ValueTask<ReadChannel> AcceptChannelAsync(string channelId, CancellationToken cancellationToken = default)
-        => Multiplexer.AcceptChannelAsync(channelId, cancellationToken);
+        => _multiplexer.AcceptChannelAsync(channelId, cancellationToken);
 
     /// <summary>
     /// Accepts incoming channels as they arrive.
@@ -73,14 +80,14 @@ public sealed class WebSocketMultiplexerConnection : IAsyncDisposable, IDisposab
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>An async enumerable of read channels.</returns>
     public IAsyncEnumerable<ReadChannel> AcceptChannelsAsync(CancellationToken cancellationToken = default)
-        => Multiplexer.AcceptChannelsAsync(cancellationToken);
+        => _multiplexer.AcceptChannelsAsync(cancellationToken);
 
     /// <summary>
     /// Initiates graceful shutdown of the multiplexer.
     /// </summary>
     /// <param name="cancellationToken">Cancellation token.</param>
     public ValueTask GoAwayAsync(CancellationToken cancellationToken = default)
-        => Multiplexer.GoAwayAsync(cancellationToken);
+        => _multiplexer.GoAwayAsync(cancellationToken);
 
     /// <summary>
     /// Closes the WebSocket connection gracefully.
@@ -93,7 +100,7 @@ public sealed class WebSocketMultiplexerConnection : IAsyncDisposable, IDisposab
         string? statusDescription = null,
         CancellationToken cancellationToken = default)
     {
-        await Multiplexer.GoAwayAsync(cancellationToken).ConfigureAwait(false);
+        await _multiplexer.GoAwayAsync(cancellationToken).ConfigureAwait(false);
         
         if (_webSocket.State == WebSocketState.Open || _webSocket.State == WebSocketState.CloseReceived)
         {
@@ -107,7 +114,7 @@ public sealed class WebSocketMultiplexerConnection : IAsyncDisposable, IDisposab
         if (_disposed) return;
         _disposed = true;
 
-        await Multiplexer.DisposeAsync().ConfigureAwait(false);
+        await _multiplexer.DisposeAsync().ConfigureAwait(false);
         _stream.Dispose();
         _webSocket.Dispose();
     }
@@ -118,7 +125,7 @@ public sealed class WebSocketMultiplexerConnection : IAsyncDisposable, IDisposab
         if (_disposed) return;
         _disposed = true;
 
-        Multiplexer.DisposeAsync().AsTask().GetAwaiter().GetResult();
+        _multiplexer.DisposeAsync().AsTask().GetAwaiter().GetResult();
         _stream.Dispose();
         _webSocket.Dispose();
     }

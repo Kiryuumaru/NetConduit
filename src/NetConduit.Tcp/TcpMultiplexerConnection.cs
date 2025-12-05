@@ -6,21 +6,25 @@ namespace NetConduit.Tcp;
 /// <summary>
 /// Represents a multiplexer connection over TCP, managing both the multiplexer and underlying TCP client.
 /// </summary>
-public sealed class TcpMultiplexerConnection : IAsyncDisposable, IDisposable
+public sealed class TcpMultiplexerConnection : IStreamMultiplexerConnection, IDisposable
 {
+    private readonly StreamMultiplexer _multiplexer;
     private readonly TcpClient _client;
     private bool _disposed;
 
     internal TcpMultiplexerConnection(StreamMultiplexer multiplexer, TcpClient client)
     {
-        Multiplexer = multiplexer;
+        _multiplexer = multiplexer;
         _client = client;
     }
 
     /// <summary>
     /// The stream multiplexer.
     /// </summary>
-    public StreamMultiplexer Multiplexer { get; }
+    public StreamMultiplexer Multiplexer => _multiplexer;
+
+    /// <summary>Multiplexer options.</summary>
+    public MultiplexerOptions Options => _multiplexer.Options;
 
     /// <summary>
     /// The underlying TCP client.
@@ -47,7 +51,7 @@ public sealed class TcpMultiplexerConnection : IAsyncDisposable, IDisposable
     /// </summary>
     /// <param name="cancellationToken">Cancellation token.</param>
     internal Task RunAsync(CancellationToken cancellationToken = default)
-        => Multiplexer.RunAsync(cancellationToken);
+        => _multiplexer.RunAsync(cancellationToken);
 
     /// <summary>
     /// Starts the multiplexer and waits for handshake to complete.
@@ -65,7 +69,7 @@ public sealed class TcpMultiplexerConnection : IAsyncDisposable, IDisposable
     /// </code>
     /// </example>
     public Task<Task> StartAsync(CancellationToken cancellationToken = default)
-        => Multiplexer.StartAsync(cancellationToken);
+        => _multiplexer.StartAsync(cancellationToken);
 
     /// <summary>
     /// Opens a new channel for writing data.
@@ -74,7 +78,7 @@ public sealed class TcpMultiplexerConnection : IAsyncDisposable, IDisposable
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>A write channel for sending data.</returns>
     public ValueTask<WriteChannel> OpenChannelAsync(ChannelOptions options, CancellationToken cancellationToken = default)
-        => Multiplexer.OpenChannelAsync(options, cancellationToken);
+        => _multiplexer.OpenChannelAsync(options, cancellationToken);
 
     /// <summary>
     /// Accepts a specific channel by ID.
@@ -83,7 +87,7 @@ public sealed class TcpMultiplexerConnection : IAsyncDisposable, IDisposable
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>A read channel for receiving data.</returns>
     public ValueTask<ReadChannel> AcceptChannelAsync(string channelId, CancellationToken cancellationToken = default)
-        => Multiplexer.AcceptChannelAsync(channelId, cancellationToken);
+        => _multiplexer.AcceptChannelAsync(channelId, cancellationToken);
 
     /// <summary>
     /// Accepts incoming channels as they arrive.
@@ -91,19 +95,19 @@ public sealed class TcpMultiplexerConnection : IAsyncDisposable, IDisposable
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>An async enumerable of read channels.</returns>
     public IAsyncEnumerable<ReadChannel> AcceptChannelsAsync(CancellationToken cancellationToken = default)
-        => Multiplexer.AcceptChannelsAsync(cancellationToken);
+        => _multiplexer.AcceptChannelsAsync(cancellationToken);
 
     /// <summary>
     /// Initiates graceful shutdown of the multiplexer.
     /// </summary>
     /// <param name="cancellationToken">Cancellation token.</param>
     public ValueTask GoAwayAsync(CancellationToken cancellationToken = default)
-        => Multiplexer.GoAwayAsync(cancellationToken);
+        => _multiplexer.GoAwayAsync(cancellationToken);
 
     /// <summary>
     /// Gets the multiplexer statistics.
     /// </summary>
-    public MultiplexerStats Stats => Multiplexer.Stats;
+    public MultiplexerStats Stats => _multiplexer.Stats;
 
     /// <inheritdoc/>
     public async ValueTask DisposeAsync()
@@ -111,7 +115,7 @@ public sealed class TcpMultiplexerConnection : IAsyncDisposable, IDisposable
         if (_disposed) return;
         _disposed = true;
 
-        await Multiplexer.DisposeAsync().ConfigureAwait(false);
+        await _multiplexer.DisposeAsync().ConfigureAwait(false);
         _client.Dispose();
     }
 
@@ -121,7 +125,7 @@ public sealed class TcpMultiplexerConnection : IAsyncDisposable, IDisposable
         if (_disposed) return;
         _disposed = true;
 
-        Multiplexer.DisposeAsync().AsTask().GetAwaiter().GetResult();
+        _multiplexer.DisposeAsync().AsTask().GetAwaiter().GetResult();
         _client.Dispose();
     }
 }

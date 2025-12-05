@@ -29,6 +29,15 @@ dotnet add package NetConduit.Tcp
 
 # WebSocket transport helper  
 dotnet add package NetConduit.WebSocket
+
+# UDP transport (with built-in reliability layer)
+dotnet add package NetConduit.Udp
+
+# IPC transport (named pipes on Windows, Unix sockets on Linux/macOS)
+dotnet add package NetConduit.Ipc
+
+# QUIC transport (.NET 9+ only, requires OS support)
+dotnet add package NetConduit.Quic
 ```
 
 ## Quick Start
@@ -89,6 +98,67 @@ app.MapGet("/ws", async (HttpContext context) =>
     var runTask = await connection.StartAsync();
     // ...
 });
+```
+
+### UDP
+
+```csharp
+using NetConduit.Udp;
+
+// Server - accept connection
+var server = await UdpMultiplexer.AcceptAsync(port: 5000);
+var serverRunTask = await server.StartAsync();
+
+// Client - connect
+var client = await UdpMultiplexer.ConnectAsync("localhost", 5000);
+var clientRunTask = await client.StartAsync();
+
+// Use channels normally - UDP reliability is handled automatically
+var channel = await client.OpenChannelAsync(new() { ChannelId = "data" });
+await channel.WriteAsync(data);
+```
+
+### IPC (Inter-Process Communication)
+
+```csharp
+using NetConduit.Ipc;
+
+// On Windows: uses named pipes
+// On Linux/macOS: uses Unix domain sockets
+
+// Server
+var server = await IpcMultiplexer.AcceptAsync("my-app-ipc");
+var serverRunTask = await server.StartAsync();
+
+// Client
+var client = await IpcMultiplexer.ConnectAsync("my-app-ipc");
+var clientRunTask = await client.StartAsync();
+
+// Use channels normally
+var channel = await client.OpenChannelAsync(new() { ChannelId = "rpc" });
+```
+
+### QUIC
+
+```csharp
+using NetConduit.Quic;
+using System.Net;
+
+// Requires .NET 9+ and OS support (Windows 11+, Linux with msquic)
+
+// Server - create listener with certificate
+var listener = await QuicMultiplexer.ListenAsync(
+    new IPEndPoint(IPAddress.Any, 5000), 
+    certificate);
+var server = await QuicMultiplexer.AcceptAsync(listener);
+var serverRunTask = await server.StartAsync();
+
+// Client - connect (allowInsecure for self-signed certs in dev)
+var client = await QuicMultiplexer.ConnectAsync("localhost", 5000, allowInsecure: true);
+var clientRunTask = await client.StartAsync();
+
+// Use channels normally - benefits from QUIC's built-in multiplexing
+var channel = await client.OpenChannelAsync(new() { ChannelId = "stream" });
 ```
 
 ## Core Concepts
@@ -337,9 +407,12 @@ dotnet run -- client 5000 localhost Bob
 │  - GOAWAY graceful shutdown                                  │
 ├──────────────────────────────────────────────────────────────┤
 │  Transport Layer                                             │
-│  ┌────────────────┐  ┌────────────────┐  ┌────────────────┐  │
-│  │ NetConduit.Tcp │  │ NetConduit.WS  │  │  Any Stream    │  │
-│  └────────────────┘  └────────────────┘  └────────────────┘  │
+│  ┌────────────┐ ┌────────────┐ ┌────────────┐ ┌────────────┐ │
+│  │   .Tcp     │ │ .WebSocket │ │    .Udp    │ │    .Ipc    │ │
+│  └────────────┘ └────────────┘ └────────────┘ └────────────┘ │
+│  ┌────────────┐ ┌──────────────────────────────────────────┐ │
+│  │   .Quic    │ │            Any Stream                    │ │
+│  └────────────┘ └──────────────────────────────────────────┘ │
 └──────────────────────────────────────────────────────────────┘
 ```
 
@@ -405,8 +478,11 @@ dotnet run -c Release
 
 Available benchmark classes:
 - `TcpVsMuxBenchmark` - Direct Raw TCP vs Multiplexed comparison
-- `ThroughputBenchmark` - Throughput with varying channel counts and data sizes
-- `ScalabilityBenchmark` - Scalability across different scenarios
+- `TcpThroughputBenchmark` - TCP throughput with varying channel counts and data sizes
+- `UdpThroughputBenchmark` - UDP transport throughput benchmarks
+- `IpcThroughputBenchmark` - IPC transport throughput benchmarks
+- `WebSocketThroughputBenchmark` - WebSocket transport throughput benchmarks
+- `TransportComparisonBenchmark` - Compare all transports side-by-side
 
 ## License
 

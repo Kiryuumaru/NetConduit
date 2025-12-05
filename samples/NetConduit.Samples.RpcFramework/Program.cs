@@ -1,14 +1,14 @@
 // RPC Framework Sample
-// Demonstrates a simple request/response pattern over NetConduit multiplexed channels.
-// Each RPC method call uses a dedicated channel pair for isolation.
+// Demonstrates a simple request/response pattern over NetConduit multiplexed channels
+// using MessageTransit for clean, type-safe JSON messaging.
 
-using System.Buffers.Binary;
 using System.Net;
 using System.Net.Sockets;
-using System.Text;
 using System.Text.Json;
+using System.Text.Json.Serialization;
 using NetConduit;
 using NetConduit.Tcp;
+using NetConduit.Transits;
 
 var mode = args.Length > 0 ? args[0] : "server";
 var host = args.Length > 1 ? args[1] : "127.0.0.1";
@@ -44,28 +44,44 @@ async Task RunServerAsync(string serverHost, int serverPort, CancellationToken c
     
     while (!cancellationToken.IsCancellationRequested)
     {
-        var client = await listener.AcceptTcpClientAsync(cancellationToken);
-        Console.WriteLine($"[RPC Server] Client connected from {client.Client.RemoteEndPoint}");
-        _ = HandleClientAsync(client, cancellationToken);
+        // Use simple extension method to accept multiplexed connection
+        await using var mux = await listener.AcceptMuxAsync(null, cancellationToken);
+        Console.WriteLine($"[RPC Server] Client connected");
+        
+        _ = HandleClientAsync(mux.Multiplexer, cancellationToken);
     }
 }
 
-async Task HandleClientAsync(TcpClient client, CancellationToken cancellationToken)
+async Task HandleClientAsync(StreamMultiplexer mux, CancellationToken cancellationToken)
 {
     try
     {
-        await using var multiplexer = client.AsMux();
-        var runTask = await multiplexer.StartAsync(cancellationToken);
+        var runTask = await mux.StartAsync(cancellationToken);
         
-        // Create response channel for sending responses back
-        await using var responseChannel = await multiplexer.OpenChannelAsync(
-            new ChannelOptions { ChannelId = "RpcResponses" }, cancellationToken);
+        // Open a MessageTransit for sending RPC responses
+        // The server opens "responses" channel and accepts "requests" channel
+        await using var rpcTransit = await mux.OpenMessageTransitAsync(
+            writeChannelId: "rpc-responses",
+            readChannelId: "rpc-requests",
+            RpcJsonContext.Default.RpcResponse,
+            RpcJsonContext.Default.RpcRequest,
+            cancellationToken: cancellationToken);
         
-        var requestCount = 0;
-        await foreach (var requestChannel in multiplexer.AcceptChannelsAsync(cancellationToken))
+        Console.WriteLine("[RPC Server] MessageTransit ready for RPC");
+        
+        // Process incoming RPC requests
+        await foreach (var request in rpcTransit.ReceiveAllAsync(cancellationToken))
         {
-            requestCount++;
-            _ = HandleRpcCallAsync(requestChannel, responseChannel, requestCount, cancellationToken);
+            if (request == null) continue;
+            
+            Console.WriteLine($"[RPC Server] Received: {request.Method} (ReqId: {request.RequestId})");
+            
+            // Process and respond
+            var response = await ProcessRpcAsync(request, cancellationToken);
+            response.RequestId = request.RequestId;
+            
+            await rpcTransit.SendAsync(response, cancellationToken);
+            Console.WriteLine($"[RPC Server] Sent response for '{request.Method}' (success={response.Success})");
         }
     }
     catch (OperationCanceledException)
@@ -74,46 +90,13 @@ async Task HandleClientAsync(TcpClient client, CancellationToken cancellationTok
     }
     catch (Exception ex)
     {
-        Console.WriteLine($"[RPC Server] Error handling client: {ex.Message}");
-    }
-    finally
-    {
-        client.Dispose();
-    }
-}
-
-async Task HandleRpcCallAsync(ReadChannel requestChannel, WriteChannel responseChannel, int requestNum, CancellationToken cancellationToken)
-{
-    try
-    {
-        // Read the RPC request
-        var request = await ReadRpcMessageAsync(requestChannel, cancellationToken);
-        if (request == null)
-        {
-            Console.WriteLine($"[RPC Server] Request #{requestNum}: Invalid request");
-            return;
-        }
-        
-        Console.WriteLine($"[RPC Server] Request #{requestNum}: Received call to '{request.Method}' (ReqId: {request.RequestId})");
-        
-        // Process the RPC call
-        var response = await ProcessRpcAsync(request, cancellationToken);
-        response.RequestId = request.RequestId;
-        
-        // Send the response
-        await WriteRpcMessageAsync(responseChannel, response, cancellationToken);
-        
-        Console.WriteLine($"[RPC Server] Sent response for '{request.Method}' (success={response.Success})");
-    }
-    catch (Exception ex)
-    {
-        Console.WriteLine($"[RPC Server] Error processing RPC: {ex.Message}");
+        Console.WriteLine($"[RPC Server] Error: {ex.Message}");
     }
 }
 
 async Task<RpcResponse> ProcessRpcAsync(RpcRequest request, CancellationToken cancellationToken)
 {
-    // Simulate RPC method processing
+    // Simulate processing delay
     await Task.Delay(Random.Shared.Next(10, 100), cancellationToken);
     
     return request.Method switch
@@ -124,11 +107,7 @@ async Task<RpcResponse> ProcessRpcAsync(RpcRequest request, CancellationToken ca
         "GetTime" => HandleGetTime(),
         "Echo" => HandleEcho(request),
         "SlowOperation" => await HandleSlowOperationAsync(request, cancellationToken),
-        _ => new RpcResponse 
-        { 
-            Success = false, 
-            Error = $"Unknown method: {request.Method}" 
-        }
+        _ => new RpcResponse { Success = false, Error = $"Unknown method: {request.Method}" }
     };
 }
 
@@ -139,7 +118,7 @@ RpcResponse HandleAdd(RpcRequest request)
     {
         var a = ((JsonElement)aVal).GetInt32();
         var b = ((JsonElement)bVal).GetInt32();
-        return new RpcResponse { Success = true, Result = a + b };
+        return new RpcResponse { Success = true, Result = JsonSerializer.SerializeToElement(a + b) };
     }
     return new RpcResponse { Success = false, Error = "Missing parameters 'a' and 'b'" };
 }
@@ -151,7 +130,7 @@ RpcResponse HandleMultiply(RpcRequest request)
     {
         var a = ((JsonElement)aVal).GetDouble();
         var b = ((JsonElement)bVal).GetDouble();
-        return new RpcResponse { Success = true, Result = a * b };
+        return new RpcResponse { Success = true, Result = JsonSerializer.SerializeToElement(a * b) };
     }
     return new RpcResponse { Success = false, Error = "Missing parameters 'a' and 'b'" };
 }
@@ -160,30 +139,26 @@ RpcResponse HandleConcat(RpcRequest request)
 {
     if (request.Parameters?.TryGetValue("strings", out var stringsVal) == true)
     {
-        var element = (JsonElement)stringsVal;
-        var strings = element.EnumerateArray().Select(e => e.GetString() ?? "").ToArray();
-        return new RpcResponse { Success = true, Result = string.Join("", strings) };
+        var strings = stringsVal.EnumerateArray().Select(e => e.GetString() ?? "").ToArray();
+        return new RpcResponse { Success = true, Result = JsonSerializer.SerializeToElement(string.Join("", strings)) };
     }
     return new RpcResponse { Success = false, Error = "Missing parameter 'strings'" };
 }
 
 RpcResponse HandleGetTime()
 {
-    return new RpcResponse 
-    { 
-        Success = true, 
-        Result = new 
-        { 
-            Utc = DateTime.UtcNow.ToString("O"),
-            Local = DateTime.Now.ToString("O"),
-            UnixTimestamp = DateTimeOffset.UtcNow.ToUnixTimeSeconds()
-        }
+    var timeResult = new
+    {
+        Utc = DateTime.UtcNow.ToString("O"),
+        Local = DateTime.Now.ToString("O"),
+        UnixTimestamp = DateTimeOffset.UtcNow.ToUnixTimeSeconds()
     };
+    return new RpcResponse { Success = true, Result = JsonSerializer.SerializeToElement(timeResult) };
 }
 
 RpcResponse HandleEcho(RpcRequest request)
 {
-    return new RpcResponse { Success = true, Result = request.Parameters };
+    return new RpcResponse { Success = true, Result = JsonSerializer.SerializeToElement(request.Parameters) };
 }
 
 async Task<RpcResponse> HandleSlowOperationAsync(RpcRequest request, CancellationToken cancellationToken)
@@ -191,11 +166,11 @@ async Task<RpcResponse> HandleSlowOperationAsync(RpcRequest request, Cancellatio
     var delayMs = 1000;
     if (request.Parameters?.TryGetValue("delayMs", out var delayVal) == true)
     {
-        delayMs = ((JsonElement)delayVal).GetInt32();
+        delayMs = delayVal.GetInt32();
     }
     
     await Task.Delay(delayMs, cancellationToken);
-    return new RpcResponse { Success = true, Result = $"Completed after {delayMs}ms" };
+    return new RpcResponse { Success = true, Result = JsonSerializer.SerializeToElement($"Completed after {delayMs}ms") };
 }
 
 async Task RunClientAsync(string clientHost, int clientPort, CancellationToken cancellationToken)
@@ -204,16 +179,22 @@ async Task RunClientAsync(string clientHost, int clientPort, CancellationToken c
     
     try
     {
+        // Use simple extension method to connect multiplexed
         using var tcpClient = new TcpClient();
-        await using var multiplexer = await tcpClient.ConnectMuxAsync(clientHost, clientPort, null, cancellationToken);
+        await using var mux = await tcpClient.ConnectMuxAsync(clientHost, clientPort, null, cancellationToken);
         Console.WriteLine("[RPC Client] Connected!");
         
-        var runTask = await multiplexer.StartAsync(cancellationToken);
+        var runTask = await mux.StartAsync(cancellationToken);
         
-        var client = new RpcClient(multiplexer, cancellationToken);
+        // Open MessageTransit for RPC (client sends requests, accepts responses)
+        await using var rpcTransit = await mux.Multiplexer.OpenMessageTransitAsync(
+            writeChannelId: "rpc-requests",
+            readChannelId: "rpc-responses",
+            RpcJsonContext.Default.RpcRequest,
+            RpcJsonContext.Default.RpcResponse,
+            cancellationToken: cancellationToken);
         
-        // Start accepting response channel from server
-        await client.StartAsync();
+        var client = new SimpleRpcClient(rpcTransit);
         
         // Demo: Make several RPC calls
         Console.WriteLine("\n--- Making RPC Calls ---\n");
@@ -242,20 +223,14 @@ async Task RunClientAsync(string clientHost, int clientPort, CancellationToken c
             new { message = "test", numbers = new[] { 1, 2, 3 } }, cancellationToken);
         Console.WriteLine($"Echo(...) = {echoResult}");
         
-        // Concurrent calls - all run in parallel over separate channels
-        Console.WriteLine("\n--- Making 10 Concurrent Calls ---\n");
-        var tasks = new List<Task>();
+        // Concurrent calls - all use the same MessageTransit
+        Console.WriteLine("\n--- Making 10 Sequential Calls ---\n");
         for (int i = 0; i < 10; i++)
         {
-            var index = i;
-            tasks.Add(Task.Run(async () =>
-            {
-                var result = await client.CallAsync<int>("Add", 
-                    new { a = index, b = index * 10 }, cancellationToken);
-                Console.WriteLine($"  Concurrent call {index}: Add({index}, {index * 10}) = {result}");
-            }, cancellationToken));
+            var result = await client.CallAsync<int>("Add", 
+                new { a = i, b = i * 10 }, cancellationToken);
+            Console.WriteLine($"  Call {i}: Add({i}, {i * 10}) = {result}");
         }
-        await Task.WhenAll(tasks);
         
         // Error handling
         Console.WriteLine("\n--- Testing Error Handling ---\n");
@@ -276,218 +251,92 @@ async Task RunClientAsync(string clientHost, int clientPort, CancellationToken c
     }
 }
 
-async Task WriteRpcMessageAsync(WriteChannel channel, object message, CancellationToken cancellationToken)
-{
-    var json = JsonSerializer.Serialize(message);
-    var jsonBytes = Encoding.UTF8.GetBytes(json);
-    
-    // Write length prefix (4 bytes) + JSON data
-    var lengthBytes = new byte[4];
-    BinaryPrimitives.WriteInt32BigEndian(lengthBytes, jsonBytes.Length);
-    
-    await channel.WriteAsync(lengthBytes, cancellationToken);
-    await channel.WriteAsync(jsonBytes, cancellationToken);
-}
+// RPC Types with AOT-safe JSON serialization
 
-async Task<RpcRequest?> ReadRpcMessageAsync(ReadChannel channel, CancellationToken cancellationToken)
-{
-    // Read length prefix
-    var lengthBytes = new byte[4];
-    var read = await channel.ReadAsync(lengthBytes, cancellationToken);
-    if (read != 4) return default;
-    
-    var length = BinaryPrimitives.ReadInt32BigEndian(lengthBytes);
-    if (length <= 0 || length > 10 * 1024 * 1024) return default; // Max 10MB
-    
-    // Read JSON data
-    var jsonBytes = new byte[length];
-    var totalRead = 0;
-    while (totalRead < length)
-    {
-        read = await channel.ReadAsync(jsonBytes.AsMemory(totalRead), cancellationToken);
-        if (read == 0) return default;
-        totalRead += read;
-    }
-    
-    var json = Encoding.UTF8.GetString(jsonBytes);
-    return JsonSerializer.Deserialize<RpcRequest>(json);
-}
-
-// RPC Types
-
-class RpcRequest
+record RpcRequest
 {
     public string Method { get; set; } = "";
     public string? RequestId { get; set; }
-    public Dictionary<string, object>? Parameters { get; set; }
+    public Dictionary<string, JsonElement>? Parameters { get; set; }
 }
 
-class RpcResponse
+record RpcResponse
 {
     public bool Success { get; set; }
     public string? RequestId { get; set; }
-    public object? Result { get; set; }
+    public JsonElement? Result { get; set; }
     public string? Error { get; set; }
 }
 
-class RpcException : Exception
-{
-    public RpcException(string message) : base(message) { }
-}
+class RpcException(string message) : Exception(message);
 
-// Simple RPC Client wrapper
-class RpcClient
+// AOT-safe JSON serialization context
+[JsonSerializable(typeof(RpcRequest))]
+[JsonSerializable(typeof(RpcResponse))]
+[JsonSerializable(typeof(Dictionary<string, JsonElement>))]
+partial class RpcJsonContext : JsonSerializerContext;
+
+/// <summary>
+/// Simple RPC client using MessageTransit for request/response pattern.
+/// </summary>
+class SimpleRpcClient
 {
-    private readonly TcpMultiplexerConnection _multiplexer;
-    private readonly CancellationToken _cancellationToken;
-    private readonly Dictionary<string, TaskCompletionSource<RpcResponse>> _pendingRequests = new();
+    private readonly MessageTransit<RpcRequest, RpcResponse> _transit;
     private readonly SemaphoreSlim _lock = new(1);
     private int _requestCounter;
     
-    public RpcClient(TcpMultiplexerConnection multiplexer, CancellationToken cancellationToken)
+    public SimpleRpcClient(MessageTransit<RpcRequest, RpcResponse> transit)
     {
-        _multiplexer = multiplexer;
-        _cancellationToken = cancellationToken;
-    }
-    
-    public async Task StartAsync()
-    {
-        // Accept the response channel from server
-        await foreach (var channel in _multiplexer.AcceptChannelsAsync(_cancellationToken))
-        {
-            if (channel.ChannelId == "RpcResponses")
-            {
-                _ = ReceiveResponsesAsync(channel);
-                break;
-            }
-        }
-    }
-    
-    private async Task ReceiveResponsesAsync(ReadChannel channel)
-    {
-        try
-        {
-            while (!_cancellationToken.IsCancellationRequested)
-            {
-                // Read length prefix
-                var lengthBytes = new byte[4];
-                var read = await channel.ReadAsync(lengthBytes, _cancellationToken);
-                if (read != 4) break;
-                
-                var length = BinaryPrimitives.ReadInt32BigEndian(lengthBytes);
-                if (length <= 0 || length > 10 * 1024 * 1024) continue;
-                
-                // Read JSON data
-                var jsonBytes = new byte[length];
-                var totalRead = 0;
-                while (totalRead < length)
-                {
-                    read = await channel.ReadAsync(jsonBytes.AsMemory(totalRead), _cancellationToken);
-                    if (read == 0) break;
-                    totalRead += read;
-                }
-                
-                var json = Encoding.UTF8.GetString(jsonBytes);
-                var response = JsonSerializer.Deserialize<RpcResponse>(json);
-                
-                if (response?.RequestId != null)
-                {
-                    await _lock.WaitAsync(_cancellationToken);
-                    try
-                    {
-                        if (_pendingRequests.TryGetValue(response.RequestId, out var tcs))
-                        {
-                            _pendingRequests.Remove(response.RequestId);
-                            tcs.TrySetResult(response);
-                        }
-                    }
-                    finally
-                    {
-                        _lock.Release();
-                    }
-                }
-            }
-        }
-        catch (OperationCanceledException)
-        {
-            // Expected
-        }
+        _transit = transit;
     }
     
     public async Task<T?> CallAsync<T>(string method, object? parameters, CancellationToken cancellationToken)
     {
-        var requestId = Interlocked.Increment(ref _requestCounter).ToString();
-        var tcs = new TaskCompletionSource<RpcResponse>();
+        // Serialize parameters to Dictionary<string, JsonElement> if needed
+        Dictionary<string, JsonElement>? paramsDict = null;
+        if (parameters != null)
+        {
+            var json = JsonSerializer.Serialize(parameters);
+            paramsDict = JsonSerializer.Deserialize<Dictionary<string, JsonElement>>(json);
+        }
         
-        // Register pending request
+        var requestId = Interlocked.Increment(ref _requestCounter).ToString();
+        var request = new RpcRequest
+        {
+            Method = method,
+            RequestId = requestId,
+            Parameters = paramsDict
+        };
+        
+        // Send request and wait for matching response
         await _lock.WaitAsync(cancellationToken);
         try
         {
-            _pendingRequests[requestId] = tcs;
+            await _transit.SendAsync(request, cancellationToken);
+            
+            // Wait for response (with timeout)
+            using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            timeoutCts.CancelAfter(TimeSpan.FromSeconds(30));
+            
+            await foreach (var response in _transit.ReceiveAllAsync(timeoutCts.Token))
+            {
+                if (response?.RequestId == requestId)
+                {
+                    if (!response.Success)
+                        throw new RpcException(response.Error ?? "Unknown error");
+                    
+                    if (response.Result == null)
+                        return default;
+                    
+                    return response.Result.Value.Deserialize<T>();
+                }
+            }
+            
+            throw new RpcException("No response received");
         }
         finally
         {
             _lock.Release();
-        }
-        
-        try
-        {
-            // Create a new channel for this RPC call
-            await using var requestChannel = await _multiplexer.OpenChannelAsync(
-                new ChannelOptions { ChannelId = $"RpcRequest-{requestId}" }, cancellationToken);
-            
-            // Build request
-            var request = new RpcRequest
-            {
-                Method = method,
-                RequestId = requestId,
-                Parameters = parameters != null 
-                    ? JsonSerializer.Deserialize<Dictionary<string, object>>(
-                        JsonSerializer.Serialize(parameters))
-                    : null
-            };
-            
-            // Send request
-            var json = JsonSerializer.Serialize(request);
-            var jsonBytes = Encoding.UTF8.GetBytes(json);
-            var lengthBytes = new byte[4];
-            BinaryPrimitives.WriteInt32BigEndian(lengthBytes, jsonBytes.Length);
-            
-            await requestChannel.WriteAsync(lengthBytes, cancellationToken);
-            await requestChannel.WriteAsync(jsonBytes, cancellationToken);
-            
-            // Wait for response with timeout
-            using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-            linkedCts.CancelAfter(TimeSpan.FromSeconds(30));
-            
-            var response = await tcs.Task.WaitAsync(linkedCts.Token);
-            
-            if (!response.Success)
-            {
-                throw new RpcException(response.Error ?? "Unknown error");
-            }
-            
-            if (response.Result == null)
-            {
-                return default;
-            }
-            
-            // Convert result to requested type
-            var resultJson = JsonSerializer.Serialize(response.Result);
-            return JsonSerializer.Deserialize<T>(resultJson);
-        }
-        finally
-        {
-            // Clean up if still pending
-            await _lock.WaitAsync(CancellationToken.None);
-            try
-            {
-                _pendingRequests.Remove(requestId);
-            }
-            finally
-            {
-                _lock.Release();
-            }
         }
     }
 }

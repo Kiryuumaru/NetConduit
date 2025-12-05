@@ -7,15 +7,24 @@
 		<ImplicitUsings>enable</ImplicitUsings>
 		<Nullable>enable</Nullable>
 		<IsPackable>false</IsPackable>
+		<!-- Force local project references for benchmarks (required for IStreamMultiplexerConnection interface) -->
+		<UseLocalNetConduit>true</UseLocalNetConduit>
 	</PropertyGroup>
 
 	<ItemGroup>
 		<PackageReference Include="BenchmarkDotNet" Version="0.15.8" />
 	</ItemGroup>
 
+	<ItemGroup>
+		<FrameworkReference Include="Microsoft.AspNetCore.App" />
+	</ItemGroup>
+
 	<!-- Force local project references for benchmarks (even in Release mode) -->
 	<ItemGroup>
 		<ProjectReference Include="..\..\src\NetConduit.Tcp\NetConduit.Tcp.csproj" AdditionalProperties="UseLocalNetConduit=true" />
+		<ProjectReference Include="..\..\src\NetConduit.Udp\NetConduit.Udp.csproj" AdditionalProperties="UseLocalNetConduit=true" />
+		<ProjectReference Include="..\..\src\NetConduit.Ipc\NetConduit.Ipc.csproj" AdditionalProperties="UseLocalNetConduit=true" />
+		<ProjectReference Include="..\..\src\NetConduit.WebSocket\NetConduit.WebSocket.csproj" AdditionalProperties="UseLocalNetConduit=true" />
 	</ItemGroup>
 
 </Project>
