@@ -157,7 +157,7 @@ public class TcpVsMuxBenchmark
                 var acceptedChannels = new List<ReadChannel>();
                 var readTasks = new List<Task>();
 
-                await foreach (var channel in server.Multiplexer.AcceptChannelsAsync(cts.Token))
+                await foreach (var channel in server.AcceptChannelsAsync(cts.Token))
                 {
                     acceptedChannels.Add(channel);
                     var ch = channel;
@@ -195,7 +195,7 @@ public class TcpVsMuxBenchmark
                 for (int i = 0; i < ChannelCount; i++)
                 {
                     var channelId = $"ch-{i}";
-                    var channel = await client.Multiplexer.OpenChannelAsync(new ChannelOptions { ChannelId = channelId }, cts.Token);
+                    var channel = await client.OpenChannelAsync(new ChannelOptions { ChannelId = channelId }, cts.Token);
                     channels.Add(channel);
 
                     var ch = channel;

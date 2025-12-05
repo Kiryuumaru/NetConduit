@@ -48,11 +48,11 @@ async Task RunServerAsync(string serverHost, int serverPort, CancellationToken c
         await using var mux = await listener.AcceptMuxAsync(null, cancellationToken);
         Console.WriteLine($"[RPC Server] Client connected");
         
-        _ = HandleClientAsync(mux.Multiplexer, cancellationToken);
+        _ = HandleClientAsync(mux, cancellationToken);
     }
 }
 
-async Task HandleClientAsync(StreamMultiplexer mux, CancellationToken cancellationToken)
+async Task HandleClientAsync(IStreamMultiplexer mux, CancellationToken cancellationToken)
 {
     try
     {
@@ -187,7 +187,7 @@ async Task RunClientAsync(string clientHost, int clientPort, CancellationToken c
         var runTask = await mux.StartAsync(cancellationToken);
         
         // Open MessageTransit for RPC (client sends requests, accepts responses)
-        await using var rpcTransit = await mux.Multiplexer.OpenMessageTransitAsync(
+        await using var rpcTransit = await mux.OpenMessageTransitAsync(
             writeChannelId: "rpc-requests",
             readChannelId: "rpc-responses",
             RpcJsonContext.Default.RpcRequest,

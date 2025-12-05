@@ -53,7 +53,7 @@ var connection = await TcpMultiplexer.AcceptAsync(listener);
 var runTask = await connection.StartAsync();
 
 // Accept channels from clients
-await foreach (var channel in connection.Multiplexer.AcceptChannelsAsync())
+await foreach (var channel in connection.AcceptChannelsAsync())
 {
     // Each channel is a Stream - read data
     var buffer = new byte[1024];
@@ -73,7 +73,7 @@ var connection = await TcpMultiplexer.ConnectAsync("localhost", 5000);
 var runTask = await connection.StartAsync();
 
 // Open a channel and send data
-var channel = await connection.Multiplexer.OpenChannelAsync(
+var channel = await connection.OpenChannelAsync(
     new ChannelOptions { ChannelId = "my-channel" });
 
 await channel.WriteAsync(Encoding.UTF8.GetBytes("Hello, Server!"));

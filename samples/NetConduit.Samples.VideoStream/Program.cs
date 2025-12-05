@@ -44,7 +44,7 @@ async Task RunServerAsync(string serverHost, int serverPort, CancellationToken c
     using var listener = new TcpListener(IPAddress.Parse(serverHost), serverPort);
     listener.Start();
     
-    var clients = new List<(StreamMultiplexer mux, StreamTransit video, StreamTransit audio)>();
+    var clients = new List<(IStreamMultiplexer mux, StreamTransit video, StreamTransit audio)>();
     var clientLock = new object();
     
     // Handle incoming connections
@@ -55,8 +55,7 @@ async Task RunServerAsync(string serverHost, int serverPort, CancellationToken c
             try
             {
                 // Use simple extension to accept multiplexed connection
-                var muxConn = await listener.AcceptMuxAsync(null, cancellationToken);
-                var mux = muxConn.Multiplexer;
+                var mux = await listener.AcceptMuxAsync(null, cancellationToken);
                 Console.WriteLine($"[Stream Server] Client connected");
                 
                 _ = mux.StartAsync(cancellationToken);
@@ -98,9 +97,9 @@ async Task RunServerAsync(string serverHost, int serverPort, CancellationToken c
 }
 
 async Task StreamToClientsAsync(
-    Func<(StreamMultiplexer mux, StreamTransit video, StreamTransit audio)[]> getClients,
+    Func<(IStreamMultiplexer mux, StreamTransit video, StreamTransit audio)[]> getClients,
     object clientLock,
-    List<(StreamMultiplexer mux, StreamTransit video, StreamTransit audio)> clients,
+    List<(IStreamMultiplexer mux, StreamTransit video, StreamTransit audio)> clients,
     CancellationToken cancellationToken)
 {
     var frameNumber = 0u;
@@ -238,9 +237,9 @@ return packet;
 async Task SendFrameAsync(
 StreamTransit stream, 
 byte[] data,
-StreamMultiplexer mux,
+IStreamMultiplexer mux,
 object clientLock,
-List<(StreamMultiplexer mux, StreamTransit video, StreamTransit audio)> clients,
+List<(IStreamMultiplexer mux, StreamTransit video, StreamTransit audio)> clients,
 CancellationToken cancellationToken)
 {
 try
@@ -269,8 +268,7 @@ try
 {
     // Use simple extension method to connect
     using var tcpClient = new TcpClient();
-    await using var muxConn = await tcpClient.ConnectMuxAsync(clientHost, clientPort, null, cancellationToken);
-    var mux = muxConn.Multiplexer;
+    await using var mux = await tcpClient.ConnectMuxAsync(clientHost, clientPort, null, cancellationToken);
     Console.WriteLine("[Stream Client] Connected! Receiving stream...\n");
     
     var runTask = await mux.StartAsync(cancellationToken);

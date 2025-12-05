@@ -103,7 +103,7 @@ public class QuicMultiplexerTests
             }
 
             await Task.WhenAll(tasks);
-            Assert.Equal(channelCount, client.Multiplexer.OpenedChannelIds.Count);
+            Assert.Equal(channelCount, client.OpenedChannelIds.Count);
 
             cts.Cancel();
             await Task.WhenAll(serverRun, clientRun);

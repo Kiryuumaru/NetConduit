@@ -80,14 +80,14 @@ public class TransportComparisonBenchmark
             {
                 await using var server = await TcpMultiplexer.AcceptAsync(listener, muxOptions, cts.Token);
                 var runTask = await server.StartAsync(cts.Token);
-                await AcceptAndReadChannels(server.Multiplexer, ConcurrentChannels, DataSizePerChannel, ChunkSize, cts.Token);
+                await AcceptAndReadChannels(server, ConcurrentChannels, DataSizePerChannel, ChunkSize, cts.Token);
             }, cts.Token);
 
             var clientTask = Task.Run(async () =>
             {
                 await using var client = await TcpMultiplexer.ConnectAsync("127.0.0.1", port, muxOptions, cts.Token);
                 var runTask = await client.StartAsync(cts.Token);
-                await OpenAndWriteChannels(client.Multiplexer, ConcurrentChannels, DataSizePerChannel, _sendBuffer, cts.Token);
+                await OpenAndWriteChannels(client, ConcurrentChannels, DataSizePerChannel, _sendBuffer, cts.Token);
             }, cts.Token);
 
             await Task.WhenAll(serverTask, clientTask);
@@ -121,14 +121,14 @@ public class TransportComparisonBenchmark
         {
             await using var server = await UdpMultiplexer.AcceptAsync(actualServerPort, null, muxOptions, cts.Token);
             var runTask = await server.StartAsync(cts.Token);
-            await AcceptAndReadChannels(server.Multiplexer, ConcurrentChannels, DataSizePerChannel, ChunkSize, cts.Token);
+            await AcceptAndReadChannels(server, ConcurrentChannels, DataSizePerChannel, ChunkSize, cts.Token);
         }, cts.Token);
 
         var clientTask = Task.Run(async () =>
         {
             await using var client = await UdpMultiplexer.ConnectAsync("127.0.0.1", actualServerPort, null, muxOptions, cts.Token);
             var runTask = await client.StartAsync(cts.Token);
-            await OpenAndWriteChannels(client.Multiplexer, ConcurrentChannels, DataSizePerChannel, _sendBuffer, cts.Token);
+            await OpenAndWriteChannels(client, ConcurrentChannels, DataSizePerChannel, _sendBuffer, cts.Token);
         }, cts.Token);
 
         await Task.WhenAll(serverTask, clientTask);
@@ -155,7 +155,7 @@ public class TransportComparisonBenchmark
         {
             await using var server = await IpcMultiplexer.AcceptAsync(pipeName, muxOptions, cts.Token);
             var runTask = await server.StartAsync(cts.Token);
-            await AcceptAndReadChannels(server.Multiplexer, ConcurrentChannels, DataSizePerChannel, ChunkSize, cts.Token);
+            await AcceptAndReadChannels(server, ConcurrentChannels, DataSizePerChannel, ChunkSize, cts.Token);
         }, cts.Token);
 
         await Task.Delay(100, cts.Token); // Ensure server is listening
@@ -164,7 +164,7 @@ public class TransportComparisonBenchmark
         {
             await using var client = await IpcMultiplexer.ConnectAsync(pipeName, muxOptions, cts.Token);
             var runTask = await client.StartAsync(cts.Token);
-            await OpenAndWriteChannels(client.Multiplexer, ConcurrentChannels, DataSizePerChannel, _sendBuffer, cts.Token);
+            await OpenAndWriteChannels(client, ConcurrentChannels, DataSizePerChannel, _sendBuffer, cts.Token);
         }, cts.Token);
 
         await Task.WhenAll(serverTask, clientTask);
@@ -213,14 +213,14 @@ public class TransportComparisonBenchmark
             {
                 var server = await serverReady.Task;
                 var runTask = await server.StartAsync(cts.Token);
-                await AcceptAndReadChannels(server.Multiplexer, ConcurrentChannels, DataSizePerChannel, ChunkSize, cts.Token);
+                await AcceptAndReadChannels(server, ConcurrentChannels, DataSizePerChannel, ChunkSize, cts.Token);
             }, cts.Token);
 
             var clientTask = Task.Run(async () =>
             {
                 await using var client = await WebSocketMultiplexer.ConnectAsync($"ws://localhost:{port}/ws", muxOptions, null, cts.Token);
                 var runTask = await client.StartAsync(cts.Token);
-                await OpenAndWriteChannels(client.Multiplexer, ConcurrentChannels, DataSizePerChannel, _sendBuffer, cts.Token);
+                await OpenAndWriteChannels(client, ConcurrentChannels, DataSizePerChannel, _sendBuffer, cts.Token);
             }, cts.Token);
 
             await Task.WhenAll(serverTask, clientTask);
@@ -234,7 +234,7 @@ public class TransportComparisonBenchmark
         }
     }
 
-    private static async Task AcceptAndReadChannels(StreamMultiplexer mux, int channelCount, int dataSize, int chunkSize, CancellationToken ct)
+    private static async Task AcceptAndReadChannels(IStreamMultiplexer mux, int channelCount, int dataSize, int chunkSize, CancellationToken ct)
     {
         var acceptedChannels = new List<ReadChannel>();
         var readTasks = new List<Task>();
@@ -264,7 +264,7 @@ public class TransportComparisonBenchmark
             await ch.DisposeAsync();
     }
 
-    private static async Task OpenAndWriteChannels(StreamMultiplexer mux, int channelCount, int dataSize, byte[] sendBuffer, CancellationToken ct)
+    private static async Task OpenAndWriteChannels(IStreamMultiplexer mux, int channelCount, int dataSize, byte[] sendBuffer, CancellationToken ct)
     {
         var channels = new List<WriteChannel>();
         var sendTasks = new List<Task>();
