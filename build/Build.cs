@@ -39,6 +39,24 @@ class Build : BaseNukeBuildHelpers
             AppId = "net_conduit_websocket",
             ProjectName = "NetConduit.WebSocket",
             ProjectTestName = "NetConduit.WebSocket.IntegrationTests"
+        },
+        new DeploymentAppSpec
+        {
+            AppId = "net_conduit_udp",
+            ProjectName = "NetConduit.Udp",
+            ProjectTestName = "NetConduit.Udp.IntegrationTests"
+        },
+        new DeploymentAppSpec
+        {
+            AppId = "net_conduit_ipc",
+            ProjectName = "NetConduit.Ipc",
+            ProjectTestName = "NetConduit.Ipc.IntegrationTests"
+        },
+        new DeploymentAppSpec
+        {
+            AppId = "net_conduit_quic",
+            ProjectName = "NetConduit.Quic",
+            ProjectTestName = "NetConduit.Quic.IntegrationTests"
         }
     ];
 
