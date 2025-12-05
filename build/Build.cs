@@ -77,7 +77,6 @@ class Build : BaseNukeBuildHelpers
             {
                 DotNetTasks.DotNetBuild(_ => _
                     .SetProjectFile(RootDirectory / "tests" / spec.ProjectTestName / $"{spec.ProjectTestName}.csproj")
-                    .SetProperty("UseLocalNetConduit", false)
                     .SetConfiguration("Release"));
                 DotNetTasks.DotNetTest(_ => _
                     .SetProcessAdditionalArguments(
@@ -86,7 +85,6 @@ class Build : BaseNukeBuildHelpers
                         "RunConfiguration.CollectSourceInformation=true " +
                         "DataCollectionRunSettings.DataCollectors.DataCollector.Configuration.Format=opencovere ")
                     .SetProjectFile(RootDirectory / "tests" / spec.ProjectTestName / $"{spec.ProjectTestName}.csproj")
-                    .SetProperty("UseLocalNetConduit", false)
                     .SetConfiguration("Release"));
             }));
 

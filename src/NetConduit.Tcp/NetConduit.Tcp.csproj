@@ -1,4 +1,4 @@
-<Project Sdk="Microsoft.NET.Sdk">
+﻿<Project Sdk="Microsoft.NET.Sdk">
 
 	<PropertyGroup>
 		<LangVersion>preview</LangVersion>
@@ -38,7 +38,7 @@
 	</ItemGroup>
 
 	<ItemGroup Condition="'$(UseLocalNetConduit)' != 'true'">
-		<PackageReference Include="NetConduit" Version="1.1.3" />
+		<PackageReference Include="NetConduit" Version="1.2.1" />
 	</ItemGroup>
 
 </Project>
