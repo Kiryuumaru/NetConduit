@@ -166,7 +166,31 @@ var channel = await mux.OpenChannelAsync(options);
 
 ### Transits
 
-Transits add semantic meaning to channels:
+Transits add semantic meaning to channels. Use extension methods on the multiplexer for easy creation:
+
+```csharp
+using NetConduit.Transits;
+
+// Open a write-only stream
+var writeStream = await mux.OpenStreamAsync("upload");
+
+// Accept a read-only stream
+var readStream = await mux.AcceptStreamAsync("download");
+
+// Open a duplex stream with single channel ID
+// Creates "chat>>" for writing and accepts "chat<<" for reading
+var duplex = await mux.OpenDuplexStreamAsync("chat");
+
+// Or specify separate channel IDs
+var duplex2 = await mux.OpenDuplexStreamAsync("my-out", "their-out");
+
+// Open a message transit with single channel ID
+// Creates "rpc>>" for sending and accepts "rpc<<" for receiving
+var transit = await mux.OpenMessageTransitAsync<Request, Response>(
+    "rpc",
+    MyContext.Default.Request,
+    MyContext.Default.Response);
+```
 
 #### MessageTransit - Send/receive JSON messages
 
@@ -180,9 +204,9 @@ public record ChatMessage(string User, string Text);
 [JsonSerializable(typeof(ChatMessage))]
 public partial class ChatContext : JsonSerializerContext { }
 
-// Create transit
-var transit = new MessageTransit<ChatMessage, ChatMessage>(
-    writeChannel, readChannel,
+// Create transit with single channel ID (uses "chat>>" and "chat<<")
+var transit = await mux.OpenMessageTransitAsync<ChatMessage, ChatMessage>(
+    "chat",
     ChatContext.Default.ChatMessage,
     ChatContext.Default.ChatMessage);
 
@@ -195,12 +219,20 @@ Console.WriteLine($"{msg.User}: {msg.Text}");
 #### DuplexStreamTransit - Bidirectional stream
 
 ```csharp
-// Wrap channel pair as bidirectional Stream
-var duplex = new DuplexStreamTransit(writeChannel, readChannel);
+// Open duplex stream with single channel ID (uses "data>>" and "data<<")
+var duplex = await mux.OpenDuplexStreamAsync("data");
 
 // Use with any Stream API
 await duplex.WriteAsync(data);
 var bytesRead = await duplex.ReadAsync(buffer);
+```
+
+#### StreamTransit - Simplex stream
+
+```csharp
+// Open/accept streams directly from multiplexer
+var writeStream = await mux.OpenStreamAsync("upload");
+var readStream = await mux.AcceptStreamAsync("download");
 ```
 
 ### Reconnection
