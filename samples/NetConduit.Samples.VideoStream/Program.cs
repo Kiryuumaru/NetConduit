@@ -10,6 +10,7 @@ using System.Net.Sockets;
 using System.Text;
 using NetConduit;
 using NetConduit.Tcp;
+using NetConduit.Transits;
 
 var mode = args.Length > 0 ? args[0] : "server";
 var host = args.Length > 1 ? args[1] : "127.0.0.1";
@@ -43,7 +44,7 @@ async Task RunServerAsync(string serverHost, int serverPort, CancellationToken c
     using var listener = new TcpListener(IPAddress.Parse(serverHost), serverPort);
     listener.Start();
     
-    var clients = new List<(TcpMultiplexerConnection mux, WriteChannel video, WriteChannel audio)>();
+    var clients = new List<(StreamMultiplexer mux, StreamTransit video, StreamTransit audio)>();
     var clientLock = new object();
     
     // Handle incoming connections
@@ -53,23 +54,24 @@ async Task RunServerAsync(string serverHost, int serverPort, CancellationToken c
         {
             try
             {
-                var tcpClient = await listener.AcceptTcpClientAsync(cancellationToken);
-                Console.WriteLine($"[Stream Server] Client connected from {tcpClient.Client.RemoteEndPoint}");
+                // Use simple extension to accept multiplexed connection
+                var muxConn = await listener.AcceptMuxAsync(null, cancellationToken);
+                var mux = muxConn.Multiplexer;
+                Console.WriteLine($"[Stream Server] Client connected");
                 
-                var mux = tcpClient.AsMux();
-                var runTask = await mux.StartAsync(cancellationToken);
+                _ = mux.StartAsync(cancellationToken);
                 
-                // Open video and audio channels for this client
-                var videoChannel = await mux.OpenChannelAsync(
+                // Open video and audio streams using StreamTransit
+                var videoStream = await mux.OpenStreamAsync(
                     new ChannelOptions { ChannelId = "Video", Priority = ChannelPriority.High }, 
                     cancellationToken);
-                var audioChannel = await mux.OpenChannelAsync(
+                var audioStream = await mux.OpenStreamAsync(
                     new ChannelOptions { ChannelId = "Audio", Priority = ChannelPriority.Normal }, 
                     cancellationToken);
                 
                 lock (clientLock)
                 {
-                    clients.Add((mux, videoChannel, audioChannel));
+                    clients.Add((mux, videoStream, audioStream));
                 }
                 
                 Console.WriteLine($"[Stream Server] Client ready, total clients: {clients.Count}");
@@ -96,9 +98,9 @@ async Task RunServerAsync(string serverHost, int serverPort, CancellationToken c
 }
 
 async Task StreamToClientsAsync(
-    Func<(TcpMultiplexerConnection mux, WriteChannel video, WriteChannel audio)[]> getClients,
+    Func<(StreamMultiplexer mux, StreamTransit video, StreamTransit audio)[]> getClients,
     object clientLock,
-    List<(TcpMultiplexerConnection mux, WriteChannel video, WriteChannel audio)> clients,
+    List<(StreamMultiplexer mux, StreamTransit video, StreamTransit audio)> clients,
     CancellationToken cancellationToken)
 {
     var frameNumber = 0u;
@@ -144,167 +146,170 @@ async Task StreamToClientsAsync(
             frameNumber++;
             var videoFrame = CreateVideoFrame(frameNumber, videoFrameSize);
             
-            foreach (var (mux, video, audio) in currentClients)
-            {
-                _ = SendFrameAsync(video, videoFrame, mux, clientLock, clients, cancellationToken);
-            }
-            
-            totalVideoBytes += videoFrameSize;
-            nextVideoTime = nextVideoTime.Add(videoInterval);
-            
-            if (frameNumber % videoFps == 0)
-            {
-                var elapsed = (DateTime.UtcNow - startTime).TotalSeconds;
-                var videoBps = totalVideoBytes / elapsed / 1024 / 1024;
-                var audioBps = totalAudioBytes / elapsed / 1024 / 1024;
-                Console.WriteLine($"[Stream Server] Frame {frameNumber}: " +
-                    $"Video {videoBps:F2} MB/s, Audio {audioBps:F2} MB/s, " +
-                    $"Clients: {currentClients.Length}");
-            }
+        foreach (var (mux, video, audio) in currentClients)
+        {
+            _ = SendFrameAsync(video, videoFrame, mux, clientLock, clients, cancellationToken);
         }
         
-        // Send audio packet
-        if (now >= nextAudioTime)
-        {
-            audioPacketNumber++;
-            var audioPacket = CreateAudioPacket(audioPacketNumber, audioPacketSize);
-            
-            foreach (var (mux, video, audio) in currentClients)
-            {
-                _ = SendFrameAsync(audio, audioPacket, mux, clientLock, clients, cancellationToken);
-            }
-            
-            totalAudioBytes += audioPacketSize;
-            nextAudioTime = nextAudioTime.Add(audioInterval);
-        }
+        totalVideoBytes += videoFrameSize;
+        nextVideoTime = nextVideoTime.Add(videoInterval);
         
-        // Sleep until next event
-        var sleepTime = Math.Min(
-            (nextVideoTime - DateTime.UtcNow).TotalMilliseconds,
-            (nextAudioTime - DateTime.UtcNow).TotalMilliseconds);
-        
-        if (sleepTime > 0)
+        if (frameNumber % videoFps == 0)
         {
-            await Task.Delay(TimeSpan.FromMilliseconds(sleepTime), cancellationToken);
+            var elapsed = (DateTime.UtcNow - startTime).TotalSeconds;
+            var videoBps = totalVideoBytes / elapsed / 1024 / 1024;
+            var audioBps = totalAudioBytes / elapsed / 1024 / 1024;
+            Console.WriteLine($"[Stream Server] Frame {frameNumber}: " +
+                $"Video {videoBps:F2} MB/s, Audio {audioBps:F2} MB/s, " +
+                $"Clients: {currentClients.Length}");
         }
     }
+    
+    // Send audio packet
+    if (now >= nextAudioTime)
+    {
+        audioPacketNumber++;
+        var audioPacket = CreateAudioPacket(audioPacketNumber, audioPacketSize);
+        
+        foreach (var (mux, video, audio) in currentClients)
+        {
+            _ = SendFrameAsync(audio, audioPacket, mux, clientLock, clients, cancellationToken);
+        }
+        
+        totalAudioBytes += audioPacketSize;
+        nextAudioTime = nextAudioTime.Add(audioInterval);
+    }
+    
+    // Sleep until next event
+    var sleepTime = Math.Min(
+        (nextVideoTime - DateTime.UtcNow).TotalMilliseconds,
+        (nextAudioTime - DateTime.UtcNow).TotalMilliseconds);
+    
+    if (sleepTime > 0)
+    {
+        await Task.Delay(TimeSpan.FromMilliseconds(sleepTime), cancellationToken);
+    }
+}
 }
 
 byte[] CreateVideoFrame(uint frameNumber, int size)
 {
-    // Create a simulated video frame with header + pattern data
-    var frame = new byte[size];
-    
-    // Header: VFRM + frame number + timestamp + resolution
-    Encoding.ASCII.GetBytes("VFRM").CopyTo(frame.AsSpan(0, 4));
-    BinaryPrimitives.WriteUInt32BigEndian(frame.AsSpan(4, 4), frameNumber);
-    BinaryPrimitives.WriteInt64BigEndian(frame.AsSpan(8, 8), DateTimeOffset.UtcNow.ToUnixTimeMilliseconds());
-    BinaryPrimitives.WriteUInt16BigEndian(frame.AsSpan(16, 2), 1920); // width
-    BinaryPrimitives.WriteUInt16BigEndian(frame.AsSpan(18, 2), 1080); // height
-    
-    // Fill rest with pattern (simulating compressed video data)
-    var pattern = (byte)(frameNumber % 256);
-    for (int i = 20; i < size; i++)
-    {
-        frame[i] = (byte)((pattern + i) % 256);
-    }
-    
-    return frame;
+// Create a simulated video frame with header + pattern data
+var frame = new byte[size];
+
+// Header: VFRM + frame number + timestamp + resolution
+Encoding.ASCII.GetBytes("VFRM").CopyTo(frame.AsSpan(0, 4));
+BinaryPrimitives.WriteUInt32BigEndian(frame.AsSpan(4, 4), frameNumber);
+BinaryPrimitives.WriteInt64BigEndian(frame.AsSpan(8, 8), DateTimeOffset.UtcNow.ToUnixTimeMilliseconds());
+BinaryPrimitives.WriteUInt16BigEndian(frame.AsSpan(16, 2), 1920); // width
+BinaryPrimitives.WriteUInt16BigEndian(frame.AsSpan(18, 2), 1080); // height
+
+// Fill rest with pattern (simulating compressed video data)
+var pattern = (byte)(frameNumber % 256);
+for (int i = 20; i < size; i++)
+{
+    frame[i] = (byte)((pattern + i) % 256);
+}
+
+return frame;
 }
 
 byte[] CreateAudioPacket(uint packetNumber, int size)
 {
-    // Create a simulated audio packet with header + pattern data
-    var packet = new byte[size];
-    
-    // Header: APKT + packet number + timestamp + sample rate
-    Encoding.ASCII.GetBytes("APKT").CopyTo(packet.AsSpan(0, 4));
-    BinaryPrimitives.WriteUInt32BigEndian(packet.AsSpan(4, 4), packetNumber);
-    BinaryPrimitives.WriteInt64BigEndian(packet.AsSpan(8, 8), DateTimeOffset.UtcNow.ToUnixTimeMilliseconds());
-    BinaryPrimitives.WriteUInt32BigEndian(packet.AsSpan(16, 4), 48000); // sample rate
-    
-    // Fill rest with pattern (simulating audio data)
-    var pattern = (byte)(packetNumber % 256);
-    for (int i = 20; i < size; i++)
-    {
-        packet[i] = (byte)((pattern + i * 2) % 256);
-    }
-    
-    return packet;
+// Create a simulated audio packet with header + pattern data
+var packet = new byte[size];
+
+// Header: APKT + packet number + timestamp + sample rate
+Encoding.ASCII.GetBytes("APKT").CopyTo(packet.AsSpan(0, 4));
+BinaryPrimitives.WriteUInt32BigEndian(packet.AsSpan(4, 4), packetNumber);
+BinaryPrimitives.WriteInt64BigEndian(packet.AsSpan(8, 8), DateTimeOffset.UtcNow.ToUnixTimeMilliseconds());
+BinaryPrimitives.WriteUInt32BigEndian(packet.AsSpan(16, 4), 48000); // sample rate
+
+// Fill rest with pattern (simulating audio data)
+var pattern = (byte)(packetNumber % 256);
+for (int i = 20; i < size; i++)
+{
+    packet[i] = (byte)((pattern + i * 2) % 256);
+}
+
+return packet;
 }
 
 async Task SendFrameAsync(
-    WriteChannel channel, 
-    byte[] data,
-    TcpMultiplexerConnection mux,
-    object clientLock,
-    List<(TcpMultiplexerConnection mux, WriteChannel video, WriteChannel audio)> clients,
-    CancellationToken cancellationToken)
+StreamTransit stream, 
+byte[] data,
+StreamMultiplexer mux,
+object clientLock,
+List<(StreamMultiplexer mux, StreamTransit video, StreamTransit audio)> clients,
+CancellationToken cancellationToken)
 {
-    try
+try
+{
+    // Send length-prefixed frame using Stream API
+    var lengthBytes = new byte[4];
+    BinaryPrimitives.WriteInt32BigEndian(lengthBytes, data.Length);
+    await stream.WriteAsync(lengthBytes, cancellationToken);
+    await stream.WriteAsync(data, cancellationToken);
+}
+catch (Exception)
+{
+    // Client probably disconnected - remove from list
+    lock (clientLock)
     {
-        // Send length-prefixed frame
-        var lengthBytes = new byte[4];
-        BinaryPrimitives.WriteInt32BigEndian(lengthBytes, data.Length);
-        await channel.WriteAsync(lengthBytes, cancellationToken);
-        await channel.WriteAsync(data, cancellationToken);
+        clients.RemoveAll(c => c.mux == mux);
     }
-    catch (Exception)
-    {
-        // Client probably disconnected - remove from list
-        lock (clientLock)
-        {
-            clients.RemoveAll(c => c.mux == mux);
-        }
-    }
+}
 }
 
 async Task RunClientAsync(string clientHost, int clientPort, CancellationToken cancellationToken)
 {
-    Console.WriteLine($"[Stream Client] Connecting to {clientHost}:{clientPort}");
+Console.WriteLine($"[Stream Client] Connecting to {clientHost}:{clientPort}");
+
+try
+{
+    // Use simple extension method to connect
+    using var tcpClient = new TcpClient();
+    await using var muxConn = await tcpClient.ConnectMuxAsync(clientHost, clientPort, null, cancellationToken);
+    var mux = muxConn.Multiplexer;
+    Console.WriteLine("[Stream Client] Connected! Receiving stream...\n");
     
-    try
+    var runTask = await mux.StartAsync(cancellationToken);
+    
+    var stats = new StreamStats();
+    var statsTimer = new System.Timers.Timer(1000);
+    statsTimer.Elapsed += (_, _) => stats.PrintStats();
+    statsTimer.Start();
+    
+    // Accept streams as they come in
+    await foreach (var channel in mux.AcceptChannelsAsync(cancellationToken))
     {
-        using var tcpClient = new TcpClient();
-        await using var multiplexer = await tcpClient.ConnectMuxAsync(clientHost, clientPort, null, cancellationToken);
-        Console.WriteLine("[Stream Client] Connected! Receiving stream...\n");
-        
-        var runTask = await multiplexer.StartAsync(cancellationToken);
-        
-        var stats = new StreamStats();
-        var statsTimer = new System.Timers.Timer(1000);
-        statsTimer.Elapsed += (_, _) => stats.PrintStats();
-        statsTimer.Start();
-        
-        // Receive incoming channels
-        await foreach (var channel in multiplexer.AcceptChannelsAsync(cancellationToken))
-        {
-            _ = ReceiveStreamChannelAsync(channel, stats, cancellationToken);
-        }
-    }
-    catch (OperationCanceledException)
-    {
-        Console.WriteLine("[Stream Client] Stopped.");
-    }
-    catch (Exception ex)
-    {
-        Console.WriteLine($"[Stream Client] Error: {ex.Message}");
+        // Wrap channel in StreamTransit for easier reading
+        var stream = new StreamTransit(channel);
+        _ = ReceiveStreamChannelAsync(stream, channel.ChannelId, stats, cancellationToken);
     }
 }
+catch (OperationCanceledException)
+{
+    Console.WriteLine("[Stream Client] Stopped.");
+}
+catch (Exception ex)
+{
+    Console.WriteLine($"[Stream Client] Error: {ex.Message}");
+}
+}
 
-async Task ReceiveStreamChannelAsync(ReadChannel channel, StreamStats stats, CancellationToken cancellationToken)
+async Task ReceiveStreamChannelAsync(StreamTransit stream, string channelType, StreamStats stats, CancellationToken cancellationToken)
 {
     try
     {
-        var channelType = channel.ChannelId;
         Console.WriteLine($"[Stream Client] Received {channelType} channel");
         
-        // Read frames
+        // Read frames using Stream API
         while (!cancellationToken.IsCancellationRequested)
         {
             // Read length prefix
             var lengthBytes = new byte[4];
-            var read = await channel.ReadAsync(lengthBytes, cancellationToken);
+            var read = await stream.ReadAsync(lengthBytes, cancellationToken);
             if (read == 0) break;
             if (read != 4) continue;
             
@@ -316,7 +321,7 @@ async Task ReceiveStreamChannelAsync(ReadChannel channel, StreamStats stats, Can
             var totalRead = 0;
             while (totalRead < length)
             {
-                read = await channel.ReadAsync(frameData.AsMemory(totalRead), cancellationToken);
+                read = await stream.ReadAsync(frameData.AsMemory(totalRead), cancellationToken);
                 if (read == 0) break;
                 totalRead += read;
             }

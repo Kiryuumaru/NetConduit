@@ -1,3 +1,4 @@
+using System.Buffers.Binary;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using NetConduit.Transits;
@@ -700,6 +701,125 @@ public partial class TransitTests
         await cts.CancelAsync();
     }
 
+    [Fact(Timeout = 120000)]
+    public async Task MessageTransit_OversizedPayload_Throws()
+    {
+        // Arrange
+        await using var pipe = new DuplexPipe();
+        using var cts = new CancellationTokenSource(TestTimeout);
+
+        await using var muxA = new StreamMultiplexer(pipe.Stream1, pipe.Stream1);
+        await using var muxB = new StreamMultiplexer(pipe.Stream2, pipe.Stream2);
+
+        var runA = muxA.RunAsync(cts.Token);
+        var runB = muxB.RunAsync(cts.Token);
+
+        var writeChannel = await muxA.OpenChannelAsync(new() { ChannelId = "oversized" }, cts.Token);
+        _ = await muxB.AcceptChannelAsync("oversized", cts.Token);
+
+        await using var sendTransit = new MessageTransit<TestMessage, TestMessage>(
+            writeChannel, null,
+            TestJsonContext.Default.TestMessage,
+            TestJsonContext.Default.TestMessage);
+
+        // Oversized payload: 20 MB string (default max is 16 MB)
+        var bigPayload = new string('A', 20 * 1024 * 1024);
+        var msg = new TestMessage("big", 1, bigPayload);
+
+        // Act / Assert (guard trips on send side)
+        var ex = await Assert.ThrowsAsync<InvalidOperationException>(async () =>
+            await sendTransit.SendAsync(msg, cts.Token));
+
+        Assert.Contains("exceeds maximum allowed", ex.Message);
+
+        await cts.CancelAsync();
+    }
+
+    [Fact(Timeout = 120000)]
+    public async Task MessageTransit_OversizedPayload_AllowsWhenMaxRaised()
+    {
+        // Arrange
+        await using var pipe = new DuplexPipe();
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(120));
+
+        await using var muxA = new StreamMultiplexer(pipe.Stream1, pipe.Stream1);
+        await using var muxB = new StreamMultiplexer(pipe.Stream2, pipe.Stream2);
+
+        var runA = muxA.RunAsync(cts.Token);
+        var runB = muxB.RunAsync(cts.Token);
+
+        var writeChannel = await muxA.OpenChannelAsync(new() { ChannelId = "oversized_ok" }, cts.Token);
+        var readChannel = await muxB.AcceptChannelAsync("oversized_ok", cts.Token);
+
+        const int maxSize = 32 * 1024 * 1024; // raise limit to 32 MB
+
+        await using var sendTransit = new MessageTransit<TestMessage, TestMessage>(
+            writeChannel, null,
+            TestJsonContext.Default.TestMessage,
+            TestJsonContext.Default.TestMessage,
+            maxSize);
+
+        await using var receiveTransit = new MessageTransit<TestMessage, TestMessage>(
+            null, readChannel,
+            TestJsonContext.Default.TestMessage,
+            TestJsonContext.Default.TestMessage,
+            maxSize);
+
+        var payload = new string('B', 18 * 1024 * 1024); // 18 MB
+        var msg = new TestMessage("big-ok", 2, payload);
+
+        // Act (send/receive concurrently to keep credits flowing)
+        var sendTask = sendTransit.SendAsync(msg, cts.Token).AsTask();
+        var receiveTask = receiveTransit.ReceiveAsync(cts.Token).AsTask();
+
+        await sendTask;
+        var received = await receiveTask;
+
+        // Assert
+        Assert.NotNull(received);
+        Assert.Equal(msg.Id, received.Id);
+        Assert.Equal(msg.Value, received.Value);
+        Assert.Equal(payload.Length, received.Text?.Length);
+
+        await cts.CancelAsync();
+    }
+
+    [Fact(Timeout = 120000)]
+    public async Task MessageTransit_CorruptedLengthPrefix_Throws()
+    {
+        // Arrange
+        await using var pipe = new DuplexPipe();
+        using var cts = new CancellationTokenSource(TestTimeout);
+
+        await using var muxA = new StreamMultiplexer(pipe.Stream1, pipe.Stream1);
+        await using var muxB = new StreamMultiplexer(pipe.Stream2, pipe.Stream2);
+
+        var runA = muxA.RunAsync(cts.Token);
+        var runB = muxB.RunAsync(cts.Token);
+
+        var writeChannel = await muxA.OpenChannelAsync(new() { ChannelId = "corrupt_len" }, cts.Token);
+        var readChannel = await muxB.AcceptChannelAsync("corrupt_len", cts.Token);
+
+        await using var receiveTransit = new MessageTransit<TestMessage, TestMessage>(
+            null, readChannel,
+            TestJsonContext.Default.TestMessage,
+            TestJsonContext.Default.TestMessage);
+
+        // Corrupted length prefix: much larger than default 16 MB (matches reported failure shape)
+        var lengthBuffer = new byte[4];
+        const uint bogusLength = 825_636_407; // ~826 MB
+        BinaryPrimitives.WriteUInt32BigEndian(lengthBuffer, bogusLength);
+        await writeChannel.WriteAsync(lengthBuffer, cts.Token);
+
+        // Act / Assert
+        var ex = await Assert.ThrowsAsync<InvalidOperationException>(async () =>
+            await receiveTransit.ReceiveAsync(cts.Token));
+
+        Assert.Contains("exceeds maximum allowed", ex.Message);
+
+        await cts.CancelAsync();
+    }
+
     #endregion
 
     #region TransitExtensions Tests
@@ -867,7 +987,7 @@ public partial class TransitTests
     }
 
     [Fact(Timeout = 120000)]
-    public async Task OpenMessageTransitAsync_SingleChannelId_UsesSuffixes()
+    public async Task OpenAndAcceptMessageTransitAsync_SingleChannelId_BidirectionalCommunication()
     {
         // Arrange
         await using var pipe = new DuplexPipe();
@@ -879,24 +999,22 @@ public partial class TransitTests
         var runA = muxA.RunAsync(cts.Token);
         var runB = muxB.RunAsync(cts.Token);
 
-        // Side A opens message transit with single channelId
+        // Side A opens message transit with single channelId (opens "rpc>>", accepts "rpc<<")
         var transitATask = muxA.OpenMessageTransitAsync<TestMessage, TestMessage>(
             "rpc",
             TestJsonContext.Default.TestMessage,
             TestJsonContext.Default.TestMessage,
             cancellationToken: cts.Token);
 
-        // Side B must open "rpc<<" (A's inbound) and accept "rpc>>" (A's outbound)
-        var writeChannelB = await muxB.OpenChannelAsync(new() { ChannelId = "rpc<<" }, cts.Token);
-        var readChannelB = await muxB.AcceptChannelAsync("rpc>>", cts.Token);
+        // Side B accepts message transit with single channelId (accepts "rpc>>", opens "rpc<<")
+        var transitBTask = muxB.AcceptMessageTransitAsync<TestMessage, TestMessage>(
+            "rpc",
+            TestJsonContext.Default.TestMessage,
+            TestJsonContext.Default.TestMessage,
+            cancellationToken: cts.Token);
 
         await using var transitA = await transitATask;
-
-        // Create B's transit manually
-        await using var transitB = new MessageTransit<TestMessage, TestMessage>(
-            writeChannelB, readChannelB,
-            TestJsonContext.Default.TestMessage,
-            TestJsonContext.Default.TestMessage);
+        await using var transitB = await transitBTask;
 
         // Act - A sends to B
         var msgAtoB = new TestMessage("req-1", 42, "Hello from A");
@@ -937,14 +1055,14 @@ public partial class TransitTests
         var runA = muxA.RunAsync(cts.Token);
         var runB = muxB.RunAsync(cts.Token);
 
-        // Side A opens message transit with explicit channel IDs
+        // Side A opens message transit with explicit channel IDs (opens "requests", accepts "responses")
         var transitATask = muxA.OpenMessageTransitAsync<TestMessage, TestMessage>(
             "requests", "responses",
             TestJsonContext.Default.TestMessage,
             TestJsonContext.Default.TestMessage,
             cancellationToken: cts.Token);
 
-        // Side B opens "responses" and accepts "requests"
+        // Side B opens "responses" and accepts "requests" (inverse of A)
         var writeChannelB = await muxB.OpenChannelAsync(new() { ChannelId = "responses" }, cts.Token);
         var readChannelB = await muxB.AcceptChannelAsync("requests", cts.Token);
 
@@ -974,7 +1092,7 @@ public partial class TransitTests
     }
 
     [Fact(Timeout = 120000)]
-    public async Task OpenMessageTransitAsync_SendOnly_Works()
+    public async Task OpenSendOnlyMessageTransitAsync_Works()
     {
         // Arrange
         await using var pipe = new DuplexPipe();
@@ -987,7 +1105,7 @@ public partial class TransitTests
         var runB = muxB.RunAsync(cts.Token);
 
         // Act
-        await using var sendTransit = await muxA.OpenMessageTransitAsync<TestMessage>(
+        await using var sendTransit = await muxA.OpenSendOnlyMessageTransitAsync<TestMessage>(
             "events",
             TestJsonContext.Default.TestMessage,
             cancellationToken: cts.Token);
@@ -1025,7 +1143,7 @@ public partial class TransitTests
         var runB = muxB.RunAsync(cts.Token);
 
         // Act
-        var acceptTask = muxB.AcceptMessageTransitAsync<TestMessage>(
+        var acceptTask = muxB.AcceptReceiveOnlyMessageTransitAsync<TestMessage>(
             "notifications",
             TestJsonContext.Default.TestMessage,
             cancellationToken: cts.Token);
@@ -1053,7 +1171,7 @@ public partial class TransitTests
     }
 
     [Fact(Timeout = 120000)]
-    public async Task TransitExtensions_BothSidesUseSingleChannelId_WorksTogether()
+    public async Task OpenAndAcceptDuplexStreamAsync_SingleChannelId_WorksTogether()
     {
         // Arrange - Both sides use single channelId extension
         await using var pipe = new DuplexPipe();
@@ -1065,20 +1183,14 @@ public partial class TransitTests
         var runA = muxA.RunAsync(cts.Token);
         var runB = muxB.RunAsync(cts.Token);
 
-        // Both sides open duplex with complementary suffixes
-        // A opens "chat>>" (write) and accepts "chat<<" (read)
-        // B opens "chat<<" (write) and accepts "chat>>" (read) - which is "chat" from B's perspective reversed
-        
-        // A uses "chat" - writes to "chat>>", reads from "chat<<"
+        // A uses OpenDuplexStreamAsync - writes to "chat>>", reads from "chat<<"
         var duplexATask = muxA.OpenDuplexStreamAsync("chat", cts.Token);
         
-        // B needs to do the reverse - write to "chat<<", read from "chat>>"
-        // This is equivalent to B opening with reversed suffixes
-        var writeChannelB = await muxB.OpenChannelAsync(new() { ChannelId = "chat<<" }, cts.Token);
-        var readChannelB = await muxB.AcceptChannelAsync("chat>>", cts.Token);
+        // B uses AcceptDuplexStreamAsync - accepts "chat>>", opens "chat<<"
+        var duplexBTask = muxB.AcceptDuplexStreamAsync("chat", cts.Token);
 
         await using var duplexA = await duplexATask;
-        await using var duplexB = new DuplexStreamTransit(writeChannelB, readChannelB);
+        await using var duplexB = await duplexBTask;
 
         // Act - Bidirectional
         var msgA = new byte[] { 65, 66, 67 }; // "ABC"

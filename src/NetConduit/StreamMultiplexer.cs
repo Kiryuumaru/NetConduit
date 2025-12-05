@@ -10,7 +10,7 @@ namespace NetConduit;
 /// <summary>
 /// A transport-agnostic stream multiplexer that creates multiple virtual channels over a single connection.
 /// </summary>
-public sealed class StreamMultiplexer : IAsyncDisposable
+public sealed class StreamMultiplexer : IStreamMultiplexer
 {
     private readonly Stream _readStream;
     private readonly Stream _writeStream;
@@ -318,8 +318,17 @@ public sealed class StreamMultiplexer : IAsyncDisposable
         Stats.IncrementTotalChannelsOpened();
         Stats.IncrementOpenChannels();
 
-        // Send INIT frame with ChannelId
-        await SendInitAsync(channelIndex, options.ChannelId, options.Priority, cancellationToken).ConfigureAwait(false);
+        // Send INIT frame with ChannelId (fail fast if the transport stalls)
+        var initTask = SendInitAsync(channelIndex, options.ChannelId, options.Priority, cancellationToken).AsTask();
+        var initSendCompleted = await Task.WhenAny(initTask, Task.Delay(TimeSpan.FromSeconds(5), cancellationToken)).ConfigureAwait(false);
+        if (initSendCompleted != initTask)
+        {
+            _writeChannelsByIndex.TryRemove(channelIndex, out _);
+            _writeChannelsById.TryRemove(options.ChannelId, out _);
+            Stats.DecrementOpenChannels();
+            throw new TimeoutException("Channel open timed out before INIT frame was sent.");
+        }
+        await initTask.ConfigureAwait(false);
 
         // Wait for ACK (will be handled by read loop calling SetOpen/SetClosed/SetError)
         var timeout = TimeSpan.FromSeconds(30);

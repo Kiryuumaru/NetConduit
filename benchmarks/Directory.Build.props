@@ -1,0 +1,6 @@
+<Project>
+	<!-- Force local project references for benchmarks -->
+	<PropertyGroup>
+		<UseLocalNetConduit>true</UseLocalNetConduit>
+	</PropertyGroup>
+</Project>

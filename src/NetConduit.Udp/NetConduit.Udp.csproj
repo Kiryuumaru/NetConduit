@@ -15,12 +15,12 @@
 
 	<!-- NuGet Package Metadata -->
 	<PropertyGroup>
-		<PackageId>NetConduit.Tcp</PackageId>
+		<PackageId>NetConduit.Udp</PackageId>
 		<Authors>Kiryuumaru</Authors>
 		<Company>Kiryuumaru</Company>
 		<Copyright>Kiryuumaru</Copyright>
-		<Description>TCP transport helper for NetConduit stream multiplexer. Provides easy TCP client/server connection handling with automatic multiplexer setup.</Description>
-		<PackageTags>multiplexer;stream;tcp;networking;async;aot</PackageTags>
+		<Description>UDP transport helper for NetConduit stream multiplexer with a minimal reliable stream shim.</Description>
+		<PackageTags>multiplexer;stream;udp;networking;async;aot</PackageTags>
 		<PackageProjectUrl>https://github.com/Kiryuumaru/NetConduit</PackageProjectUrl>
 		<RepositoryUrl>https://github.com/Kiryuumaru/NetConduit.git</RepositoryUrl>
 		<RepositoryType>git</RepositoryType>

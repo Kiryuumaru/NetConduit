@@ -34,6 +34,9 @@
 		<InternalsVisibleTo Include="NetConduit.Tcp" />
 		<InternalsVisibleTo Include="NetConduit.WebSocket" />
 		<InternalsVisibleTo Include="NetConduit.UnitTests" />
+		<InternalsVisibleTo Include="NetConduit.Udp" />
+		<InternalsVisibleTo Include="NetConduit.Quic" />
+		<InternalsVisibleTo Include="NetConduit.Ipc" />
 	</ItemGroup>
 
 </Project>

@@ -15,12 +15,12 @@
 
 	<!-- NuGet Package Metadata -->
 	<PropertyGroup>
-		<PackageId>NetConduit.Tcp</PackageId>
+		<PackageId>NetConduit.Ipc</PackageId>
 		<Authors>Kiryuumaru</Authors>
 		<Company>Kiryuumaru</Company>
 		<Copyright>Kiryuumaru</Copyright>
-		<Description>TCP transport helper for NetConduit stream multiplexer. Provides easy TCP client/server connection handling with automatic multiplexer setup.</Description>
-		<PackageTags>multiplexer;stream;tcp;networking;async;aot</PackageTags>
+		<Description>Local IPC transport helper for NetConduit (named pipes on Windows, Unix domain sockets elsewhere).</Description>
+		<PackageTags>multiplexer;stream;ipc;namedpipes;unix-domain-sockets;async;aot</PackageTags>
 		<PackageProjectUrl>https://github.com/Kiryuumaru/NetConduit</PackageProjectUrl>
 		<RepositoryUrl>https://github.com/Kiryuumaru/NetConduit.git</RepositoryUrl>
 		<RepositoryType>git</RepositoryType>

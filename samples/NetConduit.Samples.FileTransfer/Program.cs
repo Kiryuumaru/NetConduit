@@ -96,12 +96,14 @@ async Task HandleClientAsync(TcpClient client, string outputDir, CancellationTok
     
     try
     {
-        await using var mux = client.AsMux();
+        // Simple extension: wrap TCP client as multiplexer
+        await using var connection = client.AsMux();
+        var runTask = await connection.StartAsync(ct);
         
-        var runTask = await mux.StartAsync(ct);
         var receiveTasks = new List<Task>();
         
-        await foreach (var channel in mux.AcceptChannelsAsync(ct))
+        // Accept all incoming file channels
+        await foreach (var channel in connection.AcceptChannelsAsync(ct))
         {
             var task = ReceiveFileAsync(channel, outputDir, ct);
             receiveTasks.Add(task);
@@ -124,7 +126,7 @@ async Task ReceiveFileAsync(ReadChannel channel, string outputDir, CancellationT
 {
     try
     {
-        // Protocol: First read header [filename_len: 4B][filename: N bytes][file_size: 8B]
+        // Read file header: [filename_len: 4B][filename: N bytes][file_size: 8B]
         var headerBuffer = new byte[4];
         await channel.ReadExactlyAsync(headerBuffer, ct);
         var filenameLen = BinaryPrimitives.ReadInt32BigEndian(headerBuffer);
@@ -137,12 +139,13 @@ async Task ReceiveFileAsync(ReadChannel channel, string outputDir, CancellationT
         await channel.ReadExactlyAsync(sizeBuffer, ct);
         var fileSize = BinaryPrimitives.ReadInt64BigEndian(sizeBuffer);
         
-        // Sanitize filename
+        // Sanitize and create output path
         filename = Path.GetFileName(filename);
         var outputPath = Path.Combine(outputDir, filename);
         
         Console.WriteLine($"[Recv] Starting: {filename} ({FormatSize(fileSize)})");
         
+        // Stream file content
         await using var fileStream = File.Create(outputPath);
         var buffer = new byte[64 * 1024];
         long received = 0;
@@ -192,23 +195,24 @@ async Task RunSenderAsync(string host, int port, string[] files, CancellationTok
     
     Console.WriteLine($"[Sender] Connecting to {host}:{port}");
     
+    // Simple extension: connect TCP and create multiplexer
     using var client = new TcpClient();
-    await using var mux = await client.ConnectMuxAsync(host, port, null, ct);
+    await using var connection = await client.ConnectMuxAsync(host, port, cancellationToken: ct);
     Console.WriteLine("[Sender] Connected!");
     
-    var runTask = await mux.StartAsync(ct);
+    var runTask = await connection.StartAsync(ct);
     
-    // Send all files concurrently
-    var sendTasks = files.Select((file, index) => SendFileAsync(mux, file, index, ct)).ToList();
+    // Send all files concurrently over separate channels
+    var sendTasks = files.Select((file, index) => SendFileAsync(connection, file, index, ct)).ToList();
     
     Console.WriteLine($"[Sender] Sending {files.Length} file(s) concurrently...");
     await Task.WhenAll(sendTasks);
     
     Console.WriteLine("[Sender] All transfers complete!");
-    await mux.GoAwayAsync(ct);
+    await connection.GoAwayAsync(ct);
 }
 
-async Task SendFileAsync(TcpMultiplexerConnection mux, string filePath, int index, CancellationToken ct)
+async Task SendFileAsync(TcpMultiplexerConnection connection, string filePath, int index, CancellationToken ct)
 {
     var filename = Path.GetFileName(filePath);
     var fileInfo = new FileInfo(filePath);
@@ -216,7 +220,8 @@ async Task SendFileAsync(TcpMultiplexerConnection mux, string filePath, int inde
     
     try
     {
-        await using var channel = await mux.OpenChannelAsync(
+        // Open a dedicated channel for this file
+        await using var channel = await connection.OpenChannelAsync(
             new ChannelOptions { ChannelId = $"file-{index}-{filename}" }, ct);
         
         Console.WriteLine($"[Send] Starting: {filename} ({FormatSize(fileSize)})");
@@ -229,7 +234,7 @@ async Task SendFileAsync(TcpMultiplexerConnection mux, string filePath, int inde
         BinaryPrimitives.WriteInt64BigEndian(header.AsSpan(4 + filenameBytes.Length, 8), fileSize);
         await channel.WriteAsync(header, ct);
         
-        // Send file content
+        // Stream file content
         await using var fileStream = File.OpenRead(filePath);
         var buffer = new byte[64 * 1024];
         long sent = 0;
