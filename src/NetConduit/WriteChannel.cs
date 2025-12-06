@@ -12,6 +12,7 @@ public sealed class WriteChannel : Stream
     private readonly StreamMultiplexer _multiplexer;
     private readonly ChannelOptions _options;
     private readonly SemaphoreSlim _creditSemaphore;
+    private readonly SemaphoreSlim _writeLock;
     private readonly CancellationTokenSource _closeCts;
     private readonly ChannelSyncState _syncState;
     private readonly TaskCompletionSource _openTcs;
@@ -35,6 +36,7 @@ public sealed class WriteChannel : Stream
         _state = ChannelState.Opening;
         _availableCredits = 0;
         _creditSemaphore = new SemaphoreSlim(0, int.MaxValue);
+        _writeLock = new SemaphoreSlim(1, 1);
         _closeCts = new CancellationTokenSource();
         _syncState = new ChannelSyncState(multiplexer.Options.ReconnectBufferSize);
         _openTcs = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -111,8 +113,13 @@ public sealed class WriteChannel : Stream
         if (buffer.Length == 0)
             return;
 
-        var remaining = buffer;
-        while (remaining.Length > 0)
+        // Acquire write lock to ensure this entire WriteAsync completes atomically
+        // This prevents interleaving when multiple threads write to the same channel
+        await _writeLock.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            var remaining = buffer;
+            while (remaining.Length > 0)
         {
             // Fast path: check if we already have credits without waiting
             var credits = Volatile.Read(ref _availableCredits);
@@ -193,11 +200,16 @@ public sealed class WriteChannel : Stream
             Stats.AddBytesSent(toSend);
             Stats.IncrementFramesSent();
             
-            remaining = remaining[toSend..];
+                remaining = remaining[toSend..];
 
-            // If we have more credits, release the semaphore for next iteration
-            if (Volatile.Read(ref _availableCredits) > 0)
-                _creditSemaphore.Release();
+                // If we have more credits, release the semaphore for next iteration
+                if (Volatile.Read(ref _availableCredits) > 0)
+                    _creditSemaphore.Release();
+            }
+        }
+        finally
+        {
+            _writeLock.Release();
         }
     }
 
@@ -262,6 +274,7 @@ public sealed class WriteChannel : Stream
         {
             _closeCts.Cancel();
             _creditSemaphore.Dispose();
+            _writeLock.Dispose();
             _closeCts.Dispose();
             _multiplexer.OnWriteChannelDisposed(ChannelIndex, ChannelId);
         }

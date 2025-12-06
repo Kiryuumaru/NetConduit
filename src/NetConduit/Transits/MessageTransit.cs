@@ -101,17 +101,18 @@ public sealed class MessageTransit<TSend, TReceive> : IMessageTransit<TSend, TRe
         if (jsonBytes.Length > _maxMessageSize)
             throw new InvalidOperationException($"Message size ({jsonBytes.Length} bytes) exceeds maximum allowed ({_maxMessageSize} bytes).");
 
-        // Write length prefix (4 bytes, big-endian)
-        var lengthBuffer = ArrayPool<byte>.Shared.Rent(4);
+        // Combine length prefix + payload into single write for atomicity
+        var totalLength = 4 + jsonBytes.Length;
+        var combinedBuffer = ArrayPool<byte>.Shared.Rent(totalLength);
         try
         {
-            BinaryPrimitives.WriteUInt32BigEndian(lengthBuffer, (uint)jsonBytes.Length);
-            await _writeChannel.WriteAsync(lengthBuffer.AsMemory(0, 4), cancellationToken).ConfigureAwait(false);
-            await _writeChannel.WriteAsync(jsonBytes, cancellationToken).ConfigureAwait(false);
+            BinaryPrimitives.WriteUInt32BigEndian(combinedBuffer, (uint)jsonBytes.Length);
+            jsonBytes.CopyTo(combinedBuffer, 4);
+            await _writeChannel.WriteAsync(combinedBuffer.AsMemory(0, totalLength), cancellationToken).ConfigureAwait(false);
         }
         finally
         {
-            ArrayPool<byte>.Shared.Return(lengthBuffer);
+            ArrayPool<byte>.Shared.Return(combinedBuffer);
         }
     }
 
