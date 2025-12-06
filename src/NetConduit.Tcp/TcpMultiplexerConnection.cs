@@ -1,5 +1,6 @@
 using System.Net.Sockets;
 using System.Runtime.CompilerServices;
+using NetConduit;
 
 namespace NetConduit.Tcp;
 
@@ -71,6 +72,16 @@ public sealed class TcpMultiplexerConnection : IStreamMultiplexer, IDisposable
         add => _multiplexer.OnError += value;
         remove => _multiplexer.OnError -= value;
     }
+
+    /// <summary>Event raised when the multiplexer disconnects.</summary>
+    public event Action<DisconnectReason, Exception?>? OnDisconnected
+    {
+        add => _multiplexer.OnDisconnected += value;
+        remove => _multiplexer.OnDisconnected -= value;
+    }
+
+    /// <summary>The reason for disconnection, if disconnected.</summary>
+    public DisconnectReason? DisconnectReason => _multiplexer.DisconnectReason;
 
     /// <summary>
     /// The underlying TCP client.

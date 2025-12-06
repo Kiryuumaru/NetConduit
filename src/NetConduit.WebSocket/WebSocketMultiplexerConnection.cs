@@ -1,4 +1,5 @@
 using System.Net.WebSockets;
+using NetConduit;
 
 namespace NetConduit.WebSocket;
 
@@ -72,6 +73,16 @@ public sealed class WebSocketMultiplexerConnection : IStreamMultiplexer, IDispos
         add => _multiplexer.OnError += value;
         remove => _multiplexer.OnError -= value;
     }
+
+    /// <summary>Event raised when the multiplexer disconnects.</summary>
+    public event Action<DisconnectReason, Exception?>? OnDisconnected
+    {
+        add => _multiplexer.OnDisconnected += value;
+        remove => _multiplexer.OnDisconnected -= value;
+    }
+
+    /// <summary>The reason for disconnection, if disconnected.</summary>
+    public DisconnectReason? DisconnectReason => _multiplexer.DisconnectReason;
 
     /// <summary>
     /// The underlying WebSocket.

@@ -52,6 +52,12 @@ public interface IStreamMultiplexer : IAsyncDisposable
     /// <summary>Event raised when an error occurs.</summary>
     event Action<Exception>? OnError;
 
+    /// <summary>Event raised when the multiplexer disconnects.</summary>
+    event Action<DisconnectReason, Exception?>? OnDisconnected;
+
+    /// <summary>The reason for disconnection, if disconnected.</summary>
+    DisconnectReason? DisconnectReason { get; }
+
     /// <summary>Starts the multiplexer and returns when the processing loop exits.</summary>
     Task<Task> StartAsync(CancellationToken cancellationToken = default);
 
