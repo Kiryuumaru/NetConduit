@@ -305,6 +305,71 @@ var writeStream = await mux.OpenStreamAsync("upload");
 var readStream = await mux.AcceptStreamAsync("download");
 ```
 
+### Disconnection Events
+
+NetConduit provides detailed disconnection events for both the multiplexer and individual channels:
+
+```csharp
+var mux = new StreamMultiplexer(readStream, writeStream, options);
+
+// Multiplexer-level disconnection event
+mux.OnDisconnected += (reason, exception) =>
+{
+    Console.WriteLine($"Disconnected: {reason}");
+    // DisconnectReason: GoAwayReceived, TransportError, LocalDispose
+    if (exception != null)
+        Console.WriteLine($"Error: {exception.Message}");
+};
+
+// Check disconnect reason after disconnect
+if (mux.DisconnectReason.HasValue)
+    Console.WriteLine($"Was disconnected due to: {mux.DisconnectReason}");
+```
+
+Channel-level close events provide granular control:
+
+```csharp
+var channel = await mux.OpenChannelAsync(new() { ChannelId = "data" });
+
+channel.OnClosed += (reason, exception) =>
+{
+    Console.WriteLine($"Channel closed: {reason}");
+    // ChannelCloseReason: LocalClose, RemoteFin, RemoteError, TransportFailed, MuxDisposed
+};
+
+// Check close reason
+if (channel.CloseReason.HasValue)
+    Console.WriteLine($"Channel was closed due to: {channel.CloseReason}");
+```
+
+Writing to a closed channel throws `ChannelClosedException`:
+
+```csharp
+try
+{
+    await channel.WriteAsync(data);
+}
+catch (ChannelClosedException ex)
+{
+    Console.WriteLine($"Cannot write to channel '{ex.ChannelId}': {ex.CloseReason}");
+}
+```
+
+### Graceful Shutdown
+
+Configure graceful shutdown timeout for clean disconnection:
+
+```csharp
+var options = new MultiplexerOptions
+{
+    GracefulShutdownTimeout = TimeSpan.FromSeconds(5)  // Default: 5 seconds
+};
+
+// DisposeAsync sends GOAWAY, waits for channels to close gracefully,
+// then aborts remaining channels after timeout
+await mux.DisposeAsync();
+```
+
 ### Reconnection
 
 NetConduit supports automatic reconnection with channel state restoration:
@@ -319,7 +384,7 @@ var options = new MultiplexerOptions
 
 var mux = new StreamMultiplexer(stream, stream, options);
 
-mux.OnDisconnected += () => Console.WriteLine("Disconnected, waiting for reconnect...");
+mux.OnDisconnected += (reason, ex) => Console.WriteLine("Disconnected, waiting for reconnect...");
 mux.OnReconnected += () => Console.WriteLine("Reconnected!");
 
 // After network disruption, reconnect with new streams
@@ -338,6 +403,7 @@ await mux.ReconnectAsync(newReadStream, newWriteStream);
 | `MaxMissedPings` | 3 | Missed pings before disconnect |
 | `EnableReconnection` | true | Enable reconnection support |
 | `ReconnectTimeout` | 60s | Max wait for reconnection |
+| `GracefulShutdownTimeout` | 5s | Timeout for graceful mux/channel shutdown |
 | `FlushMode` | Batched | Frame flushing strategy |
 | `FlushInterval` | 1ms | Batched flush interval |
 

@@ -20,6 +20,8 @@ public sealed class WriteChannel : Stream
     private volatile ChannelState _state;
     private long _availableCredits;
     private bool _disposed;
+    private ChannelCloseReason? _closeReason;
+    private Exception? _closeException;
 
     internal WriteChannel(
         StreamMultiplexer multiplexer,
@@ -60,6 +62,15 @@ public sealed class WriteChannel : Stream
     
     /// <summary>Channel statistics.</summary>
     public ChannelStats Stats { get; }
+    
+    /// <summary>Event raised when the channel is closed.</summary>
+    public event Action<ChannelCloseReason, Exception?>? OnClosed;
+    
+    /// <summary>The reason for channel closure, if closed.</summary>
+    public ChannelCloseReason? CloseReason => _closeReason;
+    
+    /// <summary>The exception associated with channel closure, if any.</summary>
+    public Exception? CloseException => _closeException;
     
     /// <summary>Synchronization state for reconnection.</summary>
     internal ChannelSyncState SyncState => _syncState;
@@ -104,10 +115,16 @@ public sealed class WriteChannel : Stream
     /// <inheritdoc/>
     public override async ValueTask WriteAsync(ReadOnlyMemory<byte> buffer, CancellationToken cancellationToken = default)
     {
+        // Check close reason first - provide more meaningful exception
+        if (_closeReason.HasValue)
+            throw new ChannelClosedException(ChannelId, _closeReason.Value, _closeException);
+        
         ObjectDisposedException.ThrowIf(_disposed, this);
         
         if (_state != ChannelState.Open)
+        {
             throw new InvalidOperationException($"Channel is not open. State: {_state}");
+        }
 
         // Handle zero-length writes - just return without doing anything
         if (buffer.Length == 0)
@@ -252,16 +269,55 @@ public sealed class WriteChannel : Stream
 
     internal void SetClosed()
     {
+        SetClosed(ChannelCloseReason.RemoteFin, null);
+    }
+
+    internal void SetClosed(ChannelCloseReason reason, Exception? exception)
+    {
+        if (_state == ChannelState.Closed)
+            return;
+            
+        _closeReason = reason;
+        _closeException = exception;
         _state = ChannelState.Closed;
         _closeCts.Cancel();
         _openTcs.TrySetCanceled();
+        
+        try
+        {
+            OnClosed?.Invoke(reason, exception);
+        }
+        catch
+        {
+            // Swallow exceptions from event handlers
+        }
+    }
+
+    /// <summary>
+    /// Aborts the channel immediately with the specified reason.
+    /// </summary>
+    internal void Abort(ChannelCloseReason reason, Exception? exception = null)
+    {
+        SetClosed(reason, exception);
     }
 
     internal void SetError(ErrorCode code, string message)
     {
+        var exception = new MultiplexerException(code, message);
+        _closeReason = ChannelCloseReason.RemoteError;
+        _closeException = exception;
         _state = ChannelState.Closed;
         _closeCts.Cancel();
-        _openTcs.TrySetException(new MultiplexerException(code, message));
+        _openTcs.TrySetException(exception);
+        
+        try
+        {
+            OnClosed?.Invoke(ChannelCloseReason.RemoteError, exception);
+        }
+        catch
+        {
+            // Swallow exceptions from event handlers
+        }
     }
 
     /// <inheritdoc/>
@@ -287,15 +343,44 @@ public sealed class WriteChannel : Stream
     {
         if (_disposed) return;
 
+        // If already aborted by mux/transport, skip graceful close
+        if (_closeReason.HasValue && (_closeReason == ChannelCloseReason.MuxDisposed || _closeReason == ChannelCloseReason.TransportFailed))
+        {
+            Dispose(true);
+            GC.SuppressFinalize(this);
+            return;
+        }
+
         if (_state == ChannelState.Open)
         {
             try
             {
+                // Wait for pending writes to complete with timeout
+                var timeout = _multiplexer.Options.GracefulShutdownTimeout;
+                using var timeoutCts = new CancellationTokenSource(timeout);
+                
+                // Try to acquire write lock to ensure pending writes complete
+                if (await _writeLock.WaitAsync(timeout).ConfigureAwait(false))
+                {
+                    _writeLock.Release();
+                }
+                
                 await CloseAsync().ConfigureAwait(false);
+                _closeReason = ChannelCloseReason.LocalClose;
+                
+                try
+                {
+                    OnClosed?.Invoke(ChannelCloseReason.LocalClose, null);
+                }
+                catch
+                {
+                    // Swallow exceptions from event handlers
+                }
             }
             catch
             {
-                // Ignore errors during dispose
+                // Ignore errors during dispose - set reason if not already set
+                _closeReason ??= ChannelCloseReason.LocalClose;
             }
         }
 

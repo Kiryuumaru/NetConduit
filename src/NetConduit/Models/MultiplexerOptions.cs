@@ -37,6 +37,12 @@ public sealed class MultiplexerOptions
     public TimeSpan GoAwayTimeout { get; init; } = TimeSpan.FromSeconds(30);
     
     /// <summary>
+    /// Timeout for graceful shutdown operations (mux and channels). Default: 5 seconds.
+    /// Used by DisposeAsync to wait for pending operations before forcing close.
+    /// </summary>
+    public TimeSpan GracefulShutdownTimeout { get; init; } = TimeSpan.FromSeconds(5);
+    
+    /// <summary>
     /// Default channel options for new channels.
     /// </summary>
     public DefaultChannelOptions DefaultChannelOptions { get; init; } = new();

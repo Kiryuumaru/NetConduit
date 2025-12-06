@@ -50,6 +50,8 @@ public sealed class StreamMultiplexer : IStreamMultiplexer
     private volatile bool _goAwaySent;
     private volatile bool _goAwayReceived;
     private bool _disposed;
+    private DisconnectReason? _disconnectReason;
+    private Exception? _disconnectException;
     private Task? _readTask;
     private Task? _writeTask;
     private Task? _pingTask;
@@ -150,7 +152,17 @@ public sealed class StreamMultiplexer : IStreamMultiplexer
     /// <summary>
     /// Event raised when the connection is lost but reconnection is possible.
     /// </summary>
-    public event Action? OnDisconnected;
+    public event Action<DisconnectReason, Exception?>? OnDisconnected;
+    
+    /// <summary>
+    /// The reason for disconnection, if disconnected.
+    /// </summary>
+    public DisconnectReason? DisconnectReason => _disconnectReason;
+    
+    /// <summary>
+    /// The exception associated with disconnection, if any.
+    /// </summary>
+    public Exception? DisconnectException => _disconnectException;
 
     /// <summary>
     /// Event raised when the connection is restored after a disconnection.
@@ -643,7 +655,8 @@ public sealed class StreamMultiplexer : IStreamMultiplexer
 
         _isConnected = false;
         _disconnectedTcs = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        OnDisconnected?.Invoke();
+        _disconnectReason = NetConduit.DisconnectReason.TransportError;
+        OnDisconnected?.Invoke(NetConduit.DisconnectReason.TransportError, null);
     }
 
     internal void OnWriteChannelDisposed(uint channelIndex, string channelId)
@@ -1102,20 +1115,57 @@ public sealed class StreamMultiplexer : IStreamMultiplexer
             {
                 break;
             }
-            catch (EndOfStreamException)
+            catch (EndOfStreamException ex)
             {
-                // Connection closed
+                // Connection closed - treat as transport error
+                HandleTransportError(ex);
                 break;
             }
             catch (Exception ex)
             {
                 OnError?.Invoke(ex);
+                HandleTransportError(ex);
                 break;
             }
         }
         
         // Close accept channel
         _acceptChannel.Writer.TryComplete();
+    }
+    
+    /// <summary>
+    /// Handles transport errors by aborting all channels and firing disconnect event.
+    /// </summary>
+    private void HandleTransportError(Exception ex)
+    {
+        if (_disconnectReason.HasValue)
+            return; // Already handled
+            
+        _disconnectReason = NetConduit.DisconnectReason.TransportError;
+        _disconnectException = ex;
+        _isConnected = false;
+        
+        // Abort all write channels
+        foreach (var channel in _writeChannelsByIndex.Values)
+        {
+            channel.Abort(ChannelCloseReason.TransportFailed, ex);
+        }
+        
+        // Abort all read channels
+        foreach (var channel in _readChannelsByIndex.Values)
+        {
+            channel.Abort(ChannelCloseReason.TransportFailed, ex);
+        }
+        
+        // Fire disconnect event
+        try
+        {
+            OnDisconnected?.Invoke(NetConduit.DisconnectReason.TransportError, ex);
+        }
+        catch
+        {
+            // Swallow exceptions from event handlers
+        }
     }
 
     private static async ValueTask ReadExactlyAsync(Stream stream, Memory<byte> buffer, CancellationToken ct)
@@ -1229,6 +1279,31 @@ public sealed class StreamMultiplexer : IStreamMultiplexer
             case ControlSubtype.GoAway:
                 _goAwayReceived = true;
                 _acceptChannel.Writer.TryComplete();
+                
+                // Fire OnDisconnected with GoAwayReceived reason
+                if (!_disconnectReason.HasValue)
+                {
+                    _disconnectReason = NetConduit.DisconnectReason.GoAwayReceived;
+                    
+                    // Abort all channels with MuxDisposed reason
+                    foreach (var channel in _writeChannelsByIndex.Values)
+                    {
+                        channel.Abort(ChannelCloseReason.MuxDisposed, null);
+                    }
+                    foreach (var channel in _readChannelsByIndex.Values)
+                    {
+                        channel.Abort(ChannelCloseReason.MuxDisposed, null);
+                    }
+                    
+                    try
+                    {
+                        OnDisconnected?.Invoke(NetConduit.DisconnectReason.GoAwayReceived, null);
+                    }
+                    catch
+                    {
+                        // Swallow exceptions from event handlers
+                    }
+                }
                 break;
                 
             case ControlSubtype.Error:
@@ -1495,35 +1570,119 @@ public sealed class StreamMultiplexer : IStreamMultiplexer
         if (_disposed) return;
         _disposed = true;
 
-        _shutdownCts.Cancel();
-
-        // Close all channels
-        foreach (var channel in _writeChannelsByIndex.Values)
+        try
         {
-            await channel.DisposeAsync().ConfigureAwait(false);
-        }
-        
-        foreach (var channel in _readChannelsByIndex.Values)
-        {
-            await channel.DisposeAsync().ConfigureAwait(false);
-        }
+            // Step 1: Send GoAway (fire-and-forget with timeout)
+            if (_isRunning && !_goAwaySent)
+            {
+                try
+                {
+                    using var goAwayTimeoutCts = new CancellationTokenSource(_options.GracefulShutdownTimeout);
+                    await SendGoAwayAsync(ErrorCode.None, goAwayTimeoutCts.Token).ConfigureAwait(false);
+                    _goAwaySent = true;
+                }
+                catch
+                {
+                    // Ignore errors sending GoAway - transport may already be dead
+                }
+            }
 
-        _acceptChannel.Writer.TryComplete();
-        
-        // Cancel any pending accepts
-        foreach (var tcs in _pendingAccepts.Values)
-        {
-            tcs.TrySetCanceled();
-        }
-        _pendingAccepts.Clear();
-        
-        // Wait for tasks
-        if (_readTask != null) await _readTask.ConfigureAwait(false);
-        if (_writeTask != null) await _writeTask.ConfigureAwait(false);
-        if (_pingTask != null) await _pingTask.ConfigureAwait(false);
+            // Step 2: Abort all channels with MuxDisposed reason FIRST
+            // This ensures channels know they're being closed due to mux disposal
+            foreach (var channel in _writeChannelsByIndex.Values.ToArray())
+            {
+                channel.Abort(ChannelCloseReason.MuxDisposed, null);
+            }
+            
+            foreach (var channel in _readChannelsByIndex.Values.ToArray())
+            {
+                channel.Abort(ChannelCloseReason.MuxDisposed, null);
+            }
 
-        _writeLock.Dispose();
-        _sendQueueSemaphore.Dispose();
-        _shutdownCts.Dispose();
+            // Step 3: Wait for channels to finish cleanup with timeout
+            var gracefulTimeout = _options.GracefulShutdownTimeout;
+            
+            try
+            {
+                var channelDisposeTasks = new List<Task>();
+                
+                foreach (var channel in _writeChannelsByIndex.Values.ToArray())
+                {
+                    channelDisposeTasks.Add(channel.DisposeAsync().AsTask());
+                }
+                
+                foreach (var channel in _readChannelsByIndex.Values.ToArray())
+                {
+                    channelDisposeTasks.Add(channel.DisposeAsync().AsTask());
+                }
+                
+                if (channelDisposeTasks.Count > 0)
+                {
+                    await Task.WhenAny(
+                        Task.WhenAll(channelDisposeTasks),
+                        Task.Delay(gracefulTimeout)
+                    ).ConfigureAwait(false);
+                }
+            }
+            catch
+            {
+                // Ignore errors during graceful shutdown
+            }
+
+            // Step 4: Set disconnect reason and fire event
+            if (!_disconnectReason.HasValue)
+            {
+                _disconnectReason = NetConduit.DisconnectReason.LocalDispose;
+                
+                try
+                {
+                    OnDisconnected?.Invoke(NetConduit.DisconnectReason.LocalDispose, null);
+                }
+                catch
+                {
+                    // Swallow exceptions from event handlers
+                }
+            }
+
+            _shutdownCts.Cancel();
+            _acceptChannel.Writer.TryComplete();
+            
+            // Cancel any pending accepts
+            foreach (var tcs in _pendingAccepts.Values)
+            {
+                tcs.TrySetCanceled();
+            }
+            _pendingAccepts.Clear();
+            
+            // Wait for tasks to complete (with timeout to avoid hanging)
+            try
+            {
+                var tasks = new List<Task>();
+                if (_readTask != null) tasks.Add(_readTask);
+                if (_writeTask != null) tasks.Add(_writeTask);
+                if (_pingTask != null) tasks.Add(_pingTask);
+                if (_flushTask != null) tasks.Add(_flushTask);
+                
+                if (tasks.Count > 0)
+                {
+                    await Task.WhenAny(
+                        Task.WhenAll(tasks),
+                        Task.Delay(TimeSpan.FromSeconds(1))
+                    ).ConfigureAwait(false);
+                }
+            }
+            catch
+            {
+                // Ignore errors waiting for tasks
+            }
+        }
+        finally
+        {
+            // Always clean up resources
+            try { _writeLock.Dispose(); } catch { }
+            try { _sendQueueSemaphore.Dispose(); } catch { }
+            try { _shutdownCts.Dispose(); } catch { }
+            try { _reconnectLock.Dispose(); } catch { }
+        }
     }
 }

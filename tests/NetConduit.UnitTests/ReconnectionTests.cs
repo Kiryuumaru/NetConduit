@@ -66,7 +66,7 @@ public class ReconnectionTests
         await using var mux2 = new StreamMultiplexer(pipe.Stream2, pipe.Stream2, options);
 
         var disconnectedEvent = new TaskCompletionSource();
-        mux1.OnDisconnected += () => disconnectedEvent.TrySetResult();
+        mux1.OnDisconnected += (reason, ex) => disconnectedEvent.TrySetResult();
 
         // Act
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
@@ -114,7 +114,7 @@ public class ReconnectionTests
         await using var mux = new StreamMultiplexer(pipe.Stream1, pipe.Stream1, options);
 
         var disconnectedFired = false;
-        mux.OnDisconnected += () => disconnectedFired = true;
+        mux.OnDisconnected += (reason, ex) => disconnectedFired = true;
 
         // Act
         mux.NotifyDisconnected();
@@ -174,7 +174,7 @@ public class ReconnectionTests
 
         // NotifyDisconnected should work when reconnection is enabled
         var disconnectedEvent = new TaskCompletionSource();
-        mux1.OnDisconnected += () => disconnectedEvent.TrySetResult();
+        mux1.OnDisconnected += (reason, ex) => disconnectedEvent.TrySetResult();
         mux1.NotifyDisconnected();
 
         // Assert
