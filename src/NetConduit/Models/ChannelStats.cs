@@ -11,6 +11,8 @@ public sealed class ChannelStats
     private long _framesReceived;
     private long _creditsGranted;
     private long _creditsConsumed;
+    private long _retransmissions;
+    private long _crcFailures;
     private readonly DateTime _openedAt;
 
     internal ChannelStats()
@@ -36,6 +38,12 @@ public sealed class ChannelStats
     /// <summary>Total credits consumed by this side.</summary>
     public long CreditsConsumed => Volatile.Read(ref _creditsConsumed);
     
+    /// <summary>Total frames retransmitted due to NACK.</summary>
+    public long Retransmissions => Volatile.Read(ref _retransmissions);
+    
+    /// <summary>Total frames received with CRC failures.</summary>
+    public long CrcFailures => Volatile.Read(ref _crcFailures);
+    
     /// <summary>How long the channel has been open.</summary>
     public TimeSpan OpenDuration => DateTime.UtcNow - _openedAt;
 
@@ -45,4 +53,6 @@ public sealed class ChannelStats
     internal void IncrementFramesReceived() => Interlocked.Increment(ref _framesReceived);
     internal void AddCreditsGranted(long credits) => Interlocked.Add(ref _creditsGranted, credits);
     internal void AddCreditsConsumed(long credits) => Interlocked.Add(ref _creditsConsumed, credits);
+    internal void IncrementRetransmissions() => Interlocked.Increment(ref _retransmissions);
+    internal void IncrementCrcFailures() => Interlocked.Increment(ref _crcFailures);
 }

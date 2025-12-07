@@ -498,6 +498,175 @@ public class DataIntegrityTests
 
     #endregion
 
+    #region Resend Buffer Tests
+
+    [Fact(Timeout = 60000)]
+    public async Task ResendBuffer_ManySmallFrames_NoDataLoss()
+    {
+        // Test that sending many small frames (worst case for frame-count buffer) works correctly
+        // With byte-based buffer derived from MaxCredits, this should never lose data
+        await using var pipe = new DuplexPipe();
+        
+        // Use larger MaxCredits for better throughput
+        var options = new MultiplexerOptions 
+        { 
+            DefaultChannelOptions = new DefaultChannelOptions { MaxCredits = 256 * 1024 } // 256KB
+        };
+        
+        await using var muxA = new StreamMultiplexer(pipe.Stream1, pipe.Stream1, options);
+        await using var muxB = new StreamMultiplexer(pipe.Stream2, pipe.Stream2, options);
+
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+        
+        var runA = muxA.RunAsync(cts.Token);
+        var runB = muxB.RunAsync(cts.Token);
+        await Task.Delay(100);
+
+        const int frameCount = 1000;   // Reduced for reliable test timing
+        const int frameSize = 8;       // Small frames - worst case for old frame-count buffer
+        
+        var channel = await muxA.OpenChannelAsync(new ChannelOptions { ChannelId = "small_frames" }, cts.Token);
+        var readChannel = await muxB.AcceptChannelAsync("small_frames", cts.Token);
+        
+        // Send many small frames
+        var sentData = new byte[frameCount * frameSize];
+        Random.Shared.NextBytes(sentData);
+        
+        var sendTask = Task.Run(async () =>
+        {
+            for (var i = 0; i < frameCount; i++)
+            {
+                await channel.WriteAsync(sentData.AsMemory(i * frameSize, frameSize), cts.Token);
+            }
+            await channel.CloseAsync(cts.Token);
+        });
+        
+        // Receive all data
+        var receivedData = await ReadAllBytesAsync(readChannel, cts.Token);
+        await sendTask;
+        
+        // Verify all data received correctly
+        Assert.Equal(sentData.Length, receivedData.Length);
+        Assert.Equal(sentData, receivedData);
+        
+        cts.Cancel();
+    }
+
+    [Fact(Timeout = 60000)]
+    public async Task ResendBuffer_MixedFrameSizes_NoDataLoss()
+    {
+        // Test mixed small and large frames - ensures buffer tracks bytes correctly
+        await using var pipe = new DuplexPipe();
+        
+        var options = new MultiplexerOptions 
+        { 
+            DefaultChannelOptions = new DefaultChannelOptions { MaxCredits = 256 * 1024 } // 256KB
+        };
+        
+        await using var muxA = new StreamMultiplexer(pipe.Stream1, pipe.Stream1, options);
+        await using var muxB = new StreamMultiplexer(pipe.Stream2, pipe.Stream2, options);
+
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+        
+        var runA = muxA.RunAsync(cts.Token);
+        var runB = muxB.RunAsync(cts.Token);
+        await Task.Delay(100);
+
+        var channel = await muxA.OpenChannelAsync(new ChannelOptions { ChannelId = "mixed_sizes" }, cts.Token);
+        var readChannel = await muxB.AcceptChannelAsync("mixed_sizes", cts.Token);
+        
+        // Send mixed frame sizes: alternating small (1-byte) and large (64KB) frames
+        var allSentData = new MemoryStream();
+        
+        var sendTask = Task.Run(async () =>
+        {
+            for (var i = 0; i < 100; i++)
+            {
+                // Small frame (1 byte)
+                var small = new byte[] { (byte)(i % 256) };
+                await channel.WriteAsync(small, cts.Token);
+                allSentData.Write(small);
+                
+                // Large frame (varies from 1KB to 16KB)
+                var largeSize = 1024 + (i % 16) * 1024;
+                var large = new byte[largeSize];
+                Random.Shared.NextBytes(large);
+                await channel.WriteAsync(large, cts.Token);
+                allSentData.Write(large);
+            }
+            await channel.CloseAsync(cts.Token);
+        });
+        
+        // Receive all data
+        var receivedData = await ReadAllBytesAsync(readChannel, cts.Token);
+        await sendTask;
+        
+        var sentBytes = allSentData.ToArray();
+        Assert.Equal(sentBytes.Length, receivedData.Length);
+        Assert.Equal(sentBytes, receivedData);
+        
+        cts.Cancel();
+    }
+
+    [Fact(Timeout = 60000)]
+    public async Task ResendBuffer_CreditExhaustion_NoOverflow()
+    {
+        // Test that buffer doesn't overflow when credits are exhausted
+        // Sender should block, not overflow the resend buffer
+        await using var pipe = new DuplexPipe();
+        
+        // Very small credits to force exhaustion quickly
+        var options = new MultiplexerOptions 
+        { 
+            DefaultChannelOptions = new DefaultChannelOptions 
+            { 
+                MinCredits = 4 * 1024,   // 4KB min
+                MaxCredits = 8 * 1024    // 8KB max - very small window
+            } 
+        };
+        
+        await using var muxA = new StreamMultiplexer(pipe.Stream1, pipe.Stream1, options);
+        await using var muxB = new StreamMultiplexer(pipe.Stream2, pipe.Stream2, options);
+
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+        
+        var runA = muxA.RunAsync(cts.Token);
+        var runB = muxB.RunAsync(cts.Token);
+        await Task.Delay(100);
+
+        var channel = await muxA.OpenChannelAsync(new ChannelOptions { ChannelId = "credit_test" }, cts.Token);
+        var readChannel = await muxB.AcceptChannelAsync("credit_test", cts.Token);
+        
+        // Send more data than credits allow (will block until receiver reads)
+        const int totalBytes = 64 * 1024; // 64KB total - 8x the max credits
+        var sentData = new byte[totalBytes];
+        Random.Shared.NextBytes(sentData);
+        
+        var sendTask = Task.Run(async () =>
+        {
+            // Send in small chunks to ensure many frames
+            const int chunkSize = 512;
+            for (var i = 0; i < totalBytes; i += chunkSize)
+            {
+                var size = Math.Min(chunkSize, totalBytes - i);
+                await channel.WriteAsync(sentData.AsMemory(i, size), cts.Token);
+            }
+            await channel.CloseAsync(cts.Token);
+        });
+        
+        // Read all data (this allows sender to continue via credit grants)
+        var receivedData = await ReadAllBytesAsync(readChannel, cts.Token);
+        await sendTask;
+        
+        // All data should be received correctly
+        Assert.Equal(sentData.Length, receivedData.Length);
+        Assert.Equal(sentData, receivedData);
+        
+        cts.Cancel();
+    }
+
+    #endregion
+
     #region Helpers
 
     private static async Task<byte[]> ReadAllBytesAsync(ReadChannel channel, CancellationToken ct)

@@ -110,6 +110,71 @@ public class QuicMultiplexerTests
         }
     }
 
+    [Theory(Timeout = 120000)]
+    [InlineData(1)]
+    [InlineData(10)]
+    [InlineData(50)]
+    [InlineData(100)]
+    public async Task QuicMux_ReliableTransfer_NoCorruption(int channelCount)
+    {
+        if (!QuicListener.IsSupported)
+            return; // skip on unsupported platforms
+
+        var port = GetFreePort();
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(90));
+        using var cert = CreateSelfSigned("CN=NetConduit-Quic-Test");
+
+        await using var listener = await QuicMultiplexer.ListenAsync(new IPEndPoint(IPAddress.Loopback, port), cert, cancellationToken: cts.Token);
+
+        var acceptTask = QuicMultiplexer.AcceptAsync(listener, cancellationToken: cts.Token);
+        var client = await QuicMultiplexer.ConnectAsync("127.0.0.1", port, allowInsecure: true, cancellationToken: cts.Token);
+        await using var server = await acceptTask;
+        await using (client)
+        await using (server)
+        {
+            var startTasks = await Task.WhenAll(client.StartAsync(cts.Token), server.StartAsync(cts.Token));
+            var clientRun = startTasks[0];
+            var serverRun = startTasks[1];
+
+            const int baseSize = 512;
+            var tasks = new List<Task>();
+
+            for (int i = 0; i < channelCount; i++)
+            {
+                int channelIndex = i;
+                tasks.Add(Task.Run(async () =>
+                {
+                    var channelId = $"reliable-{channelIndex}";
+                    var writeChannel = await client.OpenChannelAsync(new ChannelOptions { ChannelId = channelId }, cts.Token);
+                    var readChannel = await server.AcceptChannelAsync(channelId, cts.Token);
+
+                    var testData = new byte[baseSize + channelIndex];
+                    Random.Shared.NextBytes(testData);
+
+                    await writeChannel.WriteAsync(testData, cts.Token);
+                    await writeChannel.CloseAsync(cts.Token);
+
+                    var buffer = new byte[testData.Length];
+                    int totalRead = 0;
+                    while (totalRead < buffer.Length)
+                    {
+                        int read = await readChannel.ReadAsync(buffer.AsMemory(totalRead), cts.Token);
+                        if (read == 0) break;
+                        totalRead += read;
+                    }
+
+                    Assert.Equal(testData.Length, totalRead);
+                    Assert.Equal(testData, buffer);
+                }, cts.Token));
+            }
+
+            await Task.WhenAll(tasks);
+
+            cts.Cancel();
+            await Task.WhenAll(serverRun, clientRun);
+        }
+    }
+
     [Fact(Timeout = 120000)]
     public async Task QuicMux_BidirectionalCommunication_BothSidesOpenChannels()
     {

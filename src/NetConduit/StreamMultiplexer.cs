@@ -565,7 +565,7 @@ public sealed class StreamMultiplexer : IStreamMultiplexer
             offset += 12;
         }
 
-        var header = new FrameHeader(ChannelIndexLimits.ControlChannel, FrameFlags.Data, (uint)payload.Length);
+        var header = new FrameHeader(ChannelIndexLimits.ControlChannel, FrameFlags.Data, 0, (uint)payload.Length, 0);
         var headerBytes = new byte[FrameHeader.Size];
         header.Write(headerBytes);
 
@@ -632,8 +632,8 @@ public sealed class StreamMultiplexer : IStreamMultiplexer
             
             if (replayData.Length > 0)
             {
-                // Send the replayed data as a regular data frame
-                var header = new FrameHeader(channelIndex, FrameFlags.Data, (uint)replayData.Length);
+                // Send the replayed data as a regular data frame with CRC
+                var header = FrameHeader.CreateWithCrc(channelIndex, FrameFlags.Data, 0, replayData.AsSpan());
                 header.Write(headerBytes);
                 
                 await writeStream.WriteAsync(headerBytes, ct).ConfigureAwait(false);
@@ -723,9 +723,10 @@ public sealed class StreamMultiplexer : IStreamMultiplexer
     
     private const int CombinedBufferThreshold = 8192; // Combine writes for payloads <= 8KB
 
-    internal ValueTask SendDataFrameAsync(uint channelIndex, ReadOnlyMemory<byte> data, ChannelPriority priority, CancellationToken ct)
+    internal ValueTask SendDataFrameAsync(uint channelIndex, uint seq, ReadOnlyMemory<byte> data, ChannelPriority priority, CancellationToken ct)
     {
-        var header = new FrameHeader(channelIndex, FrameFlags.Data, (uint)data.Length);
+        // Create header with CRC32 computed over header fields + payload
+        var header = FrameHeader.CreateWithCrc(channelIndex, FrameFlags.Data, seq, data.Span);
         return SendFrameOptimizedAsync(header, data, ct);
     }
     
@@ -806,7 +807,7 @@ public sealed class StreamMultiplexer : IStreamMultiplexer
                         continue;
                 }
 
-                var header = new FrameHeader(item.channelIndex, FrameFlags.Data, (uint)item.data.Length);
+                var header = FrameHeader.CreateWithCrc(item.channelIndex, FrameFlags.Data, 0, item.data.Span);
                 header.Write(headerBuffer);
 
                 await _writeLock.WaitAsync(ct).ConfigureAwait(false);
@@ -918,7 +919,7 @@ public sealed class StreamMultiplexer : IStreamMultiplexer
         _localNonce = Random.Shared.NextInt64();
         BinaryPrimitives.WriteInt64BigEndian(payload.AsSpan(17), _localNonce);
         
-        var header = new FrameHeader(ChannelIndexLimits.ControlChannel, FrameFlags.Data, (uint)payload.Length);
+        var header = new FrameHeader(ChannelIndexLimits.ControlChannel, FrameFlags.Data, 0, (uint)payload.Length, 0);
         await SendFrameDirectAsync(header, payload, ct).ConfigureAwait(false);
     }
 
@@ -931,7 +932,7 @@ public sealed class StreamMultiplexer : IStreamMultiplexer
         BinaryPrimitives.WriteUInt16BigEndian(payload.AsSpan(1), (ushort)channelIdBytes.Length);
         channelIdBytes.CopyTo(payload.AsSpan(3));
         
-        var header = new FrameHeader(channelIndex, FrameFlags.Init, (uint)payload.Length);
+        var header = new FrameHeader(channelIndex, FrameFlags.Init, 0, (uint)payload.Length, 0);
         await SendFrameDirectAsync(header, payload, ct).ConfigureAwait(false);
     }
 
@@ -941,7 +942,7 @@ public sealed class StreamMultiplexer : IStreamMultiplexer
         // FIN must come after all data for proper stream semantics
         await FlushSendQueueAsync(ct).ConfigureAwait(false);
         
-        var header = new FrameHeader(channelIndex, FrameFlags.Fin, 0);
+        var header = new FrameHeader(channelIndex, FrameFlags.Fin, 0, 0, 0);
         await SendFrameDirectAsync(header, ReadOnlyMemory<byte>.Empty, ct).ConfigureAwait(false);
         
         // Force flush after FIN to ensure all data is sent immediately
@@ -979,18 +980,20 @@ public sealed class StreamMultiplexer : IStreamMultiplexer
         var payload = new byte[4];
         BinaryPrimitives.WriteUInt32BigEndian(payload, credits);
         
-        var header = new FrameHeader(channelIndex, FrameFlags.Ack, (uint)payload.Length);
+        var header = new FrameHeader(channelIndex, FrameFlags.Ack, 0, (uint)payload.Length, 0);
         await SendFrameDirectAsync(header, payload, ct).ConfigureAwait(false);
     }
 
-    internal async ValueTask SendCreditGrantAsync(uint channelIndex, uint credits, CancellationToken ct)
+    internal async ValueTask SendCreditGrantAsync(uint channelIndex, uint credits, uint ackSeq, CancellationToken ct)
     {
-        var payload = new byte[9];
+        // Extended format: [subtype: 1B][channel_index: 4B][credits: 4B][ack_seq: 4B]
+        var payload = new byte[13];
         payload[0] = (byte)ControlSubtype.CreditGrant;
         BinaryPrimitives.WriteUInt32BigEndian(payload.AsSpan(1), channelIndex);
         BinaryPrimitives.WriteUInt32BigEndian(payload.AsSpan(5), credits);
+        BinaryPrimitives.WriteUInt32BigEndian(payload.AsSpan(9), ackSeq);
         
-        var header = new FrameHeader(ChannelIndexLimits.ControlChannel, FrameFlags.Data, (uint)payload.Length);
+        var header = new FrameHeader(ChannelIndexLimits.ControlChannel, FrameFlags.Data, 0, (uint)payload.Length, 0);
         await SendFrameDirectAsync(header, payload, ct).ConfigureAwait(false);
     }
 
@@ -1001,7 +1004,7 @@ public sealed class StreamMultiplexer : IStreamMultiplexer
         _lastPingTimestamp = DateTime.UtcNow.Ticks;
         BinaryPrimitives.WriteInt64BigEndian(payload.AsSpan(1), _lastPingTimestamp);
         
-        var header = new FrameHeader(ChannelIndexLimits.ControlChannel, FrameFlags.Data, (uint)payload.Length);
+        var header = new FrameHeader(ChannelIndexLimits.ControlChannel, FrameFlags.Data, 0, (uint)payload.Length, 0);
         await SendFrameDirectAsync(header, payload, ct).ConfigureAwait(false);
     }
 
@@ -1011,7 +1014,7 @@ public sealed class StreamMultiplexer : IStreamMultiplexer
         payload[0] = (byte)ControlSubtype.Pong;
         BinaryPrimitives.WriteInt64BigEndian(payload.AsSpan(1), timestamp);
         
-        var header = new FrameHeader(ChannelIndexLimits.ControlChannel, FrameFlags.Data, (uint)payload.Length);
+        var header = new FrameHeader(ChannelIndexLimits.ControlChannel, FrameFlags.Data, 0, (uint)payload.Length, 0);
         await SendFrameDirectAsync(header, payload, ct).ConfigureAwait(false);
     }
 
@@ -1026,7 +1029,7 @@ public sealed class StreamMultiplexer : IStreamMultiplexer
         BinaryPrimitives.WriteUInt16BigEndian(payload.AsSpan(1), (ushort)code);
         BinaryPrimitives.WriteUInt32BigEndian(payload.AsSpan(3), lastChannelIndex);
         
-        var header = new FrameHeader(ChannelIndexLimits.ControlChannel, FrameFlags.Data, (uint)payload.Length);
+        var header = new FrameHeader(ChannelIndexLimits.ControlChannel, FrameFlags.Data, 0, (uint)payload.Length, 0);
         await SendFrameDirectAsync(header, payload, ct).ConfigureAwait(false);
     }
 
@@ -1037,7 +1040,7 @@ public sealed class StreamMultiplexer : IStreamMultiplexer
         BinaryPrimitives.WriteUInt16BigEndian(payload, (ushort)code);
         messageBytes.CopyTo(payload.AsSpan(2));
         
-        var header = new FrameHeader(channelIndex, FrameFlags.Err, (uint)payload.Length);
+        var header = new FrameHeader(channelIndex, FrameFlags.Err, 0, (uint)payload.Length, 0);
         await SendFrameDirectAsync(header, payload, ct).ConfigureAwait(false);
     }
 
@@ -1193,7 +1196,7 @@ public sealed class StreamMultiplexer : IStreamMultiplexer
         switch (header.Flags)
         {
             case FrameFlags.Data:
-                ProcessDataFrame(channelIndex, payload);
+                await ProcessDataFrameAsync(channelIndex, header.Seq, header.ValidateCrc(payload.Span), payload, ct).ConfigureAwait(false);
                 break;
                 
             case FrameFlags.Init:
@@ -1269,9 +1272,37 @@ public sealed class StreamMultiplexer : IStreamMultiplexer
                     var channelIndex = BinaryPrimitives.ReadUInt32BigEndian(data.Span);
                     var credits = BinaryPrimitives.ReadUInt32BigEndian(data.Span[4..]);
                     
+                    // Extended format: [channel_index: 4B][credits: 4B][ack_seq: 4B]
+                    uint? ackSeq = null;
+                    if (data.Length >= 12)
+                    {
+                        ackSeq = BinaryPrimitives.ReadUInt32BigEndian(data.Span[8..]);
+                    }
+                    
                     if (_writeChannelsByIndex.TryGetValue(channelIndex, out var channel))
                     {
                         channel.GrantCredits(credits);
+                        
+                        // Handle ack_seq to free resend buffer
+                        if (ackSeq.HasValue)
+                        {
+                            channel.HandleAckSeq(ackSeq.Value);
+                        }
+                    }
+                }
+                break;
+                
+            case ControlSubtype.Nack:
+                // NACK payload: [channel_index: 4B][seq: 4B]
+                if (data.Length >= 8)
+                {
+                    var channelIndex = BinaryPrimitives.ReadUInt32BigEndian(data.Span);
+                    var seq = BinaryPrimitives.ReadUInt32BigEndian(data.Span[4..]);
+                    
+                    if (_writeChannelsByIndex.TryGetValue(channelIndex, out var channel))
+                    {
+                        // Fire and forget retransmission
+                        _ = channel.HandleNackAsync(seq, ct);
                     }
                 }
                 break;
@@ -1386,19 +1417,42 @@ public sealed class StreamMultiplexer : IStreamMultiplexer
             payloadOffset += 12;
         }
 
-        var header = new FrameHeader(ChannelIndexLimits.ControlChannel, FrameFlags.Data, (uint)payload.Length);
+        var header = new FrameHeader(ChannelIndexLimits.ControlChannel, FrameFlags.Data, 0, (uint)payload.Length, 0);
         await SendFrameDirectAsync(header, payload, ct).ConfigureAwait(false);
     }
 
-    private void ProcessDataFrame(uint channelIndex, ReadOnlyMemory<byte> payload)
+    private async ValueTask ProcessDataFrameAsync(uint channelIndex, uint seq, bool crcValid, ReadOnlyMemory<byte> payload, CancellationToken ct)
     {
         if (_readChannelsByIndex.TryGetValue(channelIndex, out var channel))
         {
             // Zero-copy path: rent buffer from pool, copy payload, transfer ownership to channel
             var ownedMemory = OwnedMemory.Rent(payload.Length);
             payload.CopyTo(ownedMemory.Memory);
-            channel.EnqueueData(ownedMemory);
+            
+            // Pass to channel with seq and CRC validation result
+            var accepted = channel.EnqueueDataWithSeq(seq, ownedMemory, crcValid);
+            
+            if (!accepted)
+            {
+                // CRC failed - send NACK to request retransmission
+                await SendNackAsync(channelIndex, seq, ct).ConfigureAwait(false);
+            }
         }
+    }
+    
+    /// <summary>
+    /// Sends a NACK control frame requesting retransmission of a frame.
+    /// </summary>
+    private async ValueTask SendNackAsync(uint channelIndex, uint seq, CancellationToken ct)
+    {
+        // NACK payload: [subtype: 1B][channel_index: 4B][seq: 4B]
+        var payload = new byte[9];
+        payload[0] = (byte)ControlSubtype.Nack;
+        BinaryPrimitives.WriteUInt32BigEndian(payload.AsSpan(1), channelIndex);
+        BinaryPrimitives.WriteUInt32BigEndian(payload.AsSpan(5), seq);
+        
+        var header = new FrameHeader(ChannelIndexLimits.ControlChannel, FrameFlags.Data, 0, (uint)payload.Length, 0);
+        await SendFrameDirectAsync(header, payload, ct).ConfigureAwait(false);
     }
 
     private async ValueTask ProcessInitFrameAsync(uint channelIndex, ReadOnlyMemory<byte> payload, CancellationToken ct)

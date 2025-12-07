@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Threading.Channels;
 using NetConduit.Internal;
 
@@ -15,6 +16,11 @@ public sealed class ReadChannel : Stream
     private readonly ChannelSyncState _syncState;
     private readonly AdaptiveFlowControl _flowControl;
     private readonly object _disposeLock = new();
+    
+    // ARQ: Sequence tracking and reorder buffer
+    private readonly ConcurrentDictionary<uint, OwnedMemory> _reorderBuffer;
+    private uint _expectedSeq;
+    private uint _highestContiguousSeq; // For ack_seq in CREDIT_GRANT
     
     private volatile ChannelState _state;
     private OwnedMemory _currentOwnedBuffer;
@@ -47,6 +53,11 @@ public sealed class ReadChannel : Stream
         _flowControl = new AdaptiveFlowControl(options.MinCredits, options.MaxCredits);
         Stats = new ChannelStats();
         _isDisposing = false;
+        
+        // ARQ initialization
+        _reorderBuffer = new ConcurrentDictionary<uint, OwnedMemory>();
+        _expectedSeq = 0;
+        _highestContiguousSeq = 0;
     }
 
     /// <summary>The internal channel index used in wire protocol.</summary>
@@ -72,6 +83,9 @@ public sealed class ReadChannel : Stream
     
     /// <summary>Gets the initial credits to grant for this channel.</summary>
     internal uint GetInitialCredits() => _flowControl.GetInitialCredits();
+    
+    /// <summary>Gets the highest contiguous sequence number received (for ack_seq).</summary>
+    internal uint HighestContiguousSeq => _highestContiguousSeq;
     
     /// <summary>Event raised when the channel is closed.</summary>
     public event Action<ChannelCloseReason, Exception?>? OnClosed;
@@ -199,8 +213,8 @@ public sealed class ReadChannel : Stream
         var toGrant = _flowControl.RecordConsumptionAndGetGrant(toCopy);
         if (toGrant > 0)
         {
-            // Fire and forget credit grant
-            _ = _multiplexer.SendCreditGrantAsync(ChannelIndex, toGrant, CancellationToken.None);
+            // Fire and forget credit grant with ack_seq for ARQ
+            _ = _multiplexer.SendCreditGrantAsync(ChannelIndex, toGrant, _highestContiguousSeq, CancellationToken.None);
             Stats.AddCreditsGranted(toGrant);
         }
 
@@ -233,6 +247,62 @@ public sealed class ReadChannel : Stream
         // The flow control handles this internally, nothing more to do here
     }
 
+    /// <summary>
+    /// Enqueues data with sequence number for ARQ ordering.
+    /// Returns true if frame was accepted (in order or buffered), false if CRC failed.
+    /// </summary>
+    internal bool EnqueueDataWithSeq(uint seq, OwnedMemory data, bool crcValid)
+    {
+        // Use lock to synchronize with Dispose
+        lock (_disposeLock)
+        {
+            if (_state == ChannelState.Closed || _isDisposing)
+            {
+                data.Dispose();
+                return true; // Don't NACK for closed channel
+            }
+            
+            // CRC validation failed - request retransmission
+            if (!crcValid)
+            {
+                Stats.IncrementCrcFailures();
+                data.Dispose();
+                return false; // Caller should send NACK
+            }
+            
+            // Check sequence number
+            if (seq == _expectedSeq)
+            {
+                // In order - deliver immediately
+                DeliverFrame(data);
+                _expectedSeq++;
+                _highestContiguousSeq = seq;
+                
+                // Check reorder buffer for next expected frames
+                DeliverReorderedFrames();
+            }
+            else if (IsSeqNewer(seq, _expectedSeq))
+            {
+                // Out of order but newer - buffer for later
+                if (!_reorderBuffer.TryAdd(seq, data))
+                {
+                    // Already have this seq (duplicate) - dispose
+                    data.Dispose();
+                }
+            }
+            else
+            {
+                // Duplicate or old frame - discard
+                data.Dispose();
+            }
+            
+            return true;
+        }
+    }
+    
+    /// <summary>
+    /// Legacy EnqueueData without sequence (for backward compat during transition).
+    /// </summary>
     internal void EnqueueData(OwnedMemory data)
     {
         // Use lock to synchronize with Dispose
@@ -254,6 +324,35 @@ public sealed class ReadChannel : Stream
                 data.Dispose();
             }
         }
+    }
+    
+    private void DeliverFrame(OwnedMemory data)
+    {
+        _syncState.RecordReceive(data.Length);
+        
+        if (!_dataChannel.Writer.TryWrite(data))
+        {
+            data.Dispose();
+        }
+    }
+    
+    private void DeliverReorderedFrames()
+    {
+        // Deliver any consecutive frames from reorder buffer
+        while (_reorderBuffer.TryRemove(_expectedSeq, out var bufferedData))
+        {
+            DeliverFrame(bufferedData);
+            _highestContiguousSeq = _expectedSeq;
+            _expectedSeq++;
+        }
+    }
+    
+    /// <summary>
+    /// Returns true if seqA is newer than seqB (accounting for wraparound).
+    /// </summary>
+    private static bool IsSeqNewer(uint seqA, uint seqB)
+    {
+        return (int)(seqA - seqB) > 0;
     }
 
     internal void SetClosed()
