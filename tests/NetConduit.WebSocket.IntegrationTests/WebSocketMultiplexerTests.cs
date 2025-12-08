@@ -246,6 +246,69 @@ public class WebSocketMultiplexerTests
         }
     }
 
+    [Theory(Timeout = 120000)]
+    [InlineData(1)]
+    [InlineData(10)]
+    [InlineData(50)]
+    [InlineData(100)]
+    public async Task MultipleChannels_ReliableTransfer_NoCorruption(int channelCount)
+    {
+        var (host, port, wsChannel) = await CreateServerAsync();
+        try
+        {
+            using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(90));
+
+            await using var clientConnection = await WebSocketMultiplexer.ConnectAsync($"ws://localhost:{port}/ws");
+            var serverWebSocket = await wsChannel.Reader.ReadAsync(cts.Token);
+            await using var serverConnection = WebSocketMultiplexer.Accept(serverWebSocket);
+
+            var startTasks = await Task.WhenAll(clientConnection.StartAsync(cts.Token), serverConnection.StartAsync(cts.Token));
+            var clientRunTask = startTasks[0];
+            var serverRunTask = startTasks[1];
+
+            const int baseSize = 512;
+            var tasks = new List<Task>();
+
+            for (int i = 0; i < channelCount; i++)
+            {
+                int channelIndex = i;
+                tasks.Add(Task.Run(async () =>
+                {
+                    var channelId = $"reliable-{channelIndex}";
+                    var writeChannel = await clientConnection.OpenChannelAsync(new ChannelOptions { ChannelId = channelId }, cts.Token);
+                    var readChannel = await serverConnection.AcceptChannelAsync(channelId, cts.Token);
+
+                    var testData = new byte[baseSize + channelIndex];
+                    Random.Shared.NextBytes(testData);
+
+                    await writeChannel.WriteAsync(testData, cts.Token);
+                    await writeChannel.CloseAsync(cts.Token);
+
+                    var buffer = new byte[testData.Length];
+                    int totalRead = 0;
+                    while (totalRead < buffer.Length)
+                    {
+                        int read = await readChannel.ReadAsync(buffer.AsMemory(totalRead), cts.Token);
+                        if (read == 0) break;
+                        totalRead += read;
+                    }
+
+                    Assert.Equal(testData.Length, totalRead);
+                    Assert.Equal(testData, buffer);
+                }, cts.Token));
+            }
+
+            await Task.WhenAll(tasks);
+
+            await cts.CancelAsync();
+        }
+        finally
+        {
+            await host.StopAsync();
+            host.Dispose();
+        }
+    }
+
     [Fact(Timeout = 120000)]
     public async Task BidirectionalCommunication_BothSidesOpenChannels()
     {

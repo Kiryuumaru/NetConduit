@@ -12,6 +12,8 @@ N streams → 1 stream (mux) → N streams (demux)
 ## Features
 
 - **Multiple channels** over a single TCP/WebSocket/any stream connection
+- **Frame integrity** - CRC32 checksums detect corruption
+- **ARQ reliability** - automatic retransmission on errors (NACK-based)
 - **Credit-based backpressure** for flow control
 - **Priority queuing** - higher priority frames sent first
 - **Auto-reconnection** with channel state restoration
@@ -465,7 +467,8 @@ dotnet run -- client 5000 localhost Bob
 │  └───────┬────────┘  └───────┬────────┘  └───────┬────────┘  │
 ├──────────┴───────────────────┴───────────────────┴───────────┤
 │                         NetConduit                           │
-│  - Frame encoding/decoding (9-byte header)                   │
+│  - Frame encoding/decoding (17-byte header)                  │
+│  - CRC32 integrity checking + ARQ retransmission             │
 │  - Channel management (string ChannelId)                     │
 │  - Credit-based backpressure                                 │
 │  - Priority queuing                                          │
@@ -485,14 +488,16 @@ dotnet run -- client 5000 localhost Bob
 ## Frame Format
 
 ```
-┌─────────────────────────────────────────────────────────────┐
-│ Channel Index (4B) │ Flags (1B) │ Length (4B) │ Payload     │
-└─────────────────────────────────────────────────────────────┘
+┌─────────────────────────────────────────────────────────────────────────────────┐
+│ CRC32 (4B) │ Seq (4B) │ Channel Index (4B) │ Flags (1B) │ Length (4B) │ Payload │
+└─────────────────────────────────────────────────────────────────────────────────┘
 ```
 
-- 9-byte header, big-endian encoding
+- 17-byte header, big-endian encoding
+- CRC32 covers entire frame (header + payload) for integrity verification
+- Per-channel sequence numbers enable selective retransmission
 - Max 16MB payload (configurable)
-- Frame types: DATA, INIT, FIN, ACK, ERR
+- Frame types: DATA, INIT, FIN, ACK, ERR, NACK
 
 ## Performance
 
