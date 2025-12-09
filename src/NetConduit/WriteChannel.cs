@@ -1,8 +1,19 @@
 using System.Buffers;
+using System.Collections.Concurrent;
 using System.Threading.Channels;
 using NetConduit.Internal;
 
 namespace NetConduit;
+
+/// <summary>
+/// Entry in the resend buffer tracking frame data and timing for ARQ.
+/// </summary>
+internal struct ResendEntry
+{
+    public byte[] Data;
+    public long SentAtTicks;
+    public int RetransmitCount;
+}
 
 /// <summary>
 /// A write-only channel for sending data. Opened by this side.
@@ -16,6 +27,15 @@ public sealed class WriteChannel : Stream
     private readonly CancellationTokenSource _closeCts;
     private readonly ChannelSyncState _syncState;
     private readonly TaskCompletionSource _openTcs;
+    
+    // ARQ: Sequence tracking and resend buffer (byte-based, sized to MaxCredits)
+    private readonly ConcurrentDictionary<uint, ResendEntry> _resendBuffer;
+    private readonly long _maxResendBufferBytes;  // Derived from MaxCredits - guarantees all in-flight data can be retransmitted
+    private readonly long _retransmitTimeoutTicks;  // Timeout in ticks for retransmit
+    private readonly int _maxRetransmitAttempts;  // Max retransmit attempts before error
+    private long _resendBufferBytes;  // Current bytes in resend buffer
+    private uint _nextSeq;
+    private uint _ackedSeq; // Highest seq acknowledged
     
     private volatile ChannelState _state;
     private long _availableCredits;
@@ -43,6 +63,15 @@ public sealed class WriteChannel : Stream
         _syncState = new ChannelSyncState(multiplexer.Options.ReconnectBufferSize);
         _openTcs = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         Stats = new ChannelStats();
+        
+        // ARQ initialization - buffer sized to MaxCredits for guaranteed retransmit capability
+        _resendBuffer = new ConcurrentDictionary<uint, ResendEntry>();
+        _maxResendBufferBytes = options.MaxCredits;  // Auto-derived from channel's MaxCredits
+        _retransmitTimeoutTicks = multiplexer.Options.RetransmitTimeout.Ticks;
+        _maxRetransmitAttempts = multiplexer.Options.MaxRetransmitAttempts;
+        _resendBufferBytes = 0;
+        _nextSeq = 0;
+        _ackedSeq = 0;
     }
 
     /// <summary>The internal channel index used in wire protocol.</summary>
@@ -193,26 +222,20 @@ public sealed class WriteChannel : Stream
 
             // Buffer for potential replay (if reconnection enabled) and send the data frame
             var slice = remaining[..toSend];
+            
+            // ARQ: Assign sequence number and store in resend buffer
+            var seq = _nextSeq++;
+            var frameData = slice.ToArray();
+            
+            // Store in resend buffer (may evict old entries if buffer full)
+            StoreInResendBuffer(seq, frameData);
+            
             if (_multiplexer.Options.EnableReconnection)
             {
-                // Rent buffer, copy, record for replay, then send
-                var rented = ArrayPool<byte>.Shared.Rent(toSend);
-                try
-                {
-                    slice.CopyTo(rented);
-                    _syncState.RecordSend(rented.AsMemory(0, toSend).ToArray()); // sync state needs owned copy
-                    await _multiplexer.SendDataFrameAsync(ChannelIndex, rented.AsMemory(0, toSend), Priority, cancellationToken).ConfigureAwait(false);
-                }
-                finally
-                {
-                    ArrayPool<byte>.Shared.Return(rented);
-                }
+                _syncState.RecordSend(frameData); // sync state needs owned copy
             }
-            else
-            {
-                // No reconnection - pass memory directly without copying
-                await _multiplexer.SendDataFrameAsync(ChannelIndex, slice, Priority, cancellationToken).ConfigureAwait(false);
-            }
+            
+            await _multiplexer.SendDataFrameAsync(ChannelIndex, seq, frameData, Priority, cancellationToken).ConfigureAwait(false);
             
             Stats.AddBytesSent(toSend);
             Stats.IncrementFramesSent();
@@ -265,6 +288,142 @@ public sealed class WriteChannel : Stream
         // Signal that credits are available
         if (previous - credits <= 0)
             _creditSemaphore.Release();
+    }
+    
+    /// <summary>
+    /// Handles acknowledgment sequence - frees all frames up to and including ackSeq.
+    /// </summary>
+    internal void HandleAckSeq(uint ackSeq)
+    {
+        // Free all frames with seq <= ackSeq
+        foreach (var seq in _resendBuffer.Keys)
+        {
+            // Handle wraparound: if ackSeq wrapped, free both old high seqs and new low seqs
+            // Simple approach: free if seq <= ackSeq (assuming no massive gaps)
+            if (IsSeqAcked(seq, ackSeq))
+            {
+                if (_resendBuffer.TryRemove(seq, out var entry))
+                {
+                    Interlocked.Add(ref _resendBufferBytes, -entry.Data.Length);
+                }
+            }
+        }
+        
+        // Update acked seq
+        if (IsSeqNewer(ackSeq, _ackedSeq))
+        {
+            _ackedSeq = ackSeq;
+        }
+    }
+    
+    /// <summary>
+    /// Handles NACK by retransmitting the specified frame.
+    /// </summary>
+    internal async ValueTask HandleNackAsync(uint seq, CancellationToken ct)
+    {
+        if (_resendBuffer.TryGetValue(seq, out var entry))
+        {
+            // Update timestamp and retransmit count
+            entry.SentAtTicks = Environment.TickCount64;
+            entry.RetransmitCount++;
+            _resendBuffer[seq] = entry;
+            
+            // Retransmit the frame with same seq
+            await _multiplexer.SendDataFrameAsync(ChannelIndex, seq, entry.Data, Priority, ct).ConfigureAwait(false);
+            Stats.IncrementRetransmissions();
+        }
+        // If frame not found, it was already acknowledged and removed - ignore
+    }
+    
+    /// <summary>
+    /// Gets the next sequence number (for control frames that need seq).
+    /// </summary>
+    internal uint GetNextSeq() => _nextSeq;
+    
+    /// <summary>
+    /// Checks for frames that have exceeded the retransmit timeout and retransmits them.
+    /// Called by StreamMultiplexer's centralized retransmit loop.
+    /// Returns true if channel should be closed due to max retransmit attempts exceeded.
+    /// </summary>
+    internal async ValueTask<bool> CheckAndRetransmitAsync(CancellationToken ct)
+    {
+        if (_state != ChannelState.Open || _resendBuffer.IsEmpty)
+            return false;
+        
+        var now = Environment.TickCount64;
+        
+        foreach (var kvp in _resendBuffer)
+        {
+            var seq = kvp.Key;
+            var entry = kvp.Value;
+            
+            // Check if frame has exceeded timeout
+            var elapsedTicks = (now - entry.SentAtTicks) * TimeSpan.TicksPerMillisecond;
+            if (elapsedTicks < _retransmitTimeoutTicks)
+                continue;
+            
+            // Check if max attempts exceeded
+            if (entry.RetransmitCount >= _maxRetransmitAttempts)
+            {
+                // Signal that this channel should be closed
+                return true;
+            }
+            
+            // Update timestamp and retransmit count
+            entry.SentAtTicks = now;
+            entry.RetransmitCount++;
+            _resendBuffer[seq] = entry;
+            
+            // Retransmit the frame
+            try
+            {
+                await _multiplexer.SendDataFrameAsync(ChannelIndex, seq, entry.Data, Priority, ct).ConfigureAwait(false);
+                Stats.IncrementRetransmissions();
+            }
+            catch (OperationCanceledException)
+            {
+                // Cancellation is fine, just stop
+                break;
+            }
+            catch
+            {
+                // Other errors - continue with other frames
+            }
+        }
+        
+        return false;
+    }
+    
+    private void StoreInResendBuffer(uint seq, byte[] data)
+    {
+        var entry = new ResendEntry
+        {
+            Data = data,
+            SentAtTicks = Environment.TickCount64,
+            RetransmitCount = 0
+        };
+        _resendBuffer[seq] = entry;
+        Interlocked.Add(ref _resendBufferBytes, data.Length);
+        
+        // No eviction needed - credit system guarantees we can't exceed MaxCredits bytes in-flight
+        // The resend buffer is sized to MaxCredits, so all in-flight data is always retained
+    }
+    
+    /// <summary>
+    /// Returns true if seq is acknowledged by ackSeq (seq is less than or equal to ackSeq with wraparound).
+    /// </summary>
+    private static bool IsSeqAcked(uint seq, uint ackSeq)
+    {
+        // Simple comparison - handles wraparound if gap < 2^31
+        return (int)(seq - ackSeq) <= 0;
+    }
+    
+    /// <summary>
+    /// Returns true if seqA is newer than seqB (accounting for wraparound).
+    /// </summary>
+    private static bool IsSeqNewer(uint seqA, uint seqB)
+    {
+        return (int)(seqA - seqB) > 0;
     }
 
     internal void SetClosed()

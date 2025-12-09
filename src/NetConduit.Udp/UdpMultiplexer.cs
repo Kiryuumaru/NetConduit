@@ -11,6 +11,41 @@ public static class UdpMultiplexer
 {
     private static readonly byte[] HelloPayload = "NC_HELLO"u8.ToArray();
     private static readonly byte[] HelloAckPayload = "NC_HELLO_ACK"u8.ToArray();
+    
+    /// <summary>
+    /// Creates MultiplexerOptions with timeout-based retransmit enabled for UDP.
+    /// Preserves user-specified options while enabling UDP-specific defaults.
+    /// </summary>
+    private static MultiplexerOptions CreateUdpOptions(MultiplexerOptions? userOptions)
+    {
+        // Start with user options or defaults
+        var baseOptions = userOptions ?? new MultiplexerOptions();
+        
+        // For UDP, enable timeout-based retransmit by default (unless user explicitly set it)
+        // We check by comparing to the default value - if user wants to disable it for UDP,
+        // they can explicitly set EnableTimeoutRetransmit = false
+        return new MultiplexerOptions
+        {
+            SessionId = baseOptions.SessionId,
+            MaxFrameSize = baseOptions.MaxFrameSize,
+            PingInterval = baseOptions.PingInterval,
+            PingTimeout = baseOptions.PingTimeout,
+            MaxMissedPings = baseOptions.MaxMissedPings,
+            GoAwayTimeout = baseOptions.GoAwayTimeout,
+            GracefulShutdownTimeout = baseOptions.GracefulShutdownTimeout,
+            DefaultChannelOptions = baseOptions.DefaultChannelOptions,
+            EnableReconnection = baseOptions.EnableReconnection,
+            ReconnectTimeout = baseOptions.ReconnectTimeout,
+            ReconnectBufferSize = baseOptions.ReconnectBufferSize,
+            FlushMode = baseOptions.FlushMode,
+            FlushInterval = baseOptions.FlushInterval,
+            // UDP-specific: Enable timeout-based retransmit by default
+            EnableTimeoutRetransmit = userOptions?.EnableTimeoutRetransmit ?? true,
+            RetransmitTimeout = baseOptions.RetransmitTimeout,
+            RetransmitCheckInterval = baseOptions.RetransmitCheckInterval,
+            MaxRetransmitAttempts = baseOptions.MaxRetransmitAttempts,
+        };
+    }
 
     /// <summary>
     /// Connects to a UDP endpoint and creates a multiplexer.
@@ -33,7 +68,8 @@ public static class UdpMultiplexer
             await TryReceiveHelloAckAsync(client, cancellationToken).ConfigureAwait(false);
 
             var reliable = new ReliableUdpStream(client, udpOptions);
-            var mux = new StreamMultiplexer(reliable, reliable, options);
+            var muxOptions = CreateUdpOptions(options);
+            var mux = new StreamMultiplexer(reliable, reliable, muxOptions);
             return new UdpMultiplexerConnection(mux, client, reliable);
         }
         catch
@@ -69,7 +105,8 @@ public static class UdpMultiplexer
             }
 
             var reliable = new ReliableUdpStream(listener, udpOptions);
-            var mux = new StreamMultiplexer(reliable, reliable, options);
+            var muxOptions = CreateUdpOptions(options);
+            var mux = new StreamMultiplexer(reliable, reliable, muxOptions);
             return new UdpMultiplexerConnection(mux, listener, reliable);
         }
         catch

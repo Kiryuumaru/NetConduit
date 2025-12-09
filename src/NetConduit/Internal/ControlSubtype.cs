@@ -27,5 +27,8 @@ internal enum ControlSubtype : byte
     Reconnect = 0x07,
     
     /// <summary>Reconnection acknowledgment with channel state sync.</summary>
-    ReconnectAck = 0x08
+    ReconnectAck = 0x08,
+    
+    /// <summary>Negative acknowledgment requesting retransmission of a frame.</summary>
+    Nack = 0x09
 }

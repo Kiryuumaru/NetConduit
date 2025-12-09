@@ -71,6 +71,33 @@ public sealed class MultiplexerOptions
     /// Interval for batched flush when FlushMode is Batched. Default: 1ms.
     /// </summary>
     public TimeSpan FlushInterval { get; init; } = TimeSpan.FromMilliseconds(1);
+    
+    /// <summary>
+    /// Whether to enable timeout-based retransmission for unreliable transports (e.g., UDP).
+    /// When enabled, frames that are not acknowledged within <see cref="RetransmitTimeout"/> 
+    /// will be automatically retransmitted. Default: false (rely on NACK-only for TCP/WebSocket).
+    /// </summary>
+    public bool EnableTimeoutRetransmit { get; init; } = false;
+    
+    /// <summary>
+    /// Timeout before retransmitting an unacknowledged frame. Default: 200ms.
+    /// Only used when <see cref="EnableTimeoutRetransmit"/> is true.
+    /// </summary>
+    public TimeSpan RetransmitTimeout { get; init; } = TimeSpan.FromMilliseconds(200);
+    
+    /// <summary>
+    /// Interval for checking frames that need retransmission. Default: 50ms.
+    /// Smaller values give faster recovery but higher CPU usage.
+    /// Only used when <see cref="EnableTimeoutRetransmit"/> is true.
+    /// </summary>
+    public TimeSpan RetransmitCheckInterval { get; init; } = TimeSpan.FromMilliseconds(50);
+    
+    /// <summary>
+    /// Maximum number of retransmit attempts before giving up on a frame. Default: 10.
+    /// After this many attempts, the channel is closed with an error.
+    /// Only used when <see cref="EnableTimeoutRetransmit"/> is true.
+    /// </summary>
+    public int MaxRetransmitAttempts { get; init; } = 10;
 }
 
 /// <summary>

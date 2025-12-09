@@ -31,7 +31,10 @@ public sealed class DuplexPipe : IAsyncDisposable
         await _pipe2.Writer.CompleteAsync();
     }
 
-    private class DuplexPipeStream : Stream
+    /// <summary>
+    /// A bidirectional stream backed by pipes. Public for test reuse.
+    /// </summary>
+    public class DuplexPipeStream : Stream
     {
         private readonly PipeReader _reader;
         private readonly PipeWriter _writer;
