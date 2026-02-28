@@ -12,6 +12,9 @@ public sealed class MultiplexerStats
     private int _totalChannelsClosed;
     private long _lastPingRttTicks;
     private int _missedPings;
+    private long _totalCreditStarvationEvents;
+    private int _channelsCurrentlyWaitingForCredits;
+    private long _totalCreditWaitTimeTicks;
     private readonly DateTime _startedAt;
 
     internal MultiplexerStats()
@@ -42,6 +45,18 @@ public sealed class MultiplexerStats
     
     /// <summary>Number of consecutive missed pings.</summary>
     public int MissedPings => Volatile.Read(ref _missedPings);
+    
+    /// <summary>Total credit starvation events across all channels (backpressure events).</summary>
+    public long TotalCreditStarvationEvents => Volatile.Read(ref _totalCreditStarvationEvents);
+    
+    /// <summary>Number of channels currently waiting for credits (experiencing backpressure).</summary>
+    public int ChannelsCurrentlyWaitingForCredits => Volatile.Read(ref _channelsCurrentlyWaitingForCredits);
+    
+    /// <summary>Total time all channels have spent waiting for credits.</summary>
+    public TimeSpan TotalCreditWaitTime => TimeSpan.FromTicks(Volatile.Read(ref _totalCreditWaitTimeTicks));
+    
+    /// <summary>Whether any channel is currently experiencing backpressure.</summary>
+    public bool IsExperiencingBackpressure => Volatile.Read(ref _channelsCurrentlyWaitingForCredits) > 0;
 
     internal void AddBytesSent(long bytes) => Interlocked.Add(ref _bytesSent, bytes);
     internal void AddBytesReceived(long bytes) => Interlocked.Add(ref _bytesReceived, bytes);
@@ -53,4 +68,19 @@ public sealed class MultiplexerStats
     internal void SetMissedPings(int count) => Volatile.Write(ref _missedPings, count);
     internal void IncrementMissedPings() => Interlocked.Increment(ref _missedPings);
     internal void ResetMissedPings() => Volatile.Write(ref _missedPings, 0);
+    
+    /// <summary>Records a channel starting to wait for credits.</summary>
+    internal void RecordCreditStarvationStart()
+    {
+        Interlocked.Increment(ref _totalCreditStarvationEvents);
+        Interlocked.Increment(ref _channelsCurrentlyWaitingForCredits);
+    }
+    
+    /// <summary>Records a channel finishing waiting for credits.</summary>
+    internal void RecordCreditStarvationEnd(long waitTimeTicks)
+    {
+        Interlocked.Decrement(ref _channelsCurrentlyWaitingForCredits);
+        if (waitTimeTicks > 0)
+            Interlocked.Add(ref _totalCreditWaitTimeTicks, waitTimeTicks);
+    }
 }
