@@ -66,6 +66,18 @@ public sealed class WriteChannel : Stream
     /// <summary>Event raised when the channel is closed.</summary>
     public event Action<ChannelCloseReason, Exception?>? OnClosed;
     
+    /// <summary>
+    /// Event raised when credit starvation begins (no credits available to send).
+    /// This indicates the channel is experiencing backpressure from the receiver.
+    /// </summary>
+    public event Action? OnCreditStarvation;
+    
+    /// <summary>
+    /// Event raised when credits are restored after a starvation event.
+    /// The TimeSpan parameter indicates how long the wait lasted.
+    /// </summary>
+    public event Action<TimeSpan>? OnCreditRestored;
+    
     /// <summary>The reason for channel closure, if closed.</summary>
     public ChannelCloseReason? CloseReason => _closeReason;
     
@@ -142,26 +154,58 @@ public sealed class WriteChannel : Stream
             var credits = Volatile.Read(ref _availableCredits);
             if (credits <= 0)
             {
-                // Slow path: need to wait for credits
-                // Only allocate CTS when actually needed (timeout case)
-                if (_options.SendTimeout != Timeout.InfiniteTimeSpan)
+                // Slow path: need to wait for credits - track starvation event
+                var starvationStartTicks = DateTime.UtcNow.Ticks;
+                Stats.RecordCreditStarvationStart();
+                _multiplexer.Stats.RecordCreditStarvationStart();
+                
+                try
                 {
-                    using var timeoutCts = new CancellationTokenSource(_options.SendTimeout);
-                    using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, timeoutCts.Token, _closeCts.Token);
-                    try
+                    OnCreditStarvation?.Invoke();
+                }
+                catch
+                {
+                    // Swallow exceptions from event handlers
+                }
+                
+                try
+                {
+                    // Only allocate CTS when actually needed (timeout case)
+                    if (_options.SendTimeout != Timeout.InfiniteTimeSpan)
                     {
+                        using var timeoutCts = new CancellationTokenSource(_options.SendTimeout);
+                        using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, timeoutCts.Token, _closeCts.Token);
+                        try
+                        {
+                            await _creditSemaphore.WaitAsync(linkedCts.Token).ConfigureAwait(false);
+                        }
+                        catch (OperationCanceledException) when (timeoutCts.IsCancellationRequested)
+                        {
+                            throw new TimeoutException($"Send operation timed out waiting for credits after {_options.SendTimeout}");
+                        }
+                    }
+                    else
+                    {
+                        // No timeout - just wait with user token and close token
+                        using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, _closeCts.Token);
                         await _creditSemaphore.WaitAsync(linkedCts.Token).ConfigureAwait(false);
                     }
-                    catch (OperationCanceledException) when (timeoutCts.IsCancellationRequested)
-                    {
-                        throw new TimeoutException($"Send operation timed out waiting for credits after {_options.SendTimeout}");
-                    }
                 }
-                else
+                finally
                 {
-                    // No timeout - just wait with user token and close token
-                    using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, _closeCts.Token);
-                    await _creditSemaphore.WaitAsync(linkedCts.Token).ConfigureAwait(false);
+                    // Record end of starvation event
+                    var waitTicks = DateTime.UtcNow.Ticks - starvationStartTicks;
+                    Stats.RecordCreditStarvationEnd();
+                    _multiplexer.Stats.RecordCreditStarvationEnd(waitTicks);
+                    
+                    try
+                    {
+                        OnCreditRestored?.Invoke(TimeSpan.FromTicks(waitTicks));
+                    }
+                    catch
+                    {
+                        // Swallow exceptions from event handlers
+                    }
                 }
                 
                 credits = Volatile.Read(ref _availableCredits);

@@ -432,6 +432,48 @@ var channelStats = channel.Stats;
 Console.WriteLine($"Channel bytes: {channelStats.BytesSent}");
 ```
 
+### Backpressure Visibility
+
+Monitor backpressure in real-time with detailed statistics and events:
+
+```csharp
+// Per-channel backpressure stats
+var channel = await mux.OpenChannelAsync(new() { ChannelId = "data" });
+
+// Subscribe to backpressure events
+channel.OnCreditStarvation += () => 
+    Console.WriteLine($"Channel '{channel.ChannelId}' is blocked - waiting for credits");
+
+channel.OnCreditRestored += (waitTime) => 
+    Console.WriteLine($"Credits restored after {waitTime.TotalMilliseconds}ms");
+
+// Check channel stats
+Console.WriteLine($"Credit starvation events: {channel.Stats.CreditStarvationCount}");
+Console.WriteLine($"Total wait time: {channel.Stats.TotalWaitTimeForCredits}");
+Console.WriteLine($"Longest single wait: {channel.Stats.LongestWaitForCredits}");
+Console.WriteLine($"Currently waiting: {channel.Stats.IsWaitingForCredits}");
+
+// Mux-level aggregated backpressure stats
+Console.WriteLine($"Total starvation events: {mux.Stats.TotalCreditStarvationEvents}");
+Console.WriteLine($"Channels waiting: {mux.Stats.ChannelsCurrentlyWaitingForCredits}");
+Console.WriteLine($"System backpressure: {mux.Stats.IsExperiencingBackpressure}");
+```
+
+| Channel Stat | Description |
+|--------------|-------------|
+| `CreditStarvationCount` | Times credits hit zero while sending |
+| `TotalWaitTimeForCredits` | Cumulative time waiting for credits |
+| `LongestWaitForCredits` | Longest single credit wait |
+| `IsWaitingForCredits` | Currently blocked waiting for credits |
+| `CurrentWaitDuration` | Duration of current wait (if waiting) |
+
+| Mux Stat | Description |
+|----------|-------------|
+| `TotalCreditStarvationEvents` | All starvation events across channels |
+| `ChannelsCurrentlyWaitingForCredits` | Count of blocked channels |
+| `TotalCreditWaitTime` | Cumulative wait time (all channels) |
+| `IsExperiencingBackpressure` | Any channel currently blocked |
+
 ## Samples
 
 The repository includes complete sample applications:
