@@ -1,5 +1,7 @@
 # StreamMultiplexer Connection Overhaul Plan
 
+> **⚠️ BREAKING CHANGES:** This overhaul introduces breaking API changes. Backwards compatibility is not a concern—feel free to modify any public API as needed.
+
 ## Problem Statement
 
 Currently, `StreamMultiplexer.CreateAsync()` calls `StreamFactory` immediately during construction. If the initial connection fails, an exception is thrown directly with no retry logic. The sophisticated auto-reconnect logic only applies AFTER the multiplexer is running and a transport error occurs mid-session.
@@ -22,7 +24,7 @@ Unify connection handling so that:
 
 ```csharp
 // Creation - synchronous, no I/O, no exceptions from network
-var mux = new StreamMultiplexer(options);  // Public constructor
+var mux = StreamMultiplexer.Create(options);  // Static factory method
 
 // Start - kicks off background loop, returns run task immediately
 Task runTask = mux.Start();  // Synchronous, just spawns the background task
@@ -39,31 +41,42 @@ var channel = await mux.OpenChannelAsync(options);
 ## State Machine
 
 ```
-                                    ┌──────────────────────────────────────────┐
-                                    │                                          │
-                                    ▼                                          │
-[Created] ──Start()──► [Connecting] ──success──► [Handshaking] ──success──► [Running]
-                            │                         │                        │
-                         failure                   failure              transport error
-                            │                         │                        │
-                            ▼                         │                        │
-                      [Reconnecting] ◄────────────────┴────────────────────────┘
-                            │
-                  max attempts exceeded
-                            │
-                            ▼
-                        [Failed]
+[Created] ──Start()──► [Connecting] ──success──► [Running]
+                            │  ▲                     │
+                         failure│              transport error
+                            │  │                     │
+                            └──┘                     ▼
+                       (retry loop)            [Reconnecting] ──success──► [Running]
+                            │                        │  ▲
+                   max attempts                   failure│
+                      exceeded                       │  │
+                            │                        └──┘
+                            ▼                   (retry loop)
+                        [Failed]                     │
+                                           max attempts exceeded
+                                                     │
+                                                     ▼
+                                                 [Failed]
 ```
+
+**States explained:**
+- `[Connecting]` = Initial connection phase (StreamFactory + Handshake, with retries)
+- `[Reconnecting]` = Recovery phase after transport error (same logic, but `IsReconnecting=true`)
+- Both phases use `ConnectWithRetryAsync()` with identical retry/backoff behavior
+
+**Note:** 
+- Initial connection failures stay in `[Connecting]` (retry loop with `IsReconnecting=false`)
+- Transport errors from `[Running]` transition to `[Reconnecting]` (`IsReconnecting=true`)
+- Handshake is part of each connection attempt, not a separate visible state
 
 ### State Definitions
 
 | State | `IsRunning` | `IsConnected` | `IsReconnecting` | Description |
 |-------|-------------|---------------|------------------|-------------|
 | Created | `false` | `false` | `false` | Just constructed, `Start()` not called |
-| Connecting | `true` | `false` | `false` | Initial connection attempt in progress |
-| Handshaking | `true` | `false` | `false` | Streams acquired, performing handshake |
+| Connecting | `true` | `false` | `false` | Initial connection in progress (includes handshake) |
 | Running | `true` | `true` | `false` | Fully operational, channels can be used |
-| Reconnecting | `true` | `false` | `true` | Connection lost, attempting recovery |
+| Reconnecting | `true` | `false` | `true` | Connection lost, attempting recovery (includes handshake) |
 | Failed | `false` | `false` | `false` | Max attempts exceeded, `runTask` faulted |
 
 ---
@@ -162,7 +175,7 @@ Existing options that apply to both initial and reconnection:
 | `Start()` called twice | Throw `InvalidOperationException` |
 | `StreamFactory` throws | Count as failed attempt, fire event, retry |
 | `StreamFactory` returns null | Treat as failure, retry |
-| `StreamFactory` hangs | Relies on user's CancellationToken (or add `ConnectionTimeout`?) |
+| `StreamFactory` hangs | Relies on user's CancellationToken or on `ConnectionTimeout` |
 | Handshake timeout | Dispose streams, fire event, retry |
 | Handshake protocol error | Dispose streams, retry (assume transient - **confirmed**) |
 | `Dispose()` during connecting | Cancel all attempts, clean up, complete runTask |
@@ -177,16 +190,18 @@ Existing options that apply to both initial and reconnection:
 | Ping timeout (no explicit error) | Treat as transport error, trigger reconnect |
 | `MaxAutoReconnectAttempts` exceeded | Fire `OnAutoReconnectFailed`, fault runTask |
 
-### Channel Operations (Confirmed: Block Optimistically)
+### Channel Operations (Confirmed: Await Optimistically)
 
 | Operation | Before Ready | During Reconnecting | After Ready |
 |-----------|--------------|---------------------|-------------|
-| `OpenChannelAsync` | Blocks until ready | Blocks until reconnected | Normal |
-| `AcceptChannelAsync` | Blocks until ready | Blocks until reconnected | Normal |
-| `WriteChannel.WriteAsync` | Blocks | Buffers (up to limit) | Normal |
-| `ReadChannel.ReadAsync` | Blocks | Returns buffered, then blocks | Normal |
+| `OpenChannelAsync` | Awaits until ready | Awaits until reconnected | Normal |
+| `AcceptChannelAsync` | Awaits until ready | Awaits until reconnected | Normal |
+| `WriteChannel.WriteAsync` | Awaits | Buffers (up to limit) | Normal |
+| `ReadChannel.ReadAsync` | Awaits | Returns buffered, then awaits | Normal |
 
-**Decision:** Block and wait optimistically. Channels will resume once connection is restored.
+**Decision:** Await asynchronously (not thread-blocking). Channels will resume once connection is restored.
+
+> **Note:** "Awaits" = async waiting via `await`, not literal thread blocking. All operations remain non-blocking and async.
 
 ---
 
@@ -198,7 +213,7 @@ Existing options that apply to both initial and reconnection:
 /// <summary>
 /// Creates a new multiplexer. No I/O occurs until Start() is called.
 /// </summary>
-public StreamMultiplexer(MultiplexerOptions options);
+public static StreamMultiplexer Create(MultiplexerOptions options);
 
 /// <summary>
 /// Starts the multiplexer background loop. Returns immediately.
@@ -227,9 +242,9 @@ public int CurrentConnectionAttempt { get; }
 
 | Member | Change |
 |--------|--------|
-| `CreateAsync(MultiplexerOptions)` | **Removed** - use constructor |
+| `CreateAsync(MultiplexerOptions)` | **Renamed** to `Create()`, no longer async |
 | `StartAsync()` | **Renamed** to `Start()`, no longer async |
-| Private constructor | **Now public** |
+| Constructor | **Remains private** - use static `Create()` |
 | `_readStream`, `_writeStream` | No longer `readonly`, can be replaced |
 
 ---
@@ -248,7 +263,7 @@ var runTask = await mux.StartAsync();
 
 ```csharp
 var options = new MultiplexerOptions { StreamFactory = factory };
-await using var mux = new StreamMultiplexer(options);
+await using var mux = StreamMultiplexer.Create(options);
 var runTask = mux.Start();
 await mux.WaitForReadyAsync();  // Optional: wait for first connection
 ```
@@ -257,7 +272,7 @@ await mux.WaitForReadyAsync();  // Optional: wait for first connection
 
 ## Test Updates Required
 
-1. Remove tests for `CreateAsync()` 
+1. Update tests from `CreateAsync()` to `Create()`
 2. Update all tests to use new `Start()` + `WaitForReadyAsync()` pattern
 3. Add tests for initial connection retry behavior
 4. Add tests for initial connection failure scenarios
@@ -268,8 +283,8 @@ await mux.WaitForReadyAsync();  // Optional: wait for first connection
 
 ## Design Decisions (Confirmed)
 
-1. **Channel operations during reconnecting:** ✅ **Block until reconnected**
-   - Wait optimistically for connection to restore
+1. **Channel operations during reconnecting:** ✅ **Await until reconnected**
+   - Async waiting (not thread-blocking) for connection to restore
    - Channels will resume automatically once reconnected
 
 2. **Handshake failure classification:** ✅ **Retry all failures**
@@ -291,7 +306,7 @@ await mux.WaitForReadyAsync();  // Optional: wait for first connection
 
 ### Phase 1: Core Restructure
 - [ ] Make `_readStream`/`_writeStream` mutable
-- [ ] Move constructor to public, remove `CreateAsync()`
+- [ ] Keep constructor private, rename `CreateAsync()` to `Create()` (non-async)
 - [ ] Implement `Start()` (non-async)
 - [ ] Implement `ConnectWithRetryAsync()` unified logic
 - [ ] Implement `WaitForReadyAsync()`
@@ -301,9 +316,9 @@ await mux.WaitForReadyAsync();  // Optional: wait for first connection
 - [ ] Ensure state transitions are correct
 - [ ] Add logging for state changes
 
-### Phase 3: Channel Blocking
-- [ ] Implement blocking behavior for channel operations during connecting/reconnecting
-- [ ] Add ready-gate mechanism
+### Phase 3: Channel Awaiting
+- [ ] Implement async await behavior for channel operations during connecting/reconnecting
+- [ ] Add ready-gate mechanism (e.g., `TaskCompletionSource` or `SemaphoreSlim`)
 
 ### Phase 4: Testing
 - [ ] Update `TestMuxHelper`
