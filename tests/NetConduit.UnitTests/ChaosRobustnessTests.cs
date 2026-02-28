@@ -61,9 +61,9 @@ public class ChaosRobustnessTests
         await using var pipe = new DuplexPipe();
         
         // Use Immediate flush mode to ensure data is flushed before close
-        var options = new MultiplexerOptions { FlushMode = FlushMode.Immediate };
-        await using var muxA = new StreamMultiplexer(pipe.Stream1, pipe.Stream1, options);
-        await using var muxB = new StreamMultiplexer(pipe.Stream2, pipe.Stream2, options);
+        var options = new MultiplexerOptions { StreamFactory = _ => null!, FlushMode = FlushMode.Immediate };
+        await using var muxA = await TestMuxHelper.CreateMuxAsync(pipe.Stream1, options);
+        await using var muxB = await TestMuxHelper.CreateMuxAsync(pipe.Stream2, options);
 
         using var cts = new CancellationTokenSource(TestTimeout);
         
@@ -208,8 +208,8 @@ public class ChaosRobustnessTests
         await using var pipe = new DuplexPipe();
         
         // Index space is auto-negotiated via handshake nonce exchange
-        await using var muxA = new StreamMultiplexer(pipe.Stream1, pipe.Stream1, new MultiplexerOptions());
-        await using var muxB = new StreamMultiplexer(pipe.Stream2, pipe.Stream2, new MultiplexerOptions());
+        await using var muxA = await TestMuxHelper.CreateMuxAsync(pipe.Stream1);
+        await using var muxB = await TestMuxHelper.CreateMuxAsync(pipe.Stream2);
 
         using var cts = new CancellationTokenSource(TestTimeout);
         
@@ -405,8 +405,8 @@ public class ChaosRobustnessTests
         // Perform random operations in random order
         await using var pipe = new DuplexPipe();
         
-        await using var muxA = new StreamMultiplexer(pipe.Stream1, pipe.Stream1, new MultiplexerOptions());
-        await using var muxB = new StreamMultiplexer(pipe.Stream2, pipe.Stream2, new MultiplexerOptions());
+        await using var muxA = await TestMuxHelper.CreateMuxAsync(pipe.Stream1);
+        await using var muxB = await TestMuxHelper.CreateMuxAsync(pipe.Stream2);
 
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(90));
         
@@ -537,8 +537,8 @@ public class ChaosRobustnessTests
         // Send messages of random sizes (1 byte to 64KB)
         await using var pipe = new DuplexPipe();
         
-        await using var muxA = new StreamMultiplexer(pipe.Stream1, pipe.Stream1, new MultiplexerOptions());
-        await using var muxB = new StreamMultiplexer(pipe.Stream2, pipe.Stream2, new MultiplexerOptions());
+        await using var muxA = await TestMuxHelper.CreateMuxAsync(pipe.Stream1);
+        await using var muxB = await TestMuxHelper.CreateMuxAsync(pipe.Stream2);
 
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(60));
         
@@ -618,8 +618,8 @@ public class ChaosRobustnessTests
         // Both sides open channels and send data - sequential to avoid race conditions
         await using var pipe = new DuplexPipe();
         
-        await using var muxA = new StreamMultiplexer(pipe.Stream1, pipe.Stream1, new MultiplexerOptions());
-        await using var muxB = new StreamMultiplexer(pipe.Stream2, pipe.Stream2, new MultiplexerOptions());
+        await using var muxA = await TestMuxHelper.CreateMuxAsync(pipe.Stream1);
+        await using var muxB = await TestMuxHelper.CreateMuxAsync(pipe.Stream2);
 
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(120));
         
@@ -697,8 +697,8 @@ public class ChaosRobustnessTests
         // Interleave operations: A opens, B opens, A writes, B writes, etc.
         await using var pipe = new DuplexPipe();
         
-        await using var muxA = new StreamMultiplexer(pipe.Stream1, pipe.Stream1, new MultiplexerOptions());
-        await using var muxB = new StreamMultiplexer(pipe.Stream2, pipe.Stream2, new MultiplexerOptions());
+        await using var muxA = await TestMuxHelper.CreateMuxAsync(pipe.Stream1);
+        await using var muxB = await TestMuxHelper.CreateMuxAsync(pipe.Stream2);
 
         using var cts = new CancellationTokenSource(TimeSpan.FromMinutes(3));
         
@@ -774,8 +774,8 @@ public class ChaosRobustnessTests
         // Verify data integrity with cryptographic checksums
         await using var pipe = new DuplexPipe();
         
-        await using var muxA = new StreamMultiplexer(pipe.Stream1, pipe.Stream1, new MultiplexerOptions());
-        await using var muxB = new StreamMultiplexer(pipe.Stream2, pipe.Stream2, new MultiplexerOptions());
+        await using var muxA = await TestMuxHelper.CreateMuxAsync(pipe.Stream1);
+        await using var muxB = await TestMuxHelper.CreateMuxAsync(pipe.Stream2);
 
         using var cts = new CancellationTokenSource(TimeSpan.FromMinutes(3));
         
@@ -847,11 +847,11 @@ public class ChaosRobustnessTests
         // Use higher credits for heavy data test
         var options = new MultiplexerOptions 
         { 
-            DefaultChannelOptions = new DefaultChannelOptions { MaxCredits = 1024 * 1024 } 
+             StreamFactory = _ => null!, DefaultChannelOptions = new DefaultChannelOptions { MaxCredits = 1024 * 1024 } 
         };
         
-        await using var muxA = new StreamMultiplexer(pipe.Stream1, pipe.Stream1, options);
-        await using var muxB = new StreamMultiplexer(pipe.Stream2, pipe.Stream2, options);
+        await using var muxA = await TestMuxHelper.CreateMuxAsync(pipe.Stream1, options);
+        await using var muxB = await TestMuxHelper.CreateMuxAsync(pipe.Stream2, options);
 
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(60));
         
@@ -930,8 +930,8 @@ public class ChaosRobustnessTests
         // Send many 64KB messages on a single channel and verify checksums
         await using var pipe = new DuplexPipe();
         
-        await using var muxA = new StreamMultiplexer(pipe.Stream1, pipe.Stream1, new MultiplexerOptions());
-        await using var muxB = new StreamMultiplexer(pipe.Stream2, pipe.Stream2, new MultiplexerOptions());
+        await using var muxA = await TestMuxHelper.CreateMuxAsync(pipe.Stream1);
+        await using var muxB = await TestMuxHelper.CreateMuxAsync(pipe.Stream2);
 
         using var cts = new CancellationTokenSource(TimeSpan.FromMinutes(3));
         
@@ -1001,8 +1001,8 @@ public class ChaosRobustnessTests
         // Rapidly create and destroy channels, verify all data is received
         await using var pipe = new DuplexPipe();
         
-        await using var muxA = new StreamMultiplexer(pipe.Stream1, pipe.Stream1, new MultiplexerOptions());
-        await using var muxB = new StreamMultiplexer(pipe.Stream2, pipe.Stream2, new MultiplexerOptions());
+        await using var muxA = await TestMuxHelper.CreateMuxAsync(pipe.Stream1);
+        await using var muxB = await TestMuxHelper.CreateMuxAsync(pipe.Stream2);
 
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(120));
         
@@ -1063,8 +1063,8 @@ public class ChaosRobustnessTests
         // Both sides create channels with same numeric suffix simultaneously
         await using var pipe = new DuplexPipe();
         
-        await using var muxA = new StreamMultiplexer(pipe.Stream1, pipe.Stream1, new MultiplexerOptions());
-        await using var muxB = new StreamMultiplexer(pipe.Stream2, pipe.Stream2, new MultiplexerOptions());
+        await using var muxA = await TestMuxHelper.CreateMuxAsync(pipe.Stream1);
+        await using var muxB = await TestMuxHelper.CreateMuxAsync(pipe.Stream2);
 
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(90));
         
@@ -1159,8 +1159,8 @@ public class ChaosRobustnessTests
         // Intersperse empty writes
         await using var pipe = new DuplexPipe();
         
-        await using var muxA = new StreamMultiplexer(pipe.Stream1, pipe.Stream1, new MultiplexerOptions());
-        await using var muxB = new StreamMultiplexer(pipe.Stream2, pipe.Stream2, new MultiplexerOptions());
+        await using var muxA = await TestMuxHelper.CreateMuxAsync(pipe.Stream1);
+        await using var muxB = await TestMuxHelper.CreateMuxAsync(pipe.Stream2);
 
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
         
@@ -1251,3 +1251,10 @@ public class ChaosRobustnessTests
 
     #endregion
 }
+
+
+
+
+
+
+

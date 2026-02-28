@@ -55,6 +55,12 @@ public interface IStreamMultiplexer : IAsyncDisposable
     /// <summary>Event raised when the multiplexer disconnects.</summary>
     event Action<DisconnectReason, Exception?>? OnDisconnected;
 
+    /// <summary>Event raised during auto-reconnection attempts.</summary>
+    event Action<AutoReconnectEventArgs>? OnAutoReconnecting;
+
+    /// <summary>Event raised when auto-reconnection has permanently failed.</summary>
+    event Action<Exception>? OnAutoReconnectFailed;
+
     /// <summary>The reason for disconnection, if disconnected.</summary>
     DisconnectReason? DisconnectReason { get; }
 

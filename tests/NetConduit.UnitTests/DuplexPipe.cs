@@ -122,3 +122,132 @@ public sealed class DuplexPipe : IAsyncDisposable
         }
     }
 }
+
+/// <summary>
+/// Helper methods for creating StreamMultiplexer instances in tests.
+/// </summary>
+public static class TestMuxHelper
+{
+    /// <summary>
+    /// Creates MultiplexerOptions with a StreamFactory that returns the provided streams.
+    /// </summary>
+    public static MultiplexerOptions CreateOptionsFor(Stream readStream, Stream writeStream, Action<MultiplexerOptions>? configure = null)
+    {
+        var opts = new MultiplexerOptions
+        {
+            StreamFactory = _ => Task.FromResult((readStream, writeStream))
+        };
+        return opts;
+    }
+    
+    /// <summary>
+    /// Creates MultiplexerOptions with a StreamFactory that returns the same stream for read/write.
+    /// </summary>
+    public static MultiplexerOptions CreateOptionsFor(Stream stream)
+        => CreateOptionsFor(stream, stream);
+    
+    /// <summary>
+    /// Creates a pair of connected StreamMultiplexer instances for testing.
+    /// </summary>
+    public static async Task<(StreamMultiplexer Mux1, StreamMultiplexer Mux2)> CreateMuxPairAsync(
+        DuplexPipe pipe,
+        MultiplexerOptions? options1 = null,
+        MultiplexerOptions? options2 = null)
+    {
+        var opts1 = options1 ?? new MultiplexerOptions 
+        { 
+            StreamFactory = _ => Task.FromResult((pipe.Stream1, pipe.Stream1)) 
+        };
+        if (opts1.StreamFactory is null || opts1.StreamFactory == options1?.StreamFactory)
+        {
+            // Override StreamFactory if not set or if using the passed options
+            opts1 = new MultiplexerOptions
+            {
+                SessionId = opts1.SessionId,
+                MaxFrameSize = opts1.MaxFrameSize,
+                PingInterval = opts1.PingInterval,
+                PingTimeout = opts1.PingTimeout,
+                MaxMissedPings = opts1.MaxMissedPings,
+                GoAwayTimeout = opts1.GoAwayTimeout,
+                GracefulShutdownTimeout = opts1.GracefulShutdownTimeout,
+                DefaultChannelOptions = opts1.DefaultChannelOptions,
+                EnableReconnection = opts1.EnableReconnection,
+                ReconnectTimeout = opts1.ReconnectTimeout,
+                ReconnectBufferSize = opts1.ReconnectBufferSize,
+                FlushMode = opts1.FlushMode,
+                FlushInterval = opts1.FlushInterval,
+                StreamFactory = _ => Task.FromResult((pipe.Stream1, pipe.Stream1)),
+                MaxAutoReconnectAttempts = opts1.MaxAutoReconnectAttempts,
+                AutoReconnectDelay = opts1.AutoReconnectDelay,
+                MaxAutoReconnectDelay = opts1.MaxAutoReconnectDelay,
+                AutoReconnectBackoffMultiplier = opts1.AutoReconnectBackoffMultiplier
+            };
+        }
+        
+        var opts2 = options2 ?? new MultiplexerOptions 
+        { 
+            StreamFactory = _ => Task.FromResult((pipe.Stream2, pipe.Stream2)) 
+        };
+        if (opts2.StreamFactory is null || opts2.StreamFactory == options2?.StreamFactory)
+        {
+            opts2 = new MultiplexerOptions
+            {
+                SessionId = opts2.SessionId,
+                MaxFrameSize = opts2.MaxFrameSize,
+                PingInterval = opts2.PingInterval,
+                PingTimeout = opts2.PingTimeout,
+                MaxMissedPings = opts2.MaxMissedPings,
+                GoAwayTimeout = opts2.GoAwayTimeout,
+                GracefulShutdownTimeout = opts2.GracefulShutdownTimeout,
+                DefaultChannelOptions = opts2.DefaultChannelOptions,
+                EnableReconnection = opts2.EnableReconnection,
+                ReconnectTimeout = opts2.ReconnectTimeout,
+                ReconnectBufferSize = opts2.ReconnectBufferSize,
+                FlushMode = opts2.FlushMode,
+                FlushInterval = opts2.FlushInterval,
+                StreamFactory = _ => Task.FromResult((pipe.Stream2, pipe.Stream2)),
+                MaxAutoReconnectAttempts = opts2.MaxAutoReconnectAttempts,
+                AutoReconnectDelay = opts2.AutoReconnectDelay,
+                MaxAutoReconnectDelay = opts2.MaxAutoReconnectDelay,
+                AutoReconnectBackoffMultiplier = opts2.AutoReconnectBackoffMultiplier
+            };
+        }
+        
+        var mux1 = await StreamMultiplexer.CreateAsync(opts1);
+        var mux2 = await StreamMultiplexer.CreateAsync(opts2);
+        return (mux1, mux2);
+    }
+    
+    /// <summary>
+    /// Creates a StreamMultiplexer for the specified stream.
+    /// </summary>
+    public static Task<StreamMultiplexer> CreateMuxAsync(Stream stream, MultiplexerOptions? baseOptions = null)
+    {
+        var opts = baseOptions ?? new MultiplexerOptions { StreamFactory = _ => Task.FromResult((stream, stream)) };
+        if (baseOptions != null)
+        {
+            opts = new MultiplexerOptions
+            {
+                SessionId = opts.SessionId,
+                MaxFrameSize = opts.MaxFrameSize,
+                PingInterval = opts.PingInterval,
+                PingTimeout = opts.PingTimeout,
+                MaxMissedPings = opts.MaxMissedPings,
+                GoAwayTimeout = opts.GoAwayTimeout,
+                GracefulShutdownTimeout = opts.GracefulShutdownTimeout,
+                DefaultChannelOptions = opts.DefaultChannelOptions,
+                EnableReconnection = opts.EnableReconnection,
+                ReconnectTimeout = opts.ReconnectTimeout,
+                ReconnectBufferSize = opts.ReconnectBufferSize,
+                FlushMode = opts.FlushMode,
+                FlushInterval = opts.FlushInterval,
+                StreamFactory = _ => Task.FromResult((stream, stream)),
+                MaxAutoReconnectAttempts = opts.MaxAutoReconnectAttempts,
+                AutoReconnectDelay = opts.AutoReconnectDelay,
+                MaxAutoReconnectDelay = opts.MaxAutoReconnectDelay,
+                AutoReconnectBackoffMultiplier = opts.AutoReconnectBackoffMultiplier
+            };
+        }
+        return StreamMultiplexer.CreateAsync(opts);
+    }
+}

@@ -7,10 +7,8 @@ public class BasicMultiplexerTests
     {
         await using var pipe = new DuplexPipe();
         
-        await using var initiator = new StreamMultiplexer(pipe.Stream1, pipe.Stream1, 
-            new MultiplexerOptions());
-        await using var acceptor = new StreamMultiplexer(pipe.Stream2, pipe.Stream2, 
-            new MultiplexerOptions());
+        await using var initiator = await TestMuxHelper.CreateMuxAsync(pipe.Stream1);
+        await using var acceptor = await TestMuxHelper.CreateMuxAsync(pipe.Stream2);
 
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
         
@@ -35,10 +33,8 @@ public class BasicMultiplexerTests
     {
         await using var pipe = new DuplexPipe();
         
-        await using var initiator = new StreamMultiplexer(pipe.Stream1, pipe.Stream1,
-            new MultiplexerOptions());
-        await using var acceptor = new StreamMultiplexer(pipe.Stream2, pipe.Stream2,
-            new MultiplexerOptions());
+        await using var initiator = await TestMuxHelper.CreateMuxAsync(pipe.Stream1);
+        await using var acceptor = await TestMuxHelper.CreateMuxAsync(pipe.Stream2);
 
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
         
@@ -62,10 +58,8 @@ public class BasicMultiplexerTests
     {
         await using var pipe = new DuplexPipe();
         
-        await using var initiator = new StreamMultiplexer(pipe.Stream1, pipe.Stream1,
-            new MultiplexerOptions());
-        await using var acceptor = new StreamMultiplexer(pipe.Stream2, pipe.Stream2,
-            new MultiplexerOptions());
+        await using var initiator = await TestMuxHelper.CreateMuxAsync(pipe.Stream1);
+        await using var acceptor = await TestMuxHelper.CreateMuxAsync(pipe.Stream2);
 
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
         
@@ -100,10 +94,8 @@ public class BasicMultiplexerTests
     {
         await using var pipe = new DuplexPipe();
         
-        await using var initiator = new StreamMultiplexer(pipe.Stream1, pipe.Stream1,
-            new MultiplexerOptions());
-        await using var acceptor = new StreamMultiplexer(pipe.Stream2, pipe.Stream2,
-            new MultiplexerOptions());
+        await using var initiator = await TestMuxHelper.CreateMuxAsync(pipe.Stream1);
+        await using var acceptor = await TestMuxHelper.CreateMuxAsync(pipe.Stream2);
 
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
         
@@ -144,10 +136,8 @@ public class BasicMultiplexerTests
     {
         await using var pipe = new DuplexPipe();
         
-        await using var initiator = new StreamMultiplexer(pipe.Stream1, pipe.Stream1,
-            new MultiplexerOptions());
-        await using var acceptor = new StreamMultiplexer(pipe.Stream2, pipe.Stream2,
-            new MultiplexerOptions());
+        await using var initiator = await TestMuxHelper.CreateMuxAsync(pipe.Stream1);
+        await using var acceptor = await TestMuxHelper.CreateMuxAsync(pipe.Stream2);
 
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
         
@@ -198,10 +188,8 @@ public class BasicMultiplexerTests
     {
         await using var pipe = new DuplexPipe();
         
-        await using var initiator = new StreamMultiplexer(pipe.Stream1, pipe.Stream1,
-            new MultiplexerOptions());
-        await using var acceptor = new StreamMultiplexer(pipe.Stream2, pipe.Stream2,
-            new MultiplexerOptions());
+        await using var initiator = await TestMuxHelper.CreateMuxAsync(pipe.Stream1);
+        await using var acceptor = await TestMuxHelper.CreateMuxAsync(pipe.Stream2);
 
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
         
@@ -244,10 +232,8 @@ public class BasicMultiplexerTests
     {
         await using var pipe = new DuplexPipe();
         
-        await using var initiator = new StreamMultiplexer(pipe.Stream1, pipe.Stream1,
-            new MultiplexerOptions());
-        await using var acceptor = new StreamMultiplexer(pipe.Stream2, pipe.Stream2,
-            new MultiplexerOptions());
+        await using var initiator = await TestMuxHelper.CreateMuxAsync(pipe.Stream1);
+        await using var acceptor = await TestMuxHelper.CreateMuxAsync(pipe.Stream2);
 
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
         
@@ -282,3 +268,6 @@ public class BasicMultiplexerTests
         cts.Cancel();
     }
 }
+
+
+

@@ -24,10 +24,8 @@ public class BenchmarkTests
     {
         await using var pipe = new DuplexPipe();
         
-        await using var initiator = new StreamMultiplexer(pipe.Stream1, pipe.Stream1,
-            new MultiplexerOptions());
-        await using var acceptor = new StreamMultiplexer(pipe.Stream2, pipe.Stream2,
-            new MultiplexerOptions());
+        await using var initiator = await TestMuxHelper.CreateMuxAsync(pipe.Stream1);
+        await using var acceptor = await TestMuxHelper.CreateMuxAsync(pipe.Stream2);
 
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(60));
         
@@ -106,10 +104,8 @@ public class BenchmarkTests
     {
         await using var pipe = new DuplexPipe();
         
-        await using var initiator = new StreamMultiplexer(pipe.Stream1, pipe.Stream1,
-            new MultiplexerOptions());
-        await using var acceptor = new StreamMultiplexer(pipe.Stream2, pipe.Stream2,
-            new MultiplexerOptions());
+        await using var initiator = await TestMuxHelper.CreateMuxAsync(pipe.Stream1);
+        await using var acceptor = await TestMuxHelper.CreateMuxAsync(pipe.Stream2);
 
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(120));
         
@@ -183,10 +179,8 @@ public class BenchmarkTests
     {
         await using var pipe = new DuplexPipe();
         
-        await using var initiator = new StreamMultiplexer(pipe.Stream1, pipe.Stream1,
-            new MultiplexerOptions());
-        await using var acceptor = new StreamMultiplexer(pipe.Stream2, pipe.Stream2,
-            new MultiplexerOptions());
+        await using var initiator = await TestMuxHelper.CreateMuxAsync(pipe.Stream1);
+        await using var acceptor = await TestMuxHelper.CreateMuxAsync(pipe.Stream2);
 
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(180));
         
@@ -283,10 +277,10 @@ public class BenchmarkTests
     {
         await using var pipe = new DuplexPipe();
         
-        await using var initiator = new StreamMultiplexer(pipe.Stream1, pipe.Stream1,
-            new MultiplexerOptions { DefaultChannelOptions = new DefaultChannelOptions { MaxCredits = 1024 * 1024 } });
-        await using var acceptor = new StreamMultiplexer(pipe.Stream2, pipe.Stream2,
-            new MultiplexerOptions { DefaultChannelOptions = new DefaultChannelOptions { MaxCredits = 1024 * 1024 } });
+        await using var initiator = await TestMuxHelper.CreateMuxAsync(pipe.Stream1,
+            new MultiplexerOptions { StreamFactory = _ => null!, DefaultChannelOptions = new DefaultChannelOptions { MaxCredits = 1024 * 1024 } });
+        await using var acceptor = await TestMuxHelper.CreateMuxAsync(pipe.Stream2,
+            new MultiplexerOptions { StreamFactory = _ => null!, DefaultChannelOptions = new DefaultChannelOptions { MaxCredits = 1024 * 1024 } });
 
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(120));
         
@@ -352,10 +346,10 @@ public class BenchmarkTests
     {
         await using var pipe = new DuplexPipe();
         
-        await using var initiator = new StreamMultiplexer(pipe.Stream1, pipe.Stream1,
-            new MultiplexerOptions { DefaultChannelOptions = new DefaultChannelOptions { MaxCredits = 256 * 1024 } });
-        await using var acceptor = new StreamMultiplexer(pipe.Stream2, pipe.Stream2,
-            new MultiplexerOptions { DefaultChannelOptions = new DefaultChannelOptions { MaxCredits = 256 * 1024 } });
+        await using var initiator = await TestMuxHelper.CreateMuxAsync(pipe.Stream1,
+            new MultiplexerOptions { StreamFactory = _ => null!, DefaultChannelOptions = new DefaultChannelOptions { MaxCredits = 256 * 1024 } });
+        await using var acceptor = await TestMuxHelper.CreateMuxAsync(pipe.Stream2,
+            new MultiplexerOptions { StreamFactory = _ => null!, DefaultChannelOptions = new DefaultChannelOptions { MaxCredits = 256 * 1024 } });
 
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(180));
         
@@ -472,10 +466,8 @@ public class BenchmarkTests
     {
         await using var pipe = new DuplexPipe();
         
-        await using var initiator = new StreamMultiplexer(pipe.Stream1, pipe.Stream1,
-            new MultiplexerOptions());
-        await using var acceptor = new StreamMultiplexer(pipe.Stream2, pipe.Stream2,
-            new MultiplexerOptions());
+        await using var initiator = await TestMuxHelper.CreateMuxAsync(pipe.Stream1);
+        await using var acceptor = await TestMuxHelper.CreateMuxAsync(pipe.Stream2);
 
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(60));
         
@@ -551,10 +543,8 @@ public class BenchmarkTests
         
         await using var pipe = new DuplexPipe();
         
-        await using var initiator = new StreamMultiplexer(pipe.Stream1, pipe.Stream1,
-            new MultiplexerOptions());
-        await using var acceptor = new StreamMultiplexer(pipe.Stream2, pipe.Stream2,
-            new MultiplexerOptions());
+        await using var initiator = await TestMuxHelper.CreateMuxAsync(pipe.Stream1);
+        await using var acceptor = await TestMuxHelper.CreateMuxAsync(pipe.Stream2);
 
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(60));
         
@@ -627,10 +617,10 @@ public class BenchmarkTests
     {
         await using var pipe = new DuplexPipe();
         
-        await using var initiator = new StreamMultiplexer(pipe.Stream1, pipe.Stream1,
-            new MultiplexerOptions { DefaultChannelOptions = new DefaultChannelOptions { MaxCredits = 512 * 1024 } });
-        await using var acceptor = new StreamMultiplexer(pipe.Stream2, pipe.Stream2,
-            new MultiplexerOptions { DefaultChannelOptions = new DefaultChannelOptions { MaxCredits = 512 * 1024 } });
+        await using var initiator = await TestMuxHelper.CreateMuxAsync(pipe.Stream1,
+            new MultiplexerOptions { StreamFactory = _ => null!, DefaultChannelOptions = new DefaultChannelOptions { MaxCredits = 512 * 1024 } });
+        await using var acceptor = await TestMuxHelper.CreateMuxAsync(pipe.Stream2,
+            new MultiplexerOptions { StreamFactory = _ => null!, DefaultChannelOptions = new DefaultChannelOptions { MaxCredits = 512 * 1024 } });
 
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(120));
         
@@ -716,10 +706,8 @@ public class BenchmarkTests
     {
         await using var pipe = new DuplexPipe();
         
-        await using var initiator = new StreamMultiplexer(pipe.Stream1, pipe.Stream1,
-            new MultiplexerOptions());
-        await using var acceptor = new StreamMultiplexer(pipe.Stream2, pipe.Stream2,
-            new MultiplexerOptions());
+        await using var initiator = await TestMuxHelper.CreateMuxAsync(pipe.Stream1);
+        await using var acceptor = await TestMuxHelper.CreateMuxAsync(pipe.Stream2);
 
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(120));
         
@@ -807,10 +795,10 @@ public class BenchmarkTests
         {
             await using var pipe = new DuplexPipe();
             
-            await using var initiator = new StreamMultiplexer(pipe.Stream1, pipe.Stream1,
-                new MultiplexerOptions { DefaultChannelOptions = new DefaultChannelOptions { MaxCredits = (uint)credits } });
-            await using var acceptor = new StreamMultiplexer(pipe.Stream2, pipe.Stream2,
-                new MultiplexerOptions { DefaultChannelOptions = new DefaultChannelOptions { MaxCredits = (uint)credits } });
+            await using var initiator = await TestMuxHelper.CreateMuxAsync(pipe.Stream1,
+                new MultiplexerOptions { StreamFactory = _ => null!, DefaultChannelOptions = new DefaultChannelOptions { MaxCredits = (uint)credits } });
+            await using var acceptor = await TestMuxHelper.CreateMuxAsync(pipe.Stream2,
+                new MultiplexerOptions { StreamFactory = _ => null!, DefaultChannelOptions = new DefaultChannelOptions { MaxCredits = (uint)credits } });
 
             using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(60));
             
@@ -914,10 +902,10 @@ public class BenchmarkTests
         {
             await using var pipe = new DuplexPipe();
             
-            await using var initiator = new StreamMultiplexer(pipe.Stream1, pipe.Stream1,
-                new MultiplexerOptions { DefaultChannelOptions = new DefaultChannelOptions { MaxCredits = 1024 * 1024 } });
-            await using var acceptor = new StreamMultiplexer(pipe.Stream2, pipe.Stream2,
-                new MultiplexerOptions { DefaultChannelOptions = new DefaultChannelOptions { MaxCredits = 1024 * 1024 } });
+            await using var initiator = await TestMuxHelper.CreateMuxAsync(pipe.Stream1,
+                new MultiplexerOptions { StreamFactory = _ => null!, DefaultChannelOptions = new DefaultChannelOptions { MaxCredits = 1024 * 1024 } });
+            await using var acceptor = await TestMuxHelper.CreateMuxAsync(pipe.Stream2,
+                new MultiplexerOptions { StreamFactory = _ => null!, DefaultChannelOptions = new DefaultChannelOptions { MaxCredits = 1024 * 1024 } });
 
             using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(60));
             
@@ -1025,3 +1013,7 @@ public class BenchmarkTests
 
     #endregion
 }
+
+
+
+

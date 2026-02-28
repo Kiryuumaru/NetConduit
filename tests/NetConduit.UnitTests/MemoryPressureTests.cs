@@ -14,13 +14,12 @@ public class MemoryPressureTests
         // Very small reconnect buffer to trigger trimming
         var options = new MultiplexerOptions
         {
-            EnableReconnection = true,
+             StreamFactory = _ => null!, EnableReconnection = true,
             ReconnectBufferSize = 1024 // Only 1KB buffer
         };
         
-        await using var initiator = new StreamMultiplexer(pipe.Stream1, pipe.Stream1, options);
-        await using var acceptor = new StreamMultiplexer(pipe.Stream2, pipe.Stream2, 
-            new MultiplexerOptions());
+        await using var initiator = await TestMuxHelper.CreateMuxAsync(pipe.Stream1, options);
+        await using var acceptor = await TestMuxHelper.CreateMuxAsync(pipe.Stream2);
 
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
         
@@ -73,7 +72,7 @@ public class MemoryPressureTests
         
         var options = new MultiplexerOptions
         {
-            EnableReconnection = false, // Disable reconnection to reduce memory overhead
+             StreamFactory = _ => null!, EnableReconnection = false, // Disable reconnection to reduce memory overhead
             DefaultChannelOptions = new DefaultChannelOptions 
             { 
                 MinCredits = 1024, // Small credits
@@ -81,8 +80,8 @@ public class MemoryPressureTests
             }
         };
         
-        await using var initiator = new StreamMultiplexer(pipe.Stream1, pipe.Stream1, options);
-        await using var acceptor = new StreamMultiplexer(pipe.Stream2, pipe.Stream2, options);
+        await using var initiator = await TestMuxHelper.CreateMuxAsync(pipe.Stream1, options);
+        await using var acceptor = await TestMuxHelper.CreateMuxAsync(pipe.Stream2, options);
 
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(60));
         
@@ -155,16 +154,15 @@ public class MemoryPressureTests
         
         var acceptorOptions = new MultiplexerOptions
         {
-            DefaultChannelOptions = new DefaultChannelOptions 
+             StreamFactory = _ => null!, DefaultChannelOptions = new DefaultChannelOptions 
             { 
                 MinCredits = 512,   // Very small credits
                 MaxCredits = 1024   // Forces frequent backpressure
             }
         };
         
-        await using var initiator = new StreamMultiplexer(pipe.Stream1, pipe.Stream1, 
-            new MultiplexerOptions());
-        await using var acceptor = new StreamMultiplexer(pipe.Stream2, pipe.Stream2, acceptorOptions);
+        await using var initiator = await TestMuxHelper.CreateMuxAsync(pipe.Stream1);
+        await using var acceptor = await TestMuxHelper.CreateMuxAsync(pipe.Stream2, acceptorOptions);
 
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(60));
         
@@ -248,12 +246,11 @@ public class MemoryPressureTests
         // Force immediate backpressure with tiny credits
         var acceptorOptions = new MultiplexerOptions
         {
-            DefaultChannelOptions = new DefaultChannelOptions { MinCredits = 100, MaxCredits = 100 }
+             StreamFactory = _ => null!, DefaultChannelOptions = new DefaultChannelOptions { MinCredits = 100, MaxCredits = 100 }
         };
         
-        await using var initiator = new StreamMultiplexer(pipe.Stream1, pipe.Stream1, 
-            new MultiplexerOptions());
-        await using var acceptor = new StreamMultiplexer(pipe.Stream2, pipe.Stream2, acceptorOptions);
+        await using var initiator = await TestMuxHelper.CreateMuxAsync(pipe.Stream1);
+        await using var acceptor = await TestMuxHelper.CreateMuxAsync(pipe.Stream2, acceptorOptions);
 
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
         
@@ -327,12 +324,11 @@ public class MemoryPressureTests
         
         var acceptorOptions = new MultiplexerOptions
         {
-            DefaultChannelOptions = new DefaultChannelOptions { MinCredits = 256, MaxCredits = 512 }
+             StreamFactory = _ => null!, DefaultChannelOptions = new DefaultChannelOptions { MinCredits = 256, MaxCredits = 512 }
         };
         
-        await using var initiator = new StreamMultiplexer(pipe.Stream1, pipe.Stream1, 
-            new MultiplexerOptions());
-        await using var acceptor = new StreamMultiplexer(pipe.Stream2, pipe.Stream2, acceptorOptions);
+        await using var initiator = await TestMuxHelper.CreateMuxAsync(pipe.Stream1);
+        await using var acceptor = await TestMuxHelper.CreateMuxAsync(pipe.Stream2, acceptorOptions);
 
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(60));
         
@@ -407,12 +403,11 @@ public class MemoryPressureTests
         
         var options = new MultiplexerOptions
         {
-            EnableReconnection = false
+             StreamFactory = _ => null!, EnableReconnection = false
         };
         
-        await using var initiator = new StreamMultiplexer(pipe.Stream1, pipe.Stream1, options);
-        await using var acceptor = new StreamMultiplexer(pipe.Stream2, pipe.Stream2, 
-            new MultiplexerOptions());
+        await using var initiator = await TestMuxHelper.CreateMuxAsync(pipe.Stream1, options);
+        await using var acceptor = await TestMuxHelper.CreateMuxAsync(pipe.Stream2);
 
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
         
@@ -464,12 +459,11 @@ public class MemoryPressureTests
         
         var acceptorOptions = new MultiplexerOptions
         {
-            DefaultChannelOptions = new DefaultChannelOptions { MinCredits = 50, MaxCredits = 50 }
+             StreamFactory = _ => null!, DefaultChannelOptions = new DefaultChannelOptions { MinCredits = 50, MaxCredits = 50 }
         };
         
-        await using var initiator = new StreamMultiplexer(pipe.Stream1, pipe.Stream1, 
-            new MultiplexerOptions());
-        await using var acceptor = new StreamMultiplexer(pipe.Stream2, pipe.Stream2, acceptorOptions);
+        await using var initiator = await TestMuxHelper.CreateMuxAsync(pipe.Stream1);
+        await using var acceptor = await TestMuxHelper.CreateMuxAsync(pipe.Stream2, acceptorOptions);
 
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
         
@@ -533,13 +527,12 @@ public class MemoryPressureTests
         
         var options = new MultiplexerOptions
         {
-            EnableReconnection = true,
+             StreamFactory = _ => null!, EnableReconnection = true,
             ReconnectBufferSize = 0  // No buffering even with reconnection enabled
         };
         
-        await using var initiator = new StreamMultiplexer(pipe.Stream1, pipe.Stream1, options);
-        await using var acceptor = new StreamMultiplexer(pipe.Stream2, pipe.Stream2, 
-            new MultiplexerOptions());
+        await using var initiator = await TestMuxHelper.CreateMuxAsync(pipe.Stream1, options);
+        await using var acceptor = await TestMuxHelper.CreateMuxAsync(pipe.Stream2);
 
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
         
@@ -589,11 +582,11 @@ public class MemoryPressureTests
         
         var options = new MultiplexerOptions
         {
-            EnableReconnection = false // Reduce memory overhead
+             StreamFactory = _ => null!, EnableReconnection = false // Reduce memory overhead
         };
         
-        await using var initiator = new StreamMultiplexer(pipe.Stream1, pipe.Stream1, options);
-        await using var acceptor = new StreamMultiplexer(pipe.Stream2, pipe.Stream2, options);
+        await using var initiator = await TestMuxHelper.CreateMuxAsync(pipe.Stream1, options);
+        await using var acceptor = await TestMuxHelper.CreateMuxAsync(pipe.Stream2, options);
 
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(120));
         
@@ -647,3 +640,11 @@ public class MemoryPressureTests
         cts.Cancel();
     }
 }
+
+
+
+
+
+
+
+

@@ -24,10 +24,8 @@ public class TcpRelayTests
         
         await using var physicalPipe = new DuplexPipe();
         
-        await using var muxInitiator = new StreamMultiplexer(physicalPipe.Stream1, physicalPipe.Stream1,
-            new MultiplexerOptions());
-        await using var muxAcceptor = new StreamMultiplexer(physicalPipe.Stream2, physicalPipe.Stream2,
-            new MultiplexerOptions());
+        await using var muxInitiator = await TestMuxHelper.CreateMuxAsync(physicalPipe.Stream1);
+        await using var muxAcceptor = await TestMuxHelper.CreateMuxAsync(physicalPipe.Stream2);
 
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
         
@@ -86,10 +84,8 @@ public class TcpRelayTests
         
         await using var physicalPipe = new DuplexPipe();
         
-        await using var muxInitiator = new StreamMultiplexer(physicalPipe.Stream1, physicalPipe.Stream1,
-            new MultiplexerOptions());
-        await using var muxAcceptor = new StreamMultiplexer(physicalPipe.Stream2, physicalPipe.Stream2,
-            new MultiplexerOptions());
+        await using var muxInitiator = await TestMuxHelper.CreateMuxAsync(physicalPipe.Stream1);
+        await using var muxAcceptor = await TestMuxHelper.CreateMuxAsync(physicalPipe.Stream2);
 
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(60));
         
@@ -185,20 +181,16 @@ public class TcpRelayTests
         await using var deviceBToServerPipe = new DuplexPipe();
         
         // Device A's multiplexer (connected to server)
-        await using var deviceAMux = new StreamMultiplexer(deviceAToServerPipe.Stream1, deviceAToServerPipe.Stream1,
-            new MultiplexerOptions());
+        await using var deviceAMux = await TestMuxHelper.CreateMuxAsync(deviceAToServerPipe.Stream1);
         
         // Server's multiplexer for Device A connection
-        await using var serverMuxA = new StreamMultiplexer(deviceAToServerPipe.Stream2, deviceAToServerPipe.Stream2,
-            new MultiplexerOptions());
+        await using var serverMuxA = await TestMuxHelper.CreateMuxAsync(deviceAToServerPipe.Stream2);
         
         // Device B's multiplexer (connected to server)
-        await using var deviceBMux = new StreamMultiplexer(deviceBToServerPipe.Stream1, deviceBToServerPipe.Stream1,
-            new MultiplexerOptions());
+        await using var deviceBMux = await TestMuxHelper.CreateMuxAsync(deviceBToServerPipe.Stream1);
         
         // Server's multiplexer for Device B connection
-        await using var serverMuxB = new StreamMultiplexer(deviceBToServerPipe.Stream2, deviceBToServerPipe.Stream2,
-            new MultiplexerOptions());
+        await using var serverMuxB = await TestMuxHelper.CreateMuxAsync(deviceBToServerPipe.Stream2);
 
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
         
@@ -278,14 +270,10 @@ public class TcpRelayTests
         await using var deviceAToServerPipe = new DuplexPipe();
         await using var deviceBToServerPipe = new DuplexPipe();
         
-        await using var deviceAMux = new StreamMultiplexer(deviceAToServerPipe.Stream1, deviceAToServerPipe.Stream1,
-            new MultiplexerOptions());
-        await using var serverMuxA = new StreamMultiplexer(deviceAToServerPipe.Stream2, deviceAToServerPipe.Stream2,
-            new MultiplexerOptions());
-        await using var deviceBMux = new StreamMultiplexer(deviceBToServerPipe.Stream1, deviceBToServerPipe.Stream1,
-            new MultiplexerOptions());
-        await using var serverMuxB = new StreamMultiplexer(deviceBToServerPipe.Stream2, deviceBToServerPipe.Stream2,
-            new MultiplexerOptions());
+        await using var deviceAMux = await TestMuxHelper.CreateMuxAsync(deviceAToServerPipe.Stream1);
+        await using var serverMuxA = await TestMuxHelper.CreateMuxAsync(deviceAToServerPipe.Stream2);
+        await using var deviceBMux = await TestMuxHelper.CreateMuxAsync(deviceBToServerPipe.Stream1);
+        await using var serverMuxB = await TestMuxHelper.CreateMuxAsync(deviceBToServerPipe.Stream2);
 
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(60));
         
@@ -369,10 +357,8 @@ public class TcpRelayTests
         // Create the "relay" infrastructure using our mux
         await using var physicalPipe = new DuplexPipe();
         
-        await using var muxInitiator = new StreamMultiplexer(physicalPipe.Stream1, physicalPipe.Stream1,
-            new MultiplexerOptions());
-        await using var muxAcceptor = new StreamMultiplexer(physicalPipe.Stream2, physicalPipe.Stream2,
-            new MultiplexerOptions());
+        await using var muxInitiator = await TestMuxHelper.CreateMuxAsync(physicalPipe.Stream1);
+        await using var muxAcceptor = await TestMuxHelper.CreateMuxAsync(physicalPipe.Stream2);
 
         var muxInitiatorTask = muxInitiator.RunAsync(cts.Token);
         var muxAcceptorTask = muxAcceptor.RunAsync(cts.Token);
@@ -428,10 +414,8 @@ public class TcpRelayTests
         
         await using var physicalPipe = new DuplexPipe();
         
-        await using var muxInitiator = new StreamMultiplexer(physicalPipe.Stream1, physicalPipe.Stream1,
-            new MultiplexerOptions());
-        await using var muxAcceptor = new StreamMultiplexer(physicalPipe.Stream2, physicalPipe.Stream2,
-            new MultiplexerOptions());
+        await using var muxInitiator = await TestMuxHelper.CreateMuxAsync(physicalPipe.Stream1);
+        await using var muxAcceptor = await TestMuxHelper.CreateMuxAsync(physicalPipe.Stream2);
 
         var muxInitiatorTask = muxInitiator.RunAsync(cts.Token);
         var muxAcceptorTask = muxAcceptor.RunAsync(cts.Token);
@@ -487,10 +471,8 @@ public class TcpRelayTests
         
         await using var physicalPipe = new DuplexPipe();
         
-        await using var clientMux = new StreamMultiplexer(physicalPipe.Stream1, physicalPipe.Stream1,
-            new MultiplexerOptions());
-        await using var serverMux = new StreamMultiplexer(physicalPipe.Stream2, physicalPipe.Stream2,
-            new MultiplexerOptions());
+        await using var clientMux = await TestMuxHelper.CreateMuxAsync(physicalPipe.Stream1);
+        await using var serverMux = await TestMuxHelper.CreateMuxAsync(physicalPipe.Stream2);
 
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(60));  // Increased timeout
         
@@ -638,3 +620,8 @@ public class TcpRelayTests
 
     #endregion
 }
+
+
+
+
+

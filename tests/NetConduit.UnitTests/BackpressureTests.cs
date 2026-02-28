@@ -10,12 +10,11 @@ public class BackpressureTests
         // Acceptor controls credits - set small initial credits
         var acceptorOptions = new MultiplexerOptions 
         { 
-            DefaultChannelOptions = new DefaultChannelOptions { MinCredits = 1024, MaxCredits = 1024 }
+             StreamFactory = _ => null!, DefaultChannelOptions = new DefaultChannelOptions { MinCredits = 1024, MaxCredits = 1024 }
         };
         
-        await using var initiator = new StreamMultiplexer(pipe.Stream1, pipe.Stream1,
-            new MultiplexerOptions());
-        await using var acceptor = new StreamMultiplexer(pipe.Stream2, pipe.Stream2, acceptorOptions);
+        await using var initiator = await TestMuxHelper.CreateMuxAsync(pipe.Stream1);
+        await using var acceptor = await TestMuxHelper.CreateMuxAsync(pipe.Stream2, acceptorOptions);
 
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
         
@@ -83,12 +82,11 @@ public class BackpressureTests
         // Acceptor controls credits - set small initial credits
         var acceptorOptions = new MultiplexerOptions 
         { 
-            DefaultChannelOptions = new DefaultChannelOptions { MinCredits = 100, MaxCredits = 100 }
+             StreamFactory = _ => null!, DefaultChannelOptions = new DefaultChannelOptions { MinCredits = 100, MaxCredits = 100 }
         };
         
-        await using var initiator = new StreamMultiplexer(pipe.Stream1, pipe.Stream1,
-            new MultiplexerOptions());
-        await using var acceptor = new StreamMultiplexer(pipe.Stream2, pipe.Stream2, acceptorOptions);
+        await using var initiator = await TestMuxHelper.CreateMuxAsync(pipe.Stream1);
+        await using var acceptor = await TestMuxHelper.CreateMuxAsync(pipe.Stream2, acceptorOptions);
 
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
         
@@ -127,10 +125,8 @@ public class BackpressureTests
     {
         await using var pipe = new DuplexPipe();
         
-        await using var initiator = new StreamMultiplexer(pipe.Stream1, pipe.Stream1,
-            new MultiplexerOptions());
-        await using var acceptor = new StreamMultiplexer(pipe.Stream2, pipe.Stream2,
-            new MultiplexerOptions());
+        await using var initiator = await TestMuxHelper.CreateMuxAsync(pipe.Stream1);
+        await using var acceptor = await TestMuxHelper.CreateMuxAsync(pipe.Stream2);
 
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
         
@@ -184,12 +180,11 @@ public class BackpressureTests
         // Acceptor controls credits - set small initial credits
         var acceptorOptions = new MultiplexerOptions 
         { 
-            DefaultChannelOptions = new DefaultChannelOptions { MinCredits = 100, MaxCredits = 100 }
+             StreamFactory = _ => null!, DefaultChannelOptions = new DefaultChannelOptions { MinCredits = 100, MaxCredits = 100 }
         };
         
-        await using var initiator = new StreamMultiplexer(pipe.Stream1, pipe.Stream1,
-            new MultiplexerOptions());
-        await using var acceptor = new StreamMultiplexer(pipe.Stream2, pipe.Stream2, acceptorOptions);
+        await using var initiator = await TestMuxHelper.CreateMuxAsync(pipe.Stream1);
+        await using var acceptor = await TestMuxHelper.CreateMuxAsync(pipe.Stream2, acceptorOptions);
 
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
         
@@ -248,3 +243,8 @@ public class BackpressureTests
         cts.Cancel();
     }
 }
+
+
+
+
+

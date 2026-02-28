@@ -38,6 +38,8 @@ public sealed class StreamMultiplexer : IStreamMultiplexer
     private volatile bool _isConnected;
     private volatile bool _isReconnecting;
     private TaskCompletionSource? _disconnectedTcs;
+    private Task? _autoReconnectTask;
+    private CancellationTokenSource? _autoReconnectCts;
     
     // Index space negotiation via handshake nonce
     private long _localNonce;
@@ -62,16 +64,16 @@ public sealed class StreamMultiplexer : IStreamMultiplexer
     private readonly byte[] _headerBuffer = new byte[FrameHeader.Size]; // Reusable header buffer
 
     /// <summary>
-    /// Creates a new stream multiplexer.
+    /// Creates a new stream multiplexer. Use <see cref="CreateAsync"/> to create an instance.
     /// </summary>
     /// <param name="readStream">Stream for reading data from remote.</param>
     /// <param name="writeStream">Stream for writing data to remote.</param>
     /// <param name="options">Multiplexer options.</param>
-    public StreamMultiplexer(Stream readStream, Stream writeStream, MultiplexerOptions? options = null)
+    private StreamMultiplexer(Stream readStream, Stream writeStream, MultiplexerOptions options)
     {
         _readStream = readStream ?? throw new ArgumentNullException(nameof(readStream));
         _writeStream = writeStream ?? throw new ArgumentNullException(nameof(writeStream));
-        _options = options ?? new MultiplexerOptions();
+        _options = options ?? throw new ArgumentNullException(nameof(options));
         _sessionId = _options.SessionId ?? Guid.NewGuid();
         
         // Index space will be determined after handshake nonce exchange
@@ -85,6 +87,36 @@ public sealed class StreamMultiplexer : IStreamMultiplexer
         });
         
         Stats = new MultiplexerStats();
+    }
+
+    /// <summary>
+    /// Creates a new stream multiplexer using the StreamFactory from options.
+    /// </summary>
+    /// <param name="options">Multiplexer options with required StreamFactory.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>A new StreamMultiplexer instance.</returns>
+    /// <example>
+    /// <code>
+    /// var options = new MultiplexerOptions 
+    /// { 
+    ///     StreamFactory = async ct => {
+    ///         var client = new TcpClient();
+    ///         await client.ConnectAsync("localhost", 5000, ct);
+    ///         var stream = client.GetStream();
+    ///         return (stream, stream);
+    ///     }
+    /// };
+    /// await using var mux = await StreamMultiplexer.CreateAsync(options);
+    /// </code>
+    /// </example>
+    public static async Task<StreamMultiplexer> CreateAsync(
+        MultiplexerOptions options,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(options);
+        
+        var (readStream, writeStream) = await options.StreamFactory(cancellationToken).ConfigureAwait(false);
+        return new StreamMultiplexer(readStream, writeStream, options);
     }
 
     /// <summary>Multiplexer options.</summary>
@@ -168,6 +200,17 @@ public sealed class StreamMultiplexer : IStreamMultiplexer
     /// Event raised when the connection is restored after a disconnection.
     /// </summary>
     public event Action? OnReconnected;
+
+    /// <summary>
+    /// Event raised during auto-reconnection attempts. 
+    /// Allows monitoring progress and optionally cancelling the reconnection process.
+    /// </summary>
+    public event Action<AutoReconnectEventArgs>? OnAutoReconnecting;
+
+    /// <summary>
+    /// Event raised when auto-reconnection has permanently failed after all attempts.
+    /// </summary>
+    public event Action<Exception>? OnAutoReconnectFailed;
 
     /// <summary>
     /// Whether the multiplexer is currently connected.
@@ -646,7 +689,8 @@ public sealed class StreamMultiplexer : IStreamMultiplexer
 
     /// <summary>
     /// Signals that the connection has been lost. Call this when the underlying transport fails.
-    /// If reconnection is enabled, the multiplexer will wait for ReconnectAsync to be called.
+    /// If StreamFactory is configured, auto-reconnection will be attempted.
+    /// Otherwise, if reconnection is enabled, the multiplexer will wait for ReconnectAsync to be called.
     /// </summary>
     public void NotifyDisconnected()
     {
@@ -656,7 +700,24 @@ public sealed class StreamMultiplexer : IStreamMultiplexer
         _isConnected = false;
         _disconnectedTcs = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         _disconnectReason = NetConduit.DisconnectReason.TransportError;
-        OnDisconnected?.Invoke(NetConduit.DisconnectReason.TransportError, null);
+        
+        try
+        {
+            OnDisconnected?.Invoke(NetConduit.DisconnectReason.TransportError, null);
+        }
+        catch
+        {
+            // Swallow exceptions from event handlers
+        }
+        
+        // If StreamFactory is configured, attempt auto-reconnect
+        if (_options.StreamFactory != null)
+        {
+            _autoReconnectCts = new CancellationTokenSource();
+            _autoReconnectTask = Task.Run(() => AutoReconnectLoopAsync(
+                new Exception("Connection manually disconnected"), 
+                _autoReconnectCts.Token));
+        }
     }
 
     internal void OnWriteChannelDisposed(uint channelIndex, string channelId)
@@ -1134,7 +1195,7 @@ public sealed class StreamMultiplexer : IStreamMultiplexer
     }
     
     /// <summary>
-    /// Handles transport errors by aborting all channels and firing disconnect event.
+    /// Handles transport errors by triggering auto-reconnect (if configured) or aborting all channels.
     /// </summary>
     private void HandleTransportError(Exception ex)
     {
@@ -1145,6 +1206,43 @@ public sealed class StreamMultiplexer : IStreamMultiplexer
         _disconnectException = ex;
         _isConnected = false;
         
+        // If StreamFactory is configured, attempt auto-reconnect (don't abort channels yet)
+        if (_options.StreamFactory != null && _options.EnableReconnection && !_disposed)
+        {
+            // Fire disconnect event first for auto-reconnect case
+            try
+            {
+                OnDisconnected?.Invoke(NetConduit.DisconnectReason.TransportError, ex);
+            }
+            catch
+            {
+                // Swallow exceptions from event handlers
+            }
+            
+            _autoReconnectCts = new CancellationTokenSource();
+            _autoReconnectTask = Task.Run(() => AutoReconnectLoopAsync(ex, _autoReconnectCts.Token));
+            return;
+        }
+        
+        // No auto-reconnect - abort all channels first, then fire disconnect event
+        // (maintains original ordering for backward compatibility)
+        AbortAllChannels(ex);
+        
+        try
+        {
+            OnDisconnected?.Invoke(NetConduit.DisconnectReason.TransportError, ex);
+        }
+        catch
+        {
+            // Swallow exceptions from event handlers
+        }
+    }
+    
+    /// <summary>
+    /// Aborts all channels with the specified exception.
+    /// </summary>
+    private void AbortAllChannels(Exception ex)
+    {
         // Abort all write channels
         foreach (var channel in _writeChannelsByIndex.Values)
         {
@@ -1156,15 +1254,107 @@ public sealed class StreamMultiplexer : IStreamMultiplexer
         {
             channel.Abort(ChannelCloseReason.TransportFailed, ex);
         }
+    }
+    
+    /// <summary>
+    /// Auto-reconnection loop using the configured StreamFactory.
+    /// </summary>
+    private async Task AutoReconnectLoopAsync(Exception initialException, CancellationToken ct)
+    {
+        var lastException = initialException;
+        var currentDelay = _options.AutoReconnectDelay;
+        var maxAttempts = _options.MaxAutoReconnectAttempts;
+        var attempt = 0;
         
-        // Fire disconnect event
+        _isReconnecting = true;
+        
         try
         {
-            OnDisconnected?.Invoke(NetConduit.DisconnectReason.TransportError, ex);
+            while (!ct.IsCancellationRequested && !_disposed)
+            {
+                attempt++;
+                
+                // Check if we've exceeded max attempts (0 = unlimited)
+                if (maxAttempts > 0 && attempt > maxAttempts)
+                {
+                    var failEx = new MultiplexerException(
+                        ErrorCode.Internal, 
+                        $"Auto-reconnection failed after {maxAttempts} attempts.", 
+                        lastException);
+                    AbortAllChannels(failEx);
+                    OnAutoReconnectFailed?.Invoke(failEx);
+                    return;
+                }
+                
+                // Notify listeners of reconnection attempt
+                var eventArgs = new AutoReconnectEventArgs
+                {
+                    AttemptNumber = attempt,
+                    MaxAttempts = maxAttempts,
+                    NextDelay = currentDelay,
+                    LastException = lastException
+                };
+                
+                try
+                {
+                    OnAutoReconnecting?.Invoke(eventArgs);
+                }
+                catch
+                {
+                    // Swallow exceptions from event handlers
+                }
+                
+                if (eventArgs.Cancel)
+                {
+                    var cancelEx = new OperationCanceledException("Auto-reconnection cancelled by event handler.");
+                    AbortAllChannels(cancelEx);
+                    OnAutoReconnectFailed?.Invoke(cancelEx);
+                    return;
+                }
+                
+                // Wait before attempting (skip delay on first attempt)
+                if (attempt > 1)
+                {
+                    try
+                    {
+                        await Task.Delay(currentDelay, ct).ConfigureAwait(false);
+                    }
+                    catch (OperationCanceledException)
+                    {
+                        return;
+                    }
+                }
+                
+                try
+                {
+                    // Create new streams using factory
+                    var (newReadStream, newWriteStream) = await _options.StreamFactory!(ct).ConfigureAwait(false);
+                    
+                    // Attempt reconnection with new streams
+                    await ReconnectAsync(newReadStream, newWriteStream, ct).ConfigureAwait(false);
+                    
+                    // Success! Clear disconnect state
+                    _disconnectReason = null;
+                    _disconnectException = null;
+                    return;
+                }
+                catch (OperationCanceledException) when (ct.IsCancellationRequested)
+                {
+                    return;
+                }
+                catch (Exception ex)
+                {
+                    lastException = ex;
+                    
+                    // Apply exponential backoff for next attempt
+                    var nextDelay = TimeSpan.FromMilliseconds(currentDelay.TotalMilliseconds * _options.AutoReconnectBackoffMultiplier);
+                    currentDelay = nextDelay > _options.MaxAutoReconnectDelay ? _options.MaxAutoReconnectDelay : nextDelay;
+                }
+            }
         }
-        catch
+        finally
         {
-            // Swallow exceptions from event handlers
+            _isReconnecting = false;
         }
     }
 
@@ -1647,6 +1837,20 @@ public sealed class StreamMultiplexer : IStreamMultiplexer
             _shutdownCts.Cancel();
             _acceptChannel.Writer.TryComplete();
             
+            // Cancel auto-reconnect if in progress
+            try
+            {
+                _autoReconnectCts?.Cancel();
+                if (_autoReconnectTask != null)
+                {
+                    await Task.WhenAny(_autoReconnectTask, Task.Delay(TimeSpan.FromSeconds(1))).ConfigureAwait(false);
+                }
+            }
+            catch
+            {
+                // Ignore errors cancelling auto-reconnect
+            }
+            
             // Cancel any pending accepts
             foreach (var tcs in _pendingAccepts.Values)
             {
@@ -1683,6 +1887,7 @@ public sealed class StreamMultiplexer : IStreamMultiplexer
             try { _sendQueueSemaphore.Dispose(); } catch { }
             try { _shutdownCts.Dispose(); } catch { }
             try { _reconnectLock.Dispose(); } catch { }
+            try { _autoReconnectCts?.Dispose(); } catch { }
         }
     }
 }

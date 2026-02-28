@@ -1,6 +1,44 @@
 namespace NetConduit;
 
 /// <summary>
+/// Delegate that creates new read and write streams for reconnection.
+/// </summary>
+/// <param name="cancellationToken">Cancellation token.</param>
+/// <returns>A tuple containing the new read and write streams.</returns>
+public delegate Task<(Stream ReadStream, Stream WriteStream)> StreamFactoryDelegate(CancellationToken cancellationToken);
+
+/// <summary>
+/// Event arguments for auto-reconnect attempts.
+/// </summary>
+public sealed class AutoReconnectEventArgs
+{
+    /// <summary>
+    /// The attempt number (1-based).
+    /// </summary>
+    public int AttemptNumber { get; init; }
+    
+    /// <summary>
+    /// Maximum configured attempts.
+    /// </summary>
+    public int MaxAttempts { get; init; }
+    
+    /// <summary>
+    /// The delay before the next attempt.
+    /// </summary>
+    public TimeSpan NextDelay { get; init; }
+    
+    /// <summary>
+    /// The exception from the last connection attempt, if any.
+    /// </summary>
+    public Exception? LastException { get; init; }
+    
+    /// <summary>
+    /// Set to true to cancel the reconnection process.
+    /// </summary>
+    public bool Cancel { get; set; }
+}
+
+/// <summary>
 /// Configuration options for the multiplexer.
 /// </summary>
 public sealed class MultiplexerOptions
@@ -71,6 +109,33 @@ public sealed class MultiplexerOptions
     /// Interval for batched flush when FlushMode is Batched. Default: 1ms.
     /// </summary>
     public TimeSpan FlushInterval { get; init; } = TimeSpan.FromMilliseconds(1);
+    
+    /// <summary>
+    /// Factory delegate for creating streams. Required.
+    /// Used for initial connection and auto-reconnection on transport failure.
+    /// </summary>
+    public required StreamFactoryDelegate StreamFactory { get; init; }
+    
+    /// <summary>
+    /// Maximum number of auto-reconnection attempts before giving up. Default: 0 (unlimited).
+    /// Set to a positive value to limit attempts.
+    /// </summary>
+    public int MaxAutoReconnectAttempts { get; init; } = 0;
+    
+    /// <summary>
+    /// Initial delay between auto-reconnection attempts. Default: 1 second.
+    /// </summary>
+    public TimeSpan AutoReconnectDelay { get; init; } = TimeSpan.FromSeconds(1);
+    
+    /// <summary>
+    /// Maximum delay between auto-reconnection attempts (for exponential backoff). Default: 30 seconds.
+    /// </summary>
+    public TimeSpan MaxAutoReconnectDelay { get; init; } = TimeSpan.FromSeconds(30);
+    
+    /// <summary>
+    /// Multiplier for exponential backoff between reconnection attempts. Default: 2.0.
+    /// </summary>
+    public double AutoReconnectBackoffMultiplier { get; init; } = 2.0;
 }
 
 /// <summary>

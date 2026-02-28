@@ -12,8 +12,8 @@ public class DisconnectionTests
     {
         // Arrange
         await using var pipe = new DuplexPipe();
-        await using var mux1 = new StreamMultiplexer(pipe.Stream1, pipe.Stream1);
-        await using var mux2 = new StreamMultiplexer(pipe.Stream2, pipe.Stream2);
+        await using var mux1 = await TestMuxHelper.CreateMuxAsync(pipe.Stream1);
+        await using var mux2 = await TestMuxHelper.CreateMuxAsync(pipe.Stream2);
 
         var disconnectEvent = new TaskCompletionSource<DisconnectReason>();
         mux1.OnDisconnected += (reason, ex) => disconnectEvent.TrySetResult(reason);
@@ -44,8 +44,8 @@ public class DisconnectionTests
     {
         // Arrange
         await using var pipe = new DuplexPipe();
-        await using var mux1 = new StreamMultiplexer(pipe.Stream1, pipe.Stream1);
-        await using var mux2 = new StreamMultiplexer(pipe.Stream2, pipe.Stream2);
+        await using var mux1 = await TestMuxHelper.CreateMuxAsync(pipe.Stream1);
+        await using var mux2 = await TestMuxHelper.CreateMuxAsync(pipe.Stream2);
 
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
         var run1 = mux1.RunAsync(cts.Token);
@@ -78,10 +78,10 @@ public class DisconnectionTests
     public async Task LocalMuxDispose_WaitsForGracefulShutdown_ThenAborts()
     {
         // Arrange - use short timeout for test
-        var options = new MultiplexerOptions { GracefulShutdownTimeout = TimeSpan.FromMilliseconds(500) };
+        var options = new MultiplexerOptions { StreamFactory = _ => null!, GracefulShutdownTimeout = TimeSpan.FromMilliseconds(500) };
         await using var pipe = new DuplexPipe();
-        await using var mux1 = new StreamMultiplexer(pipe.Stream1, pipe.Stream1, options);
-        await using var mux2 = new StreamMultiplexer(pipe.Stream2, pipe.Stream2, options);
+        await using var mux1 = await TestMuxHelper.CreateMuxAsync(pipe.Stream1, options);
+        await using var mux2 = await TestMuxHelper.CreateMuxAsync(pipe.Stream2, options);
 
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
         var run1 = mux1.RunAsync(cts.Token);
@@ -112,8 +112,8 @@ public class DisconnectionTests
     {
         // Arrange
         await using var pipe = new DuplexPipe();
-        await using var mux1 = new StreamMultiplexer(pipe.Stream1, pipe.Stream1);
-        await using var mux2 = new StreamMultiplexer(pipe.Stream2, pipe.Stream2);
+        await using var mux1 = await TestMuxHelper.CreateMuxAsync(pipe.Stream1);
+        await using var mux2 = await TestMuxHelper.CreateMuxAsync(pipe.Stream2);
 
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
         var run1 = mux1.RunAsync(cts.Token);
@@ -139,8 +139,8 @@ public class DisconnectionTests
     {
         // Arrange
         await using var pipe = new DuplexPipe();
-        await using var mux1 = new StreamMultiplexer(pipe.Stream1, pipe.Stream1);
-        await using var mux2 = new StreamMultiplexer(pipe.Stream2, pipe.Stream2);
+        await using var mux1 = await TestMuxHelper.CreateMuxAsync(pipe.Stream1);
+        await using var mux2 = await TestMuxHelper.CreateMuxAsync(pipe.Stream2);
 
         var disconnectEvent = new TaskCompletionSource<DisconnectReason>();
         mux2.OnDisconnected += (reason, ex) => disconnectEvent.TrySetResult(reason);
@@ -175,8 +175,8 @@ public class DisconnectionTests
     {
         // Arrange
         await using var pipe = new DuplexPipe();
-        await using var mux1 = new StreamMultiplexer(pipe.Stream1, pipe.Stream1);
-        await using var mux2 = new StreamMultiplexer(pipe.Stream2, pipe.Stream2);
+        await using var mux1 = await TestMuxHelper.CreateMuxAsync(pipe.Stream1);
+        await using var mux2 = await TestMuxHelper.CreateMuxAsync(pipe.Stream2);
 
         var disconnectEvent = new TaskCompletionSource();
         mux2.OnDisconnected += (reason, ex) => disconnectEvent.TrySetResult();
@@ -206,8 +206,8 @@ public class DisconnectionTests
     {
         // Arrange
         await using var pipe = new DuplexPipe();
-        await using var mux1 = new StreamMultiplexer(pipe.Stream1, pipe.Stream1);
-        await using var mux2 = new StreamMultiplexer(pipe.Stream2, pipe.Stream2);
+        await using var mux1 = await TestMuxHelper.CreateMuxAsync(pipe.Stream1);
+        await using var mux2 = await TestMuxHelper.CreateMuxAsync(pipe.Stream2);
 
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
         var run1 = mux1.RunAsync(cts.Token);
@@ -245,8 +245,8 @@ public class DisconnectionTests
     {
         // Arrange
         await using var pipe = new DuplexPipe();
-        await using var mux1 = new StreamMultiplexer(pipe.Stream1, pipe.Stream1);
-        await using var mux2 = new StreamMultiplexer(pipe.Stream2, pipe.Stream2);
+        await using var mux1 = await TestMuxHelper.CreateMuxAsync(pipe.Stream1);
+        await using var mux2 = await TestMuxHelper.CreateMuxAsync(pipe.Stream2);
 
         var disconnectEvent = new TaskCompletionSource<(DisconnectReason reason, Exception? ex)>();
         mux1.OnDisconnected += (reason, ex) => disconnectEvent.TrySetResult((reason, ex));
@@ -278,8 +278,8 @@ public class DisconnectionTests
     {
         // Arrange
         await using var pipe = new DuplexPipe();
-        await using var mux1 = new StreamMultiplexer(pipe.Stream1, pipe.Stream1);
-        await using var mux2 = new StreamMultiplexer(pipe.Stream2, pipe.Stream2);
+        await using var mux1 = await TestMuxHelper.CreateMuxAsync(pipe.Stream1);
+        await using var mux2 = await TestMuxHelper.CreateMuxAsync(pipe.Stream2);
 
         var disconnectEvent = new TaskCompletionSource();
         mux1.OnDisconnected += (reason, ex) => disconnectEvent.TrySetResult();
@@ -309,8 +309,8 @@ public class DisconnectionTests
     {
         // Arrange
         await using var pipe = new DuplexPipe();
-        await using var mux1 = new StreamMultiplexer(pipe.Stream1, pipe.Stream1);
-        await using var mux2 = new StreamMultiplexer(pipe.Stream2, pipe.Stream2);
+        await using var mux1 = await TestMuxHelper.CreateMuxAsync(pipe.Stream1);
+        await using var mux2 = await TestMuxHelper.CreateMuxAsync(pipe.Stream2);
 
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
         var run1 = mux1.RunAsync(cts.Token);
@@ -348,8 +348,8 @@ public class DisconnectionTests
     {
         // Arrange
         await using var pipe = new DuplexPipe();
-        await using var mux1 = new StreamMultiplexer(pipe.Stream1, pipe.Stream1);
-        await using var mux2 = new StreamMultiplexer(pipe.Stream2, pipe.Stream2);
+        await using var mux1 = await TestMuxHelper.CreateMuxAsync(pipe.Stream1);
+        await using var mux2 = await TestMuxHelper.CreateMuxAsync(pipe.Stream2);
 
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
         var run1 = mux1.RunAsync(cts.Token);
@@ -382,8 +382,8 @@ public class DisconnectionTests
     {
         // Arrange
         await using var pipe = new DuplexPipe();
-        await using var mux1 = new StreamMultiplexer(pipe.Stream1, pipe.Stream1);
-        await using var mux2 = new StreamMultiplexer(pipe.Stream2, pipe.Stream2);
+        await using var mux1 = await TestMuxHelper.CreateMuxAsync(pipe.Stream1);
+        await using var mux2 = await TestMuxHelper.CreateMuxAsync(pipe.Stream2);
 
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
         var run1 = mux1.RunAsync(cts.Token);
@@ -416,8 +416,8 @@ public class DisconnectionTests
     {
         // Arrange
         await using var pipe = new DuplexPipe();
-        await using var mux1 = new StreamMultiplexer(pipe.Stream1, pipe.Stream1);
-        await using var mux2 = new StreamMultiplexer(pipe.Stream2, pipe.Stream2);
+        await using var mux1 = await TestMuxHelper.CreateMuxAsync(pipe.Stream1);
+        await using var mux2 = await TestMuxHelper.CreateMuxAsync(pipe.Stream2);
 
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
         var run1 = mux1.RunAsync(cts.Token);
@@ -447,8 +447,8 @@ public class DisconnectionTests
     {
         // Arrange
         await using var pipe = new DuplexPipe();
-        await using var mux1 = new StreamMultiplexer(pipe.Stream1, pipe.Stream1);
-        await using var mux2 = new StreamMultiplexer(pipe.Stream2, pipe.Stream2);
+        await using var mux1 = await TestMuxHelper.CreateMuxAsync(pipe.Stream1);
+        await using var mux2 = await TestMuxHelper.CreateMuxAsync(pipe.Stream2);
 
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
         var run1 = mux1.RunAsync(cts.Token);
@@ -480,8 +480,8 @@ public class DisconnectionTests
     {
         // Arrange
         await using var pipe = new DuplexPipe();
-        await using var mux1 = new StreamMultiplexer(pipe.Stream1, pipe.Stream1);
-        await using var mux2 = new StreamMultiplexer(pipe.Stream2, pipe.Stream2);
+        await using var mux1 = await TestMuxHelper.CreateMuxAsync(pipe.Stream1);
+        await using var mux2 = await TestMuxHelper.CreateMuxAsync(pipe.Stream2);
 
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
         var run1 = mux1.RunAsync(cts.Token);
@@ -512,8 +512,8 @@ public class DisconnectionTests
     {
         // Arrange
         await using var pipe = new DuplexPipe();
-        await using var mux1 = new StreamMultiplexer(pipe.Stream1, pipe.Stream1);
-        await using var mux2 = new StreamMultiplexer(pipe.Stream2, pipe.Stream2);
+        await using var mux1 = await TestMuxHelper.CreateMuxAsync(pipe.Stream1);
+        await using var mux2 = await TestMuxHelper.CreateMuxAsync(pipe.Stream2);
 
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
         var run1 = mux1.RunAsync(cts.Token);
@@ -560,8 +560,8 @@ public class DisconnectionTests
     {
         // Arrange
         await using var pipe = new DuplexPipe();
-        await using var mux1 = new StreamMultiplexer(pipe.Stream1, pipe.Stream1);
-        await using var mux2 = new StreamMultiplexer(pipe.Stream2, pipe.Stream2);
+        await using var mux1 = await TestMuxHelper.CreateMuxAsync(pipe.Stream1);
+        await using var mux2 = await TestMuxHelper.CreateMuxAsync(pipe.Stream2);
 
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
         var run1 = mux1.RunAsync(cts.Token);
@@ -608,8 +608,8 @@ public class DisconnectionTests
     {
         // Arrange
         await using var pipe = new DuplexPipe();
-        await using var mux1 = new StreamMultiplexer(pipe.Stream1, pipe.Stream1);
-        await using var mux2 = new StreamMultiplexer(pipe.Stream2, pipe.Stream2);
+        await using var mux1 = await TestMuxHelper.CreateMuxAsync(pipe.Stream1);
+        await using var mux2 = await TestMuxHelper.CreateMuxAsync(pipe.Stream2);
 
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
         var run1 = mux1.RunAsync(cts.Token);
@@ -657,10 +657,10 @@ public class DisconnectionTests
     public async Task MuxDispose_TimeoutExpires_AbortsForcefully()
     {
         // Arrange - use very short timeout
-        var options = new MultiplexerOptions { GracefulShutdownTimeout = TimeSpan.FromMilliseconds(100) };
+        var options = new MultiplexerOptions { StreamFactory = _ => null!, GracefulShutdownTimeout = TimeSpan.FromMilliseconds(100) };
         await using var pipe = new DuplexPipe();
-        await using var mux1 = new StreamMultiplexer(pipe.Stream1, pipe.Stream1, options);
-        await using var mux2 = new StreamMultiplexer(pipe.Stream2, pipe.Stream2, options);
+        await using var mux1 = await TestMuxHelper.CreateMuxAsync(pipe.Stream1, options);
+        await using var mux2 = await TestMuxHelper.CreateMuxAsync(pipe.Stream2, options);
 
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
         var run1 = mux1.RunAsync(cts.Token);
@@ -691,10 +691,10 @@ public class DisconnectionTests
     {
         // Arrange - use custom timeout
         var timeout = TimeSpan.FromMilliseconds(200);
-        var options = new MultiplexerOptions { GracefulShutdownTimeout = timeout };
+        var options = new MultiplexerOptions { StreamFactory = _ => null!, GracefulShutdownTimeout = timeout };
         await using var pipe = new DuplexPipe();
-        await using var mux1 = new StreamMultiplexer(pipe.Stream1, pipe.Stream1, options);
-        await using var mux2 = new StreamMultiplexer(pipe.Stream2, pipe.Stream2, options);
+        await using var mux1 = await TestMuxHelper.CreateMuxAsync(pipe.Stream1, options);
+        await using var mux2 = await TestMuxHelper.CreateMuxAsync(pipe.Stream2, options);
 
         // Assert options is set correctly
         Assert.Equal(timeout, mux1.Options.GracefulShutdownTimeout);
@@ -732,8 +732,8 @@ public class DisconnectionTests
     {
         // Arrange
         await using var pipe = new DuplexPipe();
-        await using var mux1 = new StreamMultiplexer(pipe.Stream1, pipe.Stream1);
-        await using var mux2 = new StreamMultiplexer(pipe.Stream2, pipe.Stream2);
+        await using var mux1 = await TestMuxHelper.CreateMuxAsync(pipe.Stream1);
+        await using var mux2 = await TestMuxHelper.CreateMuxAsync(pipe.Stream2);
 
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
         var run1 = mux1.RunAsync(cts.Token);
@@ -771,8 +771,8 @@ public class DisconnectionTests
     {
         // Arrange
         await using var pipe = new DuplexPipe();
-        await using var mux1 = new StreamMultiplexer(pipe.Stream1, pipe.Stream1);
-        await using var mux2 = new StreamMultiplexer(pipe.Stream2, pipe.Stream2);
+        await using var mux1 = await TestMuxHelper.CreateMuxAsync(pipe.Stream1);
+        await using var mux2 = await TestMuxHelper.CreateMuxAsync(pipe.Stream2);
 
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
         var run1 = mux1.RunAsync(cts.Token);
@@ -818,8 +818,8 @@ public class DisconnectionTests
     {
         // Arrange
         await using var pipe = new DuplexPipe();
-        await using var mux1 = new StreamMultiplexer(pipe.Stream1, pipe.Stream1);
-        await using var mux2 = new StreamMultiplexer(pipe.Stream2, pipe.Stream2);
+        await using var mux1 = await TestMuxHelper.CreateMuxAsync(pipe.Stream1);
+        await using var mux2 = await TestMuxHelper.CreateMuxAsync(pipe.Stream2);
 
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
         var run1 = mux1.RunAsync(cts.Token);
@@ -848,8 +848,8 @@ public class DisconnectionTests
     {
         // Arrange
         await using var pipe = new DuplexPipe();
-        await using var mux1 = new StreamMultiplexer(pipe.Stream1, pipe.Stream1);
-        await using var mux2 = new StreamMultiplexer(pipe.Stream2, pipe.Stream2);
+        await using var mux1 = await TestMuxHelper.CreateMuxAsync(pipe.Stream1);
+        await using var mux2 = await TestMuxHelper.CreateMuxAsync(pipe.Stream2);
 
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
         var run1 = mux1.RunAsync(cts.Token);
@@ -877,8 +877,8 @@ public class DisconnectionTests
     {
         // Arrange
         await using var pipe = new DuplexPipe();
-        await using var mux1 = new StreamMultiplexer(pipe.Stream1, pipe.Stream1);
-        await using var mux2 = new StreamMultiplexer(pipe.Stream2, pipe.Stream2);
+        await using var mux1 = await TestMuxHelper.CreateMuxAsync(pipe.Stream1);
+        await using var mux2 = await TestMuxHelper.CreateMuxAsync(pipe.Stream2);
 
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
         var run1 = mux1.RunAsync(cts.Token);
@@ -920,8 +920,8 @@ public class DisconnectionTests
     {
         // Arrange
         await using var pipe = new DuplexPipe();
-        await using var mux1 = new StreamMultiplexer(pipe.Stream1, pipe.Stream1);
-        await using var mux2 = new StreamMultiplexer(pipe.Stream2, pipe.Stream2);
+        await using var mux1 = await TestMuxHelper.CreateMuxAsync(pipe.Stream1);
+        await using var mux2 = await TestMuxHelper.CreateMuxAsync(pipe.Stream2);
 
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
         var run1 = mux1.RunAsync(cts.Token);
@@ -952,8 +952,8 @@ public class DisconnectionTests
     {
         // Arrange
         await using var pipe = new DuplexPipe();
-        await using var mux1 = new StreamMultiplexer(pipe.Stream1, pipe.Stream1);
-        await using var mux2 = new StreamMultiplexer(pipe.Stream2, pipe.Stream2);
+        await using var mux1 = await TestMuxHelper.CreateMuxAsync(pipe.Stream1);
+        await using var mux2 = await TestMuxHelper.CreateMuxAsync(pipe.Stream2);
 
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
         var run1 = mux1.RunAsync(cts.Token);
@@ -990,8 +990,8 @@ public class DisconnectionTests
     {
         // Arrange
         await using var pipe = new DuplexPipe();
-        await using var mux1 = new StreamMultiplexer(pipe.Stream1, pipe.Stream1);
-        await using var mux2 = new StreamMultiplexer(pipe.Stream2, pipe.Stream2);
+        await using var mux1 = await TestMuxHelper.CreateMuxAsync(pipe.Stream1);
+        await using var mux2 = await TestMuxHelper.CreateMuxAsync(pipe.Stream2);
 
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
         var run1 = mux1.RunAsync(cts.Token);
@@ -1041,7 +1041,7 @@ public class DisconnectionTests
     {
         // Arrange
         await using var pipe = new DuplexPipe();
-        var mux = new StreamMultiplexer(pipe.Stream1, pipe.Stream1);
+        var mux = await TestMuxHelper.CreateMuxAsync(pipe.Stream1);
 
         // Act & Assert - dispose before RunAsync should not throw
         await mux.DisposeAsync();
@@ -1052,7 +1052,7 @@ public class DisconnectionTests
     {
         // Arrange
         await using var pipe = new DuplexPipe();
-        await using var mux = new StreamMultiplexer(pipe.Stream1, pipe.Stream1);
+        await using var mux = await TestMuxHelper.CreateMuxAsync(pipe.Stream1);
 
         // Assert
         Assert.Null(mux.DisconnectReason);
@@ -1060,3 +1060,7 @@ public class DisconnectionTests
 
     #endregion
 }
+
+
+
+

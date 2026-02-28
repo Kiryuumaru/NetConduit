@@ -37,8 +37,8 @@ public partial class TransitTests
         await using var pipe = new DuplexPipe();
         using var cts = new CancellationTokenSource(TestTimeout);
 
-        await using var muxA = new StreamMultiplexer(pipe.Stream1, pipe.Stream1);
-        await using var muxB = new StreamMultiplexer(pipe.Stream2, pipe.Stream2);
+        await using var muxA = await TestMuxHelper.CreateMuxAsync(pipe.Stream1);
+        await using var muxB = await TestMuxHelper.CreateMuxAsync(pipe.Stream2);
 
         var runA = muxA.RunAsync(cts.Token);
         var runB = muxB.RunAsync(cts.Token);
@@ -83,8 +83,8 @@ public partial class TransitTests
         await using var pipe = new DuplexPipe();
         using var cts = new CancellationTokenSource(TestTimeout);
 
-        await using var muxA = new StreamMultiplexer(pipe.Stream1, pipe.Stream1);
-        await using var muxB = new StreamMultiplexer(pipe.Stream2, pipe.Stream2);
+        await using var muxA = await TestMuxHelper.CreateMuxAsync(pipe.Stream1);
+        await using var muxB = await TestMuxHelper.CreateMuxAsync(pipe.Stream2);
 
         var runA = muxA.RunAsync(cts.Token);
         var runB = muxB.RunAsync(cts.Token);
@@ -136,8 +136,8 @@ public partial class TransitTests
         await using var pipe = new DuplexPipe();
         using var cts = new CancellationTokenSource(TestTimeout);
 
-        await using var muxA = new StreamMultiplexer(pipe.Stream1, pipe.Stream1);
-        await using var muxB = new StreamMultiplexer(pipe.Stream2, pipe.Stream2);
+        await using var muxA = await TestMuxHelper.CreateMuxAsync(pipe.Stream1);
+        await using var muxB = await TestMuxHelper.CreateMuxAsync(pipe.Stream2);
 
         var runA = muxA.RunAsync(cts.Token);
         var runB = muxB.RunAsync(cts.Token);
@@ -192,8 +192,8 @@ public partial class TransitTests
         await using var pipe = new DuplexPipe();
         using var cts = new CancellationTokenSource(TestTimeout);
 
-        await using var muxA = new StreamMultiplexer(pipe.Stream1, pipe.Stream1);
-        await using var muxB = new StreamMultiplexer(pipe.Stream2, pipe.Stream2);
+        await using var muxA = await TestMuxHelper.CreateMuxAsync(pipe.Stream1);
+        await using var muxB = await TestMuxHelper.CreateMuxAsync(pipe.Stream2);
 
         var runA = muxA.RunAsync(cts.Token);
         var runB = muxB.RunAsync(cts.Token);
@@ -238,8 +238,8 @@ public partial class TransitTests
         await using var pipe = new DuplexPipe();
         using var cts = new CancellationTokenSource(TestTimeout);
 
-        await using var muxA = new StreamMultiplexer(pipe.Stream1, pipe.Stream1);
-        await using var muxB = new StreamMultiplexer(pipe.Stream2, pipe.Stream2);
+        await using var muxA = await TestMuxHelper.CreateMuxAsync(pipe.Stream1);
+        await using var muxB = await TestMuxHelper.CreateMuxAsync(pipe.Stream2);
 
         var runA = muxA.RunAsync(cts.Token);
         var runB = muxB.RunAsync(cts.Token);
@@ -296,8 +296,8 @@ public partial class TransitTests
         await using var pipe = new DuplexPipe();
         using var cts = new CancellationTokenSource(TestTimeout);
 
-        await using var muxA = new StreamMultiplexer(pipe.Stream1, pipe.Stream1);
-        await using var muxB = new StreamMultiplexer(pipe.Stream2, pipe.Stream2);
+        await using var muxA = await TestMuxHelper.CreateMuxAsync(pipe.Stream1);
+        await using var muxB = await TestMuxHelper.CreateMuxAsync(pipe.Stream2);
 
         var runA = muxA.RunAsync(cts.Token);
         var runB = muxB.RunAsync(cts.Token);
@@ -329,8 +329,8 @@ public partial class TransitTests
         await using var pipe = new DuplexPipe();
         using var cts = new CancellationTokenSource(TestTimeout);
 
-        await using var muxA = new StreamMultiplexer(pipe.Stream1, pipe.Stream1);
-        await using var muxB = new StreamMultiplexer(pipe.Stream2, pipe.Stream2);
+        await using var muxA = await TestMuxHelper.CreateMuxAsync(pipe.Stream1);
+        await using var muxB = await TestMuxHelper.CreateMuxAsync(pipe.Stream2);
 
         var runA = muxA.RunAsync(cts.Token);
         var runB = muxB.RunAsync(cts.Token);
@@ -364,8 +364,8 @@ public partial class TransitTests
         await using var pipe = new DuplexPipe();
         using var cts = new CancellationTokenSource(TestTimeout);
 
-        await using var muxA = new StreamMultiplexer(pipe.Stream1, pipe.Stream1);
-        await using var muxB = new StreamMultiplexer(pipe.Stream2, pipe.Stream2);
+        await using var muxA = await TestMuxHelper.CreateMuxAsync(pipe.Stream1);
+        await using var muxB = await TestMuxHelper.CreateMuxAsync(pipe.Stream2);
 
         var runA = muxA.RunAsync(cts.Token);
         var runB = muxB.RunAsync(cts.Token);
@@ -398,8 +398,8 @@ public partial class TransitTests
         await using var pipe = new DuplexPipe();
         using var cts = new CancellationTokenSource(TestTimeout);
 
-        await using var muxA = new StreamMultiplexer(pipe.Stream1, pipe.Stream1);
-        await using var muxB = new StreamMultiplexer(pipe.Stream2, pipe.Stream2);
+        await using var muxA = await TestMuxHelper.CreateMuxAsync(pipe.Stream1);
+        await using var muxB = await TestMuxHelper.CreateMuxAsync(pipe.Stream2);
 
         var runA = muxA.RunAsync(cts.Token);
         var runB = muxB.RunAsync(cts.Token);
@@ -435,8 +435,8 @@ public partial class TransitTests
         await using var pipe = new DuplexPipe();
         using var cts = new CancellationTokenSource(TestTimeout);
 
-        await using var muxA = new StreamMultiplexer(pipe.Stream1, pipe.Stream1);
-        await using var muxB = new StreamMultiplexer(pipe.Stream2, pipe.Stream2);
+        await using var muxA = await TestMuxHelper.CreateMuxAsync(pipe.Stream1);
+        await using var muxB = await TestMuxHelper.CreateMuxAsync(pipe.Stream2);
 
         var runA = muxA.RunAsync(cts.Token);
         var runB = muxB.RunAsync(cts.Token);
@@ -487,8 +487,8 @@ public partial class TransitTests
         await using var pipe = new DuplexPipe();
         using var cts = new CancellationTokenSource(TestTimeout);
 
-        await using var muxA = new StreamMultiplexer(pipe.Stream1, pipe.Stream1);
-        await using var muxB = new StreamMultiplexer(pipe.Stream2, pipe.Stream2);
+        await using var muxA = await TestMuxHelper.CreateMuxAsync(pipe.Stream1);
+        await using var muxB = await TestMuxHelper.CreateMuxAsync(pipe.Stream2);
 
         var runA = muxA.RunAsync(cts.Token);
         var runB = muxB.RunAsync(cts.Token);
@@ -525,8 +525,8 @@ public partial class TransitTests
         await using var pipe = new DuplexPipe();
         using var cts = new CancellationTokenSource(TestTimeout);
 
-        await using var muxA = new StreamMultiplexer(pipe.Stream1, pipe.Stream1);
-        await using var muxB = new StreamMultiplexer(pipe.Stream2, pipe.Stream2);
+        await using var muxA = await TestMuxHelper.CreateMuxAsync(pipe.Stream1);
+        await using var muxB = await TestMuxHelper.CreateMuxAsync(pipe.Stream2);
 
         var runA = muxA.RunAsync(cts.Token);
         var runB = muxB.RunAsync(cts.Token);
@@ -587,8 +587,8 @@ public partial class TransitTests
         await using var pipe = new DuplexPipe();
         using var cts = new CancellationTokenSource(TestTimeout);
 
-        await using var muxA = new StreamMultiplexer(pipe.Stream1, pipe.Stream1);
-        await using var muxB = new StreamMultiplexer(pipe.Stream2, pipe.Stream2);
+        await using var muxA = await TestMuxHelper.CreateMuxAsync(pipe.Stream1);
+        await using var muxB = await TestMuxHelper.CreateMuxAsync(pipe.Stream2);
 
         var runA = muxA.RunAsync(cts.Token);
         var runB = muxB.RunAsync(cts.Token);
@@ -621,8 +621,8 @@ public partial class TransitTests
         await using var pipe = new DuplexPipe();
         using var cts = new CancellationTokenSource(TestTimeout);
 
-        await using var muxA = new StreamMultiplexer(pipe.Stream1, pipe.Stream1);
-        await using var muxB = new StreamMultiplexer(pipe.Stream2, pipe.Stream2);
+        await using var muxA = await TestMuxHelper.CreateMuxAsync(pipe.Stream1);
+        await using var muxB = await TestMuxHelper.CreateMuxAsync(pipe.Stream2);
 
         var runA = muxA.RunAsync(cts.Token);
         var runB = muxB.RunAsync(cts.Token);
@@ -653,8 +653,8 @@ public partial class TransitTests
         await using var pipe = new DuplexPipe();
         using var cts = new CancellationTokenSource(TestTimeout);
 
-        await using var muxA = new StreamMultiplexer(pipe.Stream1, pipe.Stream1);
-        await using var muxB = new StreamMultiplexer(pipe.Stream2, pipe.Stream2);
+        await using var muxA = await TestMuxHelper.CreateMuxAsync(pipe.Stream1);
+        await using var muxB = await TestMuxHelper.CreateMuxAsync(pipe.Stream2);
 
         var runA = muxA.RunAsync(cts.Token);
         var runB = muxB.RunAsync(cts.Token);
@@ -680,8 +680,8 @@ public partial class TransitTests
         await using var pipe = new DuplexPipe();
         using var cts = new CancellationTokenSource(TestTimeout);
 
-        await using var muxA = new StreamMultiplexer(pipe.Stream1, pipe.Stream1);
-        await using var muxB = new StreamMultiplexer(pipe.Stream2, pipe.Stream2);
+        await using var muxA = await TestMuxHelper.CreateMuxAsync(pipe.Stream1);
+        await using var muxB = await TestMuxHelper.CreateMuxAsync(pipe.Stream2);
 
         var runA = muxA.RunAsync(cts.Token);
         var runB = muxB.RunAsync(cts.Token);
@@ -708,8 +708,8 @@ public partial class TransitTests
         await using var pipe = new DuplexPipe();
         using var cts = new CancellationTokenSource(TestTimeout);
 
-        await using var muxA = new StreamMultiplexer(pipe.Stream1, pipe.Stream1);
-        await using var muxB = new StreamMultiplexer(pipe.Stream2, pipe.Stream2);
+        await using var muxA = await TestMuxHelper.CreateMuxAsync(pipe.Stream1);
+        await using var muxB = await TestMuxHelper.CreateMuxAsync(pipe.Stream2);
 
         var runA = muxA.RunAsync(cts.Token);
         var runB = muxB.RunAsync(cts.Token);
@@ -742,8 +742,8 @@ public partial class TransitTests
         await using var pipe = new DuplexPipe();
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(120));
 
-        await using var muxA = new StreamMultiplexer(pipe.Stream1, pipe.Stream1);
-        await using var muxB = new StreamMultiplexer(pipe.Stream2, pipe.Stream2);
+        await using var muxA = await TestMuxHelper.CreateMuxAsync(pipe.Stream1);
+        await using var muxB = await TestMuxHelper.CreateMuxAsync(pipe.Stream2);
 
         var runA = muxA.RunAsync(cts.Token);
         var runB = muxB.RunAsync(cts.Token);
@@ -791,8 +791,8 @@ public partial class TransitTests
         await using var pipe = new DuplexPipe();
         using var cts = new CancellationTokenSource(TestTimeout);
 
-        await using var muxA = new StreamMultiplexer(pipe.Stream1, pipe.Stream1);
-        await using var muxB = new StreamMultiplexer(pipe.Stream2, pipe.Stream2);
+        await using var muxA = await TestMuxHelper.CreateMuxAsync(pipe.Stream1);
+        await using var muxB = await TestMuxHelper.CreateMuxAsync(pipe.Stream2);
 
         var runA = muxA.RunAsync(cts.Token);
         var runB = muxB.RunAsync(cts.Token);
@@ -831,8 +831,8 @@ public partial class TransitTests
         await using var pipe = new DuplexPipe();
         using var cts = new CancellationTokenSource(TestTimeout);
 
-        await using var muxA = new StreamMultiplexer(pipe.Stream1, pipe.Stream1);
-        await using var muxB = new StreamMultiplexer(pipe.Stream2, pipe.Stream2);
+        await using var muxA = await TestMuxHelper.CreateMuxAsync(pipe.Stream1);
+        await using var muxB = await TestMuxHelper.CreateMuxAsync(pipe.Stream2);
 
         var runA = muxA.RunAsync(cts.Token);
         var runB = muxB.RunAsync(cts.Token);
@@ -866,8 +866,8 @@ public partial class TransitTests
         await using var pipe = new DuplexPipe();
         using var cts = new CancellationTokenSource(TestTimeout);
 
-        await using var muxA = new StreamMultiplexer(pipe.Stream1, pipe.Stream1);
-        await using var muxB = new StreamMultiplexer(pipe.Stream2, pipe.Stream2);
+        await using var muxA = await TestMuxHelper.CreateMuxAsync(pipe.Stream1);
+        await using var muxB = await TestMuxHelper.CreateMuxAsync(pipe.Stream2);
 
         var runA = muxA.RunAsync(cts.Token);
         var runB = muxB.RunAsync(cts.Token);
@@ -902,8 +902,8 @@ public partial class TransitTests
         await using var pipe = new DuplexPipe();
         using var cts = new CancellationTokenSource(TestTimeout);
 
-        await using var muxA = new StreamMultiplexer(pipe.Stream1, pipe.Stream1);
-        await using var muxB = new StreamMultiplexer(pipe.Stream2, pipe.Stream2);
+        await using var muxA = await TestMuxHelper.CreateMuxAsync(pipe.Stream1);
+        await using var muxB = await TestMuxHelper.CreateMuxAsync(pipe.Stream2);
 
         var runA = muxA.RunAsync(cts.Token);
         var runB = muxB.RunAsync(cts.Token);
@@ -949,8 +949,8 @@ public partial class TransitTests
         await using var pipe = new DuplexPipe();
         using var cts = new CancellationTokenSource(TestTimeout);
 
-        await using var muxA = new StreamMultiplexer(pipe.Stream1, pipe.Stream1);
-        await using var muxB = new StreamMultiplexer(pipe.Stream2, pipe.Stream2);
+        await using var muxA = await TestMuxHelper.CreateMuxAsync(pipe.Stream1);
+        await using var muxB = await TestMuxHelper.CreateMuxAsync(pipe.Stream2);
 
         var runA = muxA.RunAsync(cts.Token);
         var runB = muxB.RunAsync(cts.Token);
@@ -993,8 +993,8 @@ public partial class TransitTests
         await using var pipe = new DuplexPipe();
         using var cts = new CancellationTokenSource(TestTimeout);
 
-        await using var muxA = new StreamMultiplexer(pipe.Stream1, pipe.Stream1);
-        await using var muxB = new StreamMultiplexer(pipe.Stream2, pipe.Stream2);
+        await using var muxA = await TestMuxHelper.CreateMuxAsync(pipe.Stream1);
+        await using var muxB = await TestMuxHelper.CreateMuxAsync(pipe.Stream2);
 
         var runA = muxA.RunAsync(cts.Token);
         var runB = muxB.RunAsync(cts.Token);
@@ -1049,8 +1049,8 @@ public partial class TransitTests
         await using var pipe = new DuplexPipe();
         using var cts = new CancellationTokenSource(TestTimeout);
 
-        await using var muxA = new StreamMultiplexer(pipe.Stream1, pipe.Stream1);
-        await using var muxB = new StreamMultiplexer(pipe.Stream2, pipe.Stream2);
+        await using var muxA = await TestMuxHelper.CreateMuxAsync(pipe.Stream1);
+        await using var muxB = await TestMuxHelper.CreateMuxAsync(pipe.Stream2);
 
         var runA = muxA.RunAsync(cts.Token);
         var runB = muxB.RunAsync(cts.Token);
@@ -1098,8 +1098,8 @@ public partial class TransitTests
         await using var pipe = new DuplexPipe();
         using var cts = new CancellationTokenSource(TestTimeout);
 
-        await using var muxA = new StreamMultiplexer(pipe.Stream1, pipe.Stream1);
-        await using var muxB = new StreamMultiplexer(pipe.Stream2, pipe.Stream2);
+        await using var muxA = await TestMuxHelper.CreateMuxAsync(pipe.Stream1);
+        await using var muxB = await TestMuxHelper.CreateMuxAsync(pipe.Stream2);
 
         var runA = muxA.RunAsync(cts.Token);
         var runB = muxB.RunAsync(cts.Token);
@@ -1136,8 +1136,8 @@ public partial class TransitTests
         await using var pipe = new DuplexPipe();
         using var cts = new CancellationTokenSource(TestTimeout);
 
-        await using var muxA = new StreamMultiplexer(pipe.Stream1, pipe.Stream1);
-        await using var muxB = new StreamMultiplexer(pipe.Stream2, pipe.Stream2);
+        await using var muxA = await TestMuxHelper.CreateMuxAsync(pipe.Stream1);
+        await using var muxB = await TestMuxHelper.CreateMuxAsync(pipe.Stream2);
 
         var runA = muxA.RunAsync(cts.Token);
         var runB = muxB.RunAsync(cts.Token);
@@ -1177,8 +1177,8 @@ public partial class TransitTests
         await using var pipe = new DuplexPipe();
         using var cts = new CancellationTokenSource(TestTimeout);
 
-        await using var muxA = new StreamMultiplexer(pipe.Stream1, pipe.Stream1);
-        await using var muxB = new StreamMultiplexer(pipe.Stream2, pipe.Stream2);
+        await using var muxA = await TestMuxHelper.CreateMuxAsync(pipe.Stream1);
+        await using var muxB = await TestMuxHelper.CreateMuxAsync(pipe.Stream2);
 
         var runA = muxA.RunAsync(cts.Token);
         var runB = muxB.RunAsync(cts.Token);
@@ -1257,8 +1257,8 @@ public partial class TransitTests
         await using var pipe = new DuplexPipe();
         using var cts = new CancellationTokenSource(TimeSpan.FromMinutes(2));
 
-        await using var muxA = new StreamMultiplexer(pipe.Stream1, pipe.Stream1);
-        await using var muxB = new StreamMultiplexer(pipe.Stream2, pipe.Stream2);
+        await using var muxA = await TestMuxHelper.CreateMuxAsync(pipe.Stream1);
+        await using var muxB = await TestMuxHelper.CreateMuxAsync(pipe.Stream2);
 
         var runA = muxA.RunAsync(cts.Token);
         var runB = muxB.RunAsync(cts.Token);
@@ -1387,8 +1387,8 @@ public partial class TransitTests
         await using var pipe = new DuplexPipe();
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(50));
 
-        await using var muxA = new StreamMultiplexer(pipe.Stream1, pipe.Stream1);
-        await using var muxB = new StreamMultiplexer(pipe.Stream2, pipe.Stream2);
+        await using var muxA = await TestMuxHelper.CreateMuxAsync(pipe.Stream1);
+        await using var muxB = await TestMuxHelper.CreateMuxAsync(pipe.Stream2);
 
         var runA = muxA.RunAsync(cts.Token);
         var runB = muxB.RunAsync(cts.Token);
@@ -1507,8 +1507,8 @@ public partial class TransitTests
         await using var pipe = new DuplexPipe();
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(100));
 
-        await using var muxA = new StreamMultiplexer(pipe.Stream1, pipe.Stream1);
-        await using var muxB = new StreamMultiplexer(pipe.Stream2, pipe.Stream2);
+        await using var muxA = await TestMuxHelper.CreateMuxAsync(pipe.Stream1);
+        await using var muxB = await TestMuxHelper.CreateMuxAsync(pipe.Stream2);
 
         var runA = muxA.RunAsync(cts.Token);
         var runB = muxB.RunAsync(cts.Token);
@@ -1636,8 +1636,8 @@ public partial class TransitTests
         await using var pipe = new DuplexPipe();
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(100));
 
-        await using var muxA = new StreamMultiplexer(pipe.Stream1, pipe.Stream1);
-        await using var muxB = new StreamMultiplexer(pipe.Stream2, pipe.Stream2);
+        await using var muxA = await TestMuxHelper.CreateMuxAsync(pipe.Stream1);
+        await using var muxB = await TestMuxHelper.CreateMuxAsync(pipe.Stream2);
 
         var runA = muxA.RunAsync(cts.Token);
         var runB = muxB.RunAsync(cts.Token);
@@ -1797,8 +1797,8 @@ public partial class TransitTests
         await using var pipe = new DuplexPipe();
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(100));
 
-        await using var muxA = new StreamMultiplexer(pipe.Stream1, pipe.Stream1);
-        await using var muxB = new StreamMultiplexer(pipe.Stream2, pipe.Stream2);
+        await using var muxA = await TestMuxHelper.CreateMuxAsync(pipe.Stream1);
+        await using var muxB = await TestMuxHelper.CreateMuxAsync(pipe.Stream2);
 
         var runA = muxA.RunAsync(cts.Token);
         var runB = muxB.RunAsync(cts.Token);
@@ -1937,3 +1937,5 @@ public partial class TransitTests
 
     #endregion
 }
+
+
