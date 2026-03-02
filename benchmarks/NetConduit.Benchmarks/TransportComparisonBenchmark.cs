@@ -68,25 +68,23 @@ public class TransportComparisonBenchmark
 
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(60));
 
-        var muxOptions = new MultiplexerOptions
-        {
-            EnableReconnection = false,
-            FlushMode = FlushMode.Immediate
-        };
-
         try
         {
             var serverTask = Task.Run(async () =>
             {
-                await using var server = await TcpMultiplexer.AcceptAsync(listener, muxOptions, cts.Token);
-                var runTask = await server.StartAsync(cts.Token);
+                var options = TcpMultiplexer.CreateServerOptions(listener);
+                await using var server = StreamMultiplexer.Create(options);
+                var runTask = server.Start(cts.Token);
+                await server.WaitForReadyAsync(cts.Token);
                 await AcceptAndReadChannels(server, ConcurrentChannels, DataSizePerChannel, ChunkSize, cts.Token);
             }, cts.Token);
 
             var clientTask = Task.Run(async () =>
             {
-                await using var client = await TcpMultiplexer.ConnectAsync("127.0.0.1", port, muxOptions, cts.Token);
-                var runTask = await client.StartAsync(cts.Token);
+                var options = TcpMultiplexer.CreateOptions("127.0.0.1", port);
+                await using var client = StreamMultiplexer.Create(options);
+                var runTask = client.Start(cts.Token);
+                await client.WaitForReadyAsync(cts.Token);
                 await OpenAndWriteChannels(client, ConcurrentChannels, DataSizePerChannel, _sendBuffer, cts.Token);
             }, cts.Token);
 
@@ -111,23 +109,21 @@ public class TransportComparisonBenchmark
 
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(60));
 
-        var muxOptions = new MultiplexerOptions
-        {
-            EnableReconnection = false,
-            FlushMode = FlushMode.Immediate
-        };
-
         var serverTask = Task.Run(async () =>
         {
-            await using var server = await UdpMultiplexer.AcceptAsync(actualServerPort, null, muxOptions, cts.Token);
-            var runTask = await server.StartAsync(cts.Token);
+            var options = UdpMultiplexer.CreateServerOptions(actualServerPort, null);
+            await using var server = StreamMultiplexer.Create(options);
+            var runTask = server.Start(cts.Token);
+            await server.WaitForReadyAsync(cts.Token);
             await AcceptAndReadChannels(server, ConcurrentChannels, DataSizePerChannel, ChunkSize, cts.Token);
         }, cts.Token);
 
         var clientTask = Task.Run(async () =>
         {
-            await using var client = await UdpMultiplexer.ConnectAsync("127.0.0.1", actualServerPort, null, muxOptions, cts.Token);
-            var runTask = await client.StartAsync(cts.Token);
+            var options = UdpMultiplexer.CreateOptions("127.0.0.1", actualServerPort, null);
+            await using var client = StreamMultiplexer.Create(options);
+            var runTask = client.Start(cts.Token);
+            await client.WaitForReadyAsync(cts.Token);
             await OpenAndWriteChannels(client, ConcurrentChannels, DataSizePerChannel, _sendBuffer, cts.Token);
         }, cts.Token);
 
@@ -143,18 +139,14 @@ public class TransportComparisonBenchmark
     {
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(60));
 
-        var muxOptions = new MultiplexerOptions
-        {
-            EnableReconnection = false,
-            FlushMode = FlushMode.Immediate
-        };
-
         var pipeName = $"netconduit_bench_{Guid.NewGuid():N}";
 
         var serverTask = Task.Run(async () =>
         {
-            await using var server = await IpcMultiplexer.AcceptAsync(pipeName, muxOptions, cts.Token);
-            var runTask = await server.StartAsync(cts.Token);
+            var options = IpcMultiplexer.CreateServerOptions(pipeName);
+            await using var server = StreamMultiplexer.Create(options);
+            var runTask = server.Start(cts.Token);
+            await server.WaitForReadyAsync(cts.Token);
             await AcceptAndReadChannels(server, ConcurrentChannels, DataSizePerChannel, ChunkSize, cts.Token);
         }, cts.Token);
 
@@ -162,8 +154,10 @@ public class TransportComparisonBenchmark
 
         var clientTask = Task.Run(async () =>
         {
-            await using var client = await IpcMultiplexer.ConnectAsync(pipeName, muxOptions, cts.Token);
-            var runTask = await client.StartAsync(cts.Token);
+            var options = IpcMultiplexer.CreateOptions(pipeName);
+            await using var client = StreamMultiplexer.Create(options);
+            var runTask = client.Start(cts.Token);
+            await client.WaitForReadyAsync(cts.Token);
             await OpenAndWriteChannels(client, ConcurrentChannels, DataSizePerChannel, _sendBuffer, cts.Token);
         }, cts.Token);
 
@@ -180,14 +174,8 @@ public class TransportComparisonBenchmark
         var port = GetAvailablePort();
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(60));
 
-        var muxOptions = new MultiplexerOptions
-        {
-            EnableReconnection = false,
-            FlushMode = FlushMode.Immediate
-        };
-
-        WebSocketMultiplexerConnection? serverConnection = null;
-        var serverReady = new TaskCompletionSource<WebSocketMultiplexerConnection>();
+        StreamMultiplexer? serverConnection = null;
+        var serverReady = new TaskCompletionSource<StreamMultiplexer>();
 
         var builder = WebApplication.CreateSlimBuilder();
         builder.WebHost.UseUrls($"http://localhost:{port}");
@@ -198,7 +186,8 @@ public class TransportComparisonBenchmark
             if (context.WebSockets.IsWebSocketRequest)
             {
                 var ws = await context.WebSockets.AcceptWebSocketAsync();
-                serverConnection = WebSocketMultiplexer.Accept(ws, muxOptions);
+                var options = WebSocketMultiplexer.CreateServerOptions(ws);
+                serverConnection = StreamMultiplexer.Create(options);
                 serverReady.TrySetResult(serverConnection);
                 try { await Task.Delay(Timeout.Infinite, cts.Token); }
                 catch (OperationCanceledException) { }
@@ -212,14 +201,17 @@ public class TransportComparisonBenchmark
             var serverTask = Task.Run(async () =>
             {
                 var server = await serverReady.Task;
-                var runTask = await server.StartAsync(cts.Token);
+                var runTask = server.Start(cts.Token);
+                await server.WaitForReadyAsync(cts.Token);
                 await AcceptAndReadChannels(server, ConcurrentChannels, DataSizePerChannel, ChunkSize, cts.Token);
             }, cts.Token);
 
             var clientTask = Task.Run(async () =>
             {
-                await using var client = await WebSocketMultiplexer.ConnectAsync($"ws://localhost:{port}/ws", muxOptions, null, cts.Token);
-                var runTask = await client.StartAsync(cts.Token);
+                var options = WebSocketMultiplexer.CreateOptions(new Uri($"ws://localhost:{port}/ws"));
+                await using var client = StreamMultiplexer.Create(options);
+                var runTask = client.Start(cts.Token);
+                await client.WaitForReadyAsync(cts.Token);
                 await OpenAndWriteChannels(client, ConcurrentChannels, DataSizePerChannel, _sendBuffer, cts.Token);
             }, cts.Token);
 

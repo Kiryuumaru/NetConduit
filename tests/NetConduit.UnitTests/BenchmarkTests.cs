@@ -29,8 +29,8 @@ public class BenchmarkTests
 
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(60));
         
-        var initiatorTask = initiator.RunAsync(cts.Token);
-        var acceptorTask = acceptor.RunAsync(cts.Token);
+        var initiatorTask = initiator.Start(cts.Token);
+        var acceptorTask = acceptor.Start(cts.Token);
         await Task.Delay(100);
 
         var iterations = 100;
@@ -109,8 +109,8 @@ public class BenchmarkTests
 
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(120));
         
-        var initiatorTask = initiator.RunAsync(cts.Token);
-        var acceptorTask = acceptor.RunAsync(cts.Token);
+        var initiatorTask = initiator.Start(cts.Token);
+        var acceptorTask = acceptor.Start(cts.Token);
         await Task.Delay(100);
 
         // Create bidirectional channels
@@ -184,8 +184,8 @@ public class BenchmarkTests
 
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(180));
         
-        var initiatorTask = initiator.RunAsync(cts.Token);
-        var acceptorTask = acceptor.RunAsync(cts.Token);
+        var initiatorTask = initiator.Start(cts.Token);
+        var acceptorTask = acceptor.Start(cts.Token);
         await Task.Delay(200);
 
         var iterations = 20;
@@ -284,8 +284,8 @@ public class BenchmarkTests
 
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(120));
         
-        var initiatorTask = initiator.RunAsync(cts.Token);
-        var acceptorTask = acceptor.RunAsync(cts.Token);
+        var initiatorTask = initiator.Start(cts.Token);
+        var acceptorTask = acceptor.Start(cts.Token);
         await Task.Delay(100);
 
         ReadChannel? readChannel = null;
@@ -353,8 +353,8 @@ public class BenchmarkTests
 
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(180));
         
-        var initiatorTask = initiator.RunAsync(cts.Token);
-        var acceptorTask = acceptor.RunAsync(cts.Token);
+        var initiatorTask = initiator.Start(cts.Token);
+        var acceptorTask = acceptor.Start(cts.Token);
         await Task.Delay(100);
 
         var channelCounts = new[] { 1, 2, 4, 8 };  // Reduced from 32
@@ -471,8 +471,8 @@ public class BenchmarkTests
 
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(60));
         
-        var initiatorTask = initiator.RunAsync(cts.Token);
-        var acceptorTask = acceptor.RunAsync(cts.Token);
+        var initiatorTask = initiator.Start(cts.Token);
+        var acceptorTask = acceptor.Start(cts.Token);
         await Task.Delay(100);
 
         ReadChannel? readChannel = null;
@@ -548,8 +548,8 @@ public class BenchmarkTests
 
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(60));
         
-        var initiatorTask = initiator.RunAsync(cts.Token);
-        var acceptorTask = acceptor.RunAsync(cts.Token);
+        var initiatorTask = initiator.Start(cts.Token);
+        var acceptorTask = acceptor.Start(cts.Token);
         await Task.Delay(200); // Longer delay for initialization
 
         var iterations = 200;
@@ -624,8 +624,8 @@ public class BenchmarkTests
 
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(120));
         
-        var initiatorTask = initiator.RunAsync(cts.Token);
-        var acceptorTask = acceptor.RunAsync(cts.Token);
+        var initiatorTask = initiator.Start(cts.Token);
+        var acceptorTask = acceptor.Start(cts.Token);
         await Task.Delay(100);
 
         var (clientSide, serverSide) = await CreateBidirectionalAsync(initiator, acceptor, cts.Token);
@@ -711,8 +711,8 @@ public class BenchmarkTests
 
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(120));
         
-        var initiatorTask = initiator.RunAsync(cts.Token);
-        var acceptorTask = acceptor.RunAsync(cts.Token);
+        var initiatorTask = initiator.Start(cts.Token);
+        var acceptorTask = acceptor.Start(cts.Token);
         await Task.Delay(100);
 
         var channelCounts = new[] { 10, 50, 100 };  // Reduced further
@@ -802,8 +802,8 @@ public class BenchmarkTests
 
             using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(60));
             
-            var initiatorTask = initiator.RunAsync(cts.Token);
-            var acceptorTask = acceptor.RunAsync(cts.Token);
+            var initiatorTask = initiator.Start(cts.Token);
+            var acceptorTask = acceptor.Start(cts.Token);
             await Task.Delay(100);
 
             ReadChannel? readChannel = null;
@@ -909,8 +909,8 @@ public class BenchmarkTests
 
             using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(60));
             
-            var initiatorTask = initiator.RunAsync(cts.Token);
-            var acceptorTask = acceptor.RunAsync(cts.Token);
+            var initiatorTask = initiator.Start(cts.Token);
+            var acceptorTask = acceptor.Start(cts.Token);
             await Task.Delay(100);
 
             ReadChannel? readChannel = null;

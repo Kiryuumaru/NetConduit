@@ -12,9 +12,20 @@ namespace NetConduit;
 /// </summary>
 public sealed class StreamMultiplexer : IStreamMultiplexer
 {
-    private readonly Stream _readStream;
-    private readonly Stream _writeStream;
+    private IStreamPair? _streamPair;
+    private Stream? _readStream;
+    private Stream? _writeStream;
     private readonly MultiplexerOptions _options;
+    
+    /// <summary>
+    /// Gets the read stream, throwing if not connected.
+    /// </summary>
+    private Stream ReadStream => _readStream ?? throw new InvalidOperationException("Not connected. Ensure Start() has been called and connection is established.");
+    
+    /// <summary>
+    /// Gets the write stream, throwing if not connected.
+    /// </summary>
+    private Stream WriteStream => _writeStream ?? throw new InvalidOperationException("Not connected. Ensure Start() has been called and connection is established.");
     private readonly Guid _sessionId;
     
     // Write channels use LOCAL index space (indices we allocate)
@@ -27,7 +38,7 @@ public sealed class StreamMultiplexer : IStreamMultiplexer
     private readonly Channel<ReadChannel> _acceptChannel;
     private readonly SemaphoreSlim _writeLock = new(1, 1);
     private readonly CancellationTokenSource _shutdownCts = new();
-    private readonly TaskCompletionSource _handshakeCompleted = new(TaskCreationOptions.RunContinuationsAsynchronously);
+    private TaskCompletionSource _handshakeCompleted = new(TaskCreationOptions.RunContinuationsAsynchronously);
     private readonly PriorityQueue<(uint ChannelIndex, ReadOnlyMemory<byte> Data), byte> _sendQueue = new();
     private readonly SemaphoreSlim _sendQueueSemaphore = new(0);
     private readonly object _sendQueueLock = new();
@@ -40,6 +51,11 @@ public sealed class StreamMultiplexer : IStreamMultiplexer
     private TaskCompletionSource? _disconnectedTcs;
     private Task? _autoReconnectTask;
     private CancellationTokenSource? _autoReconnectCts;
+    
+    // Ready gate for WaitForReadyAsync() and channel operations
+    private readonly TaskCompletionSource _readyTcs = new(TaskCreationOptions.RunContinuationsAsynchronously);
+    private volatile int _currentConnectionAttempt;
+    private Task? _mainLoopTask;
     
     // Index space negotiation via handshake nonce
     private long _localNonce;
@@ -64,17 +80,17 @@ public sealed class StreamMultiplexer : IStreamMultiplexer
     private readonly byte[] _headerBuffer = new byte[FrameHeader.Size]; // Reusable header buffer
 
     /// <summary>
-    /// Creates a new stream multiplexer. Use <see cref="CreateAsync"/> to create an instance.
+    /// Creates a new stream multiplexer (no I/O). Use <see cref="Create"/> to create an instance.
     /// </summary>
-    /// <param name="readStream">Stream for reading data from remote.</param>
-    /// <param name="writeStream">Stream for writing data to remote.</param>
-    /// <param name="options">Multiplexer options.</param>
-    private StreamMultiplexer(Stream readStream, Stream writeStream, MultiplexerOptions options)
+    /// <param name="options">Multiplexer options with required StreamFactory.</param>
+    private StreamMultiplexer(MultiplexerOptions options)
     {
-        _readStream = readStream ?? throw new ArgumentNullException(nameof(readStream));
-        _writeStream = writeStream ?? throw new ArgumentNullException(nameof(writeStream));
         _options = options ?? throw new ArgumentNullException(nameof(options));
         _sessionId = _options.SessionId ?? Guid.NewGuid();
+        
+        // Streams will be assigned when Start() calls StreamFactory
+        _readStream = null;
+        _writeStream = null;
         
         // Index space will be determined after handshake nonce exchange
         // Higher nonce uses odd indices (1, 3, 5, ...), lower uses even (2, 4, 6, ...)
@@ -90,10 +106,9 @@ public sealed class StreamMultiplexer : IStreamMultiplexer
     }
 
     /// <summary>
-    /// Creates a new stream multiplexer using the StreamFactory from options.
+    /// Creates a new multiplexer. No I/O occurs until Start() is called.
     /// </summary>
     /// <param name="options">Multiplexer options with required StreamFactory.</param>
-    /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>A new StreamMultiplexer instance.</returns>
     /// <example>
     /// <code>
@@ -106,18 +121,18 @@ public sealed class StreamMultiplexer : IStreamMultiplexer
     ///         return (stream, stream);
     ///     }
     /// };
-    /// await using var mux = await StreamMultiplexer.CreateAsync(options);
+    /// var mux = StreamMultiplexer.Create(options);
+    /// var runTask = mux.Start();
+    /// await mux.WaitForReadyAsync();
     /// </code>
     /// </example>
-    public static async Task<StreamMultiplexer> CreateAsync(
-        MultiplexerOptions options,
-        CancellationToken cancellationToken = default)
+    public static StreamMultiplexer Create(MultiplexerOptions options)
     {
         ArgumentNullException.ThrowIfNull(options);
-        
-        var (readStream, writeStream) = await options.StreamFactory(cancellationToken).ConfigureAwait(false);
-        return new StreamMultiplexer(readStream, writeStream, options);
+        return new StreamMultiplexer(options);
     }
+
+
 
     /// <summary>Multiplexer options.</summary>
     public MultiplexerOptions Options => _options;
@@ -221,6 +236,16 @@ public sealed class StreamMultiplexer : IStreamMultiplexer
     /// Whether the multiplexer is currently attempting to reconnect.
     /// </summary>
     public bool IsReconnecting => _isReconnecting;
+    
+    /// <summary>
+    /// Current connection attempt number (0 if connected, >0 during connecting/reconnecting).
+    /// </summary>
+    public int CurrentConnectionAttempt => _currentConnectionAttempt;
+    
+    /// <summary>
+    /// Event raised when the first successful connection + handshake completes.
+    /// </summary>
+    public event Action? OnReady;
 
     /// <summary>
     /// Waits for the handshake to complete.
@@ -228,18 +253,24 @@ public sealed class StreamMultiplexer : IStreamMultiplexer
     /// <param name="cancellationToken">Cancellation token.</param>
     internal Task WaitForHandshakeAsync(CancellationToken cancellationToken = default)
         => _handshakeCompleted.Task.WaitAsync(cancellationToken);
-
+    
     /// <summary>
-    /// Starts the multiplexer and waits for handshake to complete.
-    /// After this method returns, the multiplexer is ready to open and accept channels.
-    /// The background processing continues until the multiplexer is disposed or cancelled.
+    /// Waits until the multiplexer is ready (first connection + handshake complete).
     /// </summary>
     /// <param name="cancellationToken">Cancellation token.</param>
-    /// <returns>A task representing the background processing. This task completes when the multiplexer shuts down.</returns>
+    public Task WaitForReadyAsync(CancellationToken cancellationToken = default)
+        => _readyTcs.Task.WaitAsync(cancellationToken);
+    
+    /// <summary>
+    /// Starts the multiplexer background processing. No I/O occurs until this is called.
+    /// </summary>
+    /// <param name="cancellationToken">Cancellation token to stop the multiplexer.</param>
+    /// <returns>A task representing the background processing. Completes when the multiplexer shuts down.</returns>
     /// <example>
     /// <code>
-    /// // Start the multiplexer and wait for it to be ready
-    /// var runTask = await mux.StartAsync(cancellationToken);
+    /// var mux = StreamMultiplexer.Create(options);
+    /// var runTask = mux.Start(cancellationToken);
+    /// await mux.WaitForReadyAsync();
     /// 
     /// // Now you can open channels
     /// var channel = await mux.OpenChannelAsync(new ChannelOptions { ChannelId = "my-channel" });
@@ -248,73 +279,49 @@ public sealed class StreamMultiplexer : IStreamMultiplexer
     /// await runTask;
     /// </code>
     /// </example>
-    public async Task<Task> StartAsync(CancellationToken cancellationToken = default)
+    public Task Start(CancellationToken cancellationToken = default)
     {
         if (_isRunning)
-            throw new InvalidOperationException("Multiplexer is already running.");
-
-        // Start RunAsync in the background
-        var runTask = RunAsync(cancellationToken);
-        
-        // Wait for handshake to complete (or RunAsync to fail)
-        var handshakeTask = _handshakeCompleted.Task.WaitAsync(cancellationToken);
-        var completedTask = await Task.WhenAny(runTask, handshakeTask).ConfigureAwait(false);
-        
-        // If RunAsync completed first, it means an error occurred before handshake
-        if (completedTask == runTask)
         {
-            // Propagate any exception from RunAsync
-            await runTask.ConfigureAwait(false);
-            throw new InvalidOperationException("Multiplexer stopped before handshake completed.");
+            throw new InvalidOperationException("Start() has already been called. The multiplexer can only be started once.");
         }
-        
-        // Handshake completed, return the background task
-        return runTask;
-    }
-
-    /// <summary>
-    /// Starts the multiplexer read/write loops.
-    /// </summary>
-    internal async Task RunAsync(CancellationToken cancellationToken = default)
-    {
-        if (_isRunning)
-            throw new InvalidOperationException("Multiplexer is already running.");
 
         _isRunning = true;
-        _isConnected = true;
         
+        // Spawn MainLoopAsync as background task
+        _mainLoopTask = MainLoopAsync(cancellationToken);
+        return _mainLoopTask;
+    }
+    
+    /// <summary>
+    /// Main loop that handles connection and reconnection.
+    /// </summary>
+    private async Task MainLoopAsync(CancellationToken cancellationToken)
+    {
         using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, _shutdownCts.Token);
         var ct = linkedCts.Token;
 
         try
         {
-            // Send handshake
-            await SendHandshakeAsync(ct).ConfigureAwait(false);
+            // Initial connection with retry (isReconnecting = false)
+            await ConnectWithRetryAsync(isReconnecting: false, ct).ConfigureAwait(false);
             
-            // Start background tasks
-            _readTask = ReadLoopAsync(ct);
-            _writeTask = WriteLoopAsync(ct);
-            _pingTask = PingLoopAsync(ct);
+            // Signal ready after first successful connection
+            _readyTcs.TrySetResult();
+            try { OnReady?.Invoke(); } catch { }
             
-            // Start flush task only if batched mode
-            if (_options.FlushMode == FlushMode.Batched)
-                _flushTask = FlushLoopAsync(ct);
-
-            // Wait for handshake to complete
-            await _handshakeCompleted.Task.WaitAsync(ct).ConfigureAwait(false);
-
-            // Wait for all tasks to complete
-            var tasks = _flushTask != null 
-                ? new[] { _readTask, _writeTask, _pingTask, _flushTask }
-                : new[] { _readTask, _writeTask, _pingTask };
-            await Task.WhenAll(tasks).ConfigureAwait(false);
+            // Run the main processing loops
+            await RunProcessingLoopsAsync(ct).ConfigureAwait(false);
         }
-        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested || _shutdownCts.IsCancellationRequested)
         {
-            // Normal shutdown
+            // Normal shutdown - set ready as cancelled if not yet ready
+            _readyTcs.TrySetCanceled(cancellationToken);
         }
         catch (Exception ex)
         {
+            // Fatal error - propagate to ready waiters
+            _readyTcs.TrySetException(ex);
             OnError?.Invoke(ex);
             throw;
         }
@@ -323,6 +330,392 @@ public sealed class StreamMultiplexer : IStreamMultiplexer
             _isRunning = false;
             _isConnected = false;
         }
+    }
+    
+    /// <summary>
+    /// Unified connection logic used for both initial connection and reconnection.
+    /// </summary>
+    private async Task ConnectWithRetryAsync(bool isReconnecting, CancellationToken ct)
+    {
+        Exception? lastException = null;
+        var currentDelay = _options.AutoReconnectDelay;
+        var maxAttempts = _options.MaxAutoReconnectAttempts;
+        var attempt = 0;
+        
+        _isReconnecting = isReconnecting;
+        
+        try
+        {
+            while (!ct.IsCancellationRequested && !_disposed)
+            {
+                attempt++;
+                _currentConnectionAttempt = attempt;
+                
+                // Check if we've exceeded max attempts (0 = unlimited)
+                if (maxAttempts > 0 && attempt > maxAttempts)
+                {
+                    var failEx = lastException != null 
+                        ? new MultiplexerException(ErrorCode.Internal, $"Connection failed after {maxAttempts} attempts.", lastException)
+                        : new MultiplexerException(ErrorCode.Internal, $"Connection failed after {maxAttempts} attempts.");
+                    
+                    if (isReconnecting)
+                    {
+                        AbortAllChannels(failEx);
+                    }
+                    
+                    OnAutoReconnectFailed?.Invoke(failEx);
+                    throw failEx;
+                }
+                
+                // Fire OnAutoReconnecting event BEFORE each attempt (including initial)
+                var eventArgs = new AutoReconnectEventArgs
+                {
+                    AttemptNumber = attempt,
+                    MaxAttempts = maxAttempts,
+                    NextDelay = currentDelay,
+                    LastException = lastException,
+                    IsReconnecting = isReconnecting
+                };
+                
+                try { OnAutoReconnecting?.Invoke(eventArgs); } catch { }
+                
+                if (eventArgs.Cancel)
+                {
+                    var cancelEx = new OperationCanceledException("Connection cancelled by event handler.");
+                    if (isReconnecting)
+                    {
+                        AbortAllChannels(cancelEx);
+                    }
+                    OnAutoReconnectFailed?.Invoke(cancelEx);
+                    throw cancelEx;
+                }
+                
+                // Wait before attempting (skip delay on first attempt)
+                if (attempt > 1)
+                {
+                    try
+                    {
+                        await Task.Delay(currentDelay, ct).ConfigureAwait(false);
+                    }
+                    catch (OperationCanceledException)
+                    {
+                        throw;
+                    }
+                }
+                
+                try
+                {
+                    // Step 1: Create stream pair using StreamFactory (with optional timeout)
+                    IStreamPair streamPair;
+                    
+                    if (_options.ConnectionTimeout != Timeout.InfiniteTimeSpan)
+                    {
+                        using var connectionTimeoutCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+                        connectionTimeoutCts.CancelAfter(_options.ConnectionTimeout);
+                        
+                        try
+                        {
+                            streamPair = await _options.StreamFactory(connectionTimeoutCts.Token).ConfigureAwait(false);
+                        }
+                        catch (OperationCanceledException) when (!ct.IsCancellationRequested)
+                        {
+                            throw new TimeoutException($"Connection timed out after {_options.ConnectionTimeout}");
+                        }
+                    }
+                    else
+                    {
+                        streamPair = await _options.StreamFactory(ct).ConfigureAwait(false);
+                    }
+                    
+                    if (streamPair.ReadStream == null || streamPair.WriteStream == null)
+                    {
+                        throw new InvalidOperationException("StreamFactory returned null stream(s).");
+                    }
+                    
+                    // Assign stream pair
+                    _streamPair = streamPair;
+                    _readStream = streamPair.ReadStream;
+                    _writeStream = streamPair.WriteStream;
+                    
+                    // Step 2: Perform handshake (with optional timeout)
+                    await PerformHandshakeAsync(ct).ConfigureAwait(false);
+                    
+                    // Success!
+                    _isConnected = true;
+                    _currentConnectionAttempt = 0;
+                    _disconnectReason = null;
+                    _disconnectException = null;
+                    
+                    if (isReconnecting)
+                    {
+                        try { OnReconnected?.Invoke(); } catch { }
+                    }
+                    
+                    return; // Exit retry loop on success
+                }
+                catch (OperationCanceledException) when (ct.IsCancellationRequested)
+                {
+                    throw;
+                }
+                catch (Exception ex)
+                {
+                    lastException = ex;
+                    
+                    // Clean up failed stream pair
+                    await DisposeStreamsAsync().ConfigureAwait(false);
+                    
+                    // Apply exponential backoff for next attempt
+                    var nextDelay = TimeSpan.FromMilliseconds(currentDelay.TotalMilliseconds * _options.AutoReconnectBackoffMultiplier);
+                    currentDelay = nextDelay > _options.MaxAutoReconnectDelay ? _options.MaxAutoReconnectDelay : nextDelay;
+                }
+            }
+        }
+        finally
+        {
+            _isReconnecting = false;
+        }
+        
+        // If we get here without returning, we were cancelled
+        ct.ThrowIfCancellationRequested();
+    }
+    
+    /// <summary>
+    /// Performs handshake with the remote peer.
+    /// </summary>
+    private async Task PerformHandshakeAsync(CancellationToken ct)
+    {
+        // Reset handshake state
+        _handshakeCompleted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        
+        // Send handshake
+        await SendHandshakeAsync(ct).ConfigureAwait(false);
+        
+        // Wait for handshake response with optional timeout
+        if (_options.HandshakeTimeout != Timeout.InfiniteTimeSpan)
+        {
+            using var handshakeTimeoutCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            handshakeTimeoutCts.CancelAfter(_options.HandshakeTimeout);
+            
+            // Start read loop to receive handshake response
+            var readTask = ReadSingleFrameAsync(handshakeTimeoutCts.Token);
+            
+            try
+            {
+                await Task.WhenAny(_handshakeCompleted.Task, readTask).ConfigureAwait(false);
+                
+                if (!_handshakeCompleted.Task.IsCompleted)
+                {
+                    // Keep reading until handshake completes
+                    while (!_handshakeCompleted.Task.IsCompleted && !handshakeTimeoutCts.IsCancellationRequested)
+                    {
+                        await ReadSingleFrameAsync(handshakeTimeoutCts.Token).ConfigureAwait(false);
+                    }
+                }
+                
+                await _handshakeCompleted.Task.WaitAsync(handshakeTimeoutCts.Token).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException) when (!ct.IsCancellationRequested)
+            {
+                throw new TimeoutException($"Handshake timed out after {_options.HandshakeTimeout}");
+            }
+        }
+        else
+        {
+            // No timeout - read frames until handshake completes
+            while (!_handshakeCompleted.Task.IsCompleted && !ct.IsCancellationRequested)
+            {
+                await ReadSingleFrameAsync(ct).ConfigureAwait(false);
+            }
+            
+            await _handshakeCompleted.Task.WaitAsync(ct).ConfigureAwait(false);
+        }
+    }
+    
+    /// <summary>
+    /// Reads a single frame from the read stream.
+    /// </summary>
+    private async Task ReadSingleFrameAsync(CancellationToken ct)
+    {
+        var readStream = ReadStream; // Capture non-null stream
+        var headerBuffer = new byte[FrameHeader.Size];
+        await ReadExactlyAsync(readStream, headerBuffer, ct).ConfigureAwait(false);
+        var header = FrameHeader.Read(headerBuffer);
+        
+        Stats.AddBytesReceived(FrameHeader.Size);
+        
+        // Validate frame size
+        if (header.Length > _options.MaxFrameSize)
+        {
+            throw new MultiplexerException(ErrorCode.ProtocolError, 
+                $"Frame size {header.Length} exceeds maximum {_options.MaxFrameSize}");
+        }
+        
+        // Read payload
+        byte[] payload;
+        int payloadLength = (int)header.Length;
+        
+        if (payloadLength > 0)
+        {
+            payload = ArrayPool<byte>.Shared.Rent(payloadLength);
+            await ReadExactlyAsync(readStream, payload.AsMemory(0, payloadLength), ct).ConfigureAwait(false);
+            Stats.AddBytesReceived(header.Length);
+        }
+        else
+        {
+            payload = Array.Empty<byte>();
+        }
+        
+        try
+        {
+            await ProcessFrameAsync(header, payload.AsMemory(0, payloadLength), ct).ConfigureAwait(false);
+        }
+        finally
+        {
+            if (payloadLength > 0)
+                ArrayPool<byte>.Shared.Return(payload);
+        }
+    }
+    
+    /// <summary>
+    /// Disposes the current stream pair and clears stream references.
+    /// </summary>
+    private async Task DisposeStreamsAsync()
+    {
+        try
+        {
+            if (_streamPair != null)
+            {
+                await _streamPair.DisposeAsync().ConfigureAwait(false);
+            }
+        }
+        catch { }
+        
+        _streamPair = null;
+        _readStream = null;
+        _writeStream = null;
+    }
+    
+    /// <summary>
+    /// Runs the main processing loops after connection is established.
+    /// </summary>
+    private async Task RunProcessingLoopsAsync(CancellationToken ct)
+    {
+        while (!ct.IsCancellationRequested && !_disposed)
+        {
+            // Create linked token to cancel all tasks when one fails
+            using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            var linkedToken = linkedCts.Token;
+            
+            try
+            {
+                // Start background tasks with linked token
+                _readTask = ReadLoopAsync(linkedToken);
+                _writeTask = WriteLoopAsync(linkedToken);
+                _pingTask = PingLoopAsync(linkedToken);
+                
+                // Start flush task only if batched mode
+                if (_options.FlushMode == FlushMode.Batched)
+                    _flushTask = FlushLoopAsync(linkedToken);
+
+                // Wait for any task to complete (or fail)
+                var tasks = _flushTask != null 
+                    ? new[] { _readTask, _writeTask, _pingTask, _flushTask }
+                    : new[] { _readTask, _writeTask, _pingTask };
+                
+                // Wait for first task to complete
+                var completedTask = await Task.WhenAny(tasks).ConfigureAwait(false);
+                
+                // Cancel remaining tasks
+                await linkedCts.CancelAsync().ConfigureAwait(false);
+                
+                // Wait for all tasks to finish (they should exit due to cancellation)
+                // Use try/catch to handle exceptions from cancelled and faulted tasks
+                Exception? firstException = null;
+                try
+                {
+                    await Task.WhenAll(tasks).ConfigureAwait(false);
+                }
+                catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+                {
+                    // Capture the first non-cancellation exception
+                    firstException = ex;
+                }
+                
+                // Check if the first completed task faulted
+                if (completedTask.IsFaulted)
+                {
+                    throw completedTask.Exception!.InnerException ?? completedTask.Exception;
+                }
+                
+                // If we captured an exception from WhenAll, throw it
+                if (firstException != null)
+                {
+                    throw firstException;
+                }
+                
+                break; // Normal completion
+            }
+            catch (OperationCanceledException) when (ct.IsCancellationRequested)
+            {
+                break;
+            }
+            catch (Exception ex)
+            {
+                // Transport error - attempt reconnection if enabled
+                if (_options.EnableReconnection && !_disposed && !_goAwayReceived)
+                {
+                    _isConnected = false;
+                    _disconnectReason = NetConduit.DisconnectReason.TransportError;
+                    _disconnectException = ex;
+                    
+                    try { OnDisconnected?.Invoke(NetConduit.DisconnectReason.TransportError, ex); } catch { }
+                    
+                    // Clean up old stream pair
+                    await DisposeStreamsAsync().ConfigureAwait(false);
+                    
+                    // Reconnect with same retry logic
+                    await ConnectWithRetryAsync(isReconnecting: true, ct).ConfigureAwait(false);
+                    
+                    // Successfully reconnected - continue loop to restart processing tasks
+                    continue;
+                }
+                else
+                {
+                    // No reconnection - propagate error
+                    HandleTransportError(ex);
+                    throw;
+                }
+            }
+        }
+    }
+
+
+    
+    /// <summary>
+    /// Waits until the multiplexer is connected. Used by channel operations.
+    /// </summary>
+    private async Task WaitForConnectionAsync(CancellationToken cancellationToken)
+    {
+        // If not running yet, throw immediately
+        if (!_isRunning)
+            throw new InvalidOperationException("Multiplexer is not running. Call Start() first.");
+        
+        // If already connected, return immediately
+        if (_isConnected)
+            return;
+        
+        // Wait for ready (first connection) or reconnection
+        await _readyTcs.Task.WaitAsync(cancellationToken).ConfigureAwait(false);
+        
+        // If reconnecting, wait for reconnection to complete
+        while (_isReconnecting && !cancellationToken.IsCancellationRequested)
+        {
+            await Task.Delay(10, cancellationToken).ConfigureAwait(false);
+            if (_isConnected)
+                return;
+        }
+        
+        cancellationToken.ThrowIfCancellationRequested();
     }
 
     /// <summary>
@@ -338,8 +731,8 @@ public sealed class StreamMultiplexer : IStreamMultiplexer
     {
         ArgumentNullException.ThrowIfNull(options);
         
-        if (!_isRunning)
-            throw new InvalidOperationException("Multiplexer is not running.");
+        // Wait until ready (handles both initial connection and reconnection)
+        await WaitForConnectionAsync(cancellationToken).ConfigureAwait(false);
         
         if (_goAwaySent || _goAwayReceived)
             throw new InvalidOperationException("Cannot open new channels after GOAWAY.");
@@ -792,6 +1185,8 @@ public sealed class StreamMultiplexer : IStreamMultiplexer
     
     private async ValueTask SendFrameOptimizedAsync(FrameHeader header, ReadOnlyMemory<byte> payload, CancellationToken ct)
     {
+        var writeStream = WriteStream; // Capture non-null stream
+        
         // Fast path: combine header + payload into single write for small frames
         if (payload.Length <= CombinedBufferThreshold)
         {
@@ -809,10 +1204,10 @@ public sealed class StreamMultiplexer : IStreamMultiplexer
                 await _writeLock.WaitAsync(ct).ConfigureAwait(false);
                 try
                 {
-                    await _writeStream.WriteAsync(buffer.AsMemory(0, combinedLength), ct).ConfigureAwait(false);
+                    await writeStream.WriteAsync(buffer.AsMemory(0, combinedLength), ct).ConfigureAwait(false);
                     
                     if (_options.FlushMode == FlushMode.Immediate)
-                        await _writeStream.FlushAsync(ct).ConfigureAwait(false);
+                        await writeStream.FlushAsync(ct).ConfigureAwait(false);
                     else if (_options.FlushMode == FlushMode.Batched)
                         _pendingFlush = true;
                 }
@@ -833,11 +1228,11 @@ public sealed class StreamMultiplexer : IStreamMultiplexer
             try
             {
                 header.Write(_headerBuffer);
-                await _writeStream.WriteAsync(_headerBuffer, ct).ConfigureAwait(false);
-                await _writeStream.WriteAsync(payload, ct).ConfigureAwait(false);
+                await writeStream.WriteAsync(_headerBuffer, ct).ConfigureAwait(false);
+                await writeStream.WriteAsync(payload, ct).ConfigureAwait(false);
                 
                 if (_options.FlushMode == FlushMode.Immediate)
-                    await _writeStream.FlushAsync(ct).ConfigureAwait(false);
+                    await writeStream.FlushAsync(ct).ConfigureAwait(false);
                 else if (_options.FlushMode == FlushMode.Batched)
                     _pendingFlush = true;
             }
@@ -852,6 +1247,7 @@ public sealed class StreamMultiplexer : IStreamMultiplexer
 
     private async Task WriteLoopAsync(CancellationToken ct)
     {
+        var writeStream = WriteStream; // Capture non-null stream
         var headerBuffer = new byte[FrameHeader.Size];
         
         while (!ct.IsCancellationRequested)
@@ -873,13 +1269,13 @@ public sealed class StreamMultiplexer : IStreamMultiplexer
                 await _writeLock.WaitAsync(ct).ConfigureAwait(false);
                 try
                 {
-                    await _writeStream.WriteAsync(headerBuffer, ct).ConfigureAwait(false);
+                    await writeStream.WriteAsync(headerBuffer, ct).ConfigureAwait(false);
                     if (!item.data.IsEmpty)
-                        await _writeStream.WriteAsync(item.data, ct).ConfigureAwait(false);
+                        await writeStream.WriteAsync(item.data, ct).ConfigureAwait(false);
                     
                     // Conditional flush based on FlushMode
                     if (_options.FlushMode == FlushMode.Immediate)
-                        await _writeStream.FlushAsync(ct).ConfigureAwait(false);
+                        await writeStream.FlushAsync(ct).ConfigureAwait(false);
                     else if (_options.FlushMode == FlushMode.Batched)
                         _pendingFlush = true;
                 }
@@ -902,6 +1298,8 @@ public sealed class StreamMultiplexer : IStreamMultiplexer
     
     private async Task FlushLoopAsync(CancellationToken ct)
     {
+        var writeStream = WriteStream; // Capture non-null stream
+        
         while (!ct.IsCancellationRequested)
         {
             try
@@ -914,7 +1312,7 @@ public sealed class StreamMultiplexer : IStreamMultiplexer
                     try
                     {
                         _pendingFlush = false;
-                        await _writeStream.FlushAsync(ct).ConfigureAwait(false);
+                        await writeStream.FlushAsync(ct).ConfigureAwait(false);
                     }
                     finally
                     {
@@ -935,21 +1333,22 @@ public sealed class StreamMultiplexer : IStreamMultiplexer
 
     private async ValueTask SendFrameDirectAsync(FrameHeader header, ReadOnlyMemory<byte> payload, CancellationToken ct)
     {
+        var writeStream = WriteStream; // Capture non-null stream
         await _writeLock.WaitAsync(ct).ConfigureAwait(false);
         try
         {
             // Write header using reusable buffer
             header.Write(_headerBuffer);
-            await _writeStream.WriteAsync(_headerBuffer, ct).ConfigureAwait(false);
+            await writeStream.WriteAsync(_headerBuffer, ct).ConfigureAwait(false);
             
             if (!payload.IsEmpty)
-                await _writeStream.WriteAsync(payload, ct).ConfigureAwait(false);
+                await writeStream.WriteAsync(payload, ct).ConfigureAwait(false);
             
             // Conditional flush based on FlushMode
             switch (_options.FlushMode)
             {
                 case FlushMode.Immediate:
-                    await _writeStream.FlushAsync(ct).ConfigureAwait(false);
+                    await writeStream.FlushAsync(ct).ConfigureAwait(false);
                     break;
                 case FlushMode.Batched:
                     _pendingFlush = true;
@@ -981,6 +1380,18 @@ public sealed class StreamMultiplexer : IStreamMultiplexer
         
         var header = new FrameHeader(ChannelIndexLimits.ControlChannel, FrameFlags.Data, (uint)payload.Length);
         await SendFrameDirectAsync(header, payload, ct).ConfigureAwait(false);
+        
+        // Force flush after handshake - the flush task isn't running yet during handshake
+        var writeStream = WriteStream; // Capture non-null stream
+        await _writeLock.WaitAsync(ct).ConfigureAwait(false);
+        try
+        {
+            await writeStream.FlushAsync(ct).ConfigureAwait(false);
+        }
+        finally
+        {
+            _writeLock.Release();
+        }
     }
 
     private async ValueTask SendInitAsync(uint channelIndex, string channelId, ChannelPriority priority, CancellationToken ct)
@@ -1007,10 +1418,11 @@ public sealed class StreamMultiplexer : IStreamMultiplexer
         
         // Force flush after FIN to ensure all data is sent immediately
         // This guarantees the peer receives the FIN and all preceding data
+        var writeStream = WriteStream; // Capture non-null stream
         await _writeLock.WaitAsync(ct).ConfigureAwait(false);
         try
         {
-            await _writeStream.FlushAsync(ct).ConfigureAwait(false);
+            await writeStream.FlushAsync(ct).ConfigureAwait(false);
         }
         finally
         {
@@ -1108,6 +1520,7 @@ public sealed class StreamMultiplexer : IStreamMultiplexer
 
     private async Task ReadLoopAsync(CancellationToken ct)
     {
+        var readStream = ReadStream; // Capture non-null stream
         var headerBuffer = new byte[FrameHeader.Size];
         
         while (!ct.IsCancellationRequested)
@@ -1115,7 +1528,7 @@ public sealed class StreamMultiplexer : IStreamMultiplexer
             try
             {
                 // Read header
-                await ReadExactlyAsync(_readStream, headerBuffer, ct).ConfigureAwait(false);
+                await ReadExactlyAsync(readStream, headerBuffer, ct).ConfigureAwait(false);
                 var header = FrameHeader.Read(headerBuffer);
                 
                 Stats.AddBytesReceived(FrameHeader.Size);
@@ -1134,7 +1547,7 @@ public sealed class StreamMultiplexer : IStreamMultiplexer
                 if (payloadLength > 0)
                 {
                     payload = ArrayPool<byte>.Shared.Rent(payloadLength);
-                    await ReadExactlyAsync(_readStream, payload.AsMemory(0, payloadLength), ct).ConfigureAwait(false);
+                    await ReadExactlyAsync(readStream, payload.AsMemory(0, payloadLength), ct).ConfigureAwait(false);
                     Stats.AddBytesReceived(header.Length);
                 }
                 else
@@ -1176,17 +1589,15 @@ public sealed class StreamMultiplexer : IStreamMultiplexer
             {
                 break;
             }
-            catch (EndOfStreamException ex)
+            catch (EndOfStreamException)
             {
-                // Connection closed - treat as transport error
-                HandleTransportError(ex);
-                break;
+                // Connection closed - propagate to trigger reconnection
+                throw;
             }
             catch (Exception ex)
             {
                 OnError?.Invoke(ex);
-                HandleTransportError(ex);
-                break;
+                throw;
             }
         }
         
@@ -1327,13 +1738,14 @@ public sealed class StreamMultiplexer : IStreamMultiplexer
                 
                 try
                 {
-                    // Create new streams using factory
-                    var (newReadStream, newWriteStream) = await _options.StreamFactory!(ct).ConfigureAwait(false);
+                    // Create new stream pair using factory
+                    var newStreamPair = await _options.StreamFactory!(ct).ConfigureAwait(false);
                     
                     // Attempt reconnection with new streams
-                    await ReconnectAsync(newReadStream, newWriteStream, ct).ConfigureAwait(false);
+                    await ReconnectAsync(newStreamPair.ReadStream, newStreamPair.WriteStream, ct).ConfigureAwait(false);
                     
-                    // Success! Clear disconnect state
+                    // Success! Update stream pair reference and clear disconnect state
+                    _streamPair = newStreamPair;
                     _disconnectReason = null;
                     _disconnectException = null;
                     return;
@@ -1883,6 +2295,19 @@ public sealed class StreamMultiplexer : IStreamMultiplexer
         finally
         {
             // Always clean up resources
+            try
+            {
+                if (_streamPair != null)
+                {
+                    await _streamPair.DisposeAsync().ConfigureAwait(false);
+                }
+            }
+            catch { }
+            
+            _streamPair = null;
+            _readStream = null;
+            _writeStream = null;
+            
             try { _writeLock.Dispose(); } catch { }
             try { _sendQueueSemaphore.Dispose(); } catch { }
             try { _shutdownCts.Dispose(); } catch { }

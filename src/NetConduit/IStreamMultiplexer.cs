@@ -64,8 +64,16 @@ public interface IStreamMultiplexer : IAsyncDisposable
     /// <summary>The reason for disconnection, if disconnected.</summary>
     DisconnectReason? DisconnectReason { get; }
 
-    /// <summary>Starts the multiplexer and returns when the processing loop exits.</summary>
-    Task<Task> StartAsync(CancellationToken cancellationToken = default);
+    /// <summary>
+    /// Starts the multiplexer background loop. Returns immediately.
+    /// The returned task completes when the multiplexer shuts down (or fails permanently).
+    /// </summary>
+    Task Start(CancellationToken cancellationToken = default);
+    
+    /// <summary>
+    /// Waits until the multiplexer is ready (first successful connection + handshake).
+    /// </summary>
+    Task WaitForReadyAsync(CancellationToken cancellationToken = default);
 
     /// <summary>Opens an outbound channel.</summary>
     ValueTask<WriteChannel> OpenChannelAsync(ChannelOptions options, CancellationToken cancellationToken = default);

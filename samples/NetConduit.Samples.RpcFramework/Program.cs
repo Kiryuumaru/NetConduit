@@ -44,8 +44,9 @@ async Task RunServerAsync(string serverHost, int serverPort, CancellationToken c
     
     while (!cancellationToken.IsCancellationRequested)
     {
-        // Use simple extension method to accept multiplexed connection
-        await using var mux = await listener.AcceptMuxAsync(null, cancellationToken);
+        // Use CreateServerOptions pattern to accept multiplexed connection
+        var options = TcpMultiplexer.CreateServerOptions(listener);
+        await using var mux = StreamMultiplexer.Create(options);
         Console.WriteLine($"[RPC Server] Client connected");
         
         _ = HandleClientAsync(mux, cancellationToken);
@@ -56,7 +57,8 @@ async Task HandleClientAsync(IStreamMultiplexer mux, CancellationToken cancellat
 {
     try
     {
-        var runTask = await mux.StartAsync(cancellationToken);
+        var runTask = mux.Start(cancellationToken);
+        await mux.WaitForReadyAsync(cancellationToken);
         
         // Open a MessageTransit for sending RPC responses
         // The server opens "responses" channel and accepts "requests" channel
@@ -179,12 +181,13 @@ async Task RunClientAsync(string clientHost, int clientPort, CancellationToken c
     
     try
     {
-        // Use simple extension method to connect multiplexed
-        using var tcpClient = new TcpClient();
-        await using var mux = await tcpClient.ConnectMuxAsync(clientHost, clientPort, null, cancellationToken);
+        // Use CreateOptions pattern to connect multiplexed
+        var options = TcpMultiplexer.CreateOptions(clientHost, clientPort);
+        await using var mux = StreamMultiplexer.Create(options);
         Console.WriteLine("[RPC Client] Connected!");
         
-        var runTask = await mux.StartAsync(cancellationToken);
+        var runTask = mux.Start(cancellationToken);
+        await mux.WaitForReadyAsync(cancellationToken);
         
         // Open MessageTransit for RPC (client sends requests, accepts responses)
         await using var rpcTransit = await mux.OpenMessageTransitAsync(

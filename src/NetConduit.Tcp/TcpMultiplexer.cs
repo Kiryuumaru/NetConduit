@@ -9,107 +9,97 @@ namespace NetConduit.Tcp;
 public static class TcpMultiplexer
 {
     /// <summary>
-    /// Connects to a TCP server and creates a multiplexer.
+    /// Creates multiplexer options with a StreamFactory that connects to the specified host and port.
+    /// Supports reconnection - each call to StreamFactory creates a new TCP connection.
     /// </summary>
     /// <param name="host">The host to connect to.</param>
     /// <param name="port">The port to connect to.</param>
-    /// <param name="options">Optional multiplexer options.</param>
-    /// <param name="cancellationToken">Cancellation token.</param>
-    /// <returns>A connected multiplexer with the underlying TCP client.</returns>
-    public static async Task<TcpMultiplexerConnection> ConnectAsync(
+    /// <param name="configure">Optional action to configure additional options.</param>
+    /// <returns>MultiplexerOptions configured for TCP client connection.</returns>
+    public static MultiplexerOptions CreateOptions(
         string host,
         int port,
-        MultiplexerOptions? options = null,
-        CancellationToken cancellationToken = default)
+        Action<MultiplexerOptions>? configure = null)
     {
         ArgumentNullException.ThrowIfNull(host);
         
-        var client = new TcpClient();
-        try
+        var options = new MultiplexerOptions
         {
-            await client.ConnectAsync(host, port, cancellationToken).ConfigureAwait(false);
-            var stream = client.GetStream();
-            var multiplexer = new StreamMultiplexer(stream, stream, options);
-            return new TcpMultiplexerConnection(multiplexer, client);
-        }
-        catch
-        {
-            client.Dispose();
-            throw;
-        }
+            StreamFactory = async ct =>
+            {
+                var client = new TcpClient();
+                await client.ConnectAsync(host, port, ct).ConfigureAwait(false);
+                var stream = client.GetStream();
+                return new StreamPair(stream, client);
+            }
+        };
+        
+        configure?.Invoke(options);
+        return options;
     }
-
+    
     /// <summary>
-    /// Connects to a TCP server and creates a multiplexer.
+    /// Creates multiplexer options with a StreamFactory that connects to the specified endpoint.
+    /// Supports reconnection - each call to StreamFactory creates a new TCP connection.
     /// </summary>
     /// <param name="endpoint">The endpoint to connect to.</param>
-    /// <param name="options">Optional multiplexer options.</param>
-    /// <param name="cancellationToken">Cancellation token.</param>
-    /// <returns>A connected multiplexer with the underlying TCP client.</returns>
-    public static async Task<TcpMultiplexerConnection> ConnectAsync(
+    /// <param name="configure">Optional action to configure additional options.</param>
+    /// <returns>MultiplexerOptions configured for TCP client connection.</returns>
+    public static MultiplexerOptions CreateOptions(
         IPEndPoint endpoint,
-        MultiplexerOptions? options = null,
-        CancellationToken cancellationToken = default)
+        Action<MultiplexerOptions>? configure = null)
     {
         ArgumentNullException.ThrowIfNull(endpoint);
         
-        var client = new TcpClient();
-        try
+        var options = new MultiplexerOptions
         {
-            await client.ConnectAsync(endpoint, cancellationToken).ConfigureAwait(false);
-            var stream = client.GetStream();
-            var multiplexer = new StreamMultiplexer(stream, stream, options);
-            return new TcpMultiplexerConnection(multiplexer, client);
-        }
-        catch
-        {
-            client.Dispose();
-            throw;
-        }
+            StreamFactory = async ct =>
+            {
+                var client = new TcpClient();
+                await client.ConnectAsync(endpoint, ct).ConfigureAwait(false);
+                var stream = client.GetStream();
+                return new StreamPair(stream, client);
+            }
+        };
+        
+        configure?.Invoke(options);
+        return options;
     }
 
     /// <summary>
-    /// Accepts a TCP connection and creates a multiplexer.
+    /// Creates multiplexer options with a StreamFactory that accepts connections from the specified listener.
+    /// Reconnection is disabled by default for server-side connections.
     /// </summary>
     /// <param name="listener">The TCP listener to accept from.</param>
-    /// <param name="options">Optional multiplexer options.</param>
-    /// <param name="cancellationToken">Cancellation token.</param>
-    /// <returns>A connected multiplexer with the underlying TCP client.</returns>
-    public static async Task<TcpMultiplexerConnection> AcceptAsync(
+    /// <param name="configure">Optional action to configure additional options.</param>
+    /// <returns>MultiplexerOptions configured for TCP server acceptance.</returns>
+    public static MultiplexerOptions CreateServerOptions(
         TcpListener listener,
-        MultiplexerOptions? options = null,
-        CancellationToken cancellationToken = default)
+        Action<MultiplexerOptions>? configure = null)
     {
         ArgumentNullException.ThrowIfNull(listener);
         
-        var client = await listener.AcceptTcpClientAsync(cancellationToken).ConfigureAwait(false);
-        try
+        var accepted = false;
+        var options = new MultiplexerOptions
         {
-            var stream = client.GetStream();
-            var multiplexer = new StreamMultiplexer(stream, stream, options);
-            return new TcpMultiplexerConnection(multiplexer, client);
-        }
-        catch
-        {
-            client.Dispose();
-            throw;
-        }
-    }
-
-    /// <summary>
-    /// Creates a multiplexer from an existing TCP client.
-    /// </summary>
-    /// <param name="client">The TCP client.</param>
-    /// <param name="options">Optional multiplexer options.</param>
-    /// <returns>A multiplexer wrapping the TCP client.</returns>
-    public static TcpMultiplexerConnection FromClient(
-        TcpClient client,
-        MultiplexerOptions? options = null)
-    {
-        ArgumentNullException.ThrowIfNull(client);
+            EnableReconnection = false,
+            StreamFactory = async ct =>
+            {
+                if (accepted)
+                {
+                    throw new InvalidOperationException(
+                        "Server-side multiplexer does not support reconnection. " +
+                        "Create a new multiplexer instance to accept another connection.");
+                }
+                
+                accepted = true;
+                var client = await listener.AcceptTcpClientAsync(ct).ConfigureAwait(false);
+                var stream = client.GetStream();
+                return new StreamPair(stream, client);
+            }
+        };
         
-        var stream = client.GetStream();
-        var multiplexer = new StreamMultiplexer(stream, stream, options);
-        return new TcpMultiplexerConnection(multiplexer, client);
+        configure?.Invoke(options);
+        return options;
     }
 }

@@ -1,0 +1,17 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+
+	<PropertyGroup>
+		<LangVersion>preview</LangVersion>
+		<TargetFramework>net9.0</TargetFramework>
+		<OutputType>Exe</OutputType>
+		<ImplicitUsings>enable</ImplicitUsings>
+		<Nullable>enable</Nullable>
+		<IsPackable>false</IsPackable>
+	</PropertyGroup>
+
+	<ItemGroup>
+		<ProjectReference Include="..\..\src\NetConduit.Tcp\NetConduit.Tcp.csproj" />
+		<ProjectReference Include="..\..\src\NetConduit.WebSocket\NetConduit.WebSocket.csproj" />
+	</ItemGroup>
+
+</Project>

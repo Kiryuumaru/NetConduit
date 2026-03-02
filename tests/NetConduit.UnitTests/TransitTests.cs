@@ -40,8 +40,8 @@ public partial class TransitTests
         await using var muxA = await TestMuxHelper.CreateMuxAsync(pipe.Stream1);
         await using var muxB = await TestMuxHelper.CreateMuxAsync(pipe.Stream2);
 
-        var runA = muxA.RunAsync(cts.Token);
-        var runB = muxB.RunAsync(cts.Token);
+        var runA = muxA.Start(cts.Token);
+        var runB = muxB.Start(cts.Token);
 
         // Create channels
         var writeChannel = await muxA.OpenChannelAsync(new() { ChannelId = "msg_send" }, cts.Token);
@@ -86,8 +86,8 @@ public partial class TransitTests
         await using var muxA = await TestMuxHelper.CreateMuxAsync(pipe.Stream1);
         await using var muxB = await TestMuxHelper.CreateMuxAsync(pipe.Stream2);
 
-        var runA = muxA.RunAsync(cts.Token);
-        var runB = muxB.RunAsync(cts.Token);
+        var runA = muxA.Start(cts.Token);
+        var runB = muxB.Start(cts.Token);
 
         // Create channel pair: A→B for requests, B→A for responses
         var requestWriteChannel = await muxA.OpenChannelAsync(new() { ChannelId = "requests" }, cts.Token);
@@ -139,8 +139,8 @@ public partial class TransitTests
         await using var muxA = await TestMuxHelper.CreateMuxAsync(pipe.Stream1);
         await using var muxB = await TestMuxHelper.CreateMuxAsync(pipe.Stream2);
 
-        var runA = muxA.RunAsync(cts.Token);
-        var runB = muxB.RunAsync(cts.Token);
+        var runA = muxA.Start(cts.Token);
+        var runB = muxB.Start(cts.Token);
 
         var writeChannel = await muxA.OpenChannelAsync(new() { ChannelId = "multi_msg" }, cts.Token);
         var readChannel = await muxB.AcceptChannelAsync("multi_msg", cts.Token);
@@ -195,8 +195,8 @@ public partial class TransitTests
         await using var muxA = await TestMuxHelper.CreateMuxAsync(pipe.Stream1);
         await using var muxB = await TestMuxHelper.CreateMuxAsync(pipe.Stream2);
 
-        var runA = muxA.RunAsync(cts.Token);
-        var runB = muxB.RunAsync(cts.Token);
+        var runA = muxA.Start(cts.Token);
+        var runB = muxB.Start(cts.Token);
 
         var writeChannel = await muxA.OpenChannelAsync(new() { ChannelId = "complex" }, cts.Token);
         var readChannel = await muxB.AcceptChannelAsync("complex", cts.Token);
@@ -241,8 +241,8 @@ public partial class TransitTests
         await using var muxA = await TestMuxHelper.CreateMuxAsync(pipe.Stream1);
         await using var muxB = await TestMuxHelper.CreateMuxAsync(pipe.Stream2);
 
-        var runA = muxA.RunAsync(cts.Token);
-        var runB = muxB.RunAsync(cts.Token);
+        var runA = muxA.Start(cts.Token);
+        var runB = muxB.Start(cts.Token);
 
         var writeChannel = await muxA.OpenChannelAsync(new() { ChannelId = "async_enum" }, cts.Token);
         var readChannel = await muxB.AcceptChannelAsync("async_enum", cts.Token);
@@ -299,8 +299,8 @@ public partial class TransitTests
         await using var muxA = await TestMuxHelper.CreateMuxAsync(pipe.Stream1);
         await using var muxB = await TestMuxHelper.CreateMuxAsync(pipe.Stream2);
 
-        var runA = muxA.RunAsync(cts.Token);
-        var runB = muxB.RunAsync(cts.Token);
+        var runA = muxA.Start(cts.Token);
+        var runB = muxB.Start(cts.Token);
 
         var writeChannel = await muxA.OpenChannelAsync(new() { ChannelId = "conn_check" }, cts.Token);
         var readChannel = await muxB.AcceptChannelAsync("conn_check", cts.Token);
@@ -332,8 +332,8 @@ public partial class TransitTests
         await using var muxA = await TestMuxHelper.CreateMuxAsync(pipe.Stream1);
         await using var muxB = await TestMuxHelper.CreateMuxAsync(pipe.Stream2);
 
-        var runA = muxA.RunAsync(cts.Token);
-        var runB = muxB.RunAsync(cts.Token);
+        var runA = muxA.Start(cts.Token);
+        var runB = muxB.Start(cts.Token);
 
         var writeChannel = await muxA.OpenChannelAsync(new() { ChannelId = "stream_write" }, cts.Token);
         var readChannel = await muxB.AcceptChannelAsync("stream_write", cts.Token);
@@ -367,8 +367,8 @@ public partial class TransitTests
         await using var muxA = await TestMuxHelper.CreateMuxAsync(pipe.Stream1);
         await using var muxB = await TestMuxHelper.CreateMuxAsync(pipe.Stream2);
 
-        var runA = muxA.RunAsync(cts.Token);
-        var runB = muxB.RunAsync(cts.Token);
+        var runA = muxA.Start(cts.Token);
+        var runB = muxB.Start(cts.Token);
 
         var writeChannel = await muxA.OpenChannelAsync(new() { ChannelId = "stream_read" }, cts.Token);
         var readChannel = await muxB.AcceptChannelAsync("stream_read", cts.Token);
@@ -401,8 +401,8 @@ public partial class TransitTests
         await using var muxA = await TestMuxHelper.CreateMuxAsync(pipe.Stream1);
         await using var muxB = await TestMuxHelper.CreateMuxAsync(pipe.Stream2);
 
-        var runA = muxA.RunAsync(cts.Token);
-        var runB = muxB.RunAsync(cts.Token);
+        var runA = muxA.Start(cts.Token);
+        var runB = muxB.Start(cts.Token);
 
         var writeChannel = await muxA.OpenChannelAsync(new() { ChannelId = "ext_method" }, cts.Token);
         var readChannel = await muxB.AcceptChannelAsync("ext_method", cts.Token);
@@ -438,8 +438,8 @@ public partial class TransitTests
         await using var muxA = await TestMuxHelper.CreateMuxAsync(pipe.Stream1);
         await using var muxB = await TestMuxHelper.CreateMuxAsync(pipe.Stream2);
 
-        var runA = muxA.RunAsync(cts.Token);
-        var runB = muxB.RunAsync(cts.Token);
+        var runA = muxA.Start(cts.Token);
+        var runB = muxB.Start(cts.Token);
 
         // Create channel pair for duplex communication
         var aToB = await muxA.OpenChannelAsync(new() { ChannelId = "a_to_b" }, cts.Token);
@@ -490,8 +490,8 @@ public partial class TransitTests
         await using var muxA = await TestMuxHelper.CreateMuxAsync(pipe.Stream1);
         await using var muxB = await TestMuxHelper.CreateMuxAsync(pipe.Stream2);
 
-        var runA = muxA.RunAsync(cts.Token);
-        var runB = muxB.RunAsync(cts.Token);
+        var runA = muxA.Start(cts.Token);
+        var runB = muxB.Start(cts.Token);
 
         var write = await muxA.OpenChannelAsync(new() { ChannelId = "duplex_ext_w" }, cts.Token);
         var read = await muxB.AcceptChannelAsync("duplex_ext_w", cts.Token);
@@ -528,8 +528,8 @@ public partial class TransitTests
         await using var muxA = await TestMuxHelper.CreateMuxAsync(pipe.Stream1);
         await using var muxB = await TestMuxHelper.CreateMuxAsync(pipe.Stream2);
 
-        var runA = muxA.RunAsync(cts.Token);
-        var runB = muxB.RunAsync(cts.Token);
+        var runA = muxA.Start(cts.Token);
+        var runB = muxB.Start(cts.Token);
 
         var aToB = await muxA.OpenChannelAsync(new() { ChannelId = "large_a_to_b" }, cts.Token);
         var aToBRead = await muxB.AcceptChannelAsync("large_a_to_b", cts.Token);
@@ -590,8 +590,8 @@ public partial class TransitTests
         await using var muxA = await TestMuxHelper.CreateMuxAsync(pipe.Stream1);
         await using var muxB = await TestMuxHelper.CreateMuxAsync(pipe.Stream2);
 
-        var runA = muxA.RunAsync(cts.Token);
-        var runB = muxB.RunAsync(cts.Token);
+        var runA = muxA.Start(cts.Token);
+        var runB = muxB.Start(cts.Token);
 
         var writeChannel = await muxA.OpenChannelAsync(new() { ChannelId = "disposed_test" }, cts.Token);
         var readChannel = await muxB.AcceptChannelAsync("disposed_test", cts.Token);
@@ -624,8 +624,8 @@ public partial class TransitTests
         await using var muxA = await TestMuxHelper.CreateMuxAsync(pipe.Stream1);
         await using var muxB = await TestMuxHelper.CreateMuxAsync(pipe.Stream2);
 
-        var runA = muxA.RunAsync(cts.Token);
-        var runB = muxB.RunAsync(cts.Token);
+        var runA = muxA.Start(cts.Token);
+        var runB = muxB.Start(cts.Token);
 
         var writeChannel = await muxA.OpenChannelAsync(new() { ChannelId = "unsupported" }, cts.Token);
         await using var stream = new StreamTransit(writeChannel);
@@ -656,8 +656,8 @@ public partial class TransitTests
         await using var muxA = await TestMuxHelper.CreateMuxAsync(pipe.Stream1);
         await using var muxB = await TestMuxHelper.CreateMuxAsync(pipe.Stream2);
 
-        var runA = muxA.RunAsync(cts.Token);
-        var runB = muxB.RunAsync(cts.Token);
+        var runA = muxA.Start(cts.Token);
+        var runB = muxB.Start(cts.Token);
 
         var writeChannel = await muxA.OpenChannelAsync(new() { ChannelId = "send_only" }, cts.Token);
 
@@ -683,8 +683,8 @@ public partial class TransitTests
         await using var muxA = await TestMuxHelper.CreateMuxAsync(pipe.Stream1);
         await using var muxB = await TestMuxHelper.CreateMuxAsync(pipe.Stream2);
 
-        var runA = muxA.RunAsync(cts.Token);
-        var runB = muxB.RunAsync(cts.Token);
+        var runA = muxA.Start(cts.Token);
+        var runB = muxB.Start(cts.Token);
 
         var writeChannel = await muxA.OpenChannelAsync(new() { ChannelId = "recv_only" }, cts.Token);
         var readChannel = await muxB.AcceptChannelAsync("recv_only", cts.Token);
@@ -711,8 +711,8 @@ public partial class TransitTests
         await using var muxA = await TestMuxHelper.CreateMuxAsync(pipe.Stream1);
         await using var muxB = await TestMuxHelper.CreateMuxAsync(pipe.Stream2);
 
-        var runA = muxA.RunAsync(cts.Token);
-        var runB = muxB.RunAsync(cts.Token);
+        var runA = muxA.Start(cts.Token);
+        var runB = muxB.Start(cts.Token);
 
         var writeChannel = await muxA.OpenChannelAsync(new() { ChannelId = "oversized" }, cts.Token);
         _ = await muxB.AcceptChannelAsync("oversized", cts.Token);
@@ -745,8 +745,8 @@ public partial class TransitTests
         await using var muxA = await TestMuxHelper.CreateMuxAsync(pipe.Stream1);
         await using var muxB = await TestMuxHelper.CreateMuxAsync(pipe.Stream2);
 
-        var runA = muxA.RunAsync(cts.Token);
-        var runB = muxB.RunAsync(cts.Token);
+        var runA = muxA.Start(cts.Token);
+        var runB = muxB.Start(cts.Token);
 
         var writeChannel = await muxA.OpenChannelAsync(new() { ChannelId = "oversized_ok" }, cts.Token);
         var readChannel = await muxB.AcceptChannelAsync("oversized_ok", cts.Token);
@@ -794,8 +794,8 @@ public partial class TransitTests
         await using var muxA = await TestMuxHelper.CreateMuxAsync(pipe.Stream1);
         await using var muxB = await TestMuxHelper.CreateMuxAsync(pipe.Stream2);
 
-        var runA = muxA.RunAsync(cts.Token);
-        var runB = muxB.RunAsync(cts.Token);
+        var runA = muxA.Start(cts.Token);
+        var runB = muxB.Start(cts.Token);
 
         var writeChannel = await muxA.OpenChannelAsync(new() { ChannelId = "corrupt_len" }, cts.Token);
         var readChannel = await muxB.AcceptChannelAsync("corrupt_len", cts.Token);
@@ -834,8 +834,8 @@ public partial class TransitTests
         await using var muxA = await TestMuxHelper.CreateMuxAsync(pipe.Stream1);
         await using var muxB = await TestMuxHelper.CreateMuxAsync(pipe.Stream2);
 
-        var runA = muxA.RunAsync(cts.Token);
-        var runB = muxB.RunAsync(cts.Token);
+        var runA = muxA.Start(cts.Token);
+        var runB = muxB.Start(cts.Token);
 
         // Act
         await using var writeStream = await muxA.OpenStreamAsync("test-stream", cts.Token);
@@ -869,8 +869,8 @@ public partial class TransitTests
         await using var muxA = await TestMuxHelper.CreateMuxAsync(pipe.Stream1);
         await using var muxB = await TestMuxHelper.CreateMuxAsync(pipe.Stream2);
 
-        var runA = muxA.RunAsync(cts.Token);
-        var runB = muxB.RunAsync(cts.Token);
+        var runA = muxA.Start(cts.Token);
+        var runB = muxB.Start(cts.Token);
 
         // Act
         var acceptTask = muxB.AcceptStreamAsync("test-stream", cts.Token);
@@ -905,8 +905,8 @@ public partial class TransitTests
         await using var muxA = await TestMuxHelper.CreateMuxAsync(pipe.Stream1);
         await using var muxB = await TestMuxHelper.CreateMuxAsync(pipe.Stream2);
 
-        var runA = muxA.RunAsync(cts.Token);
-        var runB = muxB.RunAsync(cts.Token);
+        var runA = muxA.Start(cts.Token);
+        var runB = muxB.Start(cts.Token);
 
         // Side B opens duplex with single channelId - creates "chat>>" and accepts "chat<<"
         var duplexBTask = muxB.OpenDuplexStreamAsync("chat", cts.Token);
@@ -952,8 +952,8 @@ public partial class TransitTests
         await using var muxA = await TestMuxHelper.CreateMuxAsync(pipe.Stream1);
         await using var muxB = await TestMuxHelper.CreateMuxAsync(pipe.Stream2);
 
-        var runA = muxA.RunAsync(cts.Token);
-        var runB = muxB.RunAsync(cts.Token);
+        var runA = muxA.Start(cts.Token);
+        var runB = muxB.Start(cts.Token);
 
         // Side A opens duplex with explicit channel IDs
         var duplexATask = muxA.OpenDuplexStreamAsync("a-to-b", "b-to-a", cts.Token);
@@ -996,8 +996,8 @@ public partial class TransitTests
         await using var muxA = await TestMuxHelper.CreateMuxAsync(pipe.Stream1);
         await using var muxB = await TestMuxHelper.CreateMuxAsync(pipe.Stream2);
 
-        var runA = muxA.RunAsync(cts.Token);
-        var runB = muxB.RunAsync(cts.Token);
+        var runA = muxA.Start(cts.Token);
+        var runB = muxB.Start(cts.Token);
 
         // Side A opens message transit with single channelId (opens "rpc>>", accepts "rpc<<")
         var transitATask = muxA.OpenMessageTransitAsync<TestMessage, TestMessage>(
@@ -1052,8 +1052,8 @@ public partial class TransitTests
         await using var muxA = await TestMuxHelper.CreateMuxAsync(pipe.Stream1);
         await using var muxB = await TestMuxHelper.CreateMuxAsync(pipe.Stream2);
 
-        var runA = muxA.RunAsync(cts.Token);
-        var runB = muxB.RunAsync(cts.Token);
+        var runA = muxA.Start(cts.Token);
+        var runB = muxB.Start(cts.Token);
 
         // Side A opens message transit with explicit channel IDs (opens "requests", accepts "responses")
         var transitATask = muxA.OpenMessageTransitAsync<TestMessage, TestMessage>(
@@ -1101,8 +1101,8 @@ public partial class TransitTests
         await using var muxA = await TestMuxHelper.CreateMuxAsync(pipe.Stream1);
         await using var muxB = await TestMuxHelper.CreateMuxAsync(pipe.Stream2);
 
-        var runA = muxA.RunAsync(cts.Token);
-        var runB = muxB.RunAsync(cts.Token);
+        var runA = muxA.Start(cts.Token);
+        var runB = muxB.Start(cts.Token);
 
         // Act
         await using var sendTransit = await muxA.OpenSendOnlyMessageTransitAsync<TestMessage>(
@@ -1139,8 +1139,8 @@ public partial class TransitTests
         await using var muxA = await TestMuxHelper.CreateMuxAsync(pipe.Stream1);
         await using var muxB = await TestMuxHelper.CreateMuxAsync(pipe.Stream2);
 
-        var runA = muxA.RunAsync(cts.Token);
-        var runB = muxB.RunAsync(cts.Token);
+        var runA = muxA.Start(cts.Token);
+        var runB = muxB.Start(cts.Token);
 
         // Act
         var acceptTask = muxB.AcceptReceiveOnlyMessageTransitAsync<TestMessage>(
@@ -1180,8 +1180,8 @@ public partial class TransitTests
         await using var muxA = await TestMuxHelper.CreateMuxAsync(pipe.Stream1);
         await using var muxB = await TestMuxHelper.CreateMuxAsync(pipe.Stream2);
 
-        var runA = muxA.RunAsync(cts.Token);
-        var runB = muxB.RunAsync(cts.Token);
+        var runA = muxA.Start(cts.Token);
+        var runB = muxB.Start(cts.Token);
 
         // A uses OpenDuplexStreamAsync - writes to "chat>>", reads from "chat<<"
         var duplexATask = muxA.OpenDuplexStreamAsync("chat", cts.Token);
@@ -1260,8 +1260,8 @@ public partial class TransitTests
         await using var muxA = await TestMuxHelper.CreateMuxAsync(pipe.Stream1);
         await using var muxB = await TestMuxHelper.CreateMuxAsync(pipe.Stream2);
 
-        var runA = muxA.RunAsync(cts.Token);
-        var runB = muxB.RunAsync(cts.Token);
+        var runA = muxA.Start(cts.Token);
+        var runB = muxB.Start(cts.Token);
 
         var writeChannel = await muxA.OpenChannelAsync(new() { ChannelId = "concurrent_stress" }, cts.Token);
         var readChannel = await muxB.AcceptChannelAsync("concurrent_stress", cts.Token);
@@ -1353,7 +1353,7 @@ public partial class TransitTests
         }
 
         await cts.CancelAsync();
-        try { await receiveTask; } catch { }
+        try { await receiveTask; } catch (OperationCanceledException) { }
 
         // Assert - NO corruption should occur
         var output = $"Sent: {sentMessages.Count}, Received: {receivedMessages.Count}, " +
@@ -1390,8 +1390,8 @@ public partial class TransitTests
         await using var muxA = await TestMuxHelper.CreateMuxAsync(pipe.Stream1);
         await using var muxB = await TestMuxHelper.CreateMuxAsync(pipe.Stream2);
 
-        var runA = muxA.RunAsync(cts.Token);
-        var runB = muxB.RunAsync(cts.Token);
+        var runA = muxA.Start(cts.Token);
+        var runB = muxB.Start(cts.Token);
 
         var writeChannel = await muxA.OpenChannelAsync(new() { ChannelId = "fireforget_stress" }, cts.Token);
         var readChannel = await muxB.AcceptChannelAsync("fireforget_stress", cts.Token);
@@ -1474,7 +1474,7 @@ public partial class TransitTests
         }
 
         await cts.CancelAsync();
-        try { await receiveTask; } catch { }
+        try { await receiveTask; } catch (OperationCanceledException) { }
 
         // Assert - NO corruption should occur
         var output = $"Sent: {sentMessages.Count}, Received: {receivedMessages.Count}, " +
@@ -1510,8 +1510,8 @@ public partial class TransitTests
         await using var muxA = await TestMuxHelper.CreateMuxAsync(pipe.Stream1);
         await using var muxB = await TestMuxHelper.CreateMuxAsync(pipe.Stream2);
 
-        var runA = muxA.RunAsync(cts.Token);
-        var runB = muxB.RunAsync(cts.Token);
+        var runA = muxA.Start(cts.Token);
+        var runB = muxB.Start(cts.Token);
 
         var writeChannel = await muxA.OpenChannelAsync(new() { ChannelId = "concurrent_writes" }, cts.Token);
         var readChannel = await muxB.AcceptChannelAsync("concurrent_writes", cts.Token);
@@ -1604,7 +1604,7 @@ public partial class TransitTests
         }
 
         await cts.CancelAsync();
-        try { await receiveTask; } catch { }
+        try { await receiveTask; } catch (OperationCanceledException) { }
 
         // Assert - all messages should be received without corruption
         Console.WriteLine($"Sent: {sentMessages.Count}, Received: {receivedMessages.Count}, " +
@@ -1639,8 +1639,8 @@ public partial class TransitTests
         await using var muxA = await TestMuxHelper.CreateMuxAsync(pipe.Stream1);
         await using var muxB = await TestMuxHelper.CreateMuxAsync(pipe.Stream2);
 
-        var runA = muxA.RunAsync(cts.Token);
-        var runB = muxB.RunAsync(cts.Token);
+        var runA = muxA.Start(cts.Token);
+        var runB = muxB.Start(cts.Token);
 
         var writeChannel = await muxA.OpenChannelAsync(new() { ChannelId = "raw_concurrent" }, cts.Token);
         var readChannel = await muxB.AcceptChannelAsync("raw_concurrent", cts.Token);
@@ -1764,7 +1764,7 @@ public partial class TransitTests
         }
 
         await cts.CancelAsync();
-        try { await receiveTask; } catch { }
+        try { await receiveTask; } catch (OperationCanceledException) { }
 
         // Assert
         var output = $"Sent: {totalMessages}, Received: {receivedPayloads.Count}, " +
@@ -1800,8 +1800,8 @@ public partial class TransitTests
         await using var muxA = await TestMuxHelper.CreateMuxAsync(pipe.Stream1);
         await using var muxB = await TestMuxHelper.CreateMuxAsync(pipe.Stream2);
 
-        var runA = muxA.RunAsync(cts.Token);
-        var runB = muxB.RunAsync(cts.Token);
+        var runA = muxA.Start(cts.Token);
+        var runB = muxB.Start(cts.Token);
 
         var writeChannel = await muxA.OpenChannelAsync(new() { ChannelId = "separate_writes" }, cts.Token);
         var readChannel = await muxB.AcceptChannelAsync("separate_writes", cts.Token);
@@ -1923,7 +1923,7 @@ public partial class TransitTests
         }
 
         await cts.CancelAsync();
-        try { await receiveTask; } catch { }
+        try { await receiveTask; } catch (OperationCanceledException) { }
 
         // Assert
         Assert.Empty(receiveErrors);

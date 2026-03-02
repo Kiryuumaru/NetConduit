@@ -19,8 +19,8 @@ public class DisconnectionTests
         mux1.OnDisconnected += (reason, ex) => disconnectEvent.TrySetResult(reason);
 
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
-        var run1 = mux1.RunAsync(cts.Token);
-        var run2 = mux2.RunAsync(cts.Token);
+        var run1 = mux1.Start(cts.Token);
+        var run2 = mux2.Start(cts.Token);
 
         await Task.Delay(100);
 
@@ -48,8 +48,8 @@ public class DisconnectionTests
         await using var mux2 = await TestMuxHelper.CreateMuxAsync(pipe.Stream2);
 
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
-        var run1 = mux1.RunAsync(cts.Token);
-        var run2 = mux2.RunAsync(cts.Token);
+        var run1 = mux1.Start(cts.Token);
+        var run2 = mux2.Start(cts.Token);
 
         await Task.Delay(100);
 
@@ -84,8 +84,8 @@ public class DisconnectionTests
         await using var mux2 = await TestMuxHelper.CreateMuxAsync(pipe.Stream2, options);
 
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
-        var run1 = mux1.RunAsync(cts.Token);
-        var run2 = mux2.RunAsync(cts.Token);
+        var run1 = mux1.Start(cts.Token);
+        var run2 = mux2.Start(cts.Token);
 
         await Task.Delay(100);
 
@@ -116,8 +116,8 @@ public class DisconnectionTests
         await using var mux2 = await TestMuxHelper.CreateMuxAsync(pipe.Stream2);
 
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
-        var run1 = mux1.RunAsync(cts.Token);
-        var run2 = mux2.RunAsync(cts.Token);
+        var run1 = mux1.Start(cts.Token);
+        var run2 = mux2.Start(cts.Token);
 
         await Task.Delay(100);
 
@@ -146,8 +146,8 @@ public class DisconnectionTests
         mux2.OnDisconnected += (reason, ex) => disconnectEvent.TrySetResult(reason);
 
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
-        var run1 = mux1.RunAsync(cts.Token);
-        var run2 = mux2.RunAsync(cts.Token);
+        var run1 = mux1.Start(cts.Token);
+        var run2 = mux2.Start(cts.Token);
 
         await Task.Delay(100);
 
@@ -182,8 +182,8 @@ public class DisconnectionTests
         mux2.OnDisconnected += (reason, ex) => disconnectEvent.TrySetResult();
 
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
-        var run1 = mux1.RunAsync(cts.Token);
-        var run2 = mux2.RunAsync(cts.Token);
+        var run1 = mux1.Start(cts.Token);
+        var run2 = mux2.Start(cts.Token);
 
         await Task.Delay(100);
 
@@ -210,8 +210,8 @@ public class DisconnectionTests
         await using var mux2 = await TestMuxHelper.CreateMuxAsync(pipe.Stream2);
 
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
-        var run1 = mux1.RunAsync(cts.Token);
-        var run2 = mux2.RunAsync(cts.Token);
+        var run1 = mux1.Start(cts.Token);
+        var run2 = mux2.Start(cts.Token);
 
         await Task.Delay(100);
 
@@ -252,8 +252,8 @@ public class DisconnectionTests
         mux1.OnDisconnected += (reason, ex) => disconnectEvent.TrySetResult((reason, ex));
 
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
-        var run1 = mux1.RunAsync(cts.Token);
-        var run2 = mux2.RunAsync(cts.Token);
+        var run1 = mux1.Start(cts.Token);
+        var run2 = mux2.Start(cts.Token);
 
         await Task.Delay(100);
 
@@ -285,8 +285,8 @@ public class DisconnectionTests
         mux1.OnDisconnected += (reason, ex) => disconnectEvent.TrySetResult();
 
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
-        var run1 = mux1.RunAsync(cts.Token);
-        var run2 = mux2.RunAsync(cts.Token);
+        var run1 = mux1.Start(cts.Token);
+        var run2 = mux2.Start(cts.Token);
 
         await Task.Delay(100);
 
@@ -307,16 +307,26 @@ public class DisconnectionTests
     [Fact(Timeout = 120000)]
     public async Task TransportError_AbortsAllChannels_WithTransportFailedReason()
     {
-        // Arrange
+        // Arrange - disable reconnection so channels are aborted immediately on transport error
         await using var pipe = new DuplexPipe();
-        await using var mux1 = await TestMuxHelper.CreateMuxAsync(pipe.Stream1);
-        await using var mux2 = await TestMuxHelper.CreateMuxAsync(pipe.Stream2);
+        var noReconnectOptions1 = new MultiplexerOptions 
+        { 
+            EnableReconnection = false,
+            StreamFactory = _ => Task.FromResult<IStreamPair>(new StreamPair(pipe.Stream1))
+        };
+        var noReconnectOptions2 = new MultiplexerOptions 
+        { 
+            EnableReconnection = false,
+            StreamFactory = _ => Task.FromResult<IStreamPair>(new StreamPair(pipe.Stream2))
+        };
+        await using var mux1 = StreamMultiplexer.Create(noReconnectOptions1);
+        await using var mux2 = StreamMultiplexer.Create(noReconnectOptions2);
 
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
-        var run1 = mux1.RunAsync(cts.Token);
-        var run2 = mux2.RunAsync(cts.Token);
+        var run1 = mux1.Start(cts.Token);
+        var run2 = mux2.Start(cts.Token);
 
-        await Task.Delay(100);
+        await Task.WhenAll(mux1.WaitForReadyAsync(cts.Token), mux2.WaitForReadyAsync(cts.Token));
 
         // Open channel
         await using var writeChannel = await mux1.OpenChannelAsync(new ChannelOptions { ChannelId = "test" }, cts.Token);
@@ -352,8 +362,8 @@ public class DisconnectionTests
         await using var mux2 = await TestMuxHelper.CreateMuxAsync(pipe.Stream2);
 
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
-        var run1 = mux1.RunAsync(cts.Token);
-        var run2 = mux2.RunAsync(cts.Token);
+        var run1 = mux1.Start(cts.Token);
+        var run2 = mux2.Start(cts.Token);
 
         await Task.Delay(100);
 
@@ -386,8 +396,8 @@ public class DisconnectionTests
         await using var mux2 = await TestMuxHelper.CreateMuxAsync(pipe.Stream2);
 
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
-        var run1 = mux1.RunAsync(cts.Token);
-        var run2 = mux2.RunAsync(cts.Token);
+        var run1 = mux1.Start(cts.Token);
+        var run2 = mux2.Start(cts.Token);
 
         await Task.Delay(100);
 
@@ -420,8 +430,8 @@ public class DisconnectionTests
         await using var mux2 = await TestMuxHelper.CreateMuxAsync(pipe.Stream2);
 
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
-        var run1 = mux1.RunAsync(cts.Token);
-        var run2 = mux2.RunAsync(cts.Token);
+        var run1 = mux1.Start(cts.Token);
+        var run2 = mux2.Start(cts.Token);
 
         await Task.Delay(100);
 
@@ -451,8 +461,8 @@ public class DisconnectionTests
         await using var mux2 = await TestMuxHelper.CreateMuxAsync(pipe.Stream2);
 
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
-        var run1 = mux1.RunAsync(cts.Token);
-        var run2 = mux2.RunAsync(cts.Token);
+        var run1 = mux1.Start(cts.Token);
+        var run2 = mux2.Start(cts.Token);
 
         await Task.Delay(100);
 
@@ -484,8 +494,8 @@ public class DisconnectionTests
         await using var mux2 = await TestMuxHelper.CreateMuxAsync(pipe.Stream2);
 
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
-        var run1 = mux1.RunAsync(cts.Token);
-        var run2 = mux2.RunAsync(cts.Token);
+        var run1 = mux1.Start(cts.Token);
+        var run2 = mux2.Start(cts.Token);
 
         await Task.Delay(100);
 
@@ -516,8 +526,8 @@ public class DisconnectionTests
         await using var mux2 = await TestMuxHelper.CreateMuxAsync(pipe.Stream2);
 
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
-        var run1 = mux1.RunAsync(cts.Token);
-        var run2 = mux2.RunAsync(cts.Token);
+        var run1 = mux1.Start(cts.Token);
+        var run2 = mux2.Start(cts.Token);
 
         await Task.Delay(100);
 
@@ -564,8 +574,8 @@ public class DisconnectionTests
         await using var mux2 = await TestMuxHelper.CreateMuxAsync(pipe.Stream2);
 
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
-        var run1 = mux1.RunAsync(cts.Token);
-        var run2 = mux2.RunAsync(cts.Token);
+        var run1 = mux1.Start(cts.Token);
+        var run2 = mux2.Start(cts.Token);
 
         await Task.Delay(100);
 
@@ -612,8 +622,8 @@ public class DisconnectionTests
         await using var mux2 = await TestMuxHelper.CreateMuxAsync(pipe.Stream2);
 
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
-        var run1 = mux1.RunAsync(cts.Token);
-        var run2 = mux2.RunAsync(cts.Token);
+        var run1 = mux1.Start(cts.Token);
+        var run2 = mux2.Start(cts.Token);
 
         await Task.Delay(100);
 
@@ -663,8 +673,8 @@ public class DisconnectionTests
         await using var mux2 = await TestMuxHelper.CreateMuxAsync(pipe.Stream2, options);
 
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
-        var run1 = mux1.RunAsync(cts.Token);
-        var run2 = mux2.RunAsync(cts.Token);
+        var run1 = mux1.Start(cts.Token);
+        var run2 = mux2.Start(cts.Token);
 
         await Task.Delay(100);
 
@@ -700,8 +710,8 @@ public class DisconnectionTests
         Assert.Equal(timeout, mux1.Options.GracefulShutdownTimeout);
 
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
-        var run1 = mux1.RunAsync(cts.Token);
-        var run2 = mux2.RunAsync(cts.Token);
+        var run1 = mux1.Start(cts.Token);
+        var run2 = mux2.Start(cts.Token);
 
         await Task.Delay(100);
 
@@ -736,8 +746,8 @@ public class DisconnectionTests
         await using var mux2 = await TestMuxHelper.CreateMuxAsync(pipe.Stream2);
 
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
-        var run1 = mux1.RunAsync(cts.Token);
-        var run2 = mux2.RunAsync(cts.Token);
+        var run1 = mux1.Start(cts.Token);
+        var run2 = mux2.Start(cts.Token);
 
         await Task.Delay(100);
 
@@ -769,16 +779,27 @@ public class DisconnectionTests
     [Fact(Timeout = 120000)]
     public async Task TransportError_ChannelOnClosedFiresBeforeMuxOnDisconnected()
     {
-        // Arrange
+        // Arrange - disable reconnection so channels are aborted immediately on transport error
         await using var pipe = new DuplexPipe();
-        await using var mux1 = await TestMuxHelper.CreateMuxAsync(pipe.Stream1);
-        await using var mux2 = await TestMuxHelper.CreateMuxAsync(pipe.Stream2);
+        var noReconnectOptions1 = new MultiplexerOptions 
+        { 
+            EnableReconnection = false,
+            StreamFactory = _ => Task.FromResult<IStreamPair>(new StreamPair(pipe.Stream1))
+        };
+        var noReconnectOptions2 = new MultiplexerOptions 
+        { 
+            EnableReconnection = false,
+            StreamFactory = _ => Task.FromResult<IStreamPair>(new StreamPair(pipe.Stream2))
+        };
+        
+        await using var mux1 = StreamMultiplexer.Create(noReconnectOptions1);
+        await using var mux2 = StreamMultiplexer.Create(noReconnectOptions2);
 
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
-        var run1 = mux1.RunAsync(cts.Token);
-        var run2 = mux2.RunAsync(cts.Token);
+        var run1 = mux1.Start(cts.Token);
+        var run2 = mux2.Start(cts.Token);
 
-        await Task.Delay(100);
+        await Task.WhenAll(mux1.WaitForReadyAsync(cts.Token), mux2.WaitForReadyAsync(cts.Token));
 
         // Open channel
         await using var writeChannel = await mux1.OpenChannelAsync(new ChannelOptions { ChannelId = "test" }, cts.Token);
@@ -822,8 +843,8 @@ public class DisconnectionTests
         await using var mux2 = await TestMuxHelper.CreateMuxAsync(pipe.Stream2);
 
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
-        var run1 = mux1.RunAsync(cts.Token);
-        var run2 = mux2.RunAsync(cts.Token);
+        var run1 = mux1.Start(cts.Token);
+        var run2 = mux2.Start(cts.Token);
 
         await Task.Delay(100);
 
@@ -852,8 +873,8 @@ public class DisconnectionTests
         await using var mux2 = await TestMuxHelper.CreateMuxAsync(pipe.Stream2);
 
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
-        var run1 = mux1.RunAsync(cts.Token);
-        var run2 = mux2.RunAsync(cts.Token);
+        var run1 = mux1.Start(cts.Token);
+        var run2 = mux2.Start(cts.Token);
 
         await Task.Delay(100);
 
@@ -881,8 +902,8 @@ public class DisconnectionTests
         await using var mux2 = await TestMuxHelper.CreateMuxAsync(pipe.Stream2);
 
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
-        var run1 = mux1.RunAsync(cts.Token);
-        var run2 = mux2.RunAsync(cts.Token);
+        var run1 = mux1.Start(cts.Token);
+        var run2 = mux2.Start(cts.Token);
 
         await Task.Delay(100);
 
@@ -924,8 +945,8 @@ public class DisconnectionTests
         await using var mux2 = await TestMuxHelper.CreateMuxAsync(pipe.Stream2);
 
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
-        var run1 = mux1.RunAsync(cts.Token);
-        var run2 = mux2.RunAsync(cts.Token);
+        var run1 = mux1.Start(cts.Token);
+        var run2 = mux2.Start(cts.Token);
 
         await Task.Delay(100);
 
@@ -956,8 +977,8 @@ public class DisconnectionTests
         await using var mux2 = await TestMuxHelper.CreateMuxAsync(pipe.Stream2);
 
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
-        var run1 = mux1.RunAsync(cts.Token);
-        var run2 = mux2.RunAsync(cts.Token);
+        var run1 = mux1.Start(cts.Token);
+        var run2 = mux2.Start(cts.Token);
 
         await Task.Delay(100);
 
@@ -994,8 +1015,8 @@ public class DisconnectionTests
         await using var mux2 = await TestMuxHelper.CreateMuxAsync(pipe.Stream2);
 
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
-        var run1 = mux1.RunAsync(cts.Token);
-        var run2 = mux2.RunAsync(cts.Token);
+        var run1 = mux1.Start(cts.Token);
+        var run2 = mux2.Start(cts.Token);
 
         await Task.Delay(100);
 

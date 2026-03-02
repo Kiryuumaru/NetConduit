@@ -1,11 +1,12 @@
 namespace NetConduit;
 
 /// <summary>
-/// Delegate that creates new read and write streams for reconnection.
+/// Delegate that creates a new stream pair for connection/reconnection.
+/// The returned <see cref="IStreamPair"/> will be disposed on reconnect or shutdown.
 /// </summary>
 /// <param name="cancellationToken">Cancellation token.</param>
-/// <returns>A tuple containing the new read and write streams.</returns>
-public delegate Task<(Stream ReadStream, Stream WriteStream)> StreamFactoryDelegate(CancellationToken cancellationToken);
+/// <returns>A stream pair containing read and write streams with proper disposal.</returns>
+public delegate Task<IStreamPair> StreamFactoryDelegate(CancellationToken cancellationToken);
 
 /// <summary>
 /// Event arguments for auto-reconnect attempts.
@@ -31,6 +32,11 @@ public sealed class AutoReconnectEventArgs
     /// The exception from the last connection attempt, if any.
     /// </summary>
     public Exception? LastException { get; init; }
+    
+    /// <summary>
+    /// Whether this is a reconnection attempt (true) or initial connection (false).
+    /// </summary>
+    public bool IsReconnecting { get; init; }
     
     /// <summary>
     /// Set to true to cancel the reconnection process.
@@ -136,6 +142,16 @@ public sealed class MultiplexerOptions
     /// Multiplier for exponential backoff between reconnection attempts. Default: 2.0.
     /// </summary>
     public double AutoReconnectBackoffMultiplier { get; init; } = 2.0;
+    
+    /// <summary>
+    /// Timeout for each StreamFactory call. Default: Infinite (relies on user's CancellationToken).
+    /// </summary>
+    public TimeSpan ConnectionTimeout { get; init; } = Timeout.InfiniteTimeSpan;
+    
+    /// <summary>
+    /// Timeout for handshake completion after connection. Default: Infinite (relies on user's CancellationToken).
+    /// </summary>
+    public TimeSpan HandshakeTimeout { get; init; } = Timeout.InfiniteTimeSpan;
 }
 
 /// <summary>

@@ -29,8 +29,8 @@ public class TcpRelayTests
 
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
         
-        var muxInitiatorTask = muxInitiator.RunAsync(cts.Token);
-        var muxAcceptorTask = muxAcceptor.RunAsync(cts.Token);
+        var muxInitiatorTask = muxInitiator.Start(cts.Token);
+        var muxAcceptorTask = muxAcceptor.Start(cts.Token);
         await Task.Delay(100);
 
         // Create a bidirectional channel pair (simulating the tunnel)
@@ -89,8 +89,8 @@ public class TcpRelayTests
 
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(60));
         
-        var muxInitiatorTask = muxInitiator.RunAsync(cts.Token);
-        var muxAcceptorTask = muxAcceptor.RunAsync(cts.Token);
+        var muxInitiatorTask = muxInitiator.Start(cts.Token);
+        var muxAcceptorTask = muxAcceptor.Start(cts.Token);
         await Task.Delay(100);
 
         const int connectionCount = 10;
@@ -195,10 +195,10 @@ public class TcpRelayTests
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
         
         // Start all multiplexers
-        var deviceATask = deviceAMux.RunAsync(cts.Token);
-        var serverATask = serverMuxA.RunAsync(cts.Token);
-        var deviceBTask = deviceBMux.RunAsync(cts.Token);
-        var serverBTask = serverMuxB.RunAsync(cts.Token);
+        var deviceATask = deviceAMux.Start(cts.Token);
+        var serverATask = serverMuxA.Start(cts.Token);
+        var deviceBTask = deviceBMux.Start(cts.Token);
+        var serverBTask = serverMuxB.Start(cts.Token);
         await Task.Delay(200);
 
         // Create channels from each device to server
@@ -277,10 +277,10 @@ public class TcpRelayTests
 
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(60));
         
-        var deviceATask = deviceAMux.RunAsync(cts.Token);
-        var serverATask = serverMuxA.RunAsync(cts.Token);
-        var deviceBTask = deviceBMux.RunAsync(cts.Token);
-        var serverBTask = serverMuxB.RunAsync(cts.Token);
+        var deviceATask = deviceAMux.Start(cts.Token);
+        var serverATask = serverMuxA.Start(cts.Token);
+        var deviceBTask = deviceBMux.Start(cts.Token);
+        var serverBTask = serverMuxB.Start(cts.Token);
         await Task.Delay(200);
 
         // Create channel from Device A to Server
@@ -360,8 +360,8 @@ public class TcpRelayTests
         await using var muxInitiator = await TestMuxHelper.CreateMuxAsync(physicalPipe.Stream1);
         await using var muxAcceptor = await TestMuxHelper.CreateMuxAsync(physicalPipe.Stream2);
 
-        var muxInitiatorTask = muxInitiator.RunAsync(cts.Token);
-        var muxAcceptorTask = muxAcceptor.RunAsync(cts.Token);
+        var muxInitiatorTask = muxInitiator.Start(cts.Token);
+        var muxAcceptorTask = muxAcceptor.Start(cts.Token);
         await Task.Delay(100);
 
         // Create channel for the relay
@@ -417,8 +417,8 @@ public class TcpRelayTests
         await using var muxInitiator = await TestMuxHelper.CreateMuxAsync(physicalPipe.Stream1);
         await using var muxAcceptor = await TestMuxHelper.CreateMuxAsync(physicalPipe.Stream2);
 
-        var muxInitiatorTask = muxInitiator.RunAsync(cts.Token);
-        var muxAcceptorTask = muxAcceptor.RunAsync(cts.Token);
+        var muxInitiatorTask = muxInitiator.Start(cts.Token);
+        var muxAcceptorTask = muxAcceptor.Start(cts.Token);
         await Task.Delay(100);
 
         const int streamCount = 5;
@@ -476,9 +476,8 @@ public class TcpRelayTests
 
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(60));  // Increased timeout
         
-        var startTasks = await Task.WhenAll(clientMux.StartAsync(cts.Token), serverMux.StartAsync(cts.Token));
-        var clientMuxTask = startTasks[0];
-        var serverMuxTask = startTasks[1];
+        var clientMuxTask = clientMux.Start(cts.Token);
+        var serverMuxTask = serverMux.Start(cts.Token);
 
         // Client: create duplex stream and send data
         var bidi = await CreateFullBidirectionalPipeAsync(clientMux, serverMux, cts.Token);

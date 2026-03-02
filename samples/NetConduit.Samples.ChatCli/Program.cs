@@ -73,11 +73,13 @@ async Task RunServerAsync(int port, string username, CancellationToken ct)
     listener.Start();
     Console.WriteLine($"[System] Listening for connections...");
     
-    // Accept connection with simple extension method
-    await using var connection = await listener.AcceptMuxAsync(cancellationToken: ct);
+    // Accept connection with CreateServerOptions pattern
+    var options = TcpMultiplexer.CreateServerOptions(listener);
+    await using var connection = StreamMultiplexer.Create(options);
     Console.WriteLine($"[System] Client connected");
     
-    var runTask = await connection.StartAsync(ct);
+    var runTask = connection.Start(ct);
+    await connection.WaitForReadyAsync(ct);
     
     // Server opens send channel, accepts receive channel
     var sendChannel = await connection.OpenChannelAsync(new ChannelOptions { ChannelId = "server-to-client" }, ct);
@@ -106,12 +108,13 @@ async Task RunClientAsync(string host, int port, string username, CancellationTo
 {
     Console.WriteLine($"[System] Connecting to {host}:{port} as '{username}'...");
     
-    // Connect with simple extension method
-    using var client = new TcpClient();
-    await using var connection = await client.ConnectMuxAsync(host, port, cancellationToken: ct);
+    // Connect with CreateOptions pattern
+    var options = TcpMultiplexer.CreateOptions(host, port);
+    await using var connection = StreamMultiplexer.Create(options);
     Console.WriteLine("[System] Connected to server");
     
-    var runTask = await connection.StartAsync(ct);
+    var runTask = connection.Start(ct);
+    await connection.WaitForReadyAsync(ct);
     
     // Client opens send channel, accepts receive channel
     var sendChannel = await connection.OpenChannelAsync(new ChannelOptions { ChannelId = "client-to-server" }, ct);
@@ -136,7 +139,7 @@ async Task RunClientAsync(string host, int port, string username, CancellationTo
     await RunChatLoopAsync(connection, sendChannel, receiveChannel, username, ct);
 }
 
-async Task RunChatLoopAsync(TcpMultiplexerConnection connection, WriteChannel sendChannel, ReadChannel receiveChannel, string username, CancellationToken ct)
+async Task RunChatLoopAsync(IStreamMultiplexer connection, WriteChannel sendChannel, ReadChannel receiveChannel, string username, CancellationToken ct)
 {
     // Create MessageTransit for type-safe messaging
     await using var transit = new MessageTransit<ChatMessage, ChatMessage>(

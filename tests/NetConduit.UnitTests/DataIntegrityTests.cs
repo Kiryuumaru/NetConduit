@@ -29,8 +29,8 @@ public class DataIntegrityTests
 
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(60));
         
-        var runA = muxA.RunAsync(cts.Token);
-        var runB = muxB.RunAsync(cts.Token);
+        var runA = muxA.Start(cts.Token);
+        var runB = muxB.Start(cts.Token);
         await Task.Delay(100);
 
         const int channelCount = 20;
@@ -136,8 +136,8 @@ public class DataIntegrityTests
 
         using var cts = new CancellationTokenSource(TimeSpan.FromMinutes(3));
         
-        var runA = muxA.RunAsync(cts.Token);
-        var runB = muxB.RunAsync(cts.Token);
+        var runA = muxA.Start(cts.Token);
+        var runB = muxB.Start(cts.Token);
         await Task.Delay(100);
 
         const int pairCount = 5;
@@ -237,8 +237,8 @@ public class DataIntegrityTests
 
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(120));
         
-        var runA = muxA.RunAsync(cts.Token);
-        var runB = muxB.RunAsync(cts.Token);
+        var runA = muxA.Start(cts.Token);
+        var runB = muxB.Start(cts.Token);
         await Task.Delay(100);
 
         // Open channels from both sides - reduced count for reliable testing
@@ -344,8 +344,8 @@ public class DataIntegrityTests
 
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(120));
         
-        var runA = muxA.RunAsync(cts.Token);
-        var runB = muxB.RunAsync(cts.Token);
+        var runA = muxA.Start(cts.Token);
+        var runB = muxB.Start(cts.Token);
         await Task.Delay(100);
 
         const int cycles = 500;
@@ -402,8 +402,8 @@ public class DataIntegrityTests
 
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
         
-        var runA = muxA.RunAsync(cts.Token);
-        var runB = muxB.RunAsync(cts.Token);
+        var runA = muxA.Start(cts.Token);
+        var runB = muxB.Start(cts.Token);
         await Task.Delay(100);
 
         // Both sides open their first channel (both will get index 1)
@@ -457,8 +457,8 @@ public class DataIntegrityTests
 
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(120));
         
-        var runA = muxA.RunAsync(cts.Token);
-        var runB = muxB.RunAsync(cts.Token);
+        var runA = muxA.Start(cts.Token);
+        var runB = muxB.Start(cts.Token);
         await Task.Delay(100);
 
         // Open 500 channels to verify index allocation works (reduced for speed)

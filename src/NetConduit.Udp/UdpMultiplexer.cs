@@ -13,70 +13,89 @@ public static class UdpMultiplexer
     private static readonly byte[] HelloAckPayload = "NC_HELLO_ACK"u8.ToArray();
 
     /// <summary>
-    /// Connects to a UDP endpoint and creates a multiplexer.
+    /// Creates multiplexer options with a StreamFactory that connects to the specified UDP endpoint.
+    /// Supports reconnection - each call to StreamFactory creates a new UDP connection.
     /// </summary>
-    public static async Task<UdpMultiplexerConnection> ConnectAsync(
+    /// <param name="host">The host to connect to.</param>
+    /// <param name="port">The port to connect to.</param>
+    /// <param name="udpOptions">Optional reliable UDP stream options.</param>
+    /// <param name="configure">Optional action to configure additional multiplexer options.</param>
+    /// <returns>MultiplexerOptions configured for UDP client connection.</returns>
+    public static MultiplexerOptions CreateOptions(
         string host,
         int port,
         ReliableUdpOptions? udpOptions = null,
-        MultiplexerOptions? options = null,
-        CancellationToken cancellationToken = default)
+        Action<MultiplexerOptions>? configure = null)
     {
         ArgumentNullException.ThrowIfNull(host);
 
-        var client = new UdpClient(AddressFamily.InterNetworkV6);
-        client.Client.DualMode = true;
-        try
+        var options = new MultiplexerOptions
         {
-            await client.Client.ConnectAsync(host, port, cancellationToken).ConfigureAwait(false);
-            await client.SendAsync(HelloPayload, cancellationToken).ConfigureAwait(false);
-            await TryReceiveHelloAckAsync(client, cancellationToken).ConfigureAwait(false);
+            StreamFactory = async ct =>
+            {
+                var client = new UdpClient(AddressFamily.InterNetworkV6);
+                client.Client.DualMode = true;
+                await client.Client.ConnectAsync(host, port, ct).ConfigureAwait(false);
+                await client.SendAsync(HelloPayload, ct).ConfigureAwait(false);
+                await TryReceiveHelloAckAsync(client, ct).ConfigureAwait(false);
 
-            var reliable = new ReliableUdpStream(client, udpOptions);
-            var mux = new StreamMultiplexer(reliable, reliable, options);
-            return new UdpMultiplexerConnection(mux, client, reliable);
-        }
-        catch
-        {
-            client.Dispose();
-            throw;
-        }
+                var reliable = new ReliableUdpStream(client, udpOptions);
+                return new StreamPair(reliable);
+            }
+        };
+
+        configure?.Invoke(options);
+        return options;
     }
 
     /// <summary>
-    /// Accepts the first incoming UDP datagram on the specified port and creates a multiplexer bound to that peer.
+    /// Creates multiplexer options with a StreamFactory that accepts UDP connections on the specified port.
+    /// Reconnection is disabled by default for server-side connections.
     /// </summary>
-    public static async Task<UdpMultiplexerConnection> AcceptAsync(
+    /// <param name="listenPort">The port to listen on.</param>
+    /// <param name="udpOptions">Optional reliable UDP stream options.</param>
+    /// <param name="configure">Optional action to configure additional multiplexer options.</param>
+    /// <returns>MultiplexerOptions configured for UDP server acceptance.</returns>
+    public static MultiplexerOptions CreateServerOptions(
         int listenPort,
         ReliableUdpOptions? udpOptions = null,
-        MultiplexerOptions? options = null,
-        CancellationToken cancellationToken = default)
+        Action<MultiplexerOptions>? configure = null)
     {
-        var listener = new UdpClient(AddressFamily.InterNetworkV6);
-        listener.Client.DualMode = true; // Allow IPv4/IPv6 clients
-        listener.Client.Bind(new IPEndPoint(IPAddress.IPv6Any, listenPort));
-
-        try
+        var accepted = false;
+        var options = new MultiplexerOptions
         {
-            var result = await listener.ReceiveAsync(cancellationToken).ConfigureAwait(false);
-            var remote = result.RemoteEndPoint;
-            listener.Connect(remote);
-
-            // Respond to hello if we got one
-            if (result.Buffer.AsSpan().SequenceEqual(HelloPayload))
+            EnableReconnection = false,
+            StreamFactory = async ct =>
             {
-                await listener.SendAsync(HelloAckPayload, cancellationToken).ConfigureAwait(false);
-            }
+                if (accepted)
+                {
+                    throw new InvalidOperationException(
+                        "Server-side UDP multiplexer does not support reconnection. " +
+                        "Create a new multiplexer instance to accept another connection.");
+                }
 
-            var reliable = new ReliableUdpStream(listener, udpOptions);
-            var mux = new StreamMultiplexer(reliable, reliable, options);
-            return new UdpMultiplexerConnection(mux, listener, reliable);
-        }
-        catch
-        {
-            listener.Dispose();
-            throw;
-        }
+                accepted = true;
+
+                var listener = new UdpClient(AddressFamily.InterNetworkV6);
+                listener.Client.DualMode = true;
+                listener.Client.Bind(new IPEndPoint(IPAddress.IPv6Any, listenPort));
+
+                var result = await listener.ReceiveAsync(ct).ConfigureAwait(false);
+                var remote = result.RemoteEndPoint;
+                listener.Connect(remote);
+
+                if (result.Buffer.AsSpan().SequenceEqual(HelloPayload))
+                {
+                    await listener.SendAsync(HelloAckPayload, ct).ConfigureAwait(false);
+                }
+
+                var reliable = new ReliableUdpStream(listener, udpOptions);
+                return new StreamPair(reliable);
+            }
+        };
+
+        configure?.Invoke(options);
+        return options;
     }
 
     private static async Task TryReceiveHelloAckAsync(UdpClient client, CancellationToken cancellationToken)
@@ -86,7 +105,7 @@ public static class UdpMultiplexer
             using var cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
             cts.CancelAfter(TimeSpan.FromSeconds(1));
             var result = await client.ReceiveAsync(cts.Token).ConfigureAwait(false);
-            _ = result; // Ignore content; best-effort ack
+            _ = result;
         }
         catch
         {

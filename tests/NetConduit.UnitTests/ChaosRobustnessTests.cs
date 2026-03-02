@@ -67,8 +67,8 @@ public class ChaosRobustnessTests
 
         using var cts = new CancellationTokenSource(TestTimeout);
         
-        var runA = muxA.RunAsync(cts.Token);
-        var runB = muxB.RunAsync(cts.Token);
+        var runA = muxA.Start(cts.Token);
+        var runB = muxB.Start(cts.Token);
         await Task.Delay(100);
 
         var totalVerified = 0L;
@@ -213,8 +213,8 @@ public class ChaosRobustnessTests
 
         using var cts = new CancellationTokenSource(TestTimeout);
         
-        var runA = muxA.RunAsync(cts.Token);
-        var runB = muxB.RunAsync(cts.Token);
+        var runA = muxA.Start(cts.Token);
+        var runB = muxB.Start(cts.Token);
         await Task.Delay(100);
 
         var concurrency = Math.Min(100, channelsPerSide / 10 + 1);
@@ -410,8 +410,8 @@ public class ChaosRobustnessTests
 
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(90));
         
-        var runA = muxA.RunAsync(cts.Token);
-        var runB = muxB.RunAsync(cts.Token);
+        var runA = muxA.Start(cts.Token);
+        var runB = muxB.Start(cts.Token);
         await Task.Delay(100);
 
         var random = new Random(42); // Fixed seed for reproducibility
@@ -511,7 +511,9 @@ public class ChaosRobustnessTests
                 if (ch.State == ChannelState.Open)
                     await ch.CloseAsync(cts.Token);
             }
-            catch { }
+            catch (ObjectDisposedException) { }
+            catch (InvalidOperationException) { }
+            catch (OperationCanceledException) { }
         }
 
         await Task.Delay(1000);
@@ -542,8 +544,8 @@ public class ChaosRobustnessTests
 
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(60));
         
-        var runA = muxA.RunAsync(cts.Token);
-        var runB = muxB.RunAsync(cts.Token);
+        var runA = muxA.Start(cts.Token);
+        var runB = muxB.Start(cts.Token);
         await Task.Delay(100);
 
         var random = new Random(123);
@@ -623,8 +625,8 @@ public class ChaosRobustnessTests
 
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(120));
         
-        var runA = muxA.RunAsync(cts.Token);
-        var runB = muxB.RunAsync(cts.Token);
+        var runA = muxA.Start(cts.Token);
+        var runB = muxB.Start(cts.Token);
         await Task.Delay(100);
 
         const int channelsPerSide = 20;
@@ -702,8 +704,8 @@ public class ChaosRobustnessTests
 
         using var cts = new CancellationTokenSource(TimeSpan.FromMinutes(3));
         
-        var runA = muxA.RunAsync(cts.Token);
-        var runB = muxB.RunAsync(cts.Token);
+        var runA = muxA.Start(cts.Token);
+        var runB = muxB.Start(cts.Token);
         await Task.Delay(100);
 
         const int pairCount = 30;
@@ -779,8 +781,8 @@ public class ChaosRobustnessTests
 
         using var cts = new CancellationTokenSource(TimeSpan.FromMinutes(3));
         
-        var runA = muxA.RunAsync(cts.Token);
-        var runB = muxB.RunAsync(cts.Token);
+        var runA = muxA.Start(cts.Token);
+        var runB = muxB.Start(cts.Token);
         await Task.Delay(100);
 
         const int channelCount = 100;
@@ -855,8 +857,8 @@ public class ChaosRobustnessTests
 
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(60));
         
-        var runA = muxA.RunAsync(cts.Token);
-        var runB = muxB.RunAsync(cts.Token);
+        var runA = muxA.Start(cts.Token);
+        var runB = muxB.Start(cts.Token);
         await Task.Delay(100);
 
         const int channelCount = 20;
@@ -935,8 +937,8 @@ public class ChaosRobustnessTests
 
         using var cts = new CancellationTokenSource(TimeSpan.FromMinutes(3));
         
-        var runA = muxA.RunAsync(cts.Token);
-        var runB = muxB.RunAsync(cts.Token);
+        var runA = muxA.Start(cts.Token);
+        var runB = muxB.Start(cts.Token);
         await Task.Delay(100);
 
         const int messageCount = 50; // Reduced for faster test
@@ -1006,8 +1008,8 @@ public class ChaosRobustnessTests
 
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(120));
         
-        var runA = muxA.RunAsync(cts.Token);
-        var runB = muxB.RunAsync(cts.Token);
+        var runA = muxA.Start(cts.Token);
+        var runB = muxB.Start(cts.Token);
         await Task.Delay(100);
 
         const int cycles = 500; // Reduced count for stability
@@ -1068,8 +1070,8 @@ public class ChaosRobustnessTests
 
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(90));
         
-        var runA = muxA.RunAsync(cts.Token);
-        var runB = muxB.RunAsync(cts.Token);
+        var runA = muxA.Start(cts.Token);
+        var runB = muxB.Start(cts.Token);
         await Task.Delay(100);
 
         const int count = 50;
@@ -1164,8 +1166,8 @@ public class ChaosRobustnessTests
 
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
         
-        var runA = muxA.RunAsync(cts.Token);
-        var runB = muxB.RunAsync(cts.Token);
+        var runA = muxA.Start(cts.Token);
+        var runB = muxB.Start(cts.Token);
         await Task.Delay(100);
 
         byte[]? received = null;

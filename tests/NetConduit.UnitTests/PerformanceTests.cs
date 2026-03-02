@@ -15,8 +15,8 @@ public class PerformanceTests
 
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(60));
         
-        var initiatorTask = initiator.RunAsync(cts.Token);
-        var acceptorTask = acceptor.RunAsync(cts.Token);
+        var initiatorTask = initiator.Start(cts.Token);
+        var acceptorTask = acceptor.Start(cts.Token);
 
         await Task.Delay(100);
 
@@ -91,8 +91,8 @@ public class PerformanceTests
 
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(60));
         
-        var initiatorTask = initiator.RunAsync(cts.Token);
-        var acceptorTask = acceptor.RunAsync(cts.Token);
+        var initiatorTask = initiator.Start(cts.Token);
+        var acceptorTask = acceptor.Start(cts.Token);
 
         await Task.Delay(100);
 
@@ -157,8 +157,8 @@ public class PerformanceTests
 
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(120));
         
-        var initiatorTask = initiator.RunAsync(cts.Token);
-        var acceptorTask = acceptor.RunAsync(cts.Token);
+        var initiatorTask = initiator.Start(cts.Token);
+        var acceptorTask = acceptor.Start(cts.Token);
 
         await Task.Delay(100);
 
@@ -228,8 +228,8 @@ public class PerformanceTests
 
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(60));
         
-        var initiatorTask = initiator.RunAsync(cts.Token);
-        var acceptorTask = acceptor.RunAsync(cts.Token);
+        var initiatorTask = initiator.Start(cts.Token);
+        var acceptorTask = acceptor.Start(cts.Token);
 
         await Task.Delay(100);
 
@@ -325,8 +325,8 @@ public class PerformanceTests
 
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
         
-        var initiatorTask = initiator.RunAsync(cts.Token);
-        var acceptorTask = acceptor.RunAsync(cts.Token);
+        var initiatorTask = initiator.Start(cts.Token);
+        var acceptorTask = acceptor.Start(cts.Token);
 
         await Task.Delay(100);
 

@@ -25,8 +25,8 @@ public class DataIntegrityStressTests
 
         using var cts = new CancellationTokenSource(TimeSpan.FromMinutes(5));
         
-        var runA = muxA.RunAsync(cts.Token);
-        var runB = muxB.RunAsync(cts.Token);
+        var runA = muxA.Start(cts.Token);
+        var runB = muxB.Start(cts.Token);
         await Task.Delay(100);
 
         const int pairCount = 100;
@@ -113,8 +113,8 @@ public class DataIntegrityStressTests
 
         using var cts = new CancellationTokenSource(TimeSpan.FromMinutes(5));
         
-        var runA = muxA.RunAsync(cts.Token);
-        var runB = muxB.RunAsync(cts.Token);
+        var runA = muxA.Start(cts.Token);
+        var runB = muxB.Start(cts.Token);
         await Task.Delay(100);
 
         // Open 1000 channels from each side
@@ -218,8 +218,8 @@ public class DataIntegrityStressTests
 
         using var cts = new CancellationTokenSource(TimeSpan.FromMinutes(5));
         
-        var runA = muxA.RunAsync(cts.Token);
-        var runB = muxB.RunAsync(cts.Token);
+        var runA = muxA.Start(cts.Token);
+        var runB = muxB.Start(cts.Token);
         await Task.Delay(100);
 
         const int cycles = 5000;
@@ -276,8 +276,8 @@ public class DataIntegrityStressTests
 
         using var cts = new CancellationTokenSource(TimeSpan.FromMinutes(5));
         
-        var runA = muxA.RunAsync(cts.Token);
-        var runB = muxB.RunAsync(cts.Token);
+        var runA = muxA.Start(cts.Token);
+        var runB = muxB.Start(cts.Token);
         await Task.Delay(100);
 
         const int testChannels = 10000;
@@ -326,8 +326,8 @@ public class DataIntegrityStressTests
 
         using var cts = new CancellationTokenSource(TimeSpan.FromMinutes(5));
         
-        var runA = muxA.RunAsync(cts.Token);
-        var runB = muxB.RunAsync(cts.Token);
+        var runA = muxA.Start(cts.Token);
+        var runB = muxB.Start(cts.Token);
         await Task.Delay(100);
 
         const int channelCount = 50;

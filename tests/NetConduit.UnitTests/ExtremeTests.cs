@@ -26,8 +26,8 @@ public class ExtremeTests
 
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(60));
         
-        var outerInitiatorTask = outerInitiator.RunAsync(cts.Token);
-        var outerAcceptorTask = outerAcceptor.RunAsync(cts.Token);
+        var outerInitiatorTask = outerInitiator.Start(cts.Token);
+        var outerAcceptorTask = outerAcceptor.Start(cts.Token);
         await Task.Delay(200);
 
         // Open two channels to create bidirectional transport for inner mux
@@ -56,13 +56,16 @@ public class ExtremeTests
         var innerAcceptReadStream = new ChannelReadStream(outerRead1);
         var innerAcceptWriteStream = new ChannelWriteStream(reverseWrite);
 
-        await using var innerInitiator = await StreamMultiplexer.CreateAsync(
+        await using var innerInitiator = StreamMultiplexer.Create(
             TestMuxHelper.CreateOptionsFor(innerInitReadStream, innerInitWriteStream));
-        await using var innerAcceptor = await StreamMultiplexer.CreateAsync(
-            TestMuxHelper.CreateOptionsFor(innerAcceptReadStream, innerAcceptWriteStream));
+        var innerInitiatorTask = innerInitiator.Start();
+        await innerInitiator.WaitForReadyAsync();
 
-        var innerInitiatorTask = innerInitiator.RunAsync(cts.Token);
-        var innerAcceptorTask = innerAcceptor.RunAsync(cts.Token);
+        await using var innerAcceptor = StreamMultiplexer.Create(
+            TestMuxHelper.CreateOptionsFor(innerAcceptReadStream, innerAcceptWriteStream));
+        var innerAcceptorTask = innerAcceptor.Start();
+        await innerAcceptor.WaitForReadyAsync();
+
         await Task.Delay(200);
 
         // Now use the inner multiplexer to transfer data
@@ -106,21 +109,24 @@ public class ExtremeTests
 
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(60));
         
-        var l1InitiatorTask = l1Initiator.RunAsync(cts.Token);
-        var l1AcceptorTask = l1Acceptor.RunAsync(cts.Token);
+        var l1InitiatorTask = l1Initiator.Start(cts.Token);
+        var l1AcceptorTask = l1Acceptor.Start(cts.Token);
         await Task.Delay(100);
 
         // Create BIDIRECTIONAL channel pair for L2 (need channels in both directions)
         var l1Bidi = await CreateFullBidirectionalPipeAsync(l1Initiator, l1Acceptor, "l1_to_l2_a", "l1_to_l2_b", cts.Token);
 
         // Level 2 - Use the properly formed bidirectional channels
-        await using var l2Initiator = await StreamMultiplexer.CreateAsync(
+        await using var l2Initiator = StreamMultiplexer.Create(
             TestMuxHelper.CreateOptionsFor(new ChannelReadStream(l1Bidi.InitiatorRead), new ChannelWriteStream(l1Bidi.InitiatorWrite)));
-        await using var l2Acceptor = await StreamMultiplexer.CreateAsync(
-            TestMuxHelper.CreateOptionsFor(new ChannelReadStream(l1Bidi.AcceptorRead), new ChannelWriteStream(l1Bidi.AcceptorWrite)));
+        var l2InitiatorTask = l2Initiator.Start();
+        await l2Initiator.WaitForReadyAsync();
 
-        var l2InitiatorTask = l2Initiator.RunAsync(cts.Token);
-        var l2AcceptorTask = l2Acceptor.RunAsync(cts.Token);
+        await using var l2Acceptor = StreamMultiplexer.Create(
+            TestMuxHelper.CreateOptionsFor(new ChannelReadStream(l1Bidi.AcceptorRead), new ChannelWriteStream(l1Bidi.AcceptorWrite)));
+        var l2AcceptorTask = l2Acceptor.Start();
+        await l2Acceptor.WaitForReadyAsync();
+
         await Task.Delay(200); // More time for L2 handshake
 
         // Transfer data directly through L2 (one level of nesting)
@@ -162,21 +168,24 @@ public class ExtremeTests
 
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(60));
         
-        var l1InitiatorTask = l1Initiator.RunAsync(cts.Token);
-        var l1AcceptorTask = l1Acceptor.RunAsync(cts.Token);
+        var l1InitiatorTask = l1Initiator.Start(cts.Token);
+        var l1AcceptorTask = l1Acceptor.Start(cts.Token);
         await Task.Delay(100);
 
         // Create BIDIRECTIONAL channel pair for L2
         var l1Bidi = await CreateFullBidirectionalPipeAsync(l1Initiator, l1Acceptor, "l1_bidi_a", "l1_bidi_b", cts.Token);
 
         // Level 2
-        await using var l2Initiator = await StreamMultiplexer.CreateAsync(
+        await using var l2Initiator = StreamMultiplexer.Create(
             TestMuxHelper.CreateOptionsFor(new ChannelReadStream(l1Bidi.InitiatorRead), new ChannelWriteStream(l1Bidi.InitiatorWrite)));
-        await using var l2Acceptor = await StreamMultiplexer.CreateAsync(
-            TestMuxHelper.CreateOptionsFor(new ChannelReadStream(l1Bidi.AcceptorRead), new ChannelWriteStream(l1Bidi.AcceptorWrite)));
+        var l2InitiatorTask = l2Initiator.Start();
+        await l2Initiator.WaitForReadyAsync();
 
-        var l2InitiatorTask = l2Initiator.RunAsync(cts.Token);
-        var l2AcceptorTask = l2Acceptor.RunAsync(cts.Token);
+        await using var l2Acceptor = StreamMultiplexer.Create(
+            TestMuxHelper.CreateOptionsFor(new ChannelReadStream(l1Bidi.AcceptorRead), new ChannelWriteStream(l1Bidi.AcceptorWrite)));
+        var l2AcceptorTask = l2Acceptor.Start();
+        await l2Acceptor.WaitForReadyAsync();
+
         await Task.Delay(500); // Give more time for L2 handshake
 
         // Verify L2 is running
@@ -190,13 +199,16 @@ public class ExtremeTests
         var l2Bidi = await CreateFullBidirectionalPipeAsync(l2Initiator, l2Acceptor, "l2_bidi_a", "l2_bidi_b", linkedCts.Token);
 
         // Level 3
-        await using var l3Initiator = await StreamMultiplexer.CreateAsync(
+        await using var l3Initiator = StreamMultiplexer.Create(
             TestMuxHelper.CreateOptionsFor(new ChannelReadStream(l2Bidi.InitiatorRead), new ChannelWriteStream(l2Bidi.InitiatorWrite)));
-        await using var l3Acceptor = await StreamMultiplexer.CreateAsync(
-            TestMuxHelper.CreateOptionsFor(new ChannelReadStream(l2Bidi.AcceptorRead), new ChannelWriteStream(l2Bidi.AcceptorWrite)));
+        var l3InitiatorTask = l3Initiator.Start();
+        await l3Initiator.WaitForReadyAsync();
 
-        var l3InitiatorTask = l3Initiator.RunAsync(cts.Token);
-        var l3AcceptorTask = l3Acceptor.RunAsync(cts.Token);
+        await using var l3Acceptor = StreamMultiplexer.Create(
+            TestMuxHelper.CreateOptionsFor(new ChannelReadStream(l2Bidi.AcceptorRead), new ChannelWriteStream(l2Bidi.AcceptorWrite)));
+        var l3AcceptorTask = l3Acceptor.Start();
+        await l3Acceptor.WaitForReadyAsync();
+
         await Task.Delay(500);
 
         // Transfer data through L3 (two levels of nesting)
@@ -237,8 +249,8 @@ public class ExtremeTests
 
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(60));
         
-        var l1InitiatorTask = l1Initiator.RunAsync(cts.Token);
-        var l1AcceptorTask = l1Acceptor.RunAsync(cts.Token);
+        var l1InitiatorTask = l1Initiator.Start(cts.Token);
+        var l1AcceptorTask = l1Acceptor.Start(cts.Token);
         await Task.Delay(100);
 
         // Create multiple inner multiplexers on separate bidirectional channel pairs
@@ -252,13 +264,15 @@ public class ExtremeTests
         {
             var bidi = await CreateFullBidirectionalPipeAsync(l1Initiator, l1Acceptor, $"inner_{i}_a", $"inner_{i}_b", cts.Token);
 
-            var innerInit = await StreamMultiplexer.CreateAsync(
+            var innerInit = StreamMultiplexer.Create(
                 TestMuxHelper.CreateOptionsFor(new ChannelReadStream(bidi.InitiatorRead), new ChannelWriteStream(bidi.InitiatorWrite)));
-            var innerAccept = await StreamMultiplexer.CreateAsync(
-                TestMuxHelper.CreateOptionsFor(new ChannelReadStream(bidi.AcceptorRead), new ChannelWriteStream(bidi.AcceptorWrite)));
+            var initTask = innerInit.Start();
+            await innerInit.WaitForReadyAsync();
 
-            var initTask = innerInit.RunAsync(cts.Token);
-            var acceptTask = innerAccept.RunAsync(cts.Token);
+            var innerAccept = StreamMultiplexer.Create(
+                TestMuxHelper.CreateOptionsFor(new ChannelReadStream(bidi.AcceptorRead), new ChannelWriteStream(bidi.AcceptorWrite)));
+            var acceptTask = innerAccept.Start();
+            await innerAccept.WaitForReadyAsync();
 
             innerMuxes.Add((innerInit, innerAccept, initTask, acceptTask));
         }
@@ -349,8 +363,8 @@ public class ExtremeTests
 
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
         
-        var initiatorTask = initiator.RunAsync(cts.Token);
-        var acceptorTask = acceptor.RunAsync(cts.Token);
+        var initiatorTask = initiator.Start(cts.Token);
+        var acceptorTask = acceptor.Start(cts.Token);
         await Task.Delay(100);
 
         var channels = new ConcurrentBag<WriteChannel>();
@@ -446,8 +460,8 @@ public class ExtremeTests
 
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
         
-        var initiatorTask = initiator.RunAsync(cts.Token);
-        var acceptorTask = acceptor.RunAsync(cts.Token);
+        var initiatorTask = initiator.Start(cts.Token);
+        var acceptorTask = acceptor.Start(cts.Token);
         await Task.Delay(100);
 
         var acceptedChannels = new List<ReadChannel>();
@@ -506,8 +520,8 @@ public class ExtremeTests
 
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
         
-        var initiatorTask = initiator.RunAsync(cts.Token);
-        var acceptorTask = acceptor.RunAsync(cts.Token);
+        var initiatorTask = initiator.Start(cts.Token);
+        var acceptorTask = acceptor.Start(cts.Token);
         await Task.Delay(100);
 
         const int channelCount = 50;
@@ -630,8 +644,8 @@ public class ExtremeTests
 
         using var cts = new CancellationTokenSource(TimeSpan.FromMinutes(2));
         
-        var initiatorTask = initiator.RunAsync(cts.Token);
-        var acceptorTask = acceptor.RunAsync(cts.Token);
+        var initiatorTask = initiator.Start(cts.Token);
+        var acceptorTask = acceptor.Start(cts.Token);
         await Task.Delay(100);
 
         const int channelCount = 10_000;
@@ -684,8 +698,8 @@ public class ExtremeTests
 
         using var cts = new CancellationTokenSource(TimeSpan.FromMinutes(2));
         
-        var initiatorTask = initiator.RunAsync(cts.Token);
-        var acceptorTask = acceptor.RunAsync(cts.Token);
+        var initiatorTask = initiator.Start(cts.Token);
+        var acceptorTask = acceptor.Start(cts.Token);
         await Task.Delay(100);
 
         ReadChannel? readChannel = null;
@@ -756,8 +770,8 @@ public class ExtremeTests
 
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(60));
         
-        var initiatorTask = initiator.RunAsync(cts.Token);
-        var acceptorTask = acceptor.RunAsync(cts.Token);
+        var initiatorTask = initiator.Start(cts.Token);
+        var acceptorTask = acceptor.Start(cts.Token);
         await Task.Delay(100);
 
         ReadChannel? readChannel = null;
@@ -821,8 +835,8 @@ public class ExtremeTests
 
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(120));
         
-        var side1Task = side1.RunAsync(cts.Token);
-        var side2Task = side2.RunAsync(cts.Token);
+        var side1Task = side1.Start(cts.Token);
+        var side2Task = side2.Start(cts.Token);
         await Task.Delay(100);
 
         const int channelsPerSide = 25;
@@ -900,8 +914,8 @@ public class ExtremeTests
 
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(60));
         
-        var clientTask = client.RunAsync(cts.Token);
-        var serverTask = server.RunAsync(cts.Token);
+        var clientTask = client.Start(cts.Token);
+        var serverTask = server.Start(cts.Token);
         await Task.Delay(100);
 
         const int requestCount = 25;
@@ -1002,8 +1016,8 @@ public class ExtremeTests
 
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
         
-        var initiatorTask = initiator.RunAsync(cts.Token);
-        var acceptorTask = acceptor.RunAsync(cts.Token);
+        var initiatorTask = initiator.Start(cts.Token);
+        var acceptorTask = acceptor.Start(cts.Token);
         await Task.Delay(100);
 
         ReadChannel? readChannel = null;
@@ -1054,8 +1068,8 @@ public class ExtremeTests
 
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
         
-        var initiatorTask = initiator.RunAsync(cts.Token);
-        var acceptorTask = acceptor.RunAsync(cts.Token);
+        var initiatorTask = initiator.Start(cts.Token);
+        var acceptorTask = acceptor.Start(cts.Token);
         await Task.Delay(100);
 
         ReadChannel? readChannel = null;
@@ -1094,8 +1108,8 @@ public class ExtremeTests
 
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
         
-        var initiatorTask = initiator.RunAsync(cts.Token);
-        var acceptorTask = acceptor.RunAsync(cts.Token);
+        var initiatorTask = initiator.Start(cts.Token);
+        var acceptorTask = acceptor.Start(cts.Token);
         await Task.Delay(100);
 
         // Create channels from both sides
@@ -1299,8 +1313,8 @@ public class ExtremeTests
 
         using var cts = new CancellationTokenSource(TimeSpan.FromMinutes(5));
         
-        var initiatorTask = initiator.RunAsync(cts.Token);
-        var acceptorTask = acceptor.RunAsync(cts.Token);
+        var initiatorTask = initiator.Start(cts.Token);
+        var acceptorTask = acceptor.Start(cts.Token);
         await Task.Delay(100);
 
         const int channelCount = 100_000;
@@ -1382,8 +1396,8 @@ public class ExtremeTests
 
         using var cts = new CancellationTokenSource(TimeSpan.FromMinutes(3));
         
-        var initiatorTask = initiator.RunAsync(cts.Token);
-        var acceptorTask = acceptor.RunAsync(cts.Token);
+        var initiatorTask = initiator.Start(cts.Token);
+        var acceptorTask = acceptor.Start(cts.Token);
         await Task.Delay(100);
 
         const int channelCount = 1000;
@@ -1471,8 +1485,8 @@ public class ExtremeTests
 
         using var cts = new CancellationTokenSource(TimeSpan.FromMinutes(5));
         
-        var initiatorTask = initiator.RunAsync(cts.Token);
-        var acceptorTask = acceptor.RunAsync(cts.Token);
+        var initiatorTask = initiator.Start(cts.Token);
+        var acceptorTask = acceptor.Start(cts.Token);
         await Task.Delay(100);
 
         ReadChannel? readChannel = null;
@@ -1554,8 +1568,8 @@ public class ExtremeTests
 
         using var cts = new CancellationTokenSource(TimeSpan.FromMinutes(3));
         
-        var initiatorTask = initiator.RunAsync(cts.Token);
-        var acceptorTask = acceptor.RunAsync(cts.Token);
+        var initiatorTask = initiator.Start(cts.Token);
+        var acceptorTask = acceptor.Start(cts.Token);
         await Task.Delay(100);
 
         const int channelCount = 100;
@@ -1657,8 +1671,8 @@ public class ExtremeTests
 
         using var cts = new CancellationTokenSource(TimeSpan.FromMinutes(2));
         
-        var initiatorTask = initiator.RunAsync(cts.Token);
-        var acceptorTask = acceptor.RunAsync(cts.Token);
+        var initiatorTask = initiator.Start(cts.Token);
+        var acceptorTask = acceptor.Start(cts.Token);
         await Task.Delay(100);
 
         ReadChannel? readChannel = null;
@@ -1777,8 +1791,8 @@ public class ExtremeTests
 
         using var cts = new CancellationTokenSource(TestTimeout);
         
-        var initiatorTask = initiator.RunAsync(cts.Token);
-        var acceptorTask = acceptor.RunAsync(cts.Token);
+        var initiatorTask = initiator.Start(cts.Token);
+        var acceptorTask = acceptor.Start(cts.Token);
         await Task.Delay(100);
 
         var completedCount = 0;
@@ -1907,8 +1921,8 @@ public class ExtremeTests
 
         using var cts = new CancellationTokenSource(TestTimeout);
         
-        var initiatorTask = initiator.RunAsync(cts.Token);
-        var acceptorTask = acceptor.RunAsync(cts.Token);
+        var initiatorTask = initiator.Start(cts.Token);
+        var acceptorTask = acceptor.Start(cts.Token);
         await Task.Delay(100);
 
         ReadChannel? readChannel = null;
@@ -2012,8 +2026,8 @@ public class ExtremeTests
 
         using var cts = new CancellationTokenSource(TestTimeout);
         
-        var initiatorTask = initiator.RunAsync(cts.Token);
-        var acceptorTask = acceptor.RunAsync(cts.Token);
+        var initiatorTask = initiator.Start(cts.Token);
+        var acceptorTask = acceptor.Start(cts.Token);
         await Task.Delay(100);
 
         const int dataPerChannel = 1024;

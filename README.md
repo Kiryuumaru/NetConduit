@@ -30,7 +30,7 @@ dotnet add package NetConduit.Tcp
 # WebSocket transport helper  
 dotnet add package NetConduit.WebSocket
 
-# UDP transport (with built-in reliability layer)
+# UDP transport (with built-in reliability layer if you want TCP like UDP for some reason)
 dotnet add package NetConduit.Udp
 
 # IPC transport (named pipes on Windows, Unix sockets on Linux/macOS)
@@ -42,18 +42,45 @@ dotnet add package NetConduit.Quic
 
 ## Quick Start
 
+### TCP Client
+
+```csharp
+using NetConduit;
+using NetConduit.Tcp;
+
+// Create options with StreamFactory for connection + reconnection
+var options = TcpMultiplexer.CreateOptions("localhost", 5000);
+
+// Create multiplexer from options
+var mux = StreamMultiplexer.Create(options);
+var runTask = mux.Start();
+await mux.WaitForReadyAsync();
+
+// Open a channel and send data
+var channel = await mux.OpenChannelAsync(
+    new ChannelOptions { ChannelId = "my-channel" });
+
+await channel.WriteAsync(Encoding.UTF8.GetBytes("Hello, Server!"));
+await channel.DisposeAsync();  // Sends FIN, closes channel gracefully
+```
+
 ### TCP Server
 
 ```csharp
 using NetConduit;
 using NetConduit.Tcp;
 
-// Accept a TCP connection
-var connection = await TcpMultiplexer.AcceptAsync(listener);
-var runTask = await connection.StartAsync();
+var listener = new TcpListener(IPAddress.Any, 5000);
+listener.Start();
 
-// Accept channels from clients
-await foreach (var channel in connection.AcceptChannelsAsync())
+// Accept client and create multiplexer with reconnection support
+var options = TcpMultiplexer.CreateServerOptions(listener);
+var mux = StreamMultiplexer.Create(options);
+var runTask = mux.Start();
+await mux.WaitForReadyAsync();
+
+// Accept channels from client
+await foreach (var channel in mux.AcceptChannelsAsync())
 {
     // Each channel is a Stream - read data
     var buffer = new byte[1024];
@@ -62,40 +89,26 @@ await foreach (var channel in connection.AcceptChannelsAsync())
 }
 ```
 
-### TCP Client
-
-```csharp
-using NetConduit;
-using NetConduit.Tcp;
-
-// Connect to server
-var connection = await TcpMultiplexer.ConnectAsync("localhost", 5000);
-var runTask = await connection.StartAsync();
-
-// Open a channel and send data
-var channel = await connection.OpenChannelAsync(
-    new ChannelOptions { ChannelId = "my-channel" });
-
-await channel.WriteAsync(Encoding.UTF8.GetBytes("Hello, Server!"));
-await channel.DisposeAsync();  // Sends FIN, closes channel gracefully
-```
-
 ### WebSocket
 
 ```csharp
 using NetConduit;
 using NetConduit.WebSocket;
 
-// Client
-var connection = await WebSocketMultiplexer.ConnectAsync("ws://localhost:5000/ws");
-var runTask = await connection.StartAsync();
+// Client - create options with StreamFactory
+var options = WebSocketMultiplexer.CreateOptions("ws://localhost:5000/ws");
+var mux = StreamMultiplexer.Create(options);
+var runTask = mux.Start();
+await mux.WaitForReadyAsync();
 
-// Server (ASP.NET Core)
+// Server (ASP.NET Core) - create options for accepted WebSocket
 app.MapGet("/ws", async (HttpContext context) =>
 {
     var webSocket = await context.WebSockets.AcceptWebSocketAsync();
-    var connection = WebSocketMultiplexer.Accept(webSocket);
-    var runTask = await connection.StartAsync();
+    var options = WebSocketMultiplexer.CreateServerOptions(webSocket);
+    var mux = StreamMultiplexer.Create(options);
+    var runTask = mux.Start();
+    await mux.WaitForReadyAsync();
     // ...
 });
 ```
@@ -103,15 +116,20 @@ app.MapGet("/ws", async (HttpContext context) =>
 ### UDP
 
 ```csharp
+using NetConduit;
 using NetConduit.Udp;
 
-// Server - accept connection
-var server = await UdpMultiplexer.AcceptAsync(port: 5000);
-var serverRunTask = await server.StartAsync();
+// Client - create options with StreamFactory
+var clientOptions = UdpMultiplexer.CreateOptions("localhost", 5000);
+var client = StreamMultiplexer.Create(clientOptions);
+var clientRunTask = client.Start();
+await client.WaitForReadyAsync();
 
-// Client - connect
-var client = await UdpMultiplexer.ConnectAsync("localhost", 5000);
-var clientRunTask = await client.StartAsync();
+// Server - create options to accept connection
+var serverOptions = UdpMultiplexer.CreateServerOptions(port: 5000);
+var server = StreamMultiplexer.Create(serverOptions);
+var serverRunTask = server.Start();
+await server.WaitForReadyAsync();
 
 // Use channels normally - UDP reliability is handled automatically
 var channel = await client.OpenChannelAsync(new() { ChannelId = "data" });
@@ -121,18 +139,23 @@ await channel.WriteAsync(data);
 ### IPC (Inter-Process Communication)
 
 ```csharp
+using NetConduit;
 using NetConduit.Ipc;
 
 // On Windows: uses named pipes
 // On Linux/macOS: uses Unix domain sockets
 
-// Server
-var server = await IpcMultiplexer.AcceptAsync("my-app-ipc");
-var serverRunTask = await server.StartAsync();
+// Client - create options with StreamFactory
+var clientOptions = IpcMultiplexer.CreateOptions("my-app-ipc");
+var client = StreamMultiplexer.Create(clientOptions);
+var clientRunTask = client.Start();
+await client.WaitForReadyAsync();
 
-// Client
-var client = await IpcMultiplexer.ConnectAsync("my-app-ipc");
-var clientRunTask = await client.StartAsync();
+// Server - create options to accept connections
+var serverOptions = IpcMultiplexer.CreateServerOptions("my-app-ipc");
+var server = StreamMultiplexer.Create(serverOptions);
+var serverRunTask = server.Start();
+await server.WaitForReadyAsync();
 
 // Use channels normally
 var channel = await client.OpenChannelAsync(new() { ChannelId = "rpc" });
@@ -141,21 +164,26 @@ var channel = await client.OpenChannelAsync(new() { ChannelId = "rpc" });
 ### QUIC
 
 ```csharp
+using NetConduit;
 using NetConduit.Quic;
 using System.Net;
 
 // Requires .NET 9+ and OS support (Windows 11+, Linux with msquic)
 
-// Server - create listener with certificate
+// Client - create options with StreamFactory
+var clientOptions = QuicMultiplexer.CreateOptions("localhost", 5000, allowInsecure: true);
+var client = StreamMultiplexer.Create(clientOptions);
+var clientRunTask = client.Start();
+await client.WaitForReadyAsync();
+
+// Server - create listener with certificate, then create options
 var listener = await QuicMultiplexer.ListenAsync(
     new IPEndPoint(IPAddress.Any, 5000), 
     certificate);
-var server = await QuicMultiplexer.AcceptAsync(listener);
-var serverRunTask = await server.StartAsync();
-
-// Client - connect (allowInsecure for self-signed certs in dev)
-var client = await QuicMultiplexer.ConnectAsync("localhost", 5000, allowInsecure: true);
-var clientRunTask = await client.StartAsync();
+var serverOptions = QuicMultiplexer.CreateServerOptions(listener);
+var server = StreamMultiplexer.Create(serverOptions);
+var serverRunTask = server.Start();
+await server.WaitForReadyAsync();
 
 // Use channels normally - benefits from QUIC's built-in multiplexing
 var channel = await client.OpenChannelAsync(new() { ChannelId = "stream" });
@@ -310,7 +338,8 @@ var readStream = await mux.AcceptStreamAsync("download");
 NetConduit provides detailed disconnection events for both the multiplexer and individual channels:
 
 ```csharp
-var mux = new StreamMultiplexer(readStream, writeStream, options);
+var options = TcpMultiplexer.CreateOptions("localhost", 5000);
+var mux = StreamMultiplexer.Create(options);
 
 // Multiplexer-level disconnection event
 mux.OnDisconnected += (reason, exception) =>
@@ -372,23 +401,26 @@ await mux.DisposeAsync();
 
 ### Reconnection
 
-NetConduit supports automatic reconnection with channel state restoration:
+NetConduit supports automatic reconnection with channel state restoration via StreamFactory:
 
 ```csharp
-var options = new MultiplexerOptions
-{
-    EnableReconnection = true,
-    ReconnectTimeout = TimeSpan.FromSeconds(60),
-    ReconnectBufferSize = 1024 * 1024  // 1MB buffer for pending data
-};
+// StreamFactory enables automatic reconnection - when connection drops,
+// multiplexer calls StreamFactory again to establish new connection
+var options = TcpMultiplexer.CreateOptions("localhost", 5000);
+options.EnableReconnection = true;
+options.ReconnectTimeout = TimeSpan.FromSeconds(60);
+options.ReconnectBufferSize = 1024 * 1024;  // 1MB buffer for pending data
 
-var mux = new StreamMultiplexer(stream, stream, options);
+var mux = StreamMultiplexer.Create(options);
 
-mux.OnDisconnected += (reason, ex) => Console.WriteLine("Disconnected, waiting for reconnect...");
+mux.OnDisconnected += (reason, ex) => Console.WriteLine("Disconnected, reconnecting...");
 mux.OnReconnected += () => Console.WriteLine("Reconnected!");
 
-// After network disruption, reconnect with new streams
-await mux.ReconnectAsync(newReadStream, newWriteStream);
+var runTask = mux.Start();
+await mux.WaitForReadyAsync();
+
+// On disconnect, multiplexer automatically calls StreamFactory to reconnect
+// Channels remain open, pending data is buffered and sent after reconnection
 ```
 
 ## Configuration
@@ -397,6 +429,7 @@ await mux.ReconnectAsync(newReadStream, newWriteStream);
 
 | Option | Default | Description |
 |--------|---------|-------------|
+| `StreamFactory` | *required* | Async factory that creates stream pairs for connection/reconnection |
 | `MaxFrameSize` | 16MB | Maximum payload per frame |
 | `PingInterval` | 30s | Heartbeat interval |
 | `PingTimeout` | 10s | Max wait for pong |
@@ -414,7 +447,6 @@ await mux.ReconnectAsync(newReadStream, newWriteStream);
 | `ChannelId` | *required* | Unique channel identifier (0-1024 bytes UTF-8) |
 | `MinCredits` | 64KB | Minimum buffer allowance |
 | `MaxCredits` | 4MB | Maximum buffer allowance (starts here, adapts down) |
-| `CreditGrantThreshold` | 0.5 | Auto-grant when X% consumed |
 | `SendTimeout` | 30s | Max wait for credits |
 | `Priority` | Normal (128) | Channel priority (0-255) |
 

@@ -28,8 +28,8 @@ public class ReconnectionTests
 
         // Act
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
-        var run1 = mux1.RunAsync(cts.Token);
-        var run2 = mux2.RunAsync(cts.Token);
+        var run1 = mux1.Start(cts.Token);
+        var run2 = mux2.Start(cts.Token);
 
         // Wait a bit for handshake
         await Task.Delay(100);
@@ -70,8 +70,8 @@ public class ReconnectionTests
 
         // Act
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
-        var run1 = mux1.RunAsync(cts.Token);
-        var run2 = mux2.RunAsync(cts.Token);
+        var run1 = mux1.Start(cts.Token);
+        var run2 = mux2.Start(cts.Token);
 
         await Task.Delay(100);
         mux1.NotifyDisconnected();
@@ -133,8 +133,8 @@ public class ReconnectionTests
 
         // Act
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
-        var run1 = mux1.RunAsync(cts.Token);
-        var run2 = mux2.RunAsync(cts.Token);
+        var run1 = mux1.Start(cts.Token);
+        var run2 = mux2.Start(cts.Token);
 
         await Task.Delay(100);
 
@@ -167,8 +167,8 @@ public class ReconnectionTests
 
         // Act
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
-        var run1 = mux1.RunAsync(cts.Token);
-        var run2 = mux2.RunAsync(cts.Token);
+        var run1 = mux1.Start(cts.Token);
+        var run2 = mux2.Start(cts.Token);
 
         await Task.Delay(100);
 
@@ -210,8 +210,8 @@ public class ReconnectionTests
         await using var mux2 = await TestMuxHelper.CreateMuxAsync(pipe.Stream2);
 
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
-        var run1 = mux1.RunAsync(cts.Token);
-        var run2 = mux2.RunAsync(cts.Token);
+        var run1 = mux1.Start(cts.Token);
+        var run2 = mux2.Start(cts.Token);
 
         await Task.Delay(100);
         Assert.True(mux1.IsConnected);
@@ -254,8 +254,8 @@ public class ReconnectionTests
         await using var mux2 = await TestMuxHelper.CreateMuxAsync(pipe.Stream2, options);
 
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
-        var run1 = mux1.RunAsync(cts.Token);
-        var run2 = mux2.RunAsync(cts.Token);
+        var run1 = mux1.Start(cts.Token);
+        var run2 = mux2.Start(cts.Token);
 
         await Task.Delay(100);
 
@@ -388,8 +388,8 @@ public class ReconnectionTests
         await using var mux2 = await TestMuxHelper.CreateMuxAsync(pipe.Stream2, options);
 
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
-        var run1 = mux1.RunAsync(cts.Token);
-        var run2 = mux2.RunAsync(cts.Token);
+        var run1 = mux1.Start(cts.Token);
+        var run2 = mux2.Start(cts.Token);
 
         await Task.Delay(100);
 
@@ -621,8 +621,8 @@ public class ReconnectionTests
         await using var mux2 = await TestMuxHelper.CreateMuxAsync(pipe.Stream2, options);
 
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
-        var run1 = mux1.RunAsync(cts.Token);
-        var run2 = mux2.RunAsync(cts.Token);
+        var run1 = mux1.Start(cts.Token);
+        var run2 = mux2.Start(cts.Token);
 
         await Task.Delay(100);
 

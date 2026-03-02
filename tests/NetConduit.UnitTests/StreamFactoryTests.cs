@@ -11,44 +11,59 @@ public class StreamFactoryTests
     public async Task StreamFactory_CalledOnTransportError()
     {
         // Arrange
-        var factoryCalled = 0;
-        var pipe1 = new DuplexPipe();
-        var pipe2 = new DuplexPipe();
+        var callCount = 0;
+        var reconnectPipe = new DuplexPipe();
+        var initialPipe = new DuplexPipe();
         
         var options = new MultiplexerOptions
         {
             EnableReconnection = true,
             StreamFactory = async ct =>
             {
-                Interlocked.Increment(ref factoryCalled);
-                return (pipe2.Stream1, pipe2.Stream1);
+                var count = Interlocked.Increment(ref callCount);
+                if (count == 1)
+                {
+                    // First call - return initial connection streams
+                    return new StreamPair(initialPipe.Stream1);
+                }
+                // Subsequent calls - this is reconnection, return reconnect pipe
+                return new StreamPair(reconnectPipe.Stream1);
             },
-            MaxAutoReconnectAttempts = 1,
+            MaxAutoReconnectAttempts = 3,
             AutoReconnectDelay = TimeSpan.FromMilliseconds(10)
         };
         
-        await using var mux1 = await StreamMultiplexer.CreateAsync(options);
-        await using var mux2 = await TestMuxHelper.CreateMuxAsync(pipe1.Stream2);
+        // Create peer for initial connection
+        await using var initialPeer = StreamMultiplexer.Create(new MultiplexerOptions
+        {
+            StreamFactory = _ => Task.FromResult<IStreamPair>(new StreamPair(initialPipe.Stream2))
+        });
+        var initialPeerTask = initialPeer.Start();
+        
+        await using var mux = StreamMultiplexer.Create(options);
+        var runTask = mux.Start();
         
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
-        var run1 = mux1.RunAsync(cts.Token);
-        var run2 = mux2.RunAsync(cts.Token);
+        await Task.WhenAll(
+            mux.WaitForReadyAsync(cts.Token),
+            initialPeer.WaitForReadyAsync(cts.Token)
+        );
         
-        await Task.Delay(100);
-        Assert.True(mux1.IsConnected);
+        Assert.True(mux.IsConnected);
+        Assert.Equal(1, callCount); // Only initial call so far
         
-        // Act - simulate transport failure by disposing the pipe
-        await pipe1.DisposeAsync();
+        // Act - simulate transport failure by disposing the initial pipe
+        await initialPipe.DisposeAsync();
         
-        // Wait for factory to be called
+        // Wait for factory to be called again (reconnection attempt)
         var deadline = DateTime.UtcNow.AddSeconds(5);
-        while (factoryCalled == 0 && DateTime.UtcNow < deadline)
+        while (callCount == 1 && DateTime.UtcNow < deadline)
         {
             await Task.Delay(50);
         }
         
         // Assert
-        Assert.True(factoryCalled >= 1, $"StreamFactory should be called on transport error, but was called {factoryCalled} times");
+        Assert.True(callCount >= 2, $"StreamFactory should be called on transport error for reconnection, but was called {callCount} times");
         
         cts.Cancel();
     }
@@ -58,45 +73,58 @@ public class StreamFactoryTests
     {
         // This test verifies that the factory is called and OnReconnected fires
         // when the factory provides working streams.
-        // Note: Full reconnection requires matching session IDs, which is complex to set up.
-        // Here we just verify the auto-reconnect mechanism triggers correctly.
         
         // Arrange
-        var factoryCalls = 0;
+        var callCount = 0;
         var reconnectAttempted = new TaskCompletionSource();
+        var initialPipe = new DuplexPipe();
         
         var options = new MultiplexerOptions
         {
             EnableReconnection = true,
             StreamFactory = async ct =>
             {
-                Interlocked.Increment(ref factoryCalls);
+                var count = Interlocked.Increment(ref callCount);
+                if (count == 1)
+                {
+                    // First call - return initial connection
+                    return new StreamPair(initialPipe.Stream1);
+                }
+                // Subsequent calls - this is reconnection, signal and throw
                 reconnectAttempted.TrySetResult();
-                // Throw to trigger retry - in real usage this would return valid streams
                 throw new InvalidOperationException("Simulated failure for test");
             },
             MaxAutoReconnectAttempts = 2,
             AutoReconnectDelay = TimeSpan.FromMilliseconds(10)
         };
         
-        await using var pipe = new DuplexPipe();
-        await using var mux = await TestMuxHelper.CreateMuxAsync(pipe.Stream1, options);
+        // Create peer for initial connection
+        await using var peer = StreamMultiplexer.Create(new MultiplexerOptions
+        {
+            StreamFactory = _ => Task.FromResult<IStreamPair>(new StreamPair(initialPipe.Stream2))
+        });
+        var peerTask = peer.Start();
+        
+        await using var mux = StreamMultiplexer.Create(options);
+        var runTask = mux.Start();
         
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
-        var _ = mux.RunAsync(cts.Token);
+        await Task.WhenAll(
+            mux.WaitForReadyAsync(cts.Token),
+            peer.WaitForReadyAsync(cts.Token)
+        );
         
-        await Task.Delay(100);
         Assert.True(mux.IsConnected);
         
-        // Act - trigger disconnect
-        mux.NotifyDisconnected();
+        // Act - trigger disconnect by disposing peer connection
+        await initialPipe.DisposeAsync();
         
-        // Wait for factory to be called
+        // Wait for factory to be called (reconnection attempt)
         var result = await Task.WhenAny(reconnectAttempted.Task, Task.Delay(TimeSpan.FromSeconds(5)));
         
         // Assert
         Assert.Equal(reconnectAttempted.Task, result);
-        Assert.True(factoryCalls >= 1, $"Factory should be called at least once, but was called {factoryCalls} times");
+        Assert.True(callCount >= 2, $"Factory should be called for reconnection, but was called {callCount} times");
         
         cts.Cancel();
     }
@@ -105,15 +133,22 @@ public class StreamFactoryTests
     public async Task StreamFactory_FailsAfterMaxAttempts()
     {
         // Arrange
-        var attemptCount = 0;
+        var callCount = 0;
         var failedEvent = new TaskCompletionSource<Exception>();
+        var initialPipe = new DuplexPipe();
         
         var options = new MultiplexerOptions
         {
             EnableReconnection = true,
             StreamFactory = async ct =>
             {
-                Interlocked.Increment(ref attemptCount);
+                var count = Interlocked.Increment(ref callCount);
+                if (count == 1)
+                {
+                    // First call - return initial connection
+                    return new StreamPair(initialPipe.Stream1);
+                }
+                // Subsequent calls (reconnection) - throw
                 throw new InvalidOperationException("Connection failed");
             },
             MaxAutoReconnectAttempts = 3,
@@ -121,25 +156,32 @@ public class StreamFactoryTests
             MaxAutoReconnectDelay = TimeSpan.FromMilliseconds(50)
         };
         
-        await using var pipe = new DuplexPipe();
-        await using var mux = await TestMuxHelper.CreateMuxAsync(pipe.Stream1, options);
+        // Create peer for initial connection
+        await using var peer = StreamMultiplexer.Create(new MultiplexerOptions
+        {
+            StreamFactory = _ => Task.FromResult<IStreamPair>(new StreamPair(initialPipe.Stream2))
+        });
+        var peerTask = peer.Start();
         
+        await using var mux = StreamMultiplexer.Create(options);
         mux.OnAutoReconnectFailed += ex => failedEvent.TrySetResult(ex);
+        var runTask = mux.Start();
         
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
-        var _ = mux.RunAsync(cts.Token);
+        await Task.WhenAll(
+            mux.WaitForReadyAsync(cts.Token),
+            peer.WaitForReadyAsync(cts.Token)
+        );
         
-        await Task.Delay(100);
+        // Act - trigger disconnect by disposing peer connection
+        await initialPipe.DisposeAsync();
         
-        // Act - trigger disconnect
-        mux.NotifyDisconnected();
-        
-        // Wait for failure
         var result = await Task.WhenAny(failedEvent.Task, Task.Delay(TimeSpan.FromSeconds(5)));
         
         // Assert
         Assert.Equal(failedEvent.Task, result);
-        Assert.Equal(3, attemptCount);
+        // Initial call + 3 reconnection attempts = 4 total calls
+        Assert.Equal(4, callCount);
         
         var exception = await failedEvent.Task;
         Assert.Contains("3 attempts", exception.Message);
@@ -152,23 +194,41 @@ public class StreamFactoryTests
     {
         // Arrange
         var events = new List<AutoReconnectEventArgs>();
+        var callCount = 0;
+        var initialPipe = new DuplexPipe();
         
         var options = new MultiplexerOptions
         {
             EnableReconnection = true,
             StreamFactory = async ct =>
             {
+                var count = Interlocked.Increment(ref callCount);
+                if (count == 1)
+                {
+                    // First call - return initial connection
+                    return new StreamPair(initialPipe.Stream1);
+                }
+                // Subsequent calls (reconnection) - throw
                 throw new InvalidOperationException("Connection failed");
             },
             MaxAutoReconnectAttempts = 3,
             AutoReconnectDelay = TimeSpan.FromMilliseconds(10)
         };
         
-        await using var pipe = new DuplexPipe();
-        await using var mux = await TestMuxHelper.CreateMuxAsync(pipe.Stream1, options);
+        // Create peer for initial connection
+        await using var peer = StreamMultiplexer.Create(new MultiplexerOptions
+        {
+            StreamFactory = _ => Task.FromResult<IStreamPair>(new StreamPair(initialPipe.Stream2))
+        });
+        var peerTask = peer.Start();
+        
+        await using var mux = StreamMultiplexer.Create(options);
         
         mux.OnAutoReconnecting += args =>
         {
+            // Only track reconnection events, not initial connection
+            if (!args.IsReconnecting) return;
+            
             lock (events)
             {
                 events.Add(new AutoReconnectEventArgs
@@ -185,12 +245,15 @@ public class StreamFactoryTests
         mux.OnAutoReconnectFailed += _ => failedEvent.TrySetResult();
         
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
-        var _ = mux.RunAsync(cts.Token);
+        var runTask = mux.Start();
         
-        await Task.Delay(100);
+        await Task.WhenAll(
+            mux.WaitForReadyAsync(cts.Token),
+            peer.WaitForReadyAsync(cts.Token)
+        );
         
-        // Act
-        mux.NotifyDisconnected();
+        // Act - trigger disconnect by disposing peer connection
+        await initialPipe.DisposeAsync();
         
         await Task.WhenAny(failedEvent.Task, Task.Delay(TimeSpan.FromSeconds(5)));
         
@@ -209,13 +272,22 @@ public class StreamFactoryTests
     {
         // Arrange
         var attemptCount = 0;
+        var callCount = 0;
         var failedEvent = new TaskCompletionSource<Exception>();
+        var initialPipe = new DuplexPipe();
         
         var options = new MultiplexerOptions
         {
             EnableReconnection = true,
             StreamFactory = async ct =>
             {
+                var count = Interlocked.Increment(ref callCount);
+                if (count == 1)
+                {
+                    // First call - return initial connection
+                    return new StreamPair(initialPipe.Stream1);
+                }
+                // Subsequent calls (reconnection) - track and throw
                 Interlocked.Increment(ref attemptCount);
                 throw new InvalidOperationException("Connection failed");
             },
@@ -223,8 +295,14 @@ public class StreamFactoryTests
             AutoReconnectDelay = TimeSpan.FromMilliseconds(10)
         };
         
-        await using var pipe = new DuplexPipe();
-        await using var mux = await TestMuxHelper.CreateMuxAsync(pipe.Stream1, options);
+        // Create peer for initial connection
+        await using var peer = StreamMultiplexer.Create(new MultiplexerOptions
+        {
+            StreamFactory = _ => Task.FromResult<IStreamPair>(new StreamPair(initialPipe.Stream2))
+        });
+        var peerTask = peer.Start();
+        
+        await using var mux = StreamMultiplexer.Create(options);
         
         mux.OnAutoReconnecting += args =>
         {
@@ -237,12 +315,15 @@ public class StreamFactoryTests
         mux.OnAutoReconnectFailed += ex => failedEvent.TrySetResult(ex);
         
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
-        var _ = mux.RunAsync(cts.Token);
+        var runTask = mux.Start();
         
-        await Task.Delay(100);
+        await Task.WhenAll(
+            mux.WaitForReadyAsync(cts.Token),
+            peer.WaitForReadyAsync(cts.Token)
+        );
         
-        // Act
-        mux.NotifyDisconnected();
+        // Act - trigger disconnect by disposing peer connection
+        await initialPipe.DisposeAsync();
         
         await Task.WhenAny(failedEvent.Task, Task.Delay(TimeSpan.FromSeconds(5)));
         
@@ -260,12 +341,21 @@ public class StreamFactoryTests
     {
         // Arrange
         var delays = new List<TimeSpan>();
+        var callCount = 0;
+        var initialPipe = new DuplexPipe();
         
         var options = new MultiplexerOptions
         {
             EnableReconnection = true,
             StreamFactory = async ct =>
             {
+                var count = Interlocked.Increment(ref callCount);
+                if (count == 1)
+                {
+                    // First call - return initial connection
+                    return new StreamPair(initialPipe.Stream1);
+                }
+                // Subsequent calls (reconnection) - throw
                 throw new InvalidOperationException("Connection failed");
             },
             MaxAutoReconnectAttempts = 4,
@@ -274,11 +364,20 @@ public class StreamFactoryTests
             AutoReconnectBackoffMultiplier = 2.0
         };
         
-        await using var pipe = new DuplexPipe();
-        await using var mux = await TestMuxHelper.CreateMuxAsync(pipe.Stream1, options);
+        // Create peer for initial connection
+        await using var peer = StreamMultiplexer.Create(new MultiplexerOptions
+        {
+            StreamFactory = _ => Task.FromResult<IStreamPair>(new StreamPair(initialPipe.Stream2))
+        });
+        var peerTask = peer.Start();
+        
+        await using var mux = StreamMultiplexer.Create(options);
         
         mux.OnAutoReconnecting += args =>
         {
+            // Only track reconnection events, not initial connection
+            if (!args.IsReconnecting) return;
+            
             lock (delays)
             {
                 delays.Add(args.NextDelay);
@@ -289,12 +388,15 @@ public class StreamFactoryTests
         mux.OnAutoReconnectFailed += _ => failedEvent.TrySetResult();
         
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(20));
-        var _ = mux.RunAsync(cts.Token);
+        var runTask = mux.Start();
         
-        await Task.Delay(100);
+        await Task.WhenAll(
+            mux.WaitForReadyAsync(cts.Token),
+            peer.WaitForReadyAsync(cts.Token)
+        );
         
-        // Act
-        mux.NotifyDisconnected();
+        // Act - trigger disconnect by disposing peer connection
+        await initialPipe.DisposeAsync();
         
         await Task.WhenAny(failedEvent.Task, Task.Delay(TimeSpan.FromSeconds(15)));
         
@@ -326,13 +428,22 @@ public class StreamFactoryTests
     {
         // Arrange
         var attemptCount = 0;
+        var callCount = 0;
         var cancellationTriggered = false;
+        var initialPipe = new DuplexPipe();
         
         var options = new MultiplexerOptions
         {
             EnableReconnection = true,
             StreamFactory = async ct =>
             {
+                var count = Interlocked.Increment(ref callCount);
+                if (count == 1)
+                {
+                    // First call - return initial connection
+                    return new StreamPair(initialPipe.Stream1);
+                }
+                // Subsequent calls (reconnection) - track and throw
                 Interlocked.Increment(ref attemptCount);
                 throw new InvalidOperationException("Connection failed");
             },
@@ -340,8 +451,14 @@ public class StreamFactoryTests
             AutoReconnectDelay = TimeSpan.FromMilliseconds(10)
         };
         
-        await using var pipe = new DuplexPipe();
-        await using var mux = await TestMuxHelper.CreateMuxAsync(pipe.Stream1, options);
+        // Create peer for initial connection
+        await using var peer = StreamMultiplexer.Create(new MultiplexerOptions
+        {
+            StreamFactory = _ => Task.FromResult<IStreamPair>(new StreamPair(initialPipe.Stream2))
+        });
+        var peerTask = peer.Start();
+        
+        await using var mux = StreamMultiplexer.Create(options);
         
         mux.OnAutoReconnecting += args =>
         {
@@ -356,12 +473,15 @@ public class StreamFactoryTests
         mux.OnAutoReconnectFailed += _ => failedEvent.TrySetResult();
         
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
-        var _ = mux.RunAsync(cts.Token);
+        var runTask = mux.Start();
         
-        await Task.Delay(100);
+        await Task.WhenAll(
+            mux.WaitForReadyAsync(cts.Token),
+            peer.WaitForReadyAsync(cts.Token)
+        );
         
-        // Act
-        mux.NotifyDisconnected();
+        // Act - trigger disconnect by disposing peer connection
+        await initialPipe.DisposeAsync();
         
         await Task.WhenAny(failedEvent.Task, Task.Delay(TimeSpan.FromSeconds(5)));
         
@@ -378,27 +498,46 @@ public class StreamFactoryTests
     {
         // Arrange
         var factoryCalled = false;
+        var callCount = 0;
+        var initialPipe = new DuplexPipe();
         
         var options = new MultiplexerOptions
         {
             EnableReconnection = false, // Disabled
             StreamFactory = async ct =>
             {
+                var count = Interlocked.Increment(ref callCount);
+                if (count == 1)
+                {
+                    // First call - return initial connection
+                    return new StreamPair(initialPipe.Stream1);
+                }
+                // Subsequent calls - this shouldn't happen
                 factoryCalled = true;
-                return (Stream.Null, Stream.Null);
+                return new StreamPair(Stream.Null);
             }
         };
         
-        await using var pipe = new DuplexPipe();
-        await using var mux = await TestMuxHelper.CreateMuxAsync(pipe.Stream1, options);
+        // Create peer for initial connection
+        await using var peer = StreamMultiplexer.Create(new MultiplexerOptions
+        {
+            StreamFactory = _ => Task.FromResult<IStreamPair>(new StreamPair(initialPipe.Stream2))
+        });
+        var peerTask = peer.Start();
+        
+        await using var mux = StreamMultiplexer.Create(options);
         
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
-        var _ = mux.RunAsync(cts.Token);
+        var runTask = mux.Start();
         
-        await Task.Delay(100);
+        await Task.WhenAll(
+            mux.WaitForReadyAsync(cts.Token),
+            peer.WaitForReadyAsync(cts.Token)
+        );
         
-        // Act - this should not trigger factory since reconnection is disabled
-        mux.NotifyDisconnected();
+        // Act - dispose the pipe to trigger a transport error
+        // Since reconnection is disabled, the factory should NOT be called again
+        await initialPipe.DisposeAsync();
         
         await Task.Delay(200);
         
@@ -415,12 +554,21 @@ public class StreamFactoryTests
         var reconnectingStates = new List<bool>();
         var factoryEntered = new TaskCompletionSource();
         var factoryExit = new TaskCompletionSource();
+        var callCount = 0;
+        var initialPipe = new DuplexPipe();
         
         var options = new MultiplexerOptions
         {
             EnableReconnection = true,
             StreamFactory = async ct =>
             {
+                var count = Interlocked.Increment(ref callCount);
+                if (count == 1)
+                {
+                    // First call - return initial connection
+                    return new StreamPair(initialPipe.Stream1);
+                }
+                // Subsequent calls (reconnection) - wait then throw
                 factoryEntered.TrySetResult();
                 await factoryExit.Task.WaitAsync(ct);
                 throw new InvalidOperationException("Test");
@@ -429,18 +577,28 @@ public class StreamFactoryTests
             AutoReconnectDelay = TimeSpan.FromMilliseconds(10)
         };
         
-        await using var pipe = new DuplexPipe();
-        await using var mux = await TestMuxHelper.CreateMuxAsync(pipe.Stream1, options);
+        // Create peer for initial connection
+        await using var peer = StreamMultiplexer.Create(new MultiplexerOptions
+        {
+            StreamFactory = _ => Task.FromResult<IStreamPair>(new StreamPair(initialPipe.Stream2))
+        });
+        var peerTask = peer.Start();
+        
+        await using var mux = StreamMultiplexer.Create(options);
         
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
-        var _ = mux.RunAsync(cts.Token);
+        var runTask = mux.Start();
         
-        await Task.Delay(100);
+        await Task.WhenAll(
+            mux.WaitForReadyAsync(cts.Token),
+            peer.WaitForReadyAsync(cts.Token)
+        );
         
         // Act
         Assert.False(mux.IsReconnecting);
         
-        mux.NotifyDisconnected();
+        // Trigger disconnect by disposing peer connection
+        await initialPipe.DisposeAsync();
         
         // Wait for factory to be entered
         await Task.WhenAny(factoryEntered.Task, Task.Delay(TimeSpan.FromSeconds(2)));
@@ -467,12 +625,21 @@ public class StreamFactoryTests
         // Arrange
         var factoryEntered = new TaskCompletionSource();
         var factoryCompleted = false;
+        var callCount = 0;
+        var initialPipe = new DuplexPipe();
         
         var options = new MultiplexerOptions
         {
             EnableReconnection = true,
             StreamFactory = async ct =>
             {
+                var count = Interlocked.Increment(ref callCount);
+                if (count == 1)
+                {
+                    // First call - return initial connection
+                    return new StreamPair(initialPipe.Stream1);
+                }
+                // Subsequent calls (reconnection) - wait a long time
                 factoryEntered.TrySetResult();
                 try
                 {
@@ -483,28 +650,37 @@ public class StreamFactoryTests
                     throw;
                 }
                 factoryCompleted = true;
-                return (Stream.Null, Stream.Null);
+                return new StreamPair(Stream.Null);
             },
             MaxAutoReconnectAttempts = 1
         };
         
-        var pipe = new DuplexPipe();
-        var mux = await TestMuxHelper.CreateMuxAsync(pipe.Stream1, options);
+        // Create peer for initial connection
+        await using var peer = StreamMultiplexer.Create(new MultiplexerOptions
+        {
+            StreamFactory = _ => Task.FromResult<IStreamPair>(new StreamPair(initialPipe.Stream2))
+        });
+        var peerTask = peer.Start();
+        
+        var mux = StreamMultiplexer.Create(options);
         
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
-        var _ = mux.RunAsync(cts.Token);
+        var runTask = mux.Start();
         
-        await Task.Delay(100);
+        await Task.WhenAll(
+            mux.WaitForReadyAsync(cts.Token),
+            peer.WaitForReadyAsync(cts.Token)
+        );
         
-        // Act
-        mux.NotifyDisconnected();
+        // Act - dispose the peer connection to trigger reconnection
+        await peer.DisposeAsync();
         
         // Wait for factory to be entered
         await Task.WhenAny(factoryEntered.Task, Task.Delay(TimeSpan.FromSeconds(2)));
         
-        // Dispose should cancel auto-reconnect
+        // Dispose mux should cancel auto-reconnect
         await mux.DisposeAsync();
-        await pipe.DisposeAsync();
+        await initialPipe.DisposeAsync();
         
         // Assert
         Assert.False(factoryCompleted, "Factory should have been cancelled by dispose");
@@ -523,13 +699,22 @@ public class StreamFactoryTests
         
         // Arrange
         var factoryCalled = new TaskCompletionSource();
+        var callCount = 0;
+        var initialPipe = new DuplexPipe();
         
         var options = new MultiplexerOptions
         {
             EnableReconnection = true,
             ReconnectBufferSize = 1024 * 1024,
-            StreamFactory = async ct => 
+            StreamFactory = async ct =>
             {
+                var count = Interlocked.Increment(ref callCount);
+                if (count == 1)
+                {
+                    // First call - return initial connection
+                    return new StreamPair(initialPipe.Stream1);
+                }
+                // Subsequent calls (reconnection) - signal and throw
                 factoryCalled.TrySetResult();
                 throw new InvalidOperationException("Simulated failure");
             },
@@ -537,15 +722,23 @@ public class StreamFactoryTests
             AutoReconnectDelay = TimeSpan.FromMilliseconds(10)
         };
         
-        await using var pipe = new DuplexPipe();
-        await using var mux1 = await TestMuxHelper.CreateMuxAsync(pipe.Stream1, options);
-        await using var mux2 = await TestMuxHelper.CreateMuxAsync(pipe.Stream2, new MultiplexerOptions { StreamFactory = _ => null!, EnableReconnection = true });
+        // Create peer for initial connection (peer uses Stream2)
+        await using var peerPipe = new DuplexPipe();
+        await using var mux1 = StreamMultiplexer.Create(options);
+        await using var mux2 = StreamMultiplexer.Create(new MultiplexerOptions
+        {
+            StreamFactory = _ => Task.FromResult<IStreamPair>(new StreamPair(initialPipe.Stream2)),
+            EnableReconnection = true
+        });
         
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
-        var run1 = mux1.RunAsync(cts.Token);
-        var run2 = mux2.RunAsync(cts.Token);
+        var run1 = mux1.Start();
+        var run2 = mux2.Start();
         
-        await Task.Delay(100);
+        await Task.WhenAll(
+            mux1.WaitForReadyAsync(cts.Token),
+            mux2.WaitForReadyAsync(cts.Token)
+        );
         
         // Open channel and send some data
         var acceptTask = Task.Run(async () =>
@@ -577,8 +770,8 @@ public class StreamFactoryTests
         // Verify SyncState tracked the data
         Assert.Equal(100, writeChannel.SyncState.BytesSent);
         
-        // Act - trigger disconnect and auto-reconnect
-        mux1.NotifyDisconnected();
+        // Act - trigger disconnect by disposing the initial pipe
+        await initialPipe.DisposeAsync();
         
         // Wait for factory to be called
         var result = await Task.WhenAny(factoryCalled.Task, Task.Delay(TimeSpan.FromSeconds(5)));
@@ -599,20 +792,35 @@ public class StreamFactoryTests
         // Arrange
         AutoReconnectEventArgs? capturedArgs = null;
         var initialException = new InvalidOperationException("Initial error");
+        var callCount = 0;
+        var initialPipe = new DuplexPipe();
         
         var options = new MultiplexerOptions
         {
             EnableReconnection = true,
             StreamFactory = async ct =>
             {
+                var count = Interlocked.Increment(ref callCount);
+                if (count == 1)
+                {
+                    // First call - return initial connection
+                    return new StreamPair(initialPipe.Stream1);
+                }
+                // Subsequent calls (reconnection) - throw
                 throw new InvalidOperationException("Factory error");
             },
             MaxAutoReconnectAttempts = 2,
             AutoReconnectDelay = TimeSpan.FromMilliseconds(50)
         };
         
-        await using var pipe = new DuplexPipe();
-        await using var mux = await TestMuxHelper.CreateMuxAsync(pipe.Stream1, options);
+        // Create peer for initial connection
+        await using var peer = StreamMultiplexer.Create(new MultiplexerOptions
+        {
+            StreamFactory = _ => Task.FromResult<IStreamPair>(new StreamPair(initialPipe.Stream2))
+        });
+        var peerTask = peer.Start();
+        
+        await using var mux = StreamMultiplexer.Create(options);
         
         mux.OnAutoReconnecting += args =>
         {
@@ -632,12 +840,15 @@ public class StreamFactoryTests
         mux.OnAutoReconnectFailed += _ => failedEvent.TrySetResult();
         
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
-        var _ = mux.RunAsync(cts.Token);
+        var runTask = mux.Start();
         
-        await Task.Delay(100);
+        await Task.WhenAll(
+            mux.WaitForReadyAsync(cts.Token),
+            peer.WaitForReadyAsync(cts.Token)
+        );
         
-        // Act
-        mux.NotifyDisconnected();
+        // Act - dispose initial pipe to trigger disconnect
+        await initialPipe.DisposeAsync();
         
         await Task.WhenAny(failedEvent.Task, Task.Delay(TimeSpan.FromSeconds(5)));
         
@@ -657,28 +868,56 @@ public class StreamFactoryTests
     public async Task StreamFactory_DisabledReconnection_NoAutoReconnect()
     {
         // Arrange - reconnection disabled
+        var factoryCalled = false;
+        var callCount = 0;
+        var initialPipe = new DuplexPipe();
+        
         var options = new MultiplexerOptions
         {
-            StreamFactory = _ => throw new InvalidOperationException("Factory should not be called"),
+            StreamFactory = async ct =>
+            {
+                var count = Interlocked.Increment(ref callCount);
+                if (count == 1)
+                {
+                    // First call - return initial connection
+                    return new StreamPair(initialPipe.Stream1);
+                }
+                // Subsequent calls - this shouldn't happen
+                factoryCalled = true;
+                throw new InvalidOperationException("Factory should not be called");
+            },
             EnableReconnection = false // Reconnection disabled
         };
         
-        await using var pipe = new DuplexPipe();
-        await using var mux = await TestMuxHelper.CreateMuxAsync(pipe.Stream1, options);
+        // Create peer for initial connection
+        await using var peer = StreamMultiplexer.Create(new MultiplexerOptions
+        {
+            StreamFactory = _ => Task.FromResult<IStreamPair>(new StreamPair(initialPipe.Stream2))
+        });
+        var peerTask = peer.Start();
+        
+        await using var mux = StreamMultiplexer.Create(options);
         
         var disconnectedEvent = new TaskCompletionSource();
         mux.OnDisconnected += (reason, ex) => disconnectedEvent.TrySetResult();
         
         var autoReconnectingCalled = false;
-        mux.OnAutoReconnecting += _ => autoReconnectingCalled = true;
+        mux.OnAutoReconnecting += args =>
+        {
+            // Only track actual reconnection attempts, not initial connection
+            if (args.IsReconnecting) autoReconnectingCalled = true;
+        };
         
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
-        var _ = mux.RunAsync(cts.Token);
+        var runTask = mux.Start();
         
-        await Task.Delay(100);
+        await Task.WhenAll(
+            mux.WaitForReadyAsync(cts.Token),
+            peer.WaitForReadyAsync(cts.Token)
+        );
         
-        // Act
-        mux.NotifyDisconnected();
+        // Act - dispose initial pipe to trigger disconnect
+        await initialPipe.DisposeAsync();
         
         await Task.WhenAny(disconnectedEvent.Task, Task.Delay(TimeSpan.FromSeconds(1)));
         
@@ -687,6 +926,7 @@ public class StreamFactoryTests
         // Assert - auto-reconnect should not be triggered when disabled
         Assert.False(autoReconnectingCalled);
         Assert.False(mux.IsReconnecting);
+        Assert.False(factoryCalled);
         
         cts.Cancel();
     }
@@ -704,13 +944,28 @@ public class StreamFactoryTests
             StreamFactory = async ct =>
             {
                 factoryCalled = true;
-                return (pipe.Stream1, pipe.Stream1);
+                return new StreamPair(pipe.Stream1);
             },
             MaxAutoReconnectAttempts = 3
         };
         
+        // Create a peer on Stream2 to complete the handshake
+        await using var peer = StreamMultiplexer.Create(new MultiplexerOptions
+        {
+            StreamFactory = _ => Task.FromResult<IStreamPair>(new StreamPair(pipe.Stream2))
+        });
+        var peerTask = peer.Start();
+        
         // Act
-        await using var mux = await StreamMultiplexer.CreateAsync(options);
+        await using var mux = StreamMultiplexer.Create(options);
+        var runTask = mux.Start();
+        
+        // Wait for both to be ready in parallel
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+        await Task.WhenAll(
+            mux.WaitForReadyAsync(cts.Token),
+            peer.WaitForReadyAsync(cts.Token)
+        );
         
         // Assert
         Assert.True(factoryCalled);

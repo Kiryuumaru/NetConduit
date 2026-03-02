@@ -54,11 +54,12 @@ async Task RunServerAsync(string serverHost, int serverPort, CancellationToken c
         {
             try
             {
-                // Use simple extension to accept multiplexed connection
-                var mux = await listener.AcceptMuxAsync(null, cancellationToken);
+                // Use CreateServerOptions pattern to accept multiplexed connection
+                var options = TcpMultiplexer.CreateServerOptions(listener);
+                var mux = StreamMultiplexer.Create(options);
                 Console.WriteLine($"[Stream Server] Client connected");
                 
-                _ = mux.StartAsync(cancellationToken);
+                _ = mux.Start(cancellationToken);
                 
                 // Open video and audio streams using StreamTransit
                 var videoStream = await mux.OpenStreamAsync(
@@ -266,12 +267,13 @@ Console.WriteLine($"[Stream Client] Connecting to {clientHost}:{clientPort}");
 
 try
 {
-    // Use simple extension method to connect
-    using var tcpClient = new TcpClient();
-    await using var mux = await tcpClient.ConnectMuxAsync(clientHost, clientPort, null, cancellationToken);
+    // Use CreateOptions pattern to connect
+    var options = TcpMultiplexer.CreateOptions(clientHost, clientPort);
+    await using var mux = StreamMultiplexer.Create(options);
     Console.WriteLine("[Stream Client] Connected! Receiving stream...\n");
     
-    var runTask = await mux.StartAsync(cancellationToken);
+    var runTask = mux.Start(cancellationToken);
+    await mux.WaitForReadyAsync(cancellationToken);
     
     var stats = new StreamStats();
     var statsTimer = new System.Timers.Timer(1000);

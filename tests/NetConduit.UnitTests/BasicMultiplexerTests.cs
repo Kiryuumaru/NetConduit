@@ -12,14 +12,15 @@ public class BasicMultiplexerTests
 
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
         
-        var initiatorTask = initiator.RunAsync(cts.Token);
-        var acceptorTask = acceptor.RunAsync(cts.Token);
+        var initiatorTask = initiator.Start(cts.Token);
+        var acceptorTask = acceptor.Start(cts.Token);
 
-        // Give time for handshake
-        await Task.Delay(100);
+        await Task.WhenAll(initiator.WaitForReadyAsync(cts.Token), acceptor.WaitForReadyAsync(cts.Token));
 
         Assert.True(initiator.IsRunning);
         Assert.True(acceptor.IsRunning);
+        Assert.True(initiator.IsConnected);
+        Assert.True(acceptor.IsConnected);
 
         cts.Cancel();
         
@@ -38,10 +39,10 @@ public class BasicMultiplexerTests
 
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
         
-        var initiatorTask = initiator.RunAsync(cts.Token);
-        var acceptorTask = acceptor.RunAsync(cts.Token);
+        var initiatorTask = initiator.Start(cts.Token);
+        var acceptorTask = acceptor.Start(cts.Token);
 
-        await Task.Delay(100); // Wait for handshake
+        await Task.WhenAll(initiator.WaitForReadyAsync(cts.Token), acceptor.WaitForReadyAsync(cts.Token));
 
         await using var writeChannel = await initiator.OpenChannelAsync(new ChannelOptions { ChannelId = "test_channel" }, cts.Token);
         
@@ -63,10 +64,10 @@ public class BasicMultiplexerTests
 
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
         
-        var initiatorTask = initiator.RunAsync(cts.Token);
-        var acceptorTask = acceptor.RunAsync(cts.Token);
+        var initiatorTask = initiator.Start(cts.Token);
+        var acceptorTask = acceptor.Start(cts.Token);
 
-        await Task.Delay(100); // Wait for handshake
+        await Task.WhenAll(initiator.WaitForReadyAsync(cts.Token), acceptor.WaitForReadyAsync(cts.Token));
 
         // Start accepting before opening
         var acceptTask = Task.Run(async () =>
@@ -99,10 +100,10 @@ public class BasicMultiplexerTests
 
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
         
-        var initiatorTask = initiator.RunAsync(cts.Token);
-        var acceptorTask = acceptor.RunAsync(cts.Token);
+        var initiatorTask = initiator.Start(cts.Token);
+        var acceptorTask = acceptor.Start(cts.Token);
 
-        await Task.Delay(100);
+        await Task.WhenAll(initiator.WaitForReadyAsync(cts.Token), acceptor.WaitForReadyAsync(cts.Token));
 
         ReadChannel? readChannel = null;
         var acceptTask = Task.Run(async () =>
@@ -141,10 +142,10 @@ public class BasicMultiplexerTests
 
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
         
-        var initiatorTask = initiator.RunAsync(cts.Token);
-        var acceptorTask = acceptor.RunAsync(cts.Token);
+        var initiatorTask = initiator.Start(cts.Token);
+        var acceptorTask = acceptor.Start(cts.Token);
 
-        await Task.Delay(100);
+        await Task.WhenAll(initiator.WaitForReadyAsync(cts.Token), acceptor.WaitForReadyAsync(cts.Token));
 
         ReadChannel? readChannel = null;
         var acceptTask = Task.Run(async () =>
@@ -193,10 +194,10 @@ public class BasicMultiplexerTests
 
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
         
-        var initiatorTask = initiator.RunAsync(cts.Token);
-        var acceptorTask = acceptor.RunAsync(cts.Token);
+        var initiatorTask = initiator.Start(cts.Token);
+        var acceptorTask = acceptor.Start(cts.Token);
 
-        await Task.Delay(100);
+        await Task.WhenAll(initiator.WaitForReadyAsync(cts.Token), acceptor.WaitForReadyAsync(cts.Token));
 
         ReadChannel? readChannel = null;
         var acceptTask = Task.Run(async () =>
@@ -237,10 +238,10 @@ public class BasicMultiplexerTests
 
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
         
-        var initiatorTask = initiator.RunAsync(cts.Token);
-        var acceptorTask = acceptor.RunAsync(cts.Token);
+        var initiatorTask = initiator.Start(cts.Token);
+        var acceptorTask = acceptor.Start(cts.Token);
 
-        await Task.Delay(100);
+        await Task.WhenAll(initiator.WaitForReadyAsync(cts.Token), acceptor.WaitForReadyAsync(cts.Token));
 
         var acceptTask = Task.Run(async () =>
         {

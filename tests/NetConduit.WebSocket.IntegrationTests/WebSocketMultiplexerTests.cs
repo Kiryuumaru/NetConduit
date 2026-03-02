@@ -68,17 +68,31 @@ public class WebSocketMultiplexerTests
     }
 
     [Fact(Timeout = 120000)]
-    public async Task ConnectAsync_EstablishesConnection()
+    public async Task CreateOptions_EstablishesConnection()
     {
         // Arrange
         var (host, port, wsChannel) = await CreateServerAsync();
         try
         {
-            // Act
-            await using var client = await WebSocketMultiplexer.ConnectAsync($"ws://localhost:{port}/ws");
+            using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
 
-            // Assert
-            Assert.Equal(WebSocketState.Open, client.State);
+            // Act
+            var clientOptions = WebSocketMultiplexer.CreateOptions($"ws://localhost:{port}/ws");
+            await using var client = StreamMultiplexer.Create(clientOptions);
+            var clientRunTask = client.Start(cts.Token);
+
+            var serverWebSocket = await wsChannel.Reader.ReadAsync(cts.Token);
+            var serverOptions = WebSocketMultiplexer.CreateServerOptions(serverWebSocket);
+            await using var server = StreamMultiplexer.Create(serverOptions);
+            var serverRunTask = server.Start(cts.Token);
+
+            await Task.WhenAll(client.WaitForReadyAsync(cts.Token), server.WaitForReadyAsync(cts.Token));
+
+            // Assert - connection established successfully if WaitForReadyAsync completes
+            Assert.NotNull(client);
+            Assert.NotNull(server);
+
+            await cts.CancelAsync();
         }
         finally
         {
@@ -88,17 +102,31 @@ public class WebSocketMultiplexerTests
     }
 
     [Fact(Timeout = 120000)]
-    public async Task ConnectAsync_WithUri_EstablishesConnection()
+    public async Task CreateOptions_WithUri_EstablishesConnection()
     {
         // Arrange
         var (host, port, wsChannel) = await CreateServerAsync();
         try
         {
-            // Act
-            await using var client = await WebSocketMultiplexer.ConnectAsync(new Uri($"ws://localhost:{port}/ws"));
+            using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
 
-            // Assert
-            Assert.Equal(WebSocketState.Open, client.State);
+            // Act
+            var clientOptions = WebSocketMultiplexer.CreateOptions(new Uri($"ws://localhost:{port}/ws"));
+            await using var client = StreamMultiplexer.Create(clientOptions);
+            var clientRunTask = client.Start(cts.Token);
+
+            var serverWebSocket = await wsChannel.Reader.ReadAsync(cts.Token);
+            var serverOptions = WebSocketMultiplexer.CreateServerOptions(serverWebSocket);
+            await using var server = StreamMultiplexer.Create(serverOptions);
+            var serverRunTask = server.Start(cts.Token);
+
+            await Task.WhenAll(client.WaitForReadyAsync(cts.Token), server.WaitForReadyAsync(cts.Token));
+
+            // Assert - connection established successfully if WaitForReadyAsync completes
+            Assert.NotNull(client);
+            Assert.NotNull(server);
+
+            await cts.CancelAsync();
         }
         finally
         {
@@ -108,24 +136,32 @@ public class WebSocketMultiplexerTests
     }
 
     [Fact(Timeout = 120000)]
-    public async Task Accept_CreatesMultiplexerFromWebSocket()
+    public async Task CreateServerOptions_CreatesMultiplexerFromWebSocket()
     {
         // Arrange
         var (host, port, wsChannel) = await CreateServerAsync();
         try
         {
-            using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+            using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
 
             // Connect client which triggers server to accept
-            await using var clientConnection = await WebSocketMultiplexer.ConnectAsync($"ws://localhost:{port}/ws");
+            var clientOptions = WebSocketMultiplexer.CreateOptions($"ws://localhost:{port}/ws");
+            await using var clientConnection = StreamMultiplexer.Create(clientOptions);
+            var clientRunTask = clientConnection.Start(cts.Token);
+
             var serverWebSocket = await wsChannel.Reader.ReadAsync(cts.Token);
 
             // Act
-            await using var serverConnection = WebSocketMultiplexer.Accept(serverWebSocket);
+            var serverOptions = WebSocketMultiplexer.CreateServerOptions(serverWebSocket);
+            await using var serverConnection = StreamMultiplexer.Create(serverOptions);
+            var serverRunTask = serverConnection.Start(cts.Token);
+
+            await Task.WhenAll(clientConnection.WaitForReadyAsync(cts.Token), serverConnection.WaitForReadyAsync(cts.Token));
 
             // Assert
             Assert.NotNull(serverConnection);
-            Assert.Equal(WebSocketState.Open, serverConnection.State);
+
+            await cts.CancelAsync();
         }
         finally
         {
@@ -143,13 +179,16 @@ public class WebSocketMultiplexerTests
         {
             using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
 
-            await using var clientConnection = await WebSocketMultiplexer.ConnectAsync($"ws://localhost:{port}/ws");
-            var serverWebSocket = await wsChannel.Reader.ReadAsync(cts.Token);
-            await using var serverConnection = WebSocketMultiplexer.Accept(serverWebSocket);
+            var clientOptions = WebSocketMultiplexer.CreateOptions($"ws://localhost:{port}/ws");
+            await using var clientConnection = StreamMultiplexer.Create(clientOptions);
+            var clientRunTask = clientConnection.Start(cts.Token);
 
-            var startTasks = await Task.WhenAll(clientConnection.StartAsync(cts.Token), serverConnection.StartAsync(cts.Token));
-            var clientRunTask = startTasks[0];
-            var serverRunTask = startTasks[1];
+            var serverWebSocket = await wsChannel.Reader.ReadAsync(cts.Token);
+            var serverOptions = WebSocketMultiplexer.CreateServerOptions(serverWebSocket);
+            await using var serverConnection = StreamMultiplexer.Create(serverOptions);
+            var serverRunTask = serverConnection.Start(cts.Token);
+
+            await Task.WhenAll(clientConnection.WaitForReadyAsync(cts.Token), serverConnection.WaitForReadyAsync(cts.Token));
 
             // Act
             var writeChannel = await clientConnection.OpenChannelAsync(new ChannelOptions { ChannelId = "test" }, cts.Token);
@@ -190,13 +229,16 @@ public class WebSocketMultiplexerTests
         {
             using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(60));
 
-            await using var clientConnection = await WebSocketMultiplexer.ConnectAsync($"ws://localhost:{port}/ws");
-            var serverWebSocket = await wsChannel.Reader.ReadAsync(cts.Token);
-            await using var serverConnection = WebSocketMultiplexer.Accept(serverWebSocket);
+            var clientOptions = WebSocketMultiplexer.CreateOptions($"ws://localhost:{port}/ws");
+            await using var clientConnection = StreamMultiplexer.Create(clientOptions);
+            var clientRunTask = clientConnection.Start(cts.Token);
 
-            var startTasks = await Task.WhenAll(clientConnection.StartAsync(cts.Token), serverConnection.StartAsync(cts.Token));
-            var clientRunTask = startTasks[0];
-            var serverRunTask = startTasks[1];
+            var serverWebSocket = await wsChannel.Reader.ReadAsync(cts.Token);
+            var serverOptions = WebSocketMultiplexer.CreateServerOptions(serverWebSocket);
+            await using var serverConnection = StreamMultiplexer.Create(serverOptions);
+            var serverRunTask = serverConnection.Start(cts.Token);
+
+            await Task.WhenAll(clientConnection.WaitForReadyAsync(cts.Token), serverConnection.WaitForReadyAsync(cts.Token));
 
             const int channelCount = 5;
             const int dataSize = 1024;
@@ -255,13 +297,16 @@ public class WebSocketMultiplexerTests
         {
             using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
 
-            await using var clientConnection = await WebSocketMultiplexer.ConnectAsync($"ws://localhost:{port}/ws");
-            var serverWebSocket = await wsChannel.Reader.ReadAsync(cts.Token);
-            await using var serverConnection = WebSocketMultiplexer.Accept(serverWebSocket);
+            var clientOptions = WebSocketMultiplexer.CreateOptions($"ws://localhost:{port}/ws");
+            await using var clientConnection = StreamMultiplexer.Create(clientOptions);
+            var clientRunTask = clientConnection.Start(cts.Token);
 
-            var startTasks = await Task.WhenAll(clientConnection.StartAsync(cts.Token), serverConnection.StartAsync(cts.Token));
-            var clientRunTask = startTasks[0];
-            var serverRunTask = startTasks[1];
+            var serverWebSocket = await wsChannel.Reader.ReadAsync(cts.Token);
+            var serverOptions = WebSocketMultiplexer.CreateServerOptions(serverWebSocket);
+            await using var serverConnection = StreamMultiplexer.Create(serverOptions);
+            var serverRunTask = serverConnection.Start(cts.Token);
+
+            await Task.WhenAll(clientConnection.WaitForReadyAsync(cts.Token), serverConnection.WaitForReadyAsync(cts.Token));
 
             // Act - Client opens channel to server
             var clientToServerWrite = await clientConnection.OpenChannelAsync(new ChannelOptions { ChannelId = "c2s" }, cts.Token);
@@ -317,13 +362,16 @@ public class WebSocketMultiplexerTests
         {
             using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(120));
 
-            await using var clientConnection = await WebSocketMultiplexer.ConnectAsync($"ws://localhost:{port}/ws");
-            var serverWebSocket = await wsChannel.Reader.ReadAsync(cts.Token);
-            await using var serverConnection = WebSocketMultiplexer.Accept(serverWebSocket);
+            var clientOptions = WebSocketMultiplexer.CreateOptions($"ws://localhost:{port}/ws");
+            await using var clientConnection = StreamMultiplexer.Create(clientOptions);
+            var clientRunTask = clientConnection.Start(cts.Token);
 
-            var startTasks = await Task.WhenAll(clientConnection.StartAsync(cts.Token), serverConnection.StartAsync(cts.Token));
-            var clientRunTask = startTasks[0];
-            var serverRunTask = startTasks[1];
+            var serverWebSocket = await wsChannel.Reader.ReadAsync(cts.Token);
+            var serverOptions = WebSocketMultiplexer.CreateServerOptions(serverWebSocket);
+            await using var serverConnection = StreamMultiplexer.Create(serverOptions);
+            var serverRunTask = serverConnection.Start(cts.Token);
+
+            await Task.WhenAll(clientConnection.WaitForReadyAsync(cts.Token), serverConnection.WaitForReadyAsync(cts.Token));
 
             // Act
             var writeChannel = await clientConnection.OpenChannelAsync(new ChannelOptions { ChannelId = "large" }, cts.Token);
@@ -372,23 +420,35 @@ public class WebSocketMultiplexerTests
     }
 
     [Fact(Timeout = 120000)]
-    public async Task ConnectAsync_WithClientOptions_AppliesOptions()
+    public async Task CreateOptions_WithClientOptions_AppliesOptions()
     {
         // Arrange
         var (host, port, wsChannel) = await CreateServerAsync();
         try
         {
+            using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+
             // Act
-            await using var client = await WebSocketMultiplexer.ConnectAsync(
+            var clientOptions = WebSocketMultiplexer.CreateOptions(
                 $"ws://localhost:{port}/ws",
-                options: null,
                 clientOptions: opts =>
                 {
                     opts.SetRequestHeader("X-Custom-Header", "test-value");
                 });
+            await using var client = StreamMultiplexer.Create(clientOptions);
+            var clientRunTask = client.Start(cts.Token);
 
-            // Assert
-            Assert.Equal(WebSocketState.Open, client.State);
+            var serverWebSocket = await wsChannel.Reader.ReadAsync(cts.Token);
+            var serverOptions = WebSocketMultiplexer.CreateServerOptions(serverWebSocket);
+            await using var server = StreamMultiplexer.Create(serverOptions);
+            var serverRunTask = server.Start(cts.Token);
+
+            await Task.WhenAll(client.WaitForReadyAsync(cts.Token), server.WaitForReadyAsync(cts.Token));
+
+            // Assert - connection established successfully with custom headers
+            Assert.NotNull(client);
+
+            await cts.CancelAsync();
         }
         finally
         {
@@ -397,10 +457,8 @@ public class WebSocketMultiplexerTests
         }
     }
 
-    #region Extension Method Tests
-
     [Fact(Timeout = 120000)]
-    public async Task AsMux_Extension_WrapsExistingWebSocket()
+    public async Task CreateServerOptions_WrapsExistingWebSocket()
     {
         // Arrange
         var (host, port, wsChannel) = await CreateServerAsync();
@@ -409,63 +467,23 @@ public class WebSocketMultiplexerTests
             using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
 
             // Connect client which triggers server to accept
-            await using var clientConnection = await WebSocketMultiplexer.ConnectAsync($"ws://localhost:{port}/ws");
+            var clientOptions = WebSocketMultiplexer.CreateOptions($"ws://localhost:{port}/ws");
+            await using var clientConnection = StreamMultiplexer.Create(clientOptions);
+            var clientRunTask = clientConnection.Start(cts.Token);
+
             var serverWebSocket = await wsChannel.Reader.ReadAsync(cts.Token);
 
-            // Act - Use extension method
-            await using var serverConnection = serverWebSocket.AsMux();
+            // Act - Use CreateServerOptions
+            var serverOptions = WebSocketMultiplexer.CreateServerOptions(serverWebSocket);
+            await using var serverConnection = StreamMultiplexer.Create(serverOptions);
+            var serverRunTask = serverConnection.Start(cts.Token);
 
-            var startTasks = await Task.WhenAll(clientConnection.StartAsync(cts.Token), serverConnection.StartAsync(cts.Token));
+            await Task.WhenAll(clientConnection.WaitForReadyAsync(cts.Token), serverConnection.WaitForReadyAsync(cts.Token));
 
             var writeChannel = await clientConnection.OpenChannelAsync(new ChannelOptions { ChannelId = "test" }, cts.Token);
             var readChannel = await serverConnection.AcceptChannelAsync("test", cts.Token);
 
-            var testData = "AsMux extension test"u8.ToArray();
-            await writeChannel.WriteAsync(testData, cts.Token);
-
-            var buffer = new byte[testData.Length];
-            int totalRead = 0;
-            while (totalRead < buffer.Length)
-            {
-                int read = await readChannel.ReadAsync(buffer.AsMemory(totalRead), cts.Token);
-                if (read == 0) break;
-                totalRead += read;
-            }
-
-            // Assert
-            Assert.Equal(testData, buffer);
-            Assert.Equal(WebSocketState.Open, serverConnection.State);
-
-            await cts.CancelAsync();
-        }
-        finally
-        {
-            await host.StopAsync();
-            host.Dispose();
-        }
-    }
-
-    [Fact(Timeout = 120000)]
-    public async Task ConnectMuxAsync_Extension_ConnectsAndCreatesMultiplexer()
-    {
-        // Arrange
-        var (host, port, wsChannel) = await CreateServerAsync();
-        try
-        {
-            using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
-
-            // Act - Use extension method
-            var clientWebSocket = new ClientWebSocket();
-            await using var clientConnection = await clientWebSocket.ConnectMuxAsync($"ws://localhost:{port}/ws");
-            var serverWebSocket = await wsChannel.Reader.ReadAsync(cts.Token);
-            await using var serverConnection = serverWebSocket.AsMux();
-
-            var startTasks = await Task.WhenAll(clientConnection.StartAsync(cts.Token), serverConnection.StartAsync(cts.Token));
-
-            var writeChannel = await clientConnection.OpenChannelAsync(new ChannelOptions { ChannelId = "test" }, cts.Token);
-            var readChannel = await serverConnection.AcceptChannelAsync("test", cts.Token);
-
-            var testData = "ConnectMuxAsync extension test"u8.ToArray();
+            var testData = "CreateServerOptions test"u8.ToArray();
             await writeChannel.WriteAsync(testData, cts.Token);
 
             var buffer = new byte[testData.Length];
@@ -488,35 +506,4 @@ public class WebSocketMultiplexerTests
             host.Dispose();
         }
     }
-
-    [Fact(Timeout = 120000)]
-    public async Task ConnectMuxAsync_WithUri_Extension_ConnectsAndCreatesMultiplexer()
-    {
-        // Arrange
-        var (host, port, wsChannel) = await CreateServerAsync();
-        try
-        {
-            using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
-
-            // Act - Use extension method with Uri
-            var clientWebSocket = new ClientWebSocket();
-            await using var clientConnection = await clientWebSocket.ConnectMuxAsync(new Uri($"ws://localhost:{port}/ws"));
-            var serverWebSocket = await wsChannel.Reader.ReadAsync(cts.Token);
-            await using var serverConnection = serverWebSocket.AsMux();
-
-            var startTasks = await Task.WhenAll(clientConnection.StartAsync(cts.Token), serverConnection.StartAsync(cts.Token));
-
-            // Assert
-            Assert.Equal(WebSocketState.Open, clientConnection.State);
-
-            await cts.CancelAsync();
-        }
-        finally
-        {
-            await host.StopAsync();
-            host.Dispose();
-        }
-    }
-
-    #endregion
 }

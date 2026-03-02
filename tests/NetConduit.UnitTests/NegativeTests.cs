@@ -20,7 +20,7 @@ public class NegativeTests
 
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
         
-        var initiatorTask = initiator.RunAsync(cts.Token);
+        var initiatorTask = initiator.Start(cts.Token);
         
         // Don't start acceptor, simulating incomplete handshake
         // Close the pipe after a short delay
@@ -55,9 +55,9 @@ public class NegativeTests
 
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
         
-        var initiatorTask = initiator.RunAsync(cts.Token);
-        var acceptorTask = acceptor.RunAsync(cts.Token);
-        await Task.Delay(100);
+        var initiatorTask = initiator.Start(cts.Token);
+        var acceptorTask = acceptor.Start(cts.Token);
+        await Task.WhenAll(initiator.WaitForReadyAsync(cts.Token), acceptor.WaitForReadyAsync(cts.Token));
 
         var writeChannel = await initiator.OpenChannelAsync(new ChannelOptions { ChannelId = "disconnect_test" }, cts.Token);
 
@@ -80,7 +80,7 @@ public class NegativeTests
             failed = true;
         }
 
-        Assert.True(failed || !initiator.IsRunning);
+        Assert.True(failed, "Writing to disconnected peer should throw an exception");
         cts.Cancel();
     }
 
@@ -94,9 +94,9 @@ public class NegativeTests
 
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
         
-        var initiatorTask = initiator.RunAsync(cts.Token);
-        var acceptorTask = acceptor.RunAsync(cts.Token);
-        await Task.Delay(100);
+        var initiatorTask = initiator.Start(cts.Token);
+        var acceptorTask = acceptor.Start(cts.Token);
+        await Task.WhenAll(initiator.WaitForReadyAsync(cts.Token), acceptor.WaitForReadyAsync(cts.Token));
 
         ReadChannel? readChannel = null;
         var acceptTask = Task.Run(async () =>
@@ -137,7 +137,7 @@ public class NegativeTests
             threw = true;
         }
 
-        Assert.True(result == 0 || threw || !acceptor.IsRunning);
+        Assert.True(result == 0 || threw, "Reading from disconnected channel should return 0 (EOF) or throw");
         cts.Cancel();
     }
 
@@ -151,8 +151,8 @@ public class NegativeTests
 
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
         
-        var initiatorTask = initiator.RunAsync(cts.Token);
-        var acceptorTask = acceptor.RunAsync(cts.Token);
+        var initiatorTask = initiator.Start(cts.Token);
+        var acceptorTask = acceptor.Start(cts.Token);
         await Task.Delay(100);
 
         ReadChannel? readChannel = null;
@@ -200,8 +200,8 @@ public class NegativeTests
 
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
         
-        var initiatorTask = initiator.RunAsync(cts.Token);
-        var acceptorTask = acceptor.RunAsync(cts.Token);
+        var initiatorTask = initiator.Start(cts.Token);
+        var acceptorTask = acceptor.Start(cts.Token);
         await Task.Delay(100);
 
         var channels = new List<WriteChannel>();
@@ -252,14 +252,14 @@ public class NegativeTests
 
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
         
-        var initiatorTask = initiator.RunAsync(cts.Token);
-        var acceptorTask = acceptor.RunAsync(cts.Token);
-        await Task.Delay(100);
+        var initiatorTask = initiator.Start(cts.Token);
+        var acceptorTask = acceptor.Start(cts.Token);
+        await Task.WhenAll(initiator.WaitForReadyAsync(cts.Token), acceptor.WaitForReadyAsync(cts.Token));
 
         var writeChannel = await initiator.OpenChannelAsync(new ChannelOptions { ChannelId = "write_after_close" }, cts.Token);
         await writeChannel.CloseAsync(cts.Token);
 
-        await Assert.ThrowsAnyAsync<Exception>(async () =>
+        await Assert.ThrowsAsync<InvalidOperationException>(async () =>
         {
             await writeChannel.WriteAsync(new byte[100], cts.Token);
         });
@@ -277,13 +277,13 @@ public class NegativeTests
 
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
         
-        var initiatorTask = initiator.RunAsync(cts.Token);
-        var acceptorTask = acceptor.RunAsync(cts.Token);
-        await Task.Delay(100);
+        var initiatorTask = initiator.Start(cts.Token);
+        var acceptorTask = acceptor.Start(cts.Token);
+        await Task.WhenAll(initiator.WaitForReadyAsync(cts.Token), acceptor.WaitForReadyAsync(cts.Token));
 
         await initiator.DisposeAsync();
 
-        await Assert.ThrowsAnyAsync<Exception>(async () =>
+        await Assert.ThrowsAsync<InvalidOperationException>(async () =>
         {
             await initiator.OpenChannelAsync(new ChannelOptions { ChannelId = "after_dispose" }, cts.Token);
         });
@@ -301,9 +301,9 @@ public class NegativeTests
 
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
         
-        var initiatorTask = initiator.RunAsync(cts.Token);
-        var acceptorTask = acceptor.RunAsync(cts.Token);
-        await Task.Delay(100);
+        var initiatorTask = initiator.Start(cts.Token);
+        var acceptorTask = acceptor.Start(cts.Token);
+        await Task.WhenAll(initiator.WaitForReadyAsync(cts.Token), acceptor.WaitForReadyAsync(cts.Token));
 
         var writeChannel = await initiator.OpenChannelAsync(new ChannelOptions { ChannelId = "empty_buffer" }, cts.Token);
         
@@ -329,8 +329,8 @@ public class NegativeTests
 
         using var runCts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
         
-        var initiatorTask = initiator.RunAsync(runCts.Token);
-        var acceptorTask = acceptor.RunAsync(runCts.Token);
+        var initiatorTask = initiator.Start(runCts.Token);
+        var acceptorTask = acceptor.Start(runCts.Token);
         await Task.Delay(100);
 
         ReadChannel? readChannel = null;
@@ -374,8 +374,8 @@ public class NegativeTests
 
         using var runCts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
         
-        var initiatorTask = initiator.RunAsync(runCts.Token);
-        var acceptorTask = acceptor.RunAsync(runCts.Token);
+        var initiatorTask = initiator.Start(runCts.Token);
+        var acceptorTask = acceptor.Start(runCts.Token);
         await Task.Delay(100);
 
         using var acceptCts = new CancellationTokenSource();
@@ -421,8 +421,8 @@ public class NegativeTests
 
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
         
-        var initiatorTask = initiator.RunAsync(cts.Token);
-        var acceptorTask = acceptor.RunAsync(cts.Token);
+        var initiatorTask = initiator.Start(cts.Token);
+        var acceptorTask = acceptor.Start(cts.Token);
         await Task.Delay(100);
 
         var acceptedCount = 0;
@@ -471,8 +471,8 @@ public class NegativeTests
 
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
         
-        var initiatorTask = initiator.RunAsync(cts.Token);
-        var acceptorTask = acceptor.RunAsync(cts.Token);
+        var initiatorTask = initiator.Start(cts.Token);
+        var acceptorTask = acceptor.Start(cts.Token);
         await Task.Delay(100);
 
         ReadChannel? readChannel = null;
@@ -552,8 +552,8 @@ public class NegativeTests
 
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
         
-        var initiatorTask = initiator.RunAsync(cts.Token);
-        var acceptorTask = acceptor.RunAsync(cts.Token);
+        var initiatorTask = initiator.Start(cts.Token);
+        var acceptorTask = acceptor.Start(cts.Token);
         await Task.Delay(100);
 
         // Multiple disposes should not throw
@@ -577,8 +577,8 @@ public class NegativeTests
 
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
         
-        var initiatorTask = initiator.RunAsync(cts.Token);
-        var acceptorTask = acceptor.RunAsync(cts.Token);
+        var initiatorTask = initiator.Start(cts.Token);
+        var acceptorTask = acceptor.Start(cts.Token);
         await Task.Delay(100);
 
         var writeChannel = await initiator.OpenChannelAsync(new ChannelOptions { ChannelId = "dispose_idempotent" }, cts.Token);
@@ -601,8 +601,8 @@ public class NegativeTests
 
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
         
-        var initiatorTask = initiator.RunAsync(cts.Token);
-        var acceptorTask = acceptor.RunAsync(cts.Token);
+        var initiatorTask = initiator.Start(cts.Token);
+        var acceptorTask = acceptor.Start(cts.Token);
         await Task.Delay(100);
 
         // Open channels but don't dispose them
@@ -660,8 +660,8 @@ public class NegativeTests
 
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
         
-        var initiatorTask = initiator.RunAsync(cts.Token);
-        var acceptorTask = acceptor.RunAsync(cts.Token);
+        var initiatorTask = initiator.Start(cts.Token);
+        var acceptorTask = acceptor.Start(cts.Token);
         await Task.Delay(100);
 
         ReadChannel? readChannel = null;
@@ -713,8 +713,8 @@ public class NegativeTests
 
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
         
-        var initiatorTask = initiator.RunAsync(cts.Token);
-        var acceptorTask = acceptor.RunAsync(cts.Token);
+        var initiatorTask = initiator.Start(cts.Token);
+        var acceptorTask = acceptor.Start(cts.Token);
         await Task.Delay(100);
 
         ReadChannel? readChannel = null;
@@ -747,8 +747,8 @@ public class NegativeTests
 
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(60));
         
-        var initiatorTask = initiator.RunAsync(cts.Token);
-        var acceptorTask = acceptor.RunAsync(cts.Token);
+        var initiatorTask = initiator.Start(cts.Token);
+        var acceptorTask = acceptor.Start(cts.Token);
         await Task.Delay(100);
 
         var targetCount = 100;  // Small count to ensure completion
