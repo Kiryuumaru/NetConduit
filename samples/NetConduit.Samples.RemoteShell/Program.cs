@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.Net;
 using System.Net.Sockets;
+using System.Runtime.InteropServices;
 using System.Text;
 using System.Text.Json.Serialization;
 using NetConduit;
@@ -8,7 +9,7 @@ using NetConduit.Tcp;
 using NetConduit.Transits;
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// NetConduit Remote Shell - SSH-like CLI
+// NetConduit Remote Shell - SSH-like CLI with Persistent Shell
 // ═══════════════════════════════════════════════════════════════════════════════
 
 if (args.Length < 2)
@@ -44,37 +45,47 @@ async Task RunServerAsync(int port)
     var cts = new CancellationTokenSource();
     var listener = new TcpListener(IPAddress.Any, port);
 
-    // Treat Ctrl+C as input so we can handle it manually
-    Console.TreatControlCAsInput = true;
+    void Shutdown()
+    {
+        Console.WriteLine();
+        WriteColored("Server shutting down...", ConsoleColor.Yellow);
+        Console.WriteLine();
+        cts.Cancel();
+        listener.Stop();
+    }
 
-    listener.Start();
-    WriteColored("● ", ConsoleColor.Green);
-    Console.WriteLine($"Remote Shell Server listening on port {port}");
-    WriteColored("  Press Ctrl+C to stop", ConsoleColor.DarkGray);
-    Console.WriteLine();
-    Console.WriteLine();
+    Console.CancelKeyPress += (_, e) =>
+    {
+        e.Cancel = true;
+        Shutdown();
+        Process.GetCurrentProcess().Kill();
+    };
 
-    // Background task to listen for Ctrl+C
-    _ = Task.Run(async () =>
+    // Background key monitor - press Q to quit
+    _ = Task.Run(() =>
     {
         while (!cts.Token.IsCancellationRequested)
         {
             if (Console.KeyAvailable)
             {
                 var key = Console.ReadKey(intercept: true);
-                if (key.Key == ConsoleKey.C && key.Modifiers.HasFlag(ConsoleModifiers.Control))
+                if (key.Key == ConsoleKey.Q || (key.Modifiers == ConsoleModifiers.Control && key.Key == ConsoleKey.C))
                 {
-                    Console.WriteLine();
-                    WriteColored("Server shutting down...", ConsoleColor.Yellow);
-                    Console.WriteLine();
-                    cts.Cancel();
-                    listener.Stop();
-                    break;
+                    Shutdown();
+                    Process.GetCurrentProcess().Kill();
+                    return;
                 }
             }
-            await Task.Delay(50);
+            Thread.Sleep(100);
         }
     });
+
+    listener.Start();
+    WriteColored("● ", ConsoleColor.Green);
+    Console.WriteLine($"Remote Shell Server listening on port {port}");
+    WriteColored("  Press Q or Ctrl+C to stop", ConsoleColor.DarkGray);
+    Console.WriteLine();
+    Console.WriteLine();
 
     try
     {
@@ -101,8 +112,7 @@ async Task RunServerAsync(int port)
 
 async Task HandleClientAsync(TcpClient tcp, string endpoint, CancellationToken serverCt)
 {
-    Process? currentProcess = null;
-    var processLock = new object();
+    Process? shellProcess = null;
 
     try
     {
@@ -137,13 +147,66 @@ async Task HandleClientAsync(TcpClient tcp, string endpoint, CancellationToken s
         }
         if (cmdCh == null || ctrlCh == null) return;
 
-        // Open output channels
+        // Open output channel
         var outCh = await mux.OpenChannelAsync(new ChannelOptions { ChannelId = "out" }, cts.Token);
-        var doneCh = await mux.OpenChannelAsync(new ChannelOptions { ChannelId = "done" }, cts.Token);
 
         var cmdTransit = new MessageTransit<Msg, Msg>(null, cmdCh, Ctx.Default.Msg, Ctx.Default.Msg);
         var ctrlTransit = new MessageTransit<Msg, Msg>(null, ctrlCh, Ctx.Default.Msg, Ctx.Default.Msg);
-        var doneTransit = new MessageTransit<Msg, Msg>(doneCh, null, Ctx.Default.Msg, Ctx.Default.Msg);
+
+        // Start persistent shell
+        var isWin = OperatingSystem.IsWindows();
+        var psi = new ProcessStartInfo
+        {
+            FileName = isWin ? "cmd.exe" : "/bin/bash",
+            Arguments = isWin ? "" : "-i", // Interactive mode for bash to show prompts
+            UseShellExecute = false,
+            RedirectStandardInput = true,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            CreateNoWindow = true,
+            WorkingDirectory = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile)
+        };
+
+        // Set TERM for proper prompt display on Linux
+        if (!isWin)
+            psi.Environment["TERM"] = "dumb";
+
+        shellProcess = Process.Start(psi);
+        if (shellProcess == null)
+        {
+            await outCh.WriteAsync(Encoding.UTF8.GetBytes("Failed to start shell\n"), cts.Token);
+            return;
+        }
+
+        // Stream stdout to client
+        _ = Task.Run(async () =>
+        {
+            var buf = new byte[1024];
+            try
+            {
+                int n;
+                while ((n = await shellProcess.StandardOutput.BaseStream.ReadAsync(buf, cts.Token)) > 0)
+                    await outCh.WriteAsync(buf.AsMemory(0, n), cts.Token);
+            }
+            catch { }
+        }, cts.Token);
+
+        // Stream stderr to client (with red ANSI color)
+        _ = Task.Run(async () =>
+        {
+            var buf = new byte[1024];
+            try
+            {
+                int n;
+                while ((n = await shellProcess.StandardError.BaseStream.ReadAsync(buf, cts.Token)) > 0)
+                {
+                    await outCh.WriteAsync("\x1b[31m"u8.ToArray(), cts.Token);
+                    await outCh.WriteAsync(buf.AsMemory(0, n), cts.Token);
+                    await outCh.WriteAsync("\x1b[0m"u8.ToArray(), cts.Token);
+                }
+            }
+            catch { }
+        }, cts.Token);
 
         // Listen for Ctrl+C signals from client
         _ = Task.Run(async () =>
@@ -152,116 +215,64 @@ async Task HandleClientAsync(TcpClient tcp, string endpoint, CancellationToken s
             {
                 await foreach (var msg in ctrlTransit.ReceiveAllAsync(cts.Token))
                 {
-                    if (msg.T == "kill")
+                    if (msg.T == "int" && shellProcess != null && !shellProcess.HasExited)
                     {
-                        lock (processLock)
+                        try
                         {
-                            if (currentProcess != null && !currentProcess.HasExited)
+                            if (isWin)
                             {
-                                try { currentProcess.Kill(entireProcessTree: true); }
-                                catch { try { currentProcess.Kill(); } catch { } }
+                                // Windows: Kill child processes of cmd.exe (like ping.exe)
+                                // We keep cmd.exe alive but kill any running subprocess
+                                foreach (var child in Process.GetProcesses())
+                                {
+                                    try
+                                    {
+                                        // Check if this process's parent is our shell
+                                        if (NativeWindows.GetParentProcessId(child.Id) == shellProcess.Id)
+                                        {
+                                            child.Kill(entireProcessTree: true);
+                                        }
+                                    }
+                                    catch { }
+                                }
+                            }
+                            else
+                            {
+                                // Unix: Send SIGINT to the process group
+                                Process.Start("kill", $"-INT -{shellProcess.Id}");
                             }
                         }
+                        catch { }
                     }
                 }
             }
             catch { }
         }, cts.Token);
 
-        // Process commands
+        // Process commands - send them to the shell
         await foreach (var msg in cmdTransit.ReceiveAllAsync(cts.Token))
         {
-            if (msg.T != "exec" || string.IsNullOrEmpty(msg.D)) continue;
+            if (msg.T != "cmd" || msg.D == null) continue;
 
             WriteColored($"  → ", ConsoleColor.DarkGray);
             Console.WriteLine($"[{endpoint}] {msg.D}");
 
-            var exitCode = await ExecuteCommandAsync(msg.D, outCh, p =>
-            {
-                lock (processLock) currentProcess = p;
-            }, () =>
-            {
-                lock (processLock) currentProcess = null;
-            }, cts.Token);
-
-            await doneTransit.SendAsync(new Msg { T = "done", D = exitCode.ToString() }, cts.Token);
+            // Write command to shell stdin
+            await shellProcess.StandardInput.WriteLineAsync(msg.D);
+            await shellProcess.StandardInput.FlushAsync();
         }
     }
     catch { }
     finally
     {
-        WriteColored($"- ", ConsoleColor.Red);
-        Console.WriteLine($"Client disconnected: {endpoint}");
-    }
-}
-
-async Task<int> ExecuteCommandAsync(string cmd, WriteChannel outCh, Action<Process> onStart, Action onEnd, CancellationToken ct)
-{
-    var isWin = OperatingSystem.IsWindows();
-    var psi = new ProcessStartInfo
-    {
-        FileName = isWin ? "cmd.exe" : "/bin/bash",
-        Arguments = isWin ? $"/c {cmd}" : $"-c \"{cmd}\"",
-        UseShellExecute = false,
-        RedirectStandardOutput = true,
-        RedirectStandardError = true,
-        CreateNoWindow = true
-    };
-
-    try
-    {
-        using var p = Process.Start(psi);
-        if (p == null) return -1;
-
-        onStart(p);
-
-        // Stream stdout in real-time
-        var outTask = Task.Run(async () =>
+        if (shellProcess != null && !shellProcess.HasExited)
         {
-            var buf = new byte[1024];
-            try
-            {
-                int n;
-                while ((n = await p.StandardOutput.BaseStream.ReadAsync(buf, ct)) > 0)
-                    await outCh.WriteAsync(buf.AsMemory(0, n), ct);
-            }
-            catch { }
-        }, ct);
-
-        // Stream stderr in real-time (with red color)
-        var errTask = Task.Run(async () =>
-        {
-            var buf = new byte[1024];
-            try
-            {
-                int n;
-                while ((n = await p.StandardError.BaseStream.ReadAsync(buf, ct)) > 0)
-                {
-                    await outCh.WriteAsync("\x1b[31m"u8.ToArray(), ct);
-                    await outCh.WriteAsync(buf.AsMemory(0, n), ct);
-                    await outCh.WriteAsync("\x1b[0m"u8.ToArray(), ct);
-                }
-            }
-            catch { }
-        }, ct);
-
-        try { await p.WaitForExitAsync(ct); }
-        catch (OperationCanceledException)
-        {
-            if (!p.HasExited)
-                try { p.Kill(entireProcessTree: true); } catch { }
+            try { shellProcess.Kill(entireProcessTree: true); }
+            catch { try { shellProcess.Kill(); } catch { } }
         }
 
-        await Task.WhenAll(outTask, errTask);
-        onEnd();
-        return p.HasExited ? p.ExitCode : -1;
-    }
-    catch (Exception ex)
-    {
-        onEnd();
-        try { await outCh.WriteAsync(Encoding.UTF8.GetBytes($"\x1b[31mError: {ex.Message}\x1b[0m\n"), ct); }
-        catch { }
-        return -1;
+        WriteColored($"- ", ConsoleColor.Red);
+        Console.WriteLine($"Client disconnected: {endpoint}");
     }
 }
 
@@ -292,20 +303,17 @@ async Task RunClientAsync(string host, int port)
     var cmdCh = await mux.OpenChannelAsync(new ChannelOptions { ChannelId = "cmd" }, mainCts.Token);
     var ctrlCh = await mux.OpenChannelAsync(new ChannelOptions { ChannelId = "ctrl" }, mainCts.Token);
 
-    // Accept output channels
+    // Accept output channel
     ReadChannel? outCh = null;
-    ReadChannel? doneCh = null;
     using var acceptCts = CancellationTokenSource.CreateLinkedTokenSource(mainCts.Token);
     acceptCts.CancelAfter(5000);
 
     await foreach (var ch in mux.AcceptChannelsAsync(acceptCts.Token))
     {
-        if (ch.ChannelId == "out") outCh = ch;
-        else if (ch.ChannelId == "done") doneCh = ch;
-        if (outCh != null && doneCh != null) break;
+        if (ch.ChannelId == "out") { outCh = ch; break; }
     }
 
-    if (outCh == null || doneCh == null)
+    if (outCh == null)
     {
         WriteColored("✗ ", ConsoleColor.Red);
         Console.WriteLine("Failed to establish channels");
@@ -314,144 +322,71 @@ async Task RunClientAsync(string host, int port)
 
     var cmdTransit = new MessageTransit<Msg, Msg>(cmdCh, null, Ctx.Default.Msg, Ctx.Default.Msg);
     var ctrlTransit = new MessageTransit<Msg, Msg>(ctrlCh, null, Ctx.Default.Msg, Ctx.Default.Msg);
-    var doneTransit = new MessageTransit<Msg, Msg>(null, doneCh, Ctx.Default.Msg, Ctx.Default.Msg);
 
-    // State
-    var commandRunning = false;
-    CancellationTokenSource? cmdCts = null;
+    var currentUser = Environment.UserName;
     var history = new List<string>();
 
-    // Treat Ctrl+C as input so we can handle it in ReadKey
-    Console.TreatControlCAsInput = true;
-
-    // Print banner
-    Console.WriteLine();
     WriteColored("✓ ", ConsoleColor.Green);
-    Console.Write("Connected to ");
-    WriteColored(host, ConsoleColor.Cyan);
-    Console.WriteLine();
-    WriteColored("  Type ", ConsoleColor.DarkGray);
-    WriteColored("exit", ConsoleColor.White);
-    WriteColored(" to disconnect, ", ConsoleColor.DarkGray);
-    WriteColored("Ctrl+C", ConsoleColor.White);
-    WriteColored(" to cancel/exit", ConsoleColor.DarkGray);
-    Console.WriteLine();
+    Console.WriteLine("Connected! Type 'exit' to quit.");
     Console.WriteLine();
 
-    // Input loop
+    // Read output from server in background
+    var outputCts = CancellationTokenSource.CreateLinkedTokenSource(mainCts.Token);
+    _ = Task.Run(async () =>
+    {
+        var buf = new byte[1024];
+        try
+        {
+            while (!outputCts.Token.IsCancellationRequested)
+            {
+                var n = await outCh.ReadAsync(buf, outputCts.Token);
+                if (n == 0) break;
+                Console.Write(Encoding.UTF8.GetString(buf, 0, n));
+            }
+        }
+        catch { }
+    }, outputCts.Token);
+
+    // Short delay to receive initial shell prompt
+    await Task.Delay(200);
+
+    // Main input loop
     while (!mainCts.Token.IsCancellationRequested)
     {
-        // Print prompt
-        WriteColored(Environment.UserName, ConsoleColor.Green);
-        WriteColored("@", ConsoleColor.DarkGray);
-        WriteColored(host, ConsoleColor.Cyan);
-        WriteColored(":", ConsoleColor.DarkGray);
-        WriteColored("~", ConsoleColor.Blue);
-        WriteColored("$ ", ConsoleColor.DarkGray);
+        var (line, wasCtrlC) = await ReadLineWithHistoryAsync(history, mainCts.Token);
 
-        // Read command with history support
-        var (cmd, wasCtrlC) = await ReadLineWithHistoryAsync(history, mainCts.Token);
-        
         if (wasCtrlC)
         {
-            // Ctrl+C while not running command = exit
-            Console.WriteLine();
-            break;
-        }
-
-        if (cmd == null || mainCts.Token.IsCancellationRequested) break;
-
-        cmd = cmd.Trim();
-        if (cmd.Length == 0) continue;
-
-        // Add to history (avoid duplicates)
-        if (history.Count == 0 || history[^1] != cmd)
-            history.Add(cmd);
-
-        if (cmd.Equals("exit", StringComparison.OrdinalIgnoreCase) ||
-            cmd.Equals("quit", StringComparison.OrdinalIgnoreCase))
-            break;
-
-        // Send command
-        await cmdTransit.SendAsync(new Msg { T = "exec", D = cmd }, mainCts.Token);
-
-        // Mark command running
-        commandRunning = true;
-        cmdCts = CancellationTokenSource.CreateLinkedTokenSource(mainCts.Token);
-
-        // Read output in background
-        var outputTask = Task.Run(async () =>
-        {
-            var buf = new byte[1024];
-            try
-            {
-                while (!cmdCts.Token.IsCancellationRequested)
-                {
-                    var n = await outCh.ReadAsync(buf, cmdCts.Token);
-                    if (n == 0) break;
-                    Console.Write(Encoding.UTF8.GetString(buf, 0, n));
-                }
-            }
-            catch { }
-        }, cmdCts.Token);
-
-        // Wait for completion or Ctrl+C
-        var doneTask = doneTransit.ReceiveAsync(mainCts.Token).AsTask();
-        var ctrlCTask = WaitForCtrlCAsync(cmdCts.Token);
-
-        var completed = await Task.WhenAny(doneTask, ctrlCTask);
-
-        if (completed == ctrlCTask && await ctrlCTask)
-        {
-            // User pressed Ctrl+C during command
+            // Send interrupt signal to server
             Console.WriteLine("^C");
-            await ctrlTransit.SendAsync(new Msg { T = "kill" }, mainCts.Token);
-            
-            // Still wait for done signal
-            try { await doneTransit.ReceiveAsync(mainCts.Token); }
+            try { await ctrlTransit.SendAsync(new Msg { T = "int" }, mainCts.Token); }
             catch { }
+            continue;
         }
 
-        await Task.Delay(50); // Flush output
-        await cmdCts.CancelAsync();
-        try { await outputTask; } catch { }
+        if (line == null) break;
 
-        commandRunning = false;
-        cmdCts.Dispose();
-        cmdCts = null;
-
-        // Show exit code if non-zero
-        Msg? done = null;
-        if (completed == doneTask)
-        {
-            try { done = await doneTask; } catch { }
-        }
+        var trimmed = line.Trim();
         
-        if (done != null && int.TryParse(done.D, out var exitCode) && exitCode != 0)
-        {
-            WriteColored($"[exit {exitCode}]", ConsoleColor.Yellow);
-            Console.WriteLine();
-        }
+        if (trimmed.Equals("exit", StringComparison.OrdinalIgnoreCase))
+            break;
+
+        // Add non-empty commands to history
+        if (!string.IsNullOrEmpty(trimmed) && (history.Count == 0 || history[^1] != trimmed))
+            history.Add(trimmed);
+
+        // Send command to server
+        await cmdTransit.SendAsync(new Msg { T = "cmd", D = line }, mainCts.Token);
+
+        // Small delay to see output
+        await Task.Delay(50);
     }
+
+    await outputCts.CancelAsync();
 
     Console.WriteLine();
     WriteColored("Connection closed.", ConsoleColor.DarkGray);
     Console.WriteLine();
-}
-
-async Task<bool> WaitForCtrlCAsync(CancellationToken ct)
-{
-    while (!ct.IsCancellationRequested)
-    {
-        if (Console.KeyAvailable)
-        {
-            var key = Console.ReadKey(intercept: true);
-            if (key.Key == ConsoleKey.C && key.Modifiers.HasFlag(ConsoleModifiers.Control))
-                return true;
-        }
-        await Task.Delay(10, ct);
-    }
-    return false;
 }
 
 async Task<(string? Line, bool WasCtrlC)> ReadLineWithHistoryAsync(List<string> history, CancellationToken ct)
@@ -459,129 +394,145 @@ async Task<(string? Line, bool WasCtrlC)> ReadLineWithHistoryAsync(List<string> 
     if (Console.IsInputRedirected)
         return (Console.ReadLine(), false);
 
-    var line = new StringBuilder();
-    var historyIndex = history.Count;
-    var cursorPos = 0;
+    // Enable Ctrl+C as input only during our input reading
+    Console.TreatControlCAsInput = true;
 
-    while (!ct.IsCancellationRequested)
+    try
     {
-        if (!Console.KeyAvailable)
+        var line = new StringBuilder();
+        var historyIndex = history.Count;
+        var cursorPos = 0;
+
+        while (!ct.IsCancellationRequested)
         {
-            await Task.Delay(10);
-            continue;
-        }
+            if (!Console.KeyAvailable)
+            {
+                await Task.Delay(10);
+                continue;
+            }
 
-        var key = Console.ReadKey(intercept: true);
+            var key = Console.ReadKey(intercept: true);
 
-        // Check for Ctrl+C
-        if (key.Key == ConsoleKey.C && key.Modifiers.HasFlag(ConsoleModifiers.Control))
-        {
-            return (null, true);
-        }
+            // Check for Ctrl+C
+            if (key.Key == ConsoleKey.C && key.Modifiers.HasFlag(ConsoleModifiers.Control))
+            {
+                return (null, true);
+            }
 
-        switch (key.Key)
-        {
-            case ConsoleKey.Enter:
-                Console.WriteLine();
-                return (line.ToString(), false);
+            switch (key.Key)
+            {
+                case ConsoleKey.Enter:
+                    Console.WriteLine();
+                    return (line.ToString(), false);
 
-            case ConsoleKey.Backspace:
-                if (cursorPos > 0)
-                {
-                    line.Remove(cursorPos - 1, 1);
-                    cursorPos--;
-                    RedrawLine(line.ToString(), cursorPos);
-                }
-                break;
+                case ConsoleKey.Backspace:
+                    if (cursorPos > 0)
+                    {
+                        var oldLen = line.Length;
+                        var oldPos = cursorPos;
+                        line.Remove(cursorPos - 1, 1);
+                        cursorPos--;
+                        RedrawLine(line.ToString(), cursorPos, oldPos, oldLen);
+                    }
+                    break;
 
-            case ConsoleKey.Delete:
-                if (cursorPos < line.Length)
-                {
-                    line.Remove(cursorPos, 1);
-                    RedrawLine(line.ToString(), cursorPos);
-                }
-                break;
+                case ConsoleKey.Delete:
+                    if (cursorPos < line.Length)
+                    {
+                        var oldLen = line.Length;
+                        line.Remove(cursorPos, 1);
+                        RedrawLine(line.ToString(), cursorPos, cursorPos, oldLen);
+                    }
+                    break;
 
-            case ConsoleKey.LeftArrow:
-                if (cursorPos > 0)
-                {
-                    cursorPos--;
-                    Console.Write("\b");
-                }
-                break;
+                case ConsoleKey.LeftArrow:
+                    if (cursorPos > 0)
+                    {
+                        cursorPos--;
+                        Console.Write("\b");
+                    }
+                    break;
 
-            case ConsoleKey.RightArrow:
-                if (cursorPos < line.Length)
-                {
-                    Console.Write(line[cursorPos]);
-                    cursorPos++;
-                }
-                break;
+                case ConsoleKey.RightArrow:
+                    if (cursorPos < line.Length)
+                    {
+                        Console.Write(line[cursorPos]);
+                        cursorPos++;
+                    }
+                    break;
 
-            case ConsoleKey.Home:
-                while (cursorPos > 0) { Console.Write("\b"); cursorPos--; }
-                break;
+                case ConsoleKey.Home:
+                    while (cursorPos > 0) { Console.Write("\b"); cursorPos--; }
+                    break;
 
-            case ConsoleKey.End:
-                while (cursorPos < line.Length)
-                {
-                    Console.Write(line[cursorPos]);
-                    cursorPos++;
-                }
-                break;
+                case ConsoleKey.End:
+                    while (cursorPos < line.Length)
+                    {
+                        Console.Write(line[cursorPos]);
+                        cursorPos++;
+                    }
+                    break;
 
-            case ConsoleKey.UpArrow:
-                if (historyIndex > 0)
-                {
-                    historyIndex--;
-                    ClearLine(line.Length, cursorPos);
-                    line.Clear();
-                    line.Append(history[historyIndex]);
-                    Console.Write(line);
-                    cursorPos = line.Length;
-                }
-                break;
+                case ConsoleKey.UpArrow:
+                    if (historyIndex > 0)
+                    {
+                        historyIndex--;
+                        ClearLine(line.Length, cursorPos);
+                        line.Clear();
+                        line.Append(history[historyIndex]);
+                        Console.Write(line);
+                        cursorPos = line.Length;
+                    }
+                    break;
 
-            case ConsoleKey.DownArrow:
-                if (historyIndex < history.Count - 1)
-                {
-                    historyIndex++;
-                    ClearLine(line.Length, cursorPos);
-                    line.Clear();
-                    line.Append(history[historyIndex]);
-                    Console.Write(line);
-                    cursorPos = line.Length;
-                }
-                else if (historyIndex == history.Count - 1)
-                {
-                    historyIndex = history.Count;
+                case ConsoleKey.DownArrow:
+                    if (historyIndex < history.Count - 1)
+                    {
+                        historyIndex++;
+                        ClearLine(line.Length, cursorPos);
+                        line.Clear();
+                        line.Append(history[historyIndex]);
+                        Console.Write(line);
+                        cursorPos = line.Length;
+                    }
+                    else if (historyIndex == history.Count - 1)
+                    {
+                        historyIndex = history.Count;
+                        ClearLine(line.Length, cursorPos);
+                        line.Clear();
+                        cursorPos = 0;
+                    }
+                    break;
+
+                case ConsoleKey.Escape:
                     ClearLine(line.Length, cursorPos);
                     line.Clear();
                     cursorPos = 0;
-                }
-                break;
+                    break;
 
-            case ConsoleKey.Escape:
-                ClearLine(line.Length, cursorPos);
-                line.Clear();
-                cursorPos = 0;
-                break;
-
-            default:
-                if (!char.IsControl(key.KeyChar))
-                {
-                    line.Insert(cursorPos, key.KeyChar);
-                    cursorPos++;
-                    if (cursorPos == line.Length)
-                        Console.Write(key.KeyChar);
-                    else
-                        RedrawLine(line.ToString(), cursorPos);
-                }
-                break;
+                default:
+                    if (!char.IsControl(key.KeyChar))
+                    {
+                        var oldLen = line.Length;
+                        var oldPos = cursorPos;
+                        line.Insert(cursorPos, key.KeyChar);
+                        cursorPos++;
+                        if (cursorPos == line.Length)
+                            Console.Write(key.KeyChar);
+                        else
+                            RedrawLine(line.ToString(), cursorPos, oldPos, oldLen);
+                    }
+                    break;
+            }
         }
-    }
 
-    return (null, false);
+        return (null, false);
+    }
+    finally
+    {
+        // Restore normal Ctrl+C behavior
+        Console.TreatControlCAsInput = false;
+    }
 }
 
 void ClearLine(int len, int pos)
@@ -591,12 +542,18 @@ void ClearLine(int len, int pos)
     for (var i = 0; i < len; i++) Console.Write("\b");
 }
 
-void RedrawLine(string line, int pos)
+void RedrawLine(string line, int newPos, int oldPos, int oldLen)
 {
-    for (var i = 0; i < pos; i++) Console.Write("\b");
+    // Move cursor to start of line
+    for (var i = 0; i < oldPos; i++) Console.Write("\b");
+    // Write new line
     Console.Write(line);
-    Console.Write(" \b");
-    for (var i = line.Length; i > pos; i--) Console.Write("\b");
+    // Clear any trailing characters from old line
+    var extraChars = oldLen - line.Length;
+    for (var i = 0; i < extraChars; i++) Console.Write(' ');
+    // Move cursor back to target position
+    var currentPos = line.Length + extraChars;
+    for (var i = currentPos; i > newPos; i--) Console.Write("\b");
 }
 
 void WriteColored(string text, ConsoleColor color)
@@ -613,9 +570,61 @@ void WriteColored(string text, ConsoleColor color)
 
 record Msg
 {
-    public string? T { get; init; } // Type: exec, kill, done
+    public string? T { get; init; } // Type: cmd, int (interrupt)
     public string? D { get; init; } // Data
 }
 
 [JsonSerializable(typeof(Msg))]
 partial class Ctx : JsonSerializerContext { }
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// Windows Interop for Parent Process ID
+// ═══════════════════════════════════════════════════════════════════════════════
+
+static partial class NativeWindows
+{
+    public static int GetParentProcessId(int processId)
+    {
+        if (!OperatingSystem.IsWindows())
+            return 0;
+
+        try
+        {
+            var handle = OpenProcess(0x0400 | 0x0010, false, processId);
+            if (handle == IntPtr.Zero) return 0;
+
+            try
+            {
+                var pbi = new PROCESS_BASIC_INFORMATION();
+                if (NtQueryInformationProcess(handle, 0, ref pbi, Marshal.SizeOf(pbi), out _) == 0)
+                    return (int)pbi.InheritedFromUniqueProcessId;
+            }
+            finally
+            {
+                CloseHandle(handle);
+            }
+        }
+        catch { }
+        return 0;
+    }
+
+    [DllImport("kernel32.dll")]
+    private static extern IntPtr OpenProcess(int dwDesiredAccess, bool bInheritHandle, int dwProcessId);
+
+    [DllImport("kernel32.dll")]
+    private static extern bool CloseHandle(IntPtr hObject);
+
+    [DllImport("ntdll.dll")]
+    private static extern int NtQueryInformationProcess(IntPtr processHandle, int processInformationClass, ref PROCESS_BASIC_INFORMATION processInformation, int processInformationLength, out int returnLength);
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct PROCESS_BASIC_INFORMATION
+    {
+        public IntPtr Reserved1;
+        public IntPtr PebBaseAddress;
+        public IntPtr Reserved2_0;
+        public IntPtr Reserved2_1;
+        public IntPtr UniqueProcessId;
+        public IntPtr InheritedFromUniqueProcessId;
+    }
+}
