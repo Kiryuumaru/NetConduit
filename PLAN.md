@@ -305,26 +305,26 @@ await mux.WaitForReadyAsync();  // Optional: wait for first connection
 ## Implementation Phases
 
 ### Phase 1: Core Restructure
-- [ ] Make `_readStream`/`_writeStream` mutable
-- [ ] Keep constructor private, rename `CreateAsync()` to `Create()` (non-async)
-- [ ] Implement `Start()` (non-async)
-- [ ] Implement `ConnectWithRetryAsync()` unified logic
-- [ ] Implement `WaitForReadyAsync()`
+- [x] Make `_readStream`/`_writeStream` mutable
+- [x] Keep constructor private, rename `CreateAsync()` to `Create()` (non-async)
+- [x] Implement `Start()` (non-async)
+- [x] Implement `ConnectWithRetryAsync()` unified logic
+- [x] Implement `WaitForReadyAsync()`
 
 ### Phase 2: State Management
-- [ ] Add `CurrentConnectionAttempt` property
-- [ ] Ensure state transitions are correct
-- [ ] Add logging for state changes
+- [x] Add `CurrentConnectionAttempt` property
+- [x] Ensure state transitions are correct
+- [x] Add logging for state changes
 
 ### Phase 3: Channel Awaiting
-- [ ] Implement async await behavior for channel operations during connecting/reconnecting
-- [ ] Add ready-gate mechanism (e.g., `TaskCompletionSource` or `SemaphoreSlim`)
+- [x] Implement async await behavior for channel operations during connecting/reconnecting
+- [x] Add ready-gate mechanism (e.g., `TaskCompletionSource` or `SemaphoreSlim`)
 
 ### Phase 4: Testing
-- [ ] Update `TestMuxHelper`
-- [ ] Update all existing tests
-- [ ] Add new tests for initial connection scenarios
+- [x] Update `TestMuxHelper`
+- [x] Update all existing tests
+- [x] Add new tests for initial connection scenarios
 
 ### Phase 5: Documentation
-- [ ] Update XML docs
-- [ ] Update README examples
+- [x] Update XML docs
+- [x] Update README examples

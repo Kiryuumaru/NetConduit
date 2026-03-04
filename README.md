@@ -512,6 +512,9 @@ The repository includes complete sample applications:
 
 | Sample | Description |
 |--------|-------------|
+| [Pong](samples/NetConduit.Samples.Pong) | Real-time multiplayer Pong game using Terminal.Gui |
+| [RemoteShell](samples/NetConduit.Samples.RemoteShell) | SSH-like remote shell with persistent sessions |
+| [GroupChat](samples/NetConduit.Samples.GroupChat) | Multi-user chat room (TCP/WebSocket) with broadcast |
 | [ChatCli](samples/NetConduit.Samples.ChatCli) | CLI chat app with bidirectional messaging |
 | [FileTransfer](samples/NetConduit.Samples.FileTransfer) | File transfer with progress and concurrent transfers |
 | [RpcFramework](samples/NetConduit.Samples.RpcFramework) | Request/response RPC pattern |
@@ -519,12 +522,23 @@ The repository includes complete sample applications:
 
 Run samples:
 ```bash
-# Chat server
-cd samples/NetConduit.Samples.ChatCli
-dotnet run -- server 5000 Alice
+# Pong server (Terminal.Gui required)
+dotnet run --project samples/NetConduit.Samples.Pong -- server 5000
 
-# Chat client (another terminal)
-dotnet run -- client 5000 localhost Bob
+# Pong client (another terminal)
+dotnet run --project samples/NetConduit.Samples.Pong -- client 5000 127.0.0.1
+
+# Remote shell server
+dotnet run --project samples/NetConduit.Samples.RemoteShell -- server 6000
+
+# Remote shell client
+dotnet run --project samples/NetConduit.Samples.RemoteShell -- client 6000 127.0.0.1
+
+# Group chat server (TCP)
+dotnet run --project samples/NetConduit.Samples.GroupChat -- server tcp 7000
+
+# Group chat client (TCP)
+dotnet run --project samples/NetConduit.Samples.GroupChat -- client tcp 7000 127.0.0.1 Alice
 ```
 
 ## Architecture
