@@ -176,43 +176,94 @@ byte[] Encode<T>(T? previousState, T currentState)
 
 ---
 
-## Array Diff Algorithm (LCS-based)
+## Array Diff Algorithm (Smart Matching + Deep Diffing)
+
+Prioritizes **minimal delta size** over speed. Detects deep property changes within array elements.
+
+### Strategy by Array Type
+
+| Array Type | Strategy |
+|------------|----------|
+| Same-length arrays | Position-based deep diffing (recurses into objects at same index) |
+| Different-length object arrays | Smart matching (ID → equality → similarity) + deep diffing |
+| Different-length primitive arrays | LCS algorithm for optimal insert/remove |
+
+### Same-Length Arrays
 
 ```csharp
-List<DeltaOp> DiffArrays(JsonArray oldArr, JsonArray newArr, object[] path)
+List<DeltaOp> DiffArraysSameLength(JsonArray oldArr, JsonArray newArr, object[] path)
 {
-    // Use Longest Common Subsequence for minimal edits
     var ops = new List<DeltaOp>();
-    var lcs = ComputeLCS(oldArr, newArr);
     
-    int oldIdx = 0, newIdx = 0, lcsIdx = 0;
-    
-    while (oldIdx < oldArr.Count || newIdx < newArr.Count)
+    for (int i = 0; i < oldArr.Count; i++)
     {
-        if (lcsIdx < lcs.Count && 
-            oldIdx < oldArr.Count && 
-            DeepEquals(oldArr[oldIdx], lcs[lcsIdx]))
-        {
-            // Element in LCS - unchanged
-            oldIdx++; newIdx++; lcsIdx++;
-        }
-        else if (newIdx < newArr.Count && 
-                 (lcsIdx >= lcs.Count || !DeepEquals(newArr[newIdx], lcs[lcsIdx])))
-        {
-            // Insert new element
-            ops.Add(new(ArrayInsert, path, newIdx, newArr[newIdx]));
-            newIdx++;
-        }
-        else if (oldIdx < oldArr.Count)
-        {
-            // Remove old element
-            ops.Add(new(ArrayRemove, path, oldIdx));
-            oldIdx++;
-        }
+        var oldElem = oldArr[i];
+        var newElem = newArr[i];
+        
+        if (DeepEquals(oldElem, newElem))
+            continue;
+        
+        // Deep diff: recurse into objects/arrays at same position
+        if (oldElem is JsonObject && newElem is JsonObject)
+            ops.AddRange(DiffObjects(oldElem, newElem, [..path, i]));
+        else if (oldElem is JsonArray && newElem is JsonArray)
+            ops.AddRange(DiffArrays(oldElem, newElem, [..path, i]));
+        else
+            ops.Add(new(Set, [..path, i], newElem));
     }
     
-    // Fallback: if ops larger than full array, replace entirely
-    if (EstimateSize(ops) > EstimateSize(newArr))
+    return ops;
+}
+```
+
+### Object Arrays with Smart Matching
+
+```csharp
+List<DeltaOp> DiffObjectArrays(JsonArray oldArr, JsonArray newArr, object[] path)
+{
+    var matches = FindBestMatches(oldArr, newArr);
+    // matches[newIdx] = oldIdx or -1 if new element
+    
+    var ops = new List<DeltaOp>();
+    var matched = new HashSet<int>();
+    
+    // Find removals (old elements not matched)
+    for (int oi = oldArr.Count - 1; oi >= 0; oi--)
+        if (!matched.Contains(oi))
+            ops.Add(new(ArrayRemove, path, oi));
+    
+    // Find insertions and deep diffs
+    for (int ni = 0; ni < newArr.Count; ni++)
+    {
+        if (matches[ni] < 0)
+            ops.Add(new(ArrayInsert, path, ni, newArr[ni]));
+        else
+            ops.AddRange(DiffObjects(oldArr[matches[ni]], newArr[ni], [..path, ni]));
+    }
+    
+    return ops;
+}
+
+(int oldIdx)[] FindBestMatches(JsonArray oldArr, JsonArray newArr)
+{
+    // Pass 1: Match by ID field ("id", "Id", "ID")
+    // Pass 2: Match by exact equality
+    // Pass 3: Match by structural similarity ≥50%
+}
+```
+
+### Primitive Arrays (LCS)
+
+```csharp
+List<DeltaOp> DiffPrimitiveArrays(JsonArray oldArr, JsonArray newArr, object[] path)
+{
+    var lcs = ComputeLCS(oldArr, newArr);
+    var ops = new List<DeltaOp>();
+    
+    // Generate ArrayRemove (reverse order) then ArrayInsert
+    // LCS determines optimal edit sequence for primitives
+    
+    if (ops.Count > Math.Max(oldArr.Count, newArr.Count))
         return [new(ArrayReplace, path, newArr)];
     
     return ops;
@@ -514,15 +565,13 @@ public class DeltaTransit<T>
 - `SyncStrategy_ReceiverNoLocalHistory_RequestsResync`
 
 ### Phase 2: Arrays
-- [x] Implement LCS algorithm
+- [x] Smart matching for object arrays (ID, equality, similarity)
+- [x] Position-based deep diffing for same-length arrays
+- [x] LCS algorithm for primitive arrays (internal)
 - [x] Array insert/remove/replace operations
-- [x] Fallback to full array when delta larger
+- [x] Fallback to full array when ops.Count > max(old, new)
 
 **Tests:**
-- `LCS_IdenticalArrays_ReturnsFullSequence`
-- `LCS_SingleInsertion_FindsCommonElements`
-- `LCS_SingleRemoval_FindsCommonElements`
-- `LCS_CompletelyDifferent_ReturnsEmpty`
 - `ArrayDiff_InsertAtStart_ReturnsArrayInsertOp`
 - `ArrayDiff_InsertAtEnd_ReturnsArrayInsertOp`
 - `ArrayDiff_InsertInMiddle_ReturnsArrayInsertOp`
@@ -533,6 +582,7 @@ public class DeltaTransit<T>
 - `ApplyDelta_ArrayInsertOp_InsertsAtIndex`
 - `ApplyDelta_ArrayRemoveOp_RemovesAtIndex`
 - `ApplyDelta_ArrayReplaceOp_ReplacesEntireArray`
+- `EdgeCase_DeeplyNestedArraysOfObjects_UpdateMiddleItem` (verifies deep diffing)
 
 ### Phase 3: Type Support (Native AOT)
 - [x] DeltaTransit<T> constructor with JsonTypeInfo<T> parameter
@@ -596,8 +646,11 @@ public class DeltaTransit<T>
 |----------|--------|--------|
 | Path format | Array of segments | No escaping, type-safe, robust |
 | Null handling | Separate SetNull op | Distinguish null value vs removed |
-| Array diff | LCS-based | Minimal edit distance |
-| Fallback | Full payload | When delta >= full size |
+| Array diff | Smart matching + deep diffing | Minimal delta size (prioritized over speed) |
+| Same-length arrays | Position-based | Elements at same index compared recursively |
+| Object arrays | ID/equality/similarity matching | Find corresponding elements across different lengths |
+| Primitive arrays | LCS-based | Optimal insert/remove sequence |
+| Fallback | Full payload | When ops.Count > max(old, new) |
 | Wire format | JSON array | Compact, debuggable |
 | Type support | All System.Text.Json types | Native .NET, no dependencies |
 | Internal repr | JsonNode | Mutable, easy to diff/apply |

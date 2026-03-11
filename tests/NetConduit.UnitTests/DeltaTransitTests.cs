@@ -459,66 +459,6 @@ public partial class DeltaTransitTests
 
     #endregion
 
-    #region Phase 2: LCS Algorithm Tests
-
-    [Fact]
-    public void LCS_IdenticalArrays_ReturnsFullSequence()
-    {
-        // Arrange
-        var a = new JsonArray(1, 2, 3);
-        var b = new JsonArray(1, 2, 3);
-
-        // Act
-        var lcs = DeltaDiff.ComputeLCS(a, b);
-
-        // Assert
-        Assert.Equal(3, lcs.Count);
-    }
-
-    [Fact]
-    public void LCS_SingleInsertion_FindsCommonElements()
-    {
-        // Arrange
-        var a = new JsonArray(1, 2, 3);
-        var b = new JsonArray(1, 99, 2, 3);
-
-        // Act
-        var lcs = DeltaDiff.ComputeLCS(a, b);
-
-        // Assert
-        Assert.Equal(3, lcs.Count); // 1, 2, 3 are common
-    }
-
-    [Fact]
-    public void LCS_SingleRemoval_FindsCommonElements()
-    {
-        // Arrange
-        var a = new JsonArray(1, 2, 3, 4);
-        var b = new JsonArray(1, 3, 4);
-
-        // Act
-        var lcs = DeltaDiff.ComputeLCS(a, b);
-
-        // Assert
-        Assert.Equal(3, lcs.Count); // 1, 3, 4 are common
-    }
-
-    [Fact]
-    public void LCS_CompletelyDifferent_ReturnsEmpty()
-    {
-        // Arrange
-        var a = new JsonArray(1, 2, 3);
-        var b = new JsonArray(4, 5, 6);
-
-        // Act
-        var lcs = DeltaDiff.ComputeLCS(a, b);
-
-        // Assert
-        Assert.Empty(lcs);
-    }
-
-    #endregion
-
     #region Phase 2: Array Diff Tests
 
     [Fact]
@@ -1952,18 +1892,29 @@ public partial class DeltaTransitTests
         var workingState = oldState.DeepClone();
         DeltaApply.ApplyDelta(workingState, ops);
 
-        // Assert - state should match after applying deltas
+        // Assert - should be single operation with deep path (minimal delta)
+        Assert.Single(ops);
+        Assert.Equal(DeltaOp.Set, ops[0].Op);
+        
+        // Path: company -> departments -> 0 -> teams -> 1 -> members -> 1 -> level
+        Assert.Equal(8, ops[0].Path.Length);
+        Assert.Equal("company", ops[0].Path[0]);
+        Assert.Equal("departments", ops[0].Path[1]);
+        Assert.Equal(0, ops[0].Path[2]);
+        Assert.Equal("teams", ops[0].Path[3]);
+        Assert.Equal(1, ops[0].Path[4]);
+        Assert.Equal("members", ops[0].Path[5]);
+        Assert.Equal(1, ops[0].Path[6]);
+        Assert.Equal("level", ops[0].Path[7]);
+        Assert.Equal(6, ops[0].Value!.GetValue<int>());
+        
+        // Verify state matches
         Assert.True(DeltaDiff.DeepEquals(workingState, newState));
         
         // Verify the specific deep change was applied
         var diana = workingState["company"]!["departments"]![0]!["teams"]![1]!["members"]![1]!;
         Assert.Equal("Diana", diana["name"]!.GetValue<string>());
         Assert.Equal(6, diana["level"]!.GetValue<int>()); // Updated from 4 to 6
-        
-        // Note: Arrays of objects currently use element-level comparison,
-        // so the entire modified department may be replaced rather than
-        // generating a single deep property change. This is by design -
-        // the delta still correctly synchronizes state.
     }
 
     [Fact]
@@ -2237,6 +2188,457 @@ public partial class DeltaTransitTests
         var tomProjects = workingState["organization"]!["regions"]![1]!["offices"]![0]!["departments"]![0]!["employees"]![0]!["projects"]!.AsArray();
         Assert.Equal(2, tomProjects.Count);
         Assert.Equal("M3", tomProjects[1]!.GetValue<string>()); // New project added
+    }
+
+    [Fact]
+    public void EdgeCase_ExtremeComplexity_CascadedArraysWithMixedOperations()
+    {
+        // Arrange - Extreme nesting: Galaxy > Clusters > Systems > Planets > Continents > Countries > Cities > Districts > Buildings > Floors > Rooms > Items
+        // 12 levels of nested arrays and objects
+        var oldState = JsonNode.Parse("""
+        {
+            "galaxy": {
+                "id": "milky-way",
+                "clusters": [
+                    {
+                        "id": "orion-arm",
+                        "systems": [
+                            {
+                                "id": "solar",
+                                "planets": [
+                                    {
+                                        "id": "earth",
+                                        "continents": [
+                                            {
+                                                "id": "asia",
+                                                "countries": [
+                                                    {
+                                                        "id": "japan",
+                                                        "cities": [
+                                                            {
+                                                                "id": "tokyo",
+                                                                "districts": [
+                                                                    {
+                                                                        "id": "shibuya",
+                                                                        "buildings": [
+                                                                            {
+                                                                                "id": "tower-a",
+                                                                                "floors": [
+                                                                                    {
+                                                                                        "id": "floor-1",
+                                                                                        "rooms": [
+                                                                                            { "id": "room-101", "name": "Conference A", "capacity": 10, "equipment": ["projector", "whiteboard"] },
+                                                                                            { "id": "room-102", "name": "Conference B", "capacity": 8, "equipment": ["tv", "phone"] },
+                                                                                            { "id": "room-103", "name": "Meeting Room", "capacity": 4, "equipment": ["whiteboard"] }
+                                                                                        ]
+                                                                                    },
+                                                                                    {
+                                                                                        "id": "floor-2",
+                                                                                        "rooms": [
+                                                                                            { "id": "room-201", "name": "Office A", "capacity": 20, "equipment": ["desks", "computers"] },
+                                                                                            { "id": "room-202", "name": "Office B", "capacity": 15, "equipment": ["desks"] }
+                                                                                        ]
+                                                                                    },
+                                                                                    {
+                                                                                        "id": "floor-3",
+                                                                                        "rooms": [
+                                                                                            { "id": "room-301", "name": "Lab", "capacity": 6, "equipment": ["machines", "tools", "safety-gear"] }
+                                                                                        ]
+                                                                                    }
+                                                                                ]
+                                                                            },
+                                                                            {
+                                                                                "id": "tower-b",
+                                                                                "floors": [
+                                                                                    {
+                                                                                        "id": "floor-1",
+                                                                                        "rooms": [
+                                                                                            { "id": "room-b101", "name": "Lobby", "capacity": 50, "equipment": ["sofas", "reception"] }
+                                                                                        ]
+                                                                                    }
+                                                                                ]
+                                                                            }
+                                                                        ]
+                                                                    },
+                                                                    {
+                                                                        "id": "shinjuku",
+                                                                        "buildings": [
+                                                                            {
+                                                                                "id": "center-1",
+                                                                                "floors": [
+                                                                                    {
+                                                                                        "id": "floor-1",
+                                                                                        "rooms": [
+                                                                                            { "id": "room-c101", "name": "Cafeteria", "capacity": 100, "equipment": ["tables", "kitchen"] }
+                                                                                        ]
+                                                                                    }
+                                                                                ]
+                                                                            }
+                                                                        ]
+                                                                    }
+                                                                ]
+                                                            },
+                                                            {
+                                                                "id": "osaka",
+                                                                "districts": [
+                                                                    {
+                                                                        "id": "umeda",
+                                                                        "buildings": [
+                                                                            {
+                                                                                "id": "sky-building",
+                                                                                "floors": [
+                                                                                    {
+                                                                                        "id": "floor-40",
+                                                                                        "rooms": [
+                                                                                            { "id": "room-obs", "name": "Observatory", "capacity": 200, "equipment": ["telescopes", "café"] }
+                                                                                        ]
+                                                                                    }
+                                                                                ]
+                                                                            }
+                                                                        ]
+                                                                    }
+                                                                ]
+                                                            }
+                                                        ]
+                                                    },
+                                                    {
+                                                        "id": "china",
+                                                        "cities": [
+                                                            {
+                                                                "id": "beijing",
+                                                                "districts": [
+                                                                    {
+                                                                        "id": "chaoyang",
+                                                                        "buildings": [
+                                                                            {
+                                                                                "id": "cctv-tower",
+                                                                                "floors": [
+                                                                                    {
+                                                                                        "id": "floor-1",
+                                                                                        "rooms": [
+                                                                                            { "id": "room-studio", "name": "Studio A", "capacity": 30, "equipment": ["cameras", "lights"] }
+                                                                                        ]
+                                                                                    }
+                                                                                ]
+                                                                            }
+                                                                        ]
+                                                                    }
+                                                                ]
+                                                            }
+                                                        ]
+                                                    }
+                                                ]
+                                            },
+                                            {
+                                                "id": "europe",
+                                                "countries": [
+                                                    {
+                                                        "id": "france",
+                                                        "cities": [
+                                                            {
+                                                                "id": "paris",
+                                                                "districts": [
+                                                                    {
+                                                                        "id": "la-defense",
+                                                                        "buildings": [
+                                                                            {
+                                                                                "id": "grande-arche",
+                                                                                "floors": [
+                                                                                    {
+                                                                                        "id": "roof",
+                                                                                        "rooms": [
+                                                                                            { "id": "room-view", "name": "Viewpoint", "capacity": 500, "equipment": ["binoculars"] }
+                                                                                        ]
+                                                                                    }
+                                                                                ]
+                                                                            }
+                                                                        ]
+                                                                    }
+                                                                ]
+                                                            }
+                                                        ]
+                                                    }
+                                                ]
+                                            }
+                                        ]
+                                    },
+                                    {
+                                        "id": "mars",
+                                        "continents": [
+                                            {
+                                                "id": "terra-cimmeria",
+                                                "countries": [
+                                                    {
+                                                        "id": "colony-alpha",
+                                                        "cities": [
+                                                            {
+                                                                "id": "dome-1",
+                                                                "districts": [
+                                                                    {
+                                                                        "id": "residential",
+                                                                        "buildings": [
+                                                                            {
+                                                                                "id": "hab-1",
+                                                                                "floors": [
+                                                                                    {
+                                                                                        "id": "level-1",
+                                                                                        "rooms": [
+                                                                                            { "id": "hab-101", "name": "Living Unit", "capacity": 4, "equipment": ["beds", "life-support"] }
+                                                                                        ]
+                                                                                    }
+                                                                                ]
+                                                                            }
+                                                                        ]
+                                                                    }
+                                                                ]
+                                                            }
+                                                        ]
+                                                    }
+                                                ]
+                                            }
+                                        ]
+                                    }
+                                ]
+                            }
+                        ]
+                    }
+                ]
+            }
+        }
+        """)!;
+
+        // Complex operations across different branches and levels:
+        // 1. Delete floor-1 and floor-2 from tower-a (keeping floor-3)
+        // 2. Update floor-3's room-301 capacity from 6 to 12
+        // 3. Add new equipment to room-301
+        // 4. Update tokyo's second district (shinjuku) cafeteria capacity
+        // 5. Delete osaka city entirely
+        // 6. Update paris viewpoint capacity
+        // 7. Add new equipment to mars hab-101
+        var newState = JsonNode.Parse("""
+        {
+            "galaxy": {
+                "id": "milky-way",
+                "clusters": [
+                    {
+                        "id": "orion-arm",
+                        "systems": [
+                            {
+                                "id": "solar",
+                                "planets": [
+                                    {
+                                        "id": "earth",
+                                        "continents": [
+                                            {
+                                                "id": "asia",
+                                                "countries": [
+                                                    {
+                                                        "id": "japan",
+                                                        "cities": [
+                                                            {
+                                                                "id": "tokyo",
+                                                                "districts": [
+                                                                    {
+                                                                        "id": "shibuya",
+                                                                        "buildings": [
+                                                                            {
+                                                                                "id": "tower-a",
+                                                                                "floors": [
+                                                                                    {
+                                                                                        "id": "floor-3",
+                                                                                        "rooms": [
+                                                                                            { "id": "room-301", "name": "Lab", "capacity": 12, "equipment": ["machines", "tools", "safety-gear", "3d-printer"] }
+                                                                                        ]
+                                                                                    }
+                                                                                ]
+                                                                            },
+                                                                            {
+                                                                                "id": "tower-b",
+                                                                                "floors": [
+                                                                                    {
+                                                                                        "id": "floor-1",
+                                                                                        "rooms": [
+                                                                                            { "id": "room-b101", "name": "Lobby", "capacity": 50, "equipment": ["sofas", "reception"] }
+                                                                                        ]
+                                                                                    }
+                                                                                ]
+                                                                            }
+                                                                        ]
+                                                                    },
+                                                                    {
+                                                                        "id": "shinjuku",
+                                                                        "buildings": [
+                                                                            {
+                                                                                "id": "center-1",
+                                                                                "floors": [
+                                                                                    {
+                                                                                        "id": "floor-1",
+                                                                                        "rooms": [
+                                                                                            { "id": "room-c101", "name": "Cafeteria", "capacity": 150, "equipment": ["tables", "kitchen"] }
+                                                                                        ]
+                                                                                    }
+                                                                                ]
+                                                                            }
+                                                                        ]
+                                                                    }
+                                                                ]
+                                                            }
+                                                        ]
+                                                    },
+                                                    {
+                                                        "id": "china",
+                                                        "cities": [
+                                                            {
+                                                                "id": "beijing",
+                                                                "districts": [
+                                                                    {
+                                                                        "id": "chaoyang",
+                                                                        "buildings": [
+                                                                            {
+                                                                                "id": "cctv-tower",
+                                                                                "floors": [
+                                                                                    {
+                                                                                        "id": "floor-1",
+                                                                                        "rooms": [
+                                                                                            { "id": "room-studio", "name": "Studio A", "capacity": 30, "equipment": ["cameras", "lights"] }
+                                                                                        ]
+                                                                                    }
+                                                                                ]
+                                                                            }
+                                                                        ]
+                                                                    }
+                                                                ]
+                                                            }
+                                                        ]
+                                                    }
+                                                ]
+                                            },
+                                            {
+                                                "id": "europe",
+                                                "countries": [
+                                                    {
+                                                        "id": "france",
+                                                        "cities": [
+                                                            {
+                                                                "id": "paris",
+                                                                "districts": [
+                                                                    {
+                                                                        "id": "la-defense",
+                                                                        "buildings": [
+                                                                            {
+                                                                                "id": "grande-arche",
+                                                                                "floors": [
+                                                                                    {
+                                                                                        "id": "roof",
+                                                                                        "rooms": [
+                                                                                            { "id": "room-view", "name": "Viewpoint", "capacity": 750, "equipment": ["binoculars"] }
+                                                                                        ]
+                                                                                    }
+                                                                                ]
+                                                                            }
+                                                                        ]
+                                                                    }
+                                                                ]
+                                                            }
+                                                        ]
+                                                    }
+                                                ]
+                                            }
+                                        ]
+                                    },
+                                    {
+                                        "id": "mars",
+                                        "continents": [
+                                            {
+                                                "id": "terra-cimmeria",
+                                                "countries": [
+                                                    {
+                                                        "id": "colony-alpha",
+                                                        "cities": [
+                                                            {
+                                                                "id": "dome-1",
+                                                                "districts": [
+                                                                    {
+                                                                        "id": "residential",
+                                                                        "buildings": [
+                                                                            {
+                                                                                "id": "hab-1",
+                                                                                "floors": [
+                                                                                    {
+                                                                                        "id": "level-1",
+                                                                                        "rooms": [
+                                                                                            { "id": "hab-101", "name": "Living Unit", "capacity": 4, "equipment": ["beds", "life-support", "hydroponics"] }
+                                                                                        ]
+                                                                                    }
+                                                                                ]
+                                                                            }
+                                                                        ]
+                                                                    }
+                                                                ]
+                                                            }
+                                                        ]
+                                                    }
+                                                ]
+                                            }
+                                        ]
+                                    }
+                                ]
+                            }
+                        ]
+                    }
+                ]
+            }
+        }
+        """)!;
+
+        // Act
+        var ops = DeltaDiff.ComputeDelta(oldState, newState);
+        var workingState = oldState.DeepClone();
+        DeltaApply.ApplyDelta(workingState, ops);
+
+        // Assert - state should match perfectly after applying all deltas
+        Assert.True(DeltaDiff.DeepEquals(workingState, newState));
+
+        // Verify specific deep changes were applied correctly:
+
+        // 1. Tower-A floors: only floor-3 remains (floor-1 and floor-2 deleted)
+        var towerAFloors = workingState["galaxy"]!["clusters"]![0]!["systems"]![0]!["planets"]![0]!
+            ["continents"]![0]!["countries"]![0]!["cities"]![0]!["districts"]![0]!["buildings"]![0]!["floors"]!.AsArray();
+        Assert.Single(towerAFloors);
+        Assert.Equal("floor-3", towerAFloors[0]!["id"]!.GetValue<string>());
+
+        // 2. Room-301 capacity updated and equipment added
+        var room301 = towerAFloors[0]!["rooms"]![0]!;
+        Assert.Equal(12, room301["capacity"]!.GetValue<int>());
+        var room301Equipment = room301["equipment"]!.AsArray();
+        Assert.Equal(4, room301Equipment.Count);
+        Assert.Equal("3d-printer", room301Equipment[3]!.GetValue<string>());
+
+        // 3. Tokyo cities count - osaka deleted
+        var tokyoCities = workingState["galaxy"]!["clusters"]![0]!["systems"]![0]!["planets"]![0]!
+            ["continents"]![0]!["countries"]![0]!["cities"]!.AsArray();
+        Assert.Single(tokyoCities);
+        Assert.Equal("tokyo", tokyoCities[0]!["id"]!.GetValue<string>());
+
+        // 4. Shinjuku cafeteria capacity updated
+        var cafeteria = workingState["galaxy"]!["clusters"]![0]!["systems"]![0]!["planets"]![0]!
+            ["continents"]![0]!["countries"]![0]!["cities"]![0]!["districts"]![1]!["buildings"]![0]!
+            ["floors"]![0]!["rooms"]![0]!;
+        Assert.Equal(150, cafeteria["capacity"]!.GetValue<int>());
+
+        // 5. Paris viewpoint capacity updated (different continent branch)
+        var viewpoint = workingState["galaxy"]!["clusters"]![0]!["systems"]![0]!["planets"]![0]!
+            ["continents"]![1]!["countries"]![0]!["cities"]![0]!["districts"]![0]!["buildings"]![0]!
+            ["floors"]![0]!["rooms"]![0]!;
+        Assert.Equal(750, viewpoint["capacity"]!.GetValue<int>());
+
+        // 6. Mars hab-101 equipment updated (different planet branch)
+        var marsHab = workingState["galaxy"]!["clusters"]![0]!["systems"]![0]!["planets"]![1]!
+            ["continents"]![0]!["countries"]![0]!["cities"]![0]!["districts"]![0]!["buildings"]![0]!
+            ["floors"]![0]!["rooms"]![0]!;
+        var marsEquipment = marsHab["equipment"]!.AsArray();
+        Assert.Equal(3, marsEquipment.Count);
+        Assert.Equal("hydroponics", marsEquipment[2]!.GetValue<string>());
     }
 
     [Fact]
