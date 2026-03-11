@@ -20,13 +20,13 @@ public class DataIntegrityStressTests
         // Original scale: 100 pairs, 50 messages per direction
         await using var pipe = new DuplexPipe();
         
-        await using var muxA = new StreamMultiplexer(pipe.Stream1, pipe.Stream1, new MultiplexerOptions());
-        await using var muxB = new StreamMultiplexer(pipe.Stream2, pipe.Stream2, new MultiplexerOptions());
+        await using var muxA = await TestMuxHelper.CreateMuxAsync(pipe.Stream1);
+        await using var muxB = await TestMuxHelper.CreateMuxAsync(pipe.Stream2);
 
         using var cts = new CancellationTokenSource(TimeSpan.FromMinutes(5));
         
-        var runA = muxA.RunAsync(cts.Token);
-        var runB = muxB.RunAsync(cts.Token);
+        var runA = muxA.Start(cts.Token);
+        var runB = muxB.Start(cts.Token);
         await Task.Delay(100);
 
         const int pairCount = 100;
@@ -108,13 +108,13 @@ public class DataIntegrityStressTests
         // Original scale: 1000 channels per side
         await using var pipe = new DuplexPipe();
         
-        await using var muxA = new StreamMultiplexer(pipe.Stream1, pipe.Stream1, new MultiplexerOptions());
-        await using var muxB = new StreamMultiplexer(pipe.Stream2, pipe.Stream2, new MultiplexerOptions());
+        await using var muxA = await TestMuxHelper.CreateMuxAsync(pipe.Stream1);
+        await using var muxB = await TestMuxHelper.CreateMuxAsync(pipe.Stream2);
 
         using var cts = new CancellationTokenSource(TimeSpan.FromMinutes(5));
         
-        var runA = muxA.RunAsync(cts.Token);
-        var runB = muxB.RunAsync(cts.Token);
+        var runA = muxA.Start(cts.Token);
+        var runB = muxB.Start(cts.Token);
         await Task.Delay(100);
 
         // Open 1000 channels from each side
@@ -213,13 +213,13 @@ public class DataIntegrityStressTests
         // Original scale: 5000 cycles
         await using var pipe = new DuplexPipe();
         
-        await using var muxA = new StreamMultiplexer(pipe.Stream1, pipe.Stream1, new MultiplexerOptions());
-        await using var muxB = new StreamMultiplexer(pipe.Stream2, pipe.Stream2, new MultiplexerOptions());
+        await using var muxA = await TestMuxHelper.CreateMuxAsync(pipe.Stream1);
+        await using var muxB = await TestMuxHelper.CreateMuxAsync(pipe.Stream2);
 
         using var cts = new CancellationTokenSource(TimeSpan.FromMinutes(5));
         
-        var runA = muxA.RunAsync(cts.Token);
-        var runB = muxB.RunAsync(cts.Token);
+        var runA = muxA.Start(cts.Token);
+        var runB = muxB.Start(cts.Token);
         await Task.Delay(100);
 
         const int cycles = 5000;
@@ -271,13 +271,13 @@ public class DataIntegrityStressTests
         // Original scale: 10,000 channels
         await using var pipe = new DuplexPipe();
         
-        await using var muxA = new StreamMultiplexer(pipe.Stream1, pipe.Stream1, new MultiplexerOptions());
-        await using var muxB = new StreamMultiplexer(pipe.Stream2, pipe.Stream2, new MultiplexerOptions());
+        await using var muxA = await TestMuxHelper.CreateMuxAsync(pipe.Stream1);
+        await using var muxB = await TestMuxHelper.CreateMuxAsync(pipe.Stream2);
 
         using var cts = new CancellationTokenSource(TimeSpan.FromMinutes(5));
         
-        var runA = muxA.RunAsync(cts.Token);
-        var runB = muxB.RunAsync(cts.Token);
+        var runA = muxA.Start(cts.Token);
+        var runB = muxB.Start(cts.Token);
         await Task.Delay(100);
 
         const int testChannels = 10000;
@@ -321,13 +321,13 @@ public class DataIntegrityStressTests
         // Scale: 50 channels, 200 messages per channel, 8KB messages
         await using var pipe = new DuplexPipe();
         
-        await using var muxA = new StreamMultiplexer(pipe.Stream1, pipe.Stream1, new MultiplexerOptions());
-        await using var muxB = new StreamMultiplexer(pipe.Stream2, pipe.Stream2, new MultiplexerOptions());
+        await using var muxA = await TestMuxHelper.CreateMuxAsync(pipe.Stream1);
+        await using var muxB = await TestMuxHelper.CreateMuxAsync(pipe.Stream2);
 
         using var cts = new CancellationTokenSource(TimeSpan.FromMinutes(5));
         
-        var runA = muxA.RunAsync(cts.Token);
-        var runB = muxB.RunAsync(cts.Token);
+        var runA = muxA.Start(cts.Token);
+        var runB = muxB.Start(cts.Token);
         await Task.Delay(100);
 
         const int channelCount = 50;
@@ -447,3 +447,6 @@ public class DataIntegrityStressTests
 
     #endregion
 }
+
+
+

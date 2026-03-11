@@ -84,21 +84,21 @@ async Task RunServerAsync(int port, string outputDir, CancellationToken ct)
     
     while (!ct.IsCancellationRequested)
     {
-        var client = await listener.AcceptTcpClientAsync(ct);
-        _ = HandleClientAsync(client, outputDir, ct);
+        // Create a multiplexer for each client connection
+        var options = TcpMultiplexer.CreateServerOptions(listener);
+        var connection = StreamMultiplexer.Create(options);
+        _ = HandleClientAsync(connection, outputDir, ct);
     }
 }
 
-async Task HandleClientAsync(TcpClient client, string outputDir, CancellationToken ct)
+async Task HandleClientAsync(StreamMultiplexer connection, string outputDir, CancellationToken ct)
 {
-    var endpoint = client.Client.RemoteEndPoint?.ToString() ?? "unknown";
-    Console.WriteLine($"[Server] Client connected: {endpoint}");
-    
     try
     {
-        // Simple extension: wrap TCP client as multiplexer
-        await using var connection = client.AsMux();
-        var runTask = await connection.StartAsync(ct);
+        var runTask = connection.Start(ct);
+        await connection.WaitForReadyAsync(ct);
+        
+        Console.WriteLine($"[Server] Client connected");
         
         var receiveTasks = new List<Task>();
         
@@ -110,15 +110,15 @@ async Task HandleClientAsync(TcpClient client, string outputDir, CancellationTok
         }
         
         await Task.WhenAll(receiveTasks);
-        Console.WriteLine($"[Server] Client {endpoint} disconnected");
+        Console.WriteLine($"[Server] Client disconnected");
     }
     catch (Exception ex)
     {
-        Console.WriteLine($"[Server] Error with client {endpoint}: {ex.Message}");
+        Console.WriteLine($"[Server] Error with client: {ex.Message}");
     }
     finally
     {
-        client.Dispose();
+        await connection.DisposeAsync();
     }
 }
 
@@ -195,12 +195,13 @@ async Task RunSenderAsync(string host, int port, string[] files, CancellationTok
     
     Console.WriteLine($"[Sender] Connecting to {host}:{port}");
     
-    // Simple extension: connect TCP and create multiplexer
-    using var client = new TcpClient();
-    await using var connection = await client.ConnectMuxAsync(host, port, cancellationToken: ct);
+    // Use CreateOptions pattern to connect TCP and create multiplexer
+    var options = TcpMultiplexer.CreateOptions(host, port);
+    await using var connection = StreamMultiplexer.Create(options);
     Console.WriteLine("[Sender] Connected!");
     
-    var runTask = await connection.StartAsync(ct);
+    var runTask = connection.Start(ct);
+    await connection.WaitForReadyAsync(ct);
     
     // Send all files concurrently over separate channels
     var sendTasks = files.Select((file, index) => SendFileAsync(connection, file, index, ct)).ToList();
@@ -212,7 +213,7 @@ async Task RunSenderAsync(string host, int port, string[] files, CancellationTok
     await connection.GoAwayAsync(ct);
 }
 
-async Task SendFileAsync(TcpMultiplexerConnection connection, string filePath, int index, CancellationToken ct)
+async Task SendFileAsync(IStreamMultiplexer connection, string filePath, int index, CancellationToken ct)
 {
     var filename = Path.GetFileName(filePath);
     var fileInfo = new FileInfo(filePath);

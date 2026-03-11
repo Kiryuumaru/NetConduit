@@ -122,3 +122,111 @@ public sealed class DuplexPipe : IAsyncDisposable
         }
     }
 }
+
+/// <summary>
+/// Helper methods for creating StreamMultiplexer instances in tests.
+/// </summary>
+public static class TestMuxHelper
+{
+    /// <summary>
+    /// Creates MultiplexerOptions with a StreamFactory that returns the provided streams.
+    /// </summary>
+    public static MultiplexerOptions CreateOptionsFor(Stream readStream, Stream writeStream, Action<MultiplexerOptions>? configure = null)
+    {
+        var opts = new MultiplexerOptions
+        {
+            StreamFactory = _ => Task.FromResult<IStreamPair>(new StreamPair(readStream, writeStream))
+        };
+        return opts;
+    }
+    
+    /// <summary>
+    /// Creates MultiplexerOptions with a StreamFactory that returns the same stream for read/write.
+    /// </summary>
+    public static MultiplexerOptions CreateOptionsFor(Stream stream)
+        => CreateOptionsFor(stream, stream);
+    
+    /// <summary>
+    /// Creates a pair of connected StreamMultiplexer instances for testing.
+    /// Uses the new Create() + Start() + WaitForReadyAsync() API.
+    /// Both muxes are started and ready to use when this method returns.
+    /// </summary>
+    public static async Task<(StreamMultiplexer Mux1, StreamMultiplexer Mux2, Task RunTask1, Task RunTask2)> CreateMuxPairAsync(
+        DuplexPipe pipe,
+        MultiplexerOptions? options1 = null,
+        MultiplexerOptions? options2 = null,
+        CancellationToken cancellationToken = default)
+    {
+        var opts1 = CopyOptionsWithStreamFactory(options1, _ => Task.FromResult<IStreamPair>(new StreamPair(pipe.Stream1)));
+        var opts2 = CopyOptionsWithStreamFactory(options2, _ => Task.FromResult<IStreamPair>(new StreamPair(pipe.Stream2)));
+        
+        var mux1 = StreamMultiplexer.Create(opts1);
+        var mux2 = StreamMultiplexer.Create(opts2);
+        
+        var runTask1 = mux1.Start(cancellationToken);
+        var runTask2 = mux2.Start(cancellationToken);
+        
+        // Wait for both to be ready in parallel
+        await Task.WhenAll(mux1.WaitForReadyAsync(cancellationToken), mux2.WaitForReadyAsync(cancellationToken));
+        
+        return (mux1, mux2, runTask1, runTask2);
+    }
+    
+    /// <summary>
+    /// Creates a StreamMultiplexer for the specified stream.
+    /// Does NOT start the mux - caller must call Start().
+    /// </summary>
+    public static StreamMultiplexer CreateMux(
+        Stream stream, 
+        MultiplexerOptions? baseOptions = null)
+    {
+        var opts = CopyOptionsWithStreamFactory(baseOptions, _ => Task.FromResult<IStreamPair>(new StreamPair(stream)));
+        return StreamMultiplexer.Create(opts);
+    }
+    
+    /// <summary>
+    /// Creates a StreamMultiplexer for the specified stream.
+    /// Does NOT start the mux - caller must call Start().
+    /// This is an async method for API compatibility (returns Task.FromResult).
+    /// </summary>
+    public static Task<StreamMultiplexer> CreateMuxAsync(
+        Stream stream, 
+        MultiplexerOptions? baseOptions = null,
+        CancellationToken cancellationToken = default)
+    {
+        var mux = CreateMux(stream, baseOptions);
+        return Task.FromResult(mux);
+    }
+    
+    private static MultiplexerOptions CopyOptionsWithStreamFactory(MultiplexerOptions? baseOptions, StreamFactoryDelegate streamFactory)
+    {
+        if (baseOptions == null)
+        {
+            return new MultiplexerOptions { StreamFactory = streamFactory };
+        }
+        
+        return new MultiplexerOptions
+        {
+            SessionId = baseOptions.SessionId,
+            MaxFrameSize = baseOptions.MaxFrameSize,
+            PingInterval = baseOptions.PingInterval,
+            PingTimeout = baseOptions.PingTimeout,
+            MaxMissedPings = baseOptions.MaxMissedPings,
+            GoAwayTimeout = baseOptions.GoAwayTimeout,
+            GracefulShutdownTimeout = baseOptions.GracefulShutdownTimeout,
+            DefaultChannelOptions = baseOptions.DefaultChannelOptions,
+            EnableReconnection = baseOptions.EnableReconnection,
+            ReconnectTimeout = baseOptions.ReconnectTimeout,
+            ReconnectBufferSize = baseOptions.ReconnectBufferSize,
+            FlushMode = baseOptions.FlushMode,
+            FlushInterval = baseOptions.FlushInterval,
+            StreamFactory = streamFactory,
+            MaxAutoReconnectAttempts = baseOptions.MaxAutoReconnectAttempts,
+            AutoReconnectDelay = baseOptions.AutoReconnectDelay,
+            MaxAutoReconnectDelay = baseOptions.MaxAutoReconnectDelay,
+            AutoReconnectBackoffMultiplier = baseOptions.AutoReconnectBackoffMultiplier,
+            ConnectionTimeout = baseOptions.ConnectionTimeout,
+            HandshakeTimeout = baseOptions.HandshakeTimeout
+        };
+    }
+}

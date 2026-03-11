@@ -181,6 +181,47 @@ public static class TransitExtensions
     }
 
     /// <summary>
+    /// Opens a message transit for bidirectional messaging with the same type for send and receive.
+    /// Uses "{channelId}&gt;&gt;" for sending and "{channelId}&lt;&lt;" for receiving.
+    /// Uses AOT-safe JsonTypeInfo for serialization.
+    /// </summary>
+    /// <typeparam name="T">The type of messages to send and receive.</typeparam>
+    /// <param name="mux">The multiplexer.</param>
+    /// <param name="channelId">The base channel ID. Will append "&gt;&gt;" for write and "&lt;&lt;" for read.</param>
+    /// <param name="typeInfo">The JSON type info for serializing/deserializing messages.</param>
+    /// <param name="maxMessageSize">Maximum message size in bytes (default: 16MB).</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>A MessageTransit for bidirectional messaging.</returns>
+    public static Task<MessageTransit<T, T>> OpenMessageTransitAsync<T>(
+        this IStreamMultiplexer mux,
+        string channelId,
+        JsonTypeInfo<T> typeInfo,
+        int maxMessageSize = 16 * 1024 * 1024,
+        CancellationToken cancellationToken = default)
+        => mux.OpenMessageTransitAsync(channelId, typeInfo, typeInfo, maxMessageSize, cancellationToken);
+
+    /// <summary>
+    /// Accepts a message transit for bidirectional messaging with the same type for send and receive.
+    /// Uses "{channelId}&gt;&gt;" for reading (accepts the opener's outbound) and "{channelId}&lt;&lt;" for writing.
+    /// This is the counterpart to <see cref="OpenMessageTransitAsync{T}(IStreamMultiplexer, string, JsonTypeInfo{T}, int, CancellationToken)"/>.
+    /// Uses AOT-safe JsonTypeInfo for serialization.
+    /// </summary>
+    /// <typeparam name="T">The type of messages to send and receive.</typeparam>
+    /// <param name="mux">The multiplexer.</param>
+    /// <param name="channelId">The base channel ID. Will accept "&gt;&gt;" for read and open "&lt;&lt;" for write.</param>
+    /// <param name="typeInfo">The JSON type info for serializing/deserializing messages.</param>
+    /// <param name="maxMessageSize">Maximum message size in bytes (default: 16MB).</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>A MessageTransit for bidirectional messaging.</returns>
+    public static Task<MessageTransit<T, T>> AcceptMessageTransitAsync<T>(
+        this IStreamMultiplexer mux,
+        string channelId,
+        JsonTypeInfo<T> typeInfo,
+        int maxMessageSize = 16 * 1024 * 1024,
+        CancellationToken cancellationToken = default)
+        => mux.AcceptMessageTransitAsync(channelId, typeInfo, typeInfo, maxMessageSize, cancellationToken);
+
+    /// <summary>
     /// Opens a message transit by opening a write channel and accepting a read channel.
     /// Uses AOT-safe JsonTypeInfo for serialization.
     /// </summary>
@@ -306,6 +347,51 @@ public static class TransitExtensions
     }
 
     /// <summary>
+    /// Opens a message transit for bidirectional messaging with the same type for send and receive.
+    /// Uses "{channelId}&gt;&gt;" for sending and "{channelId}&lt;&lt;" for receiving.
+    /// Uses reflection for serialization. Note: Not AOT-compatible.
+    /// </summary>
+    /// <typeparam name="T">The type of messages to send and receive.</typeparam>
+    /// <param name="mux">The multiplexer.</param>
+    /// <param name="channelId">The base channel ID. Will append "&gt;&gt;" for write and "&lt;&lt;" for read.</param>
+    /// <param name="jsonOptions">JSON serializer options (optional).</param>
+    /// <param name="maxMessageSize">Maximum message size in bytes (default: 16MB).</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>A MessageTransit for bidirectional messaging.</returns>
+    [RequiresUnreferencedCode("JSON serialization and deserialization might require types that cannot be statically analyzed. Use the overload that takes JsonTypeInfo for AOT compatibility.")]
+    [RequiresDynamicCode("JSON serialization and deserialization might require types that cannot be statically analyzed. Use the overload that takes JsonTypeInfo for AOT compatibility.")]
+    public static Task<MessageTransit<T, T>> OpenMessageTransitAsync<T>(
+        this IStreamMultiplexer mux,
+        string channelId,
+        JsonSerializerOptions? jsonOptions = null,
+        int maxMessageSize = 16 * 1024 * 1024,
+        CancellationToken cancellationToken = default)
+        => mux.OpenMessageTransitAsync<T, T>(channelId, jsonOptions, maxMessageSize, cancellationToken);
+
+    /// <summary>
+    /// Accepts a message transit for bidirectional messaging with the same type for send and receive.
+    /// Uses "{channelId}&gt;&gt;" for reading (accepts the opener's outbound) and "{channelId}&lt;&lt;" for writing.
+    /// This is the counterpart to <see cref="OpenMessageTransitAsync{T}(IStreamMultiplexer, string, JsonSerializerOptions?, int, CancellationToken)"/>.
+    /// Uses reflection for serialization. Note: Not AOT-compatible.
+    /// </summary>
+    /// <typeparam name="T">The type of messages to send and receive.</typeparam>
+    /// <param name="mux">The multiplexer.</param>
+    /// <param name="channelId">The base channel ID. Will accept "&gt;&gt;" for read and open "&lt;&lt;" for write.</param>
+    /// <param name="jsonOptions">JSON serializer options (optional).</param>
+    /// <param name="maxMessageSize">Maximum message size in bytes (default: 16MB).</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>A MessageTransit for bidirectional messaging.</returns>
+    [RequiresUnreferencedCode("JSON serialization and deserialization might require types that cannot be statically analyzed. Use the overload that takes JsonTypeInfo for AOT compatibility.")]
+    [RequiresDynamicCode("JSON serialization and deserialization might require types that cannot be statically analyzed. Use the overload that takes JsonTypeInfo for AOT compatibility.")]
+    public static Task<MessageTransit<T, T>> AcceptMessageTransitAsync<T>(
+        this IStreamMultiplexer mux,
+        string channelId,
+        JsonSerializerOptions? jsonOptions = null,
+        int maxMessageSize = 16 * 1024 * 1024,
+        CancellationToken cancellationToken = default)
+        => mux.AcceptMessageTransitAsync<T, T>(channelId, jsonOptions, maxMessageSize, cancellationToken);
+
+    /// <summary>
     /// Opens a message transit by opening a write channel and accepting a read channel.
     /// Uses reflection for serialization. Note: Not AOT-compatible.
     /// </summary>
@@ -377,6 +463,103 @@ public static class TransitExtensions
     {
         var readChannel = await mux.AcceptChannelAsync(channelId, cancellationToken);
         return new MessageTransit<object, TReceive>(null, readChannel, jsonOptions, maxMessageSize);
+    }
+
+    #endregion
+
+    #region DeltaTransit Extensions
+
+    /// <summary>
+    /// Opens a delta transit by opening a write channel and accepting a read channel.
+    /// Uses "{channelId}&gt;&gt;" for writing and "{channelId}&lt;&lt;" for reading.
+    /// Uses AOT-safe JsonTypeInfo for serialization.
+    /// </summary>
+    /// <typeparam name="T">The type of state to synchronize.</typeparam>
+    /// <param name="mux">The multiplexer.</param>
+    /// <param name="channelId">The base channel ID. Will append "&gt;&gt;" for write and "&lt;&lt;" for read.</param>
+    /// <param name="typeInfo">The JSON type info for serializing/deserializing state.</param>
+    /// <param name="maxMessageSize">Maximum message size in bytes (default: 16MB).</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>A DeltaTransit for bidirectional state synchronization.</returns>
+    public static async Task<DeltaTransit<T>> OpenDeltaTransitAsync<T>(
+        this IStreamMultiplexer mux,
+        string channelId,
+        JsonTypeInfo<T> typeInfo,
+        int maxMessageSize = 16 * 1024 * 1024,
+        CancellationToken cancellationToken = default)
+    {
+        var writeChannel = await mux.OpenChannelAsync(new ChannelOptions { ChannelId = channelId + OutboundSuffix }, cancellationToken);
+        var readChannel = await mux.AcceptChannelAsync(channelId + InboundSuffix, cancellationToken);
+        return new DeltaTransit<T>(writeChannel, readChannel, typeInfo, maxMessageSize);
+    }
+
+    /// <summary>
+    /// Accepts a delta transit by accepting a read channel and opening a write channel.
+    /// Uses "{channelId}&gt;&gt;" for reading (accepts the opener's outbound) and "{channelId}&lt;&lt;" for writing (opens to the opener's inbound).
+    /// This is the counterpart to <see cref="OpenDeltaTransitAsync{T}(IStreamMultiplexer, string, JsonTypeInfo{T}, int, CancellationToken)"/>.
+    /// Uses AOT-safe JsonTypeInfo for serialization.
+    /// </summary>
+    /// <typeparam name="T">The type of state to synchronize.</typeparam>
+    /// <param name="mux">The multiplexer.</param>
+    /// <param name="channelId">The base channel ID. Will accept "&gt;&gt;" for read and open "&lt;&lt;" for write.</param>
+    /// <param name="typeInfo">The JSON type info for serializing/deserializing state.</param>
+    /// <param name="maxMessageSize">Maximum message size in bytes (default: 16MB).</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>A DeltaTransit for bidirectional state synchronization.</returns>
+    public static async Task<DeltaTransit<T>> AcceptDeltaTransitAsync<T>(
+        this IStreamMultiplexer mux,
+        string channelId,
+        JsonTypeInfo<T> typeInfo,
+        int maxMessageSize = 16 * 1024 * 1024,
+        CancellationToken cancellationToken = default)
+    {
+        var readChannel = await mux.AcceptChannelAsync(channelId + OutboundSuffix, cancellationToken);
+        var writeChannel = await mux.OpenChannelAsync(new ChannelOptions { ChannelId = channelId + InboundSuffix }, cancellationToken);
+        return new DeltaTransit<T>(writeChannel, readChannel, typeInfo, maxMessageSize);
+    }
+
+    /// <summary>
+    /// Opens a send-only delta transit for pushing state updates.
+    /// Uses AOT-safe JsonTypeInfo for serialization.
+    /// </summary>
+    /// <typeparam name="T">The type of state to send.</typeparam>
+    /// <param name="mux">The multiplexer.</param>
+    /// <param name="channelId">The channel ID for sending.</param>
+    /// <param name="typeInfo">The JSON type info for serializing state.</param>
+    /// <param name="maxMessageSize">Maximum message size in bytes (default: 16MB).</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>A send-only DeltaTransit.</returns>
+    public static async Task<DeltaTransit<T>> OpenSendOnlyDeltaTransitAsync<T>(
+        this IStreamMultiplexer mux,
+        string channelId,
+        JsonTypeInfo<T> typeInfo,
+        int maxMessageSize = 16 * 1024 * 1024,
+        CancellationToken cancellationToken = default)
+    {
+        var writeChannel = await mux.OpenChannelAsync(new ChannelOptions { ChannelId = channelId }, cancellationToken);
+        return new DeltaTransit<T>(writeChannel, null, typeInfo, maxMessageSize);
+    }
+
+    /// <summary>
+    /// Accepts a receive-only delta transit for receiving state updates.
+    /// Uses AOT-safe JsonTypeInfo for serialization.
+    /// </summary>
+    /// <typeparam name="T">The type of state to receive.</typeparam>
+    /// <param name="mux">The multiplexer.</param>
+    /// <param name="channelId">The channel ID to accept for receiving.</param>
+    /// <param name="typeInfo">The JSON type info for deserializing state.</param>
+    /// <param name="maxMessageSize">Maximum message size in bytes (default: 16MB).</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>A receive-only DeltaTransit.</returns>
+    public static async Task<DeltaTransit<T>> AcceptReceiveOnlyDeltaTransitAsync<T>(
+        this IStreamMultiplexer mux,
+        string channelId,
+        JsonTypeInfo<T> typeInfo,
+        int maxMessageSize = 16 * 1024 * 1024,
+        CancellationToken cancellationToken = default)
+    {
+        var readChannel = await mux.AcceptChannelAsync(channelId, cancellationToken);
+        return new DeltaTransit<T>(null, readChannel, typeInfo, maxMessageSize);
     }
 
     #endregion

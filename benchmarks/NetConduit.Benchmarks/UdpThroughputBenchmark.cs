@@ -61,16 +61,12 @@ public class UdpThroughputBenchmark
 
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(120));
 
-        var muxOptions = new MultiplexerOptions
-        {
-            EnableReconnection = false,
-            FlushMode = FlushMode.Immediate
-        };
-
         var serverTask = Task.Run(async () =>
         {
-            await using var server = await UdpMultiplexer.AcceptAsync(actualServerPort, null, muxOptions, cts.Token);
-            var runTask = await server.StartAsync(cts.Token);
+            var options = UdpMultiplexer.CreateServerOptions(actualServerPort, null);
+            await using var server = StreamMultiplexer.Create(options);
+            var runTask = server.Start(cts.Token);
+            await server.WaitForReadyAsync(cts.Token);
 
             var acceptedChannels = new List<ReadChannel>();
             var readTasks = new List<Task>();
@@ -104,8 +100,10 @@ public class UdpThroughputBenchmark
 
         var clientTask = Task.Run(async () =>
         {
-            await using var client = await UdpMultiplexer.ConnectAsync("127.0.0.1", actualServerPort, null, muxOptions, cts.Token);
-            var runTask = await client.StartAsync(cts.Token);
+            var options = UdpMultiplexer.CreateOptions("127.0.0.1", actualServerPort, null);
+            await using var client = StreamMultiplexer.Create(options);
+            var runTask = client.Start(cts.Token);
+            await client.WaitForReadyAsync(cts.Token);
 
             var sendTasks = new List<Task>();
             var channels = new List<WriteChannel>();

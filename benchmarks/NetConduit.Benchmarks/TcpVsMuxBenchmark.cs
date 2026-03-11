@@ -141,18 +141,14 @@ public class TcpVsMuxBenchmark
 
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(120));
 
-        var muxOptions = new MultiplexerOptions
-        {
-            EnableReconnection = false,
-            FlushMode = FlushMode.Immediate
-        };
-
         try
         {
             var serverTask = Task.Run(async () =>
             {
-                await using var server = await TcpMultiplexer.AcceptAsync(listener, muxOptions, cts.Token);
-                var runTask = await server.StartAsync(cts.Token);
+                var options = TcpMultiplexer.CreateServerOptions(listener);
+                await using var server = StreamMultiplexer.Create(options);
+                var runTask = server.Start(cts.Token);
+                await server.WaitForReadyAsync(cts.Token);
 
                 var acceptedChannels = new List<ReadChannel>();
                 var readTasks = new List<Task>();
@@ -186,8 +182,10 @@ public class TcpVsMuxBenchmark
 
             var clientTask = Task.Run(async () =>
             {
-                await using var client = await TcpMultiplexer.ConnectAsync("127.0.0.1", port, muxOptions, cts.Token);
-                var runTask = await client.StartAsync(cts.Token);
+                var options = TcpMultiplexer.CreateOptions("127.0.0.1", port);
+                await using var client = StreamMultiplexer.Create(options);
+                var runTask = client.Start(cts.Token);
+                await client.WaitForReadyAsync(cts.Token);
 
                 var channels = new List<WriteChannel>();
                 var sendTasks = new List<Task>();

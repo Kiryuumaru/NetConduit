@@ -12,7 +12,7 @@ public class ReconnectionTests
     {
         // Arrange
         await using var pipe = new DuplexPipe();
-        await using var mux = new StreamMultiplexer(pipe.Stream1, pipe.Stream1);
+        await using var mux = await TestMuxHelper.CreateMuxAsync(pipe.Stream1);
 
         // Assert
         Assert.False(mux.IsConnected);
@@ -23,13 +23,13 @@ public class ReconnectionTests
     {
         // Arrange
         await using var pipe = new DuplexPipe();
-        await using var mux1 = new StreamMultiplexer(pipe.Stream1, pipe.Stream1);
-        await using var mux2 = new StreamMultiplexer(pipe.Stream2, pipe.Stream2);
+        await using var mux1 = await TestMuxHelper.CreateMuxAsync(pipe.Stream1);
+        await using var mux2 = await TestMuxHelper.CreateMuxAsync(pipe.Stream2);
 
         // Act
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
-        var run1 = mux1.RunAsync(cts.Token);
-        var run2 = mux2.RunAsync(cts.Token);
+        var run1 = mux1.Start(cts.Token);
+        var run2 = mux2.Start(cts.Token);
 
         // Wait a bit for handshake
         await Task.Delay(100);
@@ -50,7 +50,7 @@ public class ReconnectionTests
     {
         // Arrange
         await using var pipe = new DuplexPipe();
-        await using var mux = new StreamMultiplexer(pipe.Stream1, pipe.Stream1);
+        await using var mux = await TestMuxHelper.CreateMuxAsync(pipe.Stream1);
 
         // Assert
         Assert.False(mux.IsReconnecting);
@@ -61,17 +61,17 @@ public class ReconnectionTests
     {
         // Arrange
         await using var pipe = new DuplexPipe();
-        var options = new MultiplexerOptions { EnableReconnection = true };
-        await using var mux1 = new StreamMultiplexer(pipe.Stream1, pipe.Stream1, options);
-        await using var mux2 = new StreamMultiplexer(pipe.Stream2, pipe.Stream2, options);
+        var options = new MultiplexerOptions { StreamFactory = _ => null!, EnableReconnection = true };
+        await using var mux1 = await TestMuxHelper.CreateMuxAsync(pipe.Stream1, options);
+        await using var mux2 = await TestMuxHelper.CreateMuxAsync(pipe.Stream2, options);
 
         var disconnectedEvent = new TaskCompletionSource();
         mux1.OnDisconnected += (reason, ex) => disconnectedEvent.TrySetResult();
 
         // Act
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
-        var run1 = mux1.RunAsync(cts.Token);
-        var run2 = mux2.RunAsync(cts.Token);
+        var run1 = mux1.Start(cts.Token);
+        var run2 = mux2.Start(cts.Token);
 
         await Task.Delay(100);
         mux1.NotifyDisconnected();
@@ -95,8 +95,8 @@ public class ReconnectionTests
     {
         // Arrange
         await using var pipe = new DuplexPipe();
-        var options = new MultiplexerOptions { EnableReconnection = false };
-        await using var mux = new StreamMultiplexer(pipe.Stream1, pipe.Stream1, options);
+        var options = new MultiplexerOptions { StreamFactory = _ => null!, EnableReconnection = false };
+        await using var mux = await TestMuxHelper.CreateMuxAsync(pipe.Stream1, options);
 
         await using var newPipe = new DuplexPipe();
 
@@ -110,8 +110,8 @@ public class ReconnectionTests
     {
         // Arrange
         await using var pipe = new DuplexPipe();
-        var options = new MultiplexerOptions { EnableReconnection = false };
-        await using var mux = new StreamMultiplexer(pipe.Stream1, pipe.Stream1, options);
+        var options = new MultiplexerOptions { StreamFactory = _ => null!, EnableReconnection = false };
+        await using var mux = await TestMuxHelper.CreateMuxAsync(pipe.Stream1, options);
 
         var disconnectedFired = false;
         mux.OnDisconnected += (reason, ex) => disconnectedFired = true;
@@ -128,13 +128,13 @@ public class ReconnectionTests
     {
         // Arrange
         await using var pipe = new DuplexPipe();
-        await using var mux1 = new StreamMultiplexer(pipe.Stream1, pipe.Stream1);
-        await using var mux2 = new StreamMultiplexer(pipe.Stream2, pipe.Stream2);
+        await using var mux1 = await TestMuxHelper.CreateMuxAsync(pipe.Stream1);
+        await using var mux2 = await TestMuxHelper.CreateMuxAsync(pipe.Stream2);
 
         // Act
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
-        var run1 = mux1.RunAsync(cts.Token);
-        var run2 = mux2.RunAsync(cts.Token);
+        var run1 = mux1.Start(cts.Token);
+        var run2 = mux2.Start(cts.Token);
 
         await Task.Delay(100);
 
@@ -156,19 +156,19 @@ public class ReconnectionTests
         // Arrange
         var options = new MultiplexerOptions
         {
-            EnableReconnection = true,
+             StreamFactory = _ => null!, EnableReconnection = true,
             ReconnectTimeout = TimeSpan.FromSeconds(30),
             ReconnectBufferSize = 2 * 1024 * 1024 // 2MB
         };
 
         await using var pipe = new DuplexPipe();
-        await using var mux1 = new StreamMultiplexer(pipe.Stream1, pipe.Stream1, options);
-        await using var mux2 = new StreamMultiplexer(pipe.Stream2, pipe.Stream2, options);
+        await using var mux1 = await TestMuxHelper.CreateMuxAsync(pipe.Stream1, options);
+        await using var mux2 = await TestMuxHelper.CreateMuxAsync(pipe.Stream2, options);
 
         // Act
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
-        var run1 = mux1.RunAsync(cts.Token);
-        var run2 = mux2.RunAsync(cts.Token);
+        var run1 = mux1.Start(cts.Token);
+        var run2 = mux2.Start(cts.Token);
 
         await Task.Delay(100);
 
@@ -206,12 +206,12 @@ public class ReconnectionTests
     {
         // Arrange
         await using var pipe = new DuplexPipe();
-        await using var mux1 = new StreamMultiplexer(pipe.Stream1, pipe.Stream1);
-        await using var mux2 = new StreamMultiplexer(pipe.Stream2, pipe.Stream2);
+        await using var mux1 = await TestMuxHelper.CreateMuxAsync(pipe.Stream1);
+        await using var mux2 = await TestMuxHelper.CreateMuxAsync(pipe.Stream2);
 
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
-        var run1 = mux1.RunAsync(cts.Token);
-        var run2 = mux2.RunAsync(cts.Token);
+        var run1 = mux1.Start(cts.Token);
+        var run2 = mux2.Start(cts.Token);
 
         await Task.Delay(100);
         Assert.True(mux1.IsConnected);
@@ -231,8 +231,8 @@ public class ReconnectionTests
     {
         // Arrange
         await using var pipe = new DuplexPipe();
-        var options = new MultiplexerOptions { EnableReconnection = true };
-        var mux = new StreamMultiplexer(pipe.Stream1, pipe.Stream1, options);
+        var options = new MultiplexerOptions { StreamFactory = _ => null!, EnableReconnection = true };
+        var mux = await TestMuxHelper.CreateMuxAsync(pipe.Stream1, options);
 
         // Dispose the multiplexer
         await mux.DisposeAsync();
@@ -249,13 +249,13 @@ public class ReconnectionTests
     {
         // Arrange
         await using var pipe = new DuplexPipe();
-        var options = new MultiplexerOptions { EnableReconnection = true, ReconnectBufferSize = 1024 * 1024 };
-        await using var mux1 = new StreamMultiplexer(pipe.Stream1, pipe.Stream1, options);
-        await using var mux2 = new StreamMultiplexer(pipe.Stream2, pipe.Stream2, options);
+        var options = new MultiplexerOptions { StreamFactory = _ => null!, EnableReconnection = true, ReconnectBufferSize = 1024 * 1024 };
+        await using var mux1 = await TestMuxHelper.CreateMuxAsync(pipe.Stream1, options);
+        await using var mux2 = await TestMuxHelper.CreateMuxAsync(pipe.Stream2, options);
 
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
-        var run1 = mux1.RunAsync(cts.Token);
-        var run2 = mux2.RunAsync(cts.Token);
+        var run1 = mux1.Start(cts.Token);
+        var run2 = mux2.Start(cts.Token);
 
         await Task.Delay(100);
 
@@ -381,15 +381,15 @@ public class ReconnectionTests
         await using var pipe = new DuplexPipe();
         var options = new MultiplexerOptions 
         { 
-            EnableReconnection = true, 
+             StreamFactory = _ => null!, EnableReconnection = true, 
             ReconnectBufferSize = 1024 * 1024 // 1MB buffer
         };
-        await using var mux1 = new StreamMultiplexer(pipe.Stream1, pipe.Stream1, options);
-        await using var mux2 = new StreamMultiplexer(pipe.Stream2, pipe.Stream2, options);
+        await using var mux1 = await TestMuxHelper.CreateMuxAsync(pipe.Stream1, options);
+        await using var mux2 = await TestMuxHelper.CreateMuxAsync(pipe.Stream2, options);
 
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
-        var run1 = mux1.RunAsync(cts.Token);
-        var run2 = mux2.RunAsync(cts.Token);
+        var run1 = mux1.Start(cts.Token);
+        var run2 = mux2.Start(cts.Token);
 
         await Task.Delay(100);
 
@@ -614,15 +614,15 @@ public class ReconnectionTests
         await using var pipe = new DuplexPipe();
         var options = new MultiplexerOptions 
         { 
-            EnableReconnection = true, 
+             StreamFactory = _ => null!, EnableReconnection = true, 
             ReconnectBufferSize = 1024 * 1024 
         };
-        await using var mux1 = new StreamMultiplexer(pipe.Stream1, pipe.Stream1, options);
-        await using var mux2 = new StreamMultiplexer(pipe.Stream2, pipe.Stream2, options);
+        await using var mux1 = await TestMuxHelper.CreateMuxAsync(pipe.Stream1, options);
+        await using var mux2 = await TestMuxHelper.CreateMuxAsync(pipe.Stream2, options);
 
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
-        var run1 = mux1.RunAsync(cts.Token);
-        var run2 = mux2.RunAsync(cts.Token);
+        var run1 = mux1.Start(cts.Token);
+        var run2 = mux2.Start(cts.Token);
 
         await Task.Delay(100);
 
@@ -671,3 +671,9 @@ public class ReconnectionTests
         await Task.WhenAll(run1.ContinueWith(_ => { }), run2.ContinueWith(_ => { }));
     }
 }
+
+
+
+
+
+

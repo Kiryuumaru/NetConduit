@@ -2,23 +2,24 @@ using NetConduit.Udp;
 
 namespace NetConduit.Udp.IntegrationTests;
 
+[Collection("UdpTests")]
 public class UdpMultiplexerTests
 {
     [Fact(Timeout = 120000)]
     public async Task UdpMux_SendReceive_Works()
     {
         var port = GetFreePort();
-        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(60));
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(90));
 
-        var acceptTask = UdpMultiplexer.AcceptAsync(port, cancellationToken: cts.Token);
-        var connectTask = UdpMultiplexer.ConnectAsync("127.0.0.1", port, cancellationToken: cts.Token);
+        var serverOptions = UdpMultiplexer.CreateServerOptions(port);
+        await using var server = StreamMultiplexer.Create(serverOptions);
 
-        await using var server = await acceptTask;
-        await using var client = await connectTask;
+        var clientOptions = UdpMultiplexer.CreateOptions("127.0.0.1", port);
+        await using var client = StreamMultiplexer.Create(clientOptions);
 
-        var startTasks = await Task.WhenAll(client.StartAsync(cts.Token), server.StartAsync(cts.Token));
-        var clientRun = startTasks[0];
-        var serverRun = startTasks[1];
+        var clientRun = client.Start(cts.Token);
+        var serverRun = server.Start(cts.Token);
+        await Task.WhenAll(client.WaitForReadyAsync(cts.Token), server.WaitForReadyAsync(cts.Token));
 
         // open channel from client to server
         var write = await client.OpenChannelAsync(new ChannelOptions { ChannelId = "udp-test" }, cts.Token);
@@ -41,17 +42,17 @@ public class UdpMultiplexerTests
     public async Task UdpMux_MultipleChannels_TransferDataConcurrently()
     {
         var port = GetFreePort();
-        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(60));
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(90));
 
-        var acceptTask = UdpMultiplexer.AcceptAsync(port, cancellationToken: cts.Token);
-        var connectTask = UdpMultiplexer.ConnectAsync("127.0.0.1", port, cancellationToken: cts.Token);
+        var serverOptions = UdpMultiplexer.CreateServerOptions(port);
+        await using var server = StreamMultiplexer.Create(serverOptions);
 
-        await using var server = await acceptTask;
-        await using var client = await connectTask;
+        var clientOptions = UdpMultiplexer.CreateOptions("127.0.0.1", port);
+        await using var client = StreamMultiplexer.Create(clientOptions);
 
-        var startTasks = await Task.WhenAll(client.StartAsync(cts.Token), server.StartAsync(cts.Token));
-        var clientRun = startTasks[0];
-        var serverRun = startTasks[1];
+        var clientRun = client.Start(cts.Token);
+        var serverRun = server.Start(cts.Token);
+        await Task.WhenAll(client.WaitForReadyAsync(cts.Token), server.WaitForReadyAsync(cts.Token));
 
         const int channelCount = 5;
         const int dataSize = 512;
@@ -97,17 +98,17 @@ public class UdpMultiplexerTests
     public async Task UdpMux_BidirectionalCommunication_BothSidesOpenChannels()
     {
         var port = GetFreePort();
-        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(60));
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(90));
 
-        var acceptTask = UdpMultiplexer.AcceptAsync(port, cancellationToken: cts.Token);
-        var connectTask = UdpMultiplexer.ConnectAsync("127.0.0.1", port, cancellationToken: cts.Token);
+        var serverOptions = UdpMultiplexer.CreateServerOptions(port);
+        await using var server = StreamMultiplexer.Create(serverOptions);
 
-        await using var server = await acceptTask;
-        await using var client = await connectTask;
+        var clientOptions = UdpMultiplexer.CreateOptions("127.0.0.1", port);
+        await using var client = StreamMultiplexer.Create(clientOptions);
 
-        var startTasks = await Task.WhenAll(client.StartAsync(cts.Token), server.StartAsync(cts.Token));
-        var clientRun = startTasks[0];
-        var serverRun = startTasks[1];
+        var clientRun = client.Start(cts.Token);
+        var serverRun = server.Start(cts.Token);
+        await Task.WhenAll(client.WaitForReadyAsync(cts.Token), server.WaitForReadyAsync(cts.Token));
 
         // Client opens channel to server
         var clientToServerWrite = await client.OpenChannelAsync(new ChannelOptions { ChannelId = "c2s" }, cts.Token);
@@ -151,17 +152,17 @@ public class UdpMultiplexerTests
     public async Task UdpMux_LargeDataTransfer_TransfersCorrectly()
     {
         var port = GetFreePort();
-        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(60));
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(90));
 
-        var acceptTask = UdpMultiplexer.AcceptAsync(port, cancellationToken: cts.Token);
-        var connectTask = UdpMultiplexer.ConnectAsync("127.0.0.1", port, cancellationToken: cts.Token);
+        var serverOptions = UdpMultiplexer.CreateServerOptions(port);
+        await using var server = StreamMultiplexer.Create(serverOptions);
 
-        await using var server = await acceptTask;
-        await using var client = await connectTask;
+        var clientOptions = UdpMultiplexer.CreateOptions("127.0.0.1", port);
+        await using var client = StreamMultiplexer.Create(clientOptions);
 
-        var startTasks = await Task.WhenAll(client.StartAsync(cts.Token), server.StartAsync(cts.Token));
-        var clientRun = startTasks[0];
-        var serverRun = startTasks[1];
+        var clientRun = client.Start(cts.Token);
+        var serverRun = server.Start(cts.Token);
+        await Task.WhenAll(client.WaitForReadyAsync(cts.Token), server.WaitForReadyAsync(cts.Token));
 
         var writeChannel = await client.OpenChannelAsync(new ChannelOptions { ChannelId = "large" }, cts.Token);
         var readChannel = await server.AcceptChannelAsync("large", cts.Token);

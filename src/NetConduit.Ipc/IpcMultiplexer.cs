@@ -11,93 +11,118 @@ namespace NetConduit.Ipc;
 public static class IpcMultiplexer
 {
     /// <summary>
-    /// Connects to an IPC endpoint and creates a multiplexer.
+    /// Creates multiplexer options with a StreamFactory that connects to the specified IPC endpoint.
+    /// Supports reconnection - each call to StreamFactory creates a new IPC connection.
     /// </summary>
-    public static async Task<IpcMultiplexerConnection> ConnectAsync(
+    /// <param name="endpoint">The IPC endpoint name.</param>
+    /// <param name="configure">Optional action to configure additional multiplexer options.</param>
+    /// <returns>MultiplexerOptions configured for IPC client connection.</returns>
+    public static MultiplexerOptions CreateOptions(
         string endpoint,
-        MultiplexerOptions? options = null,
-        CancellationToken cancellationToken = default)
+        Action<MultiplexerOptions>? configure = null)
     {
         ArgumentNullException.ThrowIfNull(endpoint);
 
-        if (OperatingSystem.IsWindows())
+        var options = new MultiplexerOptions
         {
-            var port = GetDeterministicPort(endpoint);
-            var client = new TcpClient(AddressFamily.InterNetwork);
-            await client.ConnectAsync(IPAddress.Loopback, port, cancellationToken).ConfigureAwait(false);
-            var stream = client.GetStream();
-            var mux = new StreamMultiplexer(stream, stream, options);
-            mux.OnError += static ex => throw ex;
-            return new IpcMultiplexerConnection(mux, stream, client.Client);
-        }
-        else
-        {
-            var socket = new Socket(AddressFamily.Unix, SocketType.Stream, ProtocolType.Unspecified);
-            var endPoint = new UnixDomainSocketEndPoint(endpoint);
-            await socket.ConnectAsync(endPoint, cancellationToken).ConfigureAwait(false);
-            var stream = new NetworkStream(socket, ownsSocket: true);
-            var mux = new StreamMultiplexer(stream, stream, options);
-            mux.OnError += static ex => throw ex;
-            return new IpcMultiplexerConnection(mux, stream, socket);
-        }
+            StreamFactory = async ct =>
+            {
+                if (OperatingSystem.IsWindows())
+                {
+                    var port = GetDeterministicPort(endpoint);
+                    var client = new TcpClient(AddressFamily.InterNetwork);
+                    await client.ConnectAsync(IPAddress.Loopback, port, ct).ConfigureAwait(false);
+                    var stream = client.GetStream();
+                    return new StreamPair(stream, client);
+                }
+                else
+                {
+                    var socket = new Socket(AddressFamily.Unix, SocketType.Stream, ProtocolType.Unspecified);
+                    var endPoint = new UnixDomainSocketEndPoint(endpoint);
+                    await socket.ConnectAsync(endPoint, ct).ConfigureAwait(false);
+                    var stream = new NetworkStream(socket, ownsSocket: true);
+                    return new StreamPair(stream);
+                }
+            }
+        };
+
+        configure?.Invoke(options);
+        return options;
     }
 
     /// <summary>
-    /// Accepts an IPC connection and creates a multiplexer.
+    /// Creates multiplexer options with a StreamFactory that accepts IPC connections at the specified endpoint.
+    /// Reconnection is disabled by default for server-side connections.
     /// </summary>
-    public static async Task<IpcMultiplexerConnection> AcceptAsync(
+    /// <param name="endpoint">The IPC endpoint name.</param>
+    /// <param name="configure">Optional action to configure additional multiplexer options.</param>
+    /// <returns>MultiplexerOptions configured for IPC server acceptance.</returns>
+    public static MultiplexerOptions CreateServerOptions(
         string endpoint,
-        MultiplexerOptions? options = null,
-        CancellationToken cancellationToken = default)
+        Action<MultiplexerOptions>? configure = null)
     {
         ArgumentNullException.ThrowIfNull(endpoint);
 
-        if (OperatingSystem.IsWindows())
+        var accepted = false;
+        var options = new MultiplexerOptions
         {
-            var port = GetDeterministicPort(endpoint);
-            var listener = new TcpListener(IPAddress.Loopback, port);
-            listener.Start();
-
-            TcpClient accepted;
-            try
+            EnableReconnection = false,
+            StreamFactory = async ct =>
             {
-                accepted = await listener.AcceptTcpClientAsync(cancellationToken).ConfigureAwait(false);
+                if (accepted)
+                {
+                    throw new InvalidOperationException(
+                        "Server-side IPC multiplexer does not support reconnection. " +
+                        "Create a new multiplexer instance to accept another connection.");
+                }
+
+                accepted = true;
+
+                if (OperatingSystem.IsWindows())
+                {
+                    var port = GetDeterministicPort(endpoint);
+                    var listener = new TcpListener(IPAddress.Loopback, port);
+                    listener.Start();
+
+                    TcpClient client;
+                    try
+                    {
+                        client = await listener.AcceptTcpClientAsync(ct).ConfigureAwait(false);
+                    }
+                    finally
+                    {
+                        listener.Stop();
+                    }
+
+                    var stream = client.GetStream();
+                    return new StreamPair(stream, client);
+                }
+                else
+                {
+                    if (File.Exists(endpoint))
+                        File.Delete(endpoint);
+
+                    var listenSocket = new Socket(AddressFamily.Unix, SocketType.Stream, ProtocolType.Unspecified);
+                    var endPoint = new UnixDomainSocketEndPoint(endpoint);
+                    listenSocket.Bind(endPoint);
+                    listenSocket.Listen(backlog: 1);
+                    var clientSocket = await listenSocket.AcceptAsync(ct).ConfigureAwait(false);
+                    listenSocket.Dispose();
+
+                    var stream = new NetworkStream(clientSocket, ownsSocket: true);
+                    return new StreamPair(stream);
+                }
             }
-            finally
-            {
-                listener.Stop();
-            }
+        };
 
-            var stream = accepted.GetStream();
-            var mux = new StreamMultiplexer(stream, stream, options);
-            mux.OnError += static ex => throw ex;
-            return new IpcMultiplexerConnection(mux, stream, accepted.Client);
-        }
-        else
-        {
-            // Unix domain socket listener
-            if (File.Exists(endpoint))
-                File.Delete(endpoint);
-
-            var listenSocket = new Socket(AddressFamily.Unix, SocketType.Stream, ProtocolType.Unspecified);
-            var endPoint = new UnixDomainSocketEndPoint(endpoint);
-            listenSocket.Bind(endPoint);
-            listenSocket.Listen(backlog: 1);
-            var accepted = await listenSocket.AcceptAsync(cancellationToken).ConfigureAwait(false);
-            listenSocket.Dispose();
-
-            var stream = new NetworkStream(accepted, ownsSocket: true);
-            var mux = new StreamMultiplexer(stream, stream, options);
-            mux.OnError += static ex => throw ex;
-            return new IpcMultiplexerConnection(mux, stream, accepted);
-        }
+        configure?.Invoke(options);
+        return options;
     }
 
     private static int GetDeterministicPort(string endpoint)
     {
         var bytes = System.Text.Encoding.UTF8.GetBytes(endpoint);
         var hash = SHA256.HashData(bytes);
-        // Keep within dynamic/private port range 49152-65535
         var value = (ushort)(hash[0] << 8 | hash[1]);
         return 49152 + (value % (65535 - 49152));
     }

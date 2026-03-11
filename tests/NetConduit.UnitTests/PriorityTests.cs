@@ -3,21 +3,19 @@ namespace NetConduit.UnitTests;
 public class PriorityTests
 {
     [Fact(Timeout = 120000)]
-    public async Task Priority_HighPriorityFirst_WhenQueued()
+    public async Task Priority_MultipleChannels_AllDataReceived()
     {
         await using var pipe = new DuplexPipe();
         
-        await using var initiator = new StreamMultiplexer(pipe.Stream1, pipe.Stream1,
-            new MultiplexerOptions());
-        await using var acceptor = new StreamMultiplexer(pipe.Stream2, pipe.Stream2,
-            new MultiplexerOptions());
+        await using var initiator = await TestMuxHelper.CreateMuxAsync(pipe.Stream1);
+        await using var acceptor = await TestMuxHelper.CreateMuxAsync(pipe.Stream2);
 
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
         
-        var initiatorTask = initiator.RunAsync(cts.Token);
-        var acceptorTask = acceptor.RunAsync(cts.Token);
+        var initiatorTask = initiator.Start(cts.Token);
+        var acceptorTask = acceptor.Start(cts.Token);
 
-        await Task.Delay(100);
+        await Task.WhenAll(initiator.WaitForReadyAsync(cts.Token), acceptor.WaitForReadyAsync(cts.Token));
 
         var receivedOrder = new List<byte>();
         var acceptedCount = 0;
@@ -66,8 +64,6 @@ public class PriorityTests
 
         await Task.Delay(500);
 
-        // Note: Due to async nature, order may vary, but high priority should generally come first
-        // This test mainly ensures priority channels work correctly
         Assert.Equal(3, receivedOrder.Count);
         Assert.Contains((byte)1, receivedOrder);
         Assert.Contains((byte)2, receivedOrder);
@@ -86,17 +82,15 @@ public class PriorityTests
     {
         await using var pipe = new DuplexPipe();
         
-        await using var initiator = new StreamMultiplexer(pipe.Stream1, pipe.Stream1,
-            new MultiplexerOptions());
-        await using var acceptor = new StreamMultiplexer(pipe.Stream2, pipe.Stream2,
-            new MultiplexerOptions());
+        await using var initiator = await TestMuxHelper.CreateMuxAsync(pipe.Stream1);
+        await using var acceptor = await TestMuxHelper.CreateMuxAsync(pipe.Stream2);
 
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
         
-        var initiatorTask = initiator.RunAsync(cts.Token);
-        var acceptorTask = acceptor.RunAsync(cts.Token);
+        var initiatorTask = initiator.Start(cts.Token);
+        var acceptorTask = acceptor.Start(cts.Token);
 
-        await Task.Delay(100);
+        await Task.WhenAll(initiator.WaitForReadyAsync(cts.Token), acceptor.WaitForReadyAsync(cts.Token));
 
         ReadChannel? readChannel = null;
         var acceptTask = Task.Run(async () =>
@@ -135,17 +129,15 @@ public class PriorityTests
     {
         await using var pipe = new DuplexPipe();
         
-        await using var initiator = new StreamMultiplexer(pipe.Stream1, pipe.Stream1,
-            new MultiplexerOptions());
-        await using var acceptor = new StreamMultiplexer(pipe.Stream2, pipe.Stream2,
-            new MultiplexerOptions());
+        await using var initiator = await TestMuxHelper.CreateMuxAsync(pipe.Stream1);
+        await using var acceptor = await TestMuxHelper.CreateMuxAsync(pipe.Stream2);
 
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
         
-        var initiatorTask = initiator.RunAsync(cts.Token);
-        var acceptorTask = acceptor.RunAsync(cts.Token);
+        var initiatorTask = initiator.Start(cts.Token);
+        var acceptorTask = acceptor.Start(cts.Token);
 
-        await Task.Delay(100);
+        await Task.WhenAll(initiator.WaitForReadyAsync(cts.Token), acceptor.WaitForReadyAsync(cts.Token));
 
         ReadChannel? readChannel = null;
         var acceptTask = Task.Run(async () =>
@@ -172,3 +164,6 @@ public class PriorityTests
         cts.Cancel();
     }
 }
+
+
+

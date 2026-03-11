@@ -134,18 +134,14 @@ public class IpcThroughputBenchmark
     {
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(120));
 
-        var muxOptions = new MultiplexerOptions
-        {
-            EnableReconnection = false,
-            FlushMode = FlushMode.Immediate
-        };
-
         var pipeName = $"netconduit_bench_{Guid.NewGuid():N}";
 
         var serverTask = Task.Run(async () =>
         {
-            await using var server = await IpcMultiplexer.AcceptAsync(pipeName, muxOptions, cts.Token);
-            var runTask = await server.StartAsync(cts.Token);
+            var options = IpcMultiplexer.CreateServerOptions(pipeName);
+            await using var server = StreamMultiplexer.Create(options);
+            var runTask = server.Start(cts.Token);
+            await server.WaitForReadyAsync(cts.Token);
 
             var acceptedChannels = new List<ReadChannel>();
             var readTasks = new List<Task>();
@@ -182,8 +178,10 @@ public class IpcThroughputBenchmark
 
         var clientTask = Task.Run(async () =>
         {
-            await using var client = await IpcMultiplexer.ConnectAsync(pipeName, muxOptions, cts.Token);
-            var runTask = await client.StartAsync(cts.Token);
+            var options = IpcMultiplexer.CreateOptions(pipeName);
+            await using var client = StreamMultiplexer.Create(options);
+            var runTask = client.Start(cts.Token);
+            await client.WaitForReadyAsync(cts.Token);
 
             var sendTasks = new List<Task>();
             var channels = new List<WriteChannel>();

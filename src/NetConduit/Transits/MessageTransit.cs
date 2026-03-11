@@ -22,6 +22,8 @@ public sealed class MessageTransit<TSend, TReceive> : IMessageTransit<TSend, TRe
     private readonly JsonTypeInfo<TReceive>? _receiveTypeInfo;
     private readonly JsonSerializerOptions? _jsonOptions;
     private readonly int _maxMessageSize;
+    private readonly SemaphoreSlim _sendLock = new(1, 1);
+    private readonly SemaphoreSlim _receiveLock = new(1, 1);
     private volatile bool _disposed;
 
     /// <summary>
@@ -35,8 +37,8 @@ public sealed class MessageTransit<TSend, TReceive> : IMessageTransit<TSend, TRe
     public MessageTransit(
         WriteChannel? writeChannel,
         ReadChannel? readChannel,
-        JsonTypeInfo<TSend> sendTypeInfo,
-        JsonTypeInfo<TReceive> receiveTypeInfo,
+        JsonTypeInfo<TSend>? sendTypeInfo,
+        JsonTypeInfo<TReceive>? receiveTypeInfo,
         int maxMessageSize = 16 * 1024 * 1024)
     {
         _writeChannel = writeChannel;
@@ -88,31 +90,39 @@ public sealed class MessageTransit<TSend, TReceive> : IMessageTransit<TSend, TRe
         if (_writeChannel is null)
             throw new InvalidOperationException("This transit does not have a write channel configured.");
 
-        byte[] jsonBytes;
-        if (_sendTypeInfo is not null)
-        {
-            jsonBytes = JsonSerializer.SerializeToUtf8Bytes(message, _sendTypeInfo);
-        }
-        else
-        {
-            jsonBytes = JsonSerializer.SerializeToUtf8Bytes(message, _jsonOptions);
-        }
-
-        if (jsonBytes.Length > _maxMessageSize)
-            throw new InvalidOperationException($"Message size ({jsonBytes.Length} bytes) exceeds maximum allowed ({_maxMessageSize} bytes).");
-
-        // Combine length prefix + payload into single write for atomicity
-        var totalLength = 4 + jsonBytes.Length;
-        var combinedBuffer = ArrayPool<byte>.Shared.Rent(totalLength);
+        await _sendLock.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
-            BinaryPrimitives.WriteUInt32BigEndian(combinedBuffer, (uint)jsonBytes.Length);
-            jsonBytes.CopyTo(combinedBuffer, 4);
-            await _writeChannel.WriteAsync(combinedBuffer.AsMemory(0, totalLength), cancellationToken).ConfigureAwait(false);
+            byte[] jsonBytes;
+            if (_sendTypeInfo is not null)
+            {
+                jsonBytes = JsonSerializer.SerializeToUtf8Bytes(message, _sendTypeInfo);
+            }
+            else
+            {
+                jsonBytes = JsonSerializer.SerializeToUtf8Bytes(message, _jsonOptions);
+            }
+
+            if (jsonBytes.Length > _maxMessageSize)
+                throw new InvalidOperationException($"Message size ({jsonBytes.Length} bytes) exceeds maximum allowed ({_maxMessageSize} bytes).");
+
+            // Combine length prefix + payload into single write for atomicity
+            var totalLength = 4 + jsonBytes.Length;
+            var combinedBuffer = ArrayPool<byte>.Shared.Rent(totalLength);
+            try
+            {
+                BinaryPrimitives.WriteUInt32BigEndian(combinedBuffer, (uint)jsonBytes.Length);
+                jsonBytes.CopyTo(combinedBuffer, 4);
+                await _writeChannel.WriteAsync(combinedBuffer.AsMemory(0, totalLength), cancellationToken).ConfigureAwait(false);
+            }
+            finally
+            {
+                ArrayPool<byte>.Shared.Return(combinedBuffer);
+            }
         }
         finally
         {
-            ArrayPool<byte>.Shared.Return(combinedBuffer);
+            _sendLock.Release();
         }
     }
 
@@ -126,50 +136,58 @@ public sealed class MessageTransit<TSend, TReceive> : IMessageTransit<TSend, TRe
         if (_readChannel is null)
             throw new InvalidOperationException("This transit does not have a read channel configured.");
 
-        // Read length prefix (4 bytes, big-endian)
-        var lengthBuffer = ArrayPool<byte>.Shared.Rent(4);
+        await _receiveLock.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
-            var bytesRead = await ReadExactAsync(_readChannel, lengthBuffer.AsMemory(0, 4), cancellationToken).ConfigureAwait(false);
-            if (bytesRead == 0)
-                return default; // Channel closed
-
-            var messageLength = BinaryPrimitives.ReadUInt32BigEndian(lengthBuffer);
-
-            if (messageLength > _maxMessageSize)
-                throw new InvalidOperationException($"Received message size ({messageLength} bytes) exceeds maximum allowed ({_maxMessageSize} bytes).");
-
-            if (messageLength == 0)
-            {
-                // Empty message - return default for reference types, or handle appropriately
-                return default;
-            }
-
-            // Read message payload
-            var messageBuffer = ArrayPool<byte>.Shared.Rent((int)messageLength);
+            // Read length prefix (4 bytes, big-endian)
+            var lengthBuffer = ArrayPool<byte>.Shared.Rent(4);
             try
             {
-                bytesRead = await ReadExactAsync(_readChannel, messageBuffer.AsMemory(0, (int)messageLength), cancellationToken).ConfigureAwait(false);
+                var bytesRead = await ReadExactAsync(_readChannel, lengthBuffer.AsMemory(0, 4), cancellationToken).ConfigureAwait(false);
                 if (bytesRead == 0)
-                    return default; // Channel closed during read
+                    return default; // Channel closed
 
-                if (_receiveTypeInfo is not null)
+                var messageLength = BinaryPrimitives.ReadUInt32BigEndian(lengthBuffer);
+
+                if (messageLength > _maxMessageSize)
+                    throw new InvalidOperationException($"Received message size ({messageLength} bytes) exceeds maximum allowed ({_maxMessageSize} bytes).");
+
+                if (messageLength == 0)
                 {
-                    return JsonSerializer.Deserialize(messageBuffer.AsSpan(0, (int)messageLength), _receiveTypeInfo);
+                    // Empty message - return default for reference types, or handle appropriately
+                    return default;
                 }
-                else
+
+                // Read message payload
+                var messageBuffer = ArrayPool<byte>.Shared.Rent((int)messageLength);
+                try
                 {
-                    return JsonSerializer.Deserialize<TReceive>(messageBuffer.AsSpan(0, (int)messageLength), _jsonOptions);
+                    bytesRead = await ReadExactAsync(_readChannel, messageBuffer.AsMemory(0, (int)messageLength), cancellationToken).ConfigureAwait(false);
+                    if (bytesRead == 0)
+                        return default; // Channel closed during read
+
+                    if (_receiveTypeInfo is not null)
+                    {
+                        return JsonSerializer.Deserialize(messageBuffer.AsSpan(0, (int)messageLength), _receiveTypeInfo);
+                    }
+                    else
+                    {
+                        return JsonSerializer.Deserialize<TReceive>(messageBuffer.AsSpan(0, (int)messageLength), _jsonOptions);
+                    }
+                }
+                finally
+                {
+                    ArrayPool<byte>.Shared.Return(messageBuffer);
                 }
             }
             finally
             {
-                ArrayPool<byte>.Shared.Return(messageBuffer);
+                ArrayPool<byte>.Shared.Return(lengthBuffer);
             }
         }
         finally
         {
-            ArrayPool<byte>.Shared.Return(lengthBuffer);
+            _receiveLock.Release();
         }
     }
 
@@ -226,6 +244,9 @@ public sealed class MessageTransit<TSend, TReceive> : IMessageTransit<TSend, TRe
 
         if (_readChannel is not null)
             await _readChannel.DisposeAsync().ConfigureAwait(false);
+
+        _sendLock.Dispose();
+        _receiveLock.Dispose();
     }
 
     /// <inheritdoc/>
@@ -238,6 +259,8 @@ public sealed class MessageTransit<TSend, TReceive> : IMessageTransit<TSend, TRe
 
         _writeChannel?.Dispose();
         _readChannel?.Dispose();
+        _sendLock.Dispose();
+        _receiveLock.Dispose();
     }
 }
 

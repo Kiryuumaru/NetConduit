@@ -147,14 +147,8 @@ public class WebSocketThroughputBenchmark
         var port = GetAvailablePort();
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(120));
 
-        var muxOptions = new MultiplexerOptions
-        {
-            EnableReconnection = false,
-            FlushMode = FlushMode.Immediate
-        };
-
-        WebSocketMultiplexerConnection? serverConnection = null;
-        var serverReady = new TaskCompletionSource<WebSocketMultiplexerConnection>();
+        StreamMultiplexer? serverConnection = null;
+        var serverReady = new TaskCompletionSource<StreamMultiplexer>();
 
         var builder = WebApplication.CreateSlimBuilder();
         builder.WebHost.UseUrls($"http://localhost:{port}");
@@ -165,7 +159,8 @@ public class WebSocketThroughputBenchmark
             if (context.WebSockets.IsWebSocketRequest)
             {
                 var ws = await context.WebSockets.AcceptWebSocketAsync();
-                serverConnection = WebSocketMultiplexer.Accept(ws, muxOptions);
+                var options = WebSocketMultiplexer.CreateServerOptions(ws);
+                serverConnection = StreamMultiplexer.Create(options);
                 serverReady.TrySetResult(serverConnection);
 
                 // Keep connection alive until done
@@ -184,7 +179,8 @@ public class WebSocketThroughputBenchmark
             var serverTask = Task.Run(async () =>
             {
                 var server = await serverReady.Task;
-                var runTask = await server.StartAsync(cts.Token);
+                var runTask = server.Start(cts.Token);
+                await server.WaitForReadyAsync(cts.Token);
 
                 var acceptedChannels = new List<ReadChannel>();
                 var readTasks = new List<Task>();
@@ -218,8 +214,10 @@ public class WebSocketThroughputBenchmark
 
             var clientTask = Task.Run(async () =>
             {
-                await using var client = await WebSocketMultiplexer.ConnectAsync($"ws://localhost:{port}/ws", muxOptions, null, cts.Token);
-                var runTask = await client.StartAsync(cts.Token);
+                var options = WebSocketMultiplexer.CreateOptions(new Uri($"ws://localhost:{port}/ws"));
+                await using var client = StreamMultiplexer.Create(options);
+                var runTask = client.Start(cts.Token);
+                await client.WaitForReadyAsync(cts.Token);
 
                 var sendTasks = new List<Task>();
                 var channels = new List<WriteChannel>();

@@ -16,12 +16,11 @@ public class NegativeTests
     {
         await using var pipe = new DuplexPipe();
         
-        await using var initiator = new StreamMultiplexer(pipe.Stream1, pipe.Stream1,
-            new MultiplexerOptions());
+        await using var initiator = await TestMuxHelper.CreateMuxAsync(pipe.Stream1);
 
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
         
-        var initiatorTask = initiator.RunAsync(cts.Token);
+        var initiatorTask = initiator.Start(cts.Token);
         
         // Don't start acceptor, simulating incomplete handshake
         // Close the pipe after a short delay
@@ -49,16 +48,16 @@ public class NegativeTests
         // Use small credits so we'll exhaust them quickly and need to wait for grants
         var smallCredits = new MultiplexerOptions 
         { 
-            DefaultChannelOptions = new DefaultChannelOptions { MinCredits = 1024, MaxCredits = 1024 } 
+             StreamFactory = _ => null!, DefaultChannelOptions = new DefaultChannelOptions { MinCredits = 1024, MaxCredits = 1024 } 
         };
-        await using var initiator = new StreamMultiplexer(pipe.Stream1, pipe.Stream1, smallCredits);
-        await using var acceptor = new StreamMultiplexer(pipe.Stream2, pipe.Stream2, smallCredits);
+        await using var initiator = await TestMuxHelper.CreateMuxAsync(pipe.Stream1, smallCredits);
+        await using var acceptor = await TestMuxHelper.CreateMuxAsync(pipe.Stream2, smallCredits);
 
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
         
-        var initiatorTask = initiator.RunAsync(cts.Token);
-        var acceptorTask = acceptor.RunAsync(cts.Token);
-        await Task.Delay(100);
+        var initiatorTask = initiator.Start(cts.Token);
+        var acceptorTask = acceptor.Start(cts.Token);
+        await Task.WhenAll(initiator.WaitForReadyAsync(cts.Token), acceptor.WaitForReadyAsync(cts.Token));
 
         var writeChannel = await initiator.OpenChannelAsync(new ChannelOptions { ChannelId = "disconnect_test" }, cts.Token);
 
@@ -81,7 +80,7 @@ public class NegativeTests
             failed = true;
         }
 
-        Assert.True(failed || !initiator.IsRunning);
+        Assert.True(failed, "Writing to disconnected peer should throw an exception");
         cts.Cancel();
     }
 
@@ -90,16 +89,14 @@ public class NegativeTests
     {
         await using var pipe = new DuplexPipe();
         
-        await using var initiator = new StreamMultiplexer(pipe.Stream1, pipe.Stream1,
-            new MultiplexerOptions());
-        await using var acceptor = new StreamMultiplexer(pipe.Stream2, pipe.Stream2,
-            new MultiplexerOptions());
+        await using var initiator = await TestMuxHelper.CreateMuxAsync(pipe.Stream1);
+        await using var acceptor = await TestMuxHelper.CreateMuxAsync(pipe.Stream2);
 
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
         
-        var initiatorTask = initiator.RunAsync(cts.Token);
-        var acceptorTask = acceptor.RunAsync(cts.Token);
-        await Task.Delay(100);
+        var initiatorTask = initiator.Start(cts.Token);
+        var acceptorTask = acceptor.Start(cts.Token);
+        await Task.WhenAll(initiator.WaitForReadyAsync(cts.Token), acceptor.WaitForReadyAsync(cts.Token));
 
         ReadChannel? readChannel = null;
         var acceptTask = Task.Run(async () =>
@@ -140,7 +137,7 @@ public class NegativeTests
             threw = true;
         }
 
-        Assert.True(result == 0 || threw || !acceptor.IsRunning);
+        Assert.True(result == 0 || threw, "Reading from disconnected channel should return 0 (EOF) or throw");
         cts.Cancel();
     }
 
@@ -149,15 +146,13 @@ public class NegativeTests
     {
         await using var pipe = new DuplexPipe();
         
-        await using var initiator = new StreamMultiplexer(pipe.Stream1, pipe.Stream1,
-            new MultiplexerOptions());
-        await using var acceptor = new StreamMultiplexer(pipe.Stream2, pipe.Stream2,
-            new MultiplexerOptions());
+        await using var initiator = await TestMuxHelper.CreateMuxAsync(pipe.Stream1);
+        await using var acceptor = await TestMuxHelper.CreateMuxAsync(pipe.Stream2);
 
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
         
-        var initiatorTask = initiator.RunAsync(cts.Token);
-        var acceptorTask = acceptor.RunAsync(cts.Token);
+        var initiatorTask = initiator.Start(cts.Token);
+        var acceptorTask = acceptor.Start(cts.Token);
         await Task.Delay(100);
 
         ReadChannel? readChannel = null;
@@ -200,15 +195,13 @@ public class NegativeTests
     {
         await using var pipe = new DuplexPipe();
         
-        var initiator = new StreamMultiplexer(pipe.Stream1, pipe.Stream1,
-            new MultiplexerOptions());
-        var acceptor = new StreamMultiplexer(pipe.Stream2, pipe.Stream2,
-            new MultiplexerOptions());
+        var initiator = await TestMuxHelper.CreateMuxAsync(pipe.Stream1);
+        var acceptor = await TestMuxHelper.CreateMuxAsync(pipe.Stream2);
 
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
         
-        var initiatorTask = initiator.RunAsync(cts.Token);
-        var acceptorTask = acceptor.RunAsync(cts.Token);
+        var initiatorTask = initiator.Start(cts.Token);
+        var acceptorTask = acceptor.Start(cts.Token);
         await Task.Delay(100);
 
         var channels = new List<WriteChannel>();
@@ -254,21 +247,19 @@ public class NegativeTests
     {
         await using var pipe = new DuplexPipe();
         
-        await using var initiator = new StreamMultiplexer(pipe.Stream1, pipe.Stream1,
-            new MultiplexerOptions());
-        await using var acceptor = new StreamMultiplexer(pipe.Stream2, pipe.Stream2,
-            new MultiplexerOptions());
+        await using var initiator = await TestMuxHelper.CreateMuxAsync(pipe.Stream1);
+        await using var acceptor = await TestMuxHelper.CreateMuxAsync(pipe.Stream2);
 
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
         
-        var initiatorTask = initiator.RunAsync(cts.Token);
-        var acceptorTask = acceptor.RunAsync(cts.Token);
-        await Task.Delay(100);
+        var initiatorTask = initiator.Start(cts.Token);
+        var acceptorTask = acceptor.Start(cts.Token);
+        await Task.WhenAll(initiator.WaitForReadyAsync(cts.Token), acceptor.WaitForReadyAsync(cts.Token));
 
         var writeChannel = await initiator.OpenChannelAsync(new ChannelOptions { ChannelId = "write_after_close" }, cts.Token);
         await writeChannel.CloseAsync(cts.Token);
 
-        await Assert.ThrowsAnyAsync<Exception>(async () =>
+        await Assert.ThrowsAsync<InvalidOperationException>(async () =>
         {
             await writeChannel.WriteAsync(new byte[100], cts.Token);
         });
@@ -281,20 +272,18 @@ public class NegativeTests
     {
         await using var pipe = new DuplexPipe();
         
-        var initiator = new StreamMultiplexer(pipe.Stream1, pipe.Stream1,
-            new MultiplexerOptions());
-        await using var acceptor = new StreamMultiplexer(pipe.Stream2, pipe.Stream2,
-            new MultiplexerOptions());
+        var initiator = await TestMuxHelper.CreateMuxAsync(pipe.Stream1);
+        await using var acceptor = await TestMuxHelper.CreateMuxAsync(pipe.Stream2);
 
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
         
-        var initiatorTask = initiator.RunAsync(cts.Token);
-        var acceptorTask = acceptor.RunAsync(cts.Token);
-        await Task.Delay(100);
+        var initiatorTask = initiator.Start(cts.Token);
+        var acceptorTask = acceptor.Start(cts.Token);
+        await Task.WhenAll(initiator.WaitForReadyAsync(cts.Token), acceptor.WaitForReadyAsync(cts.Token));
 
         await initiator.DisposeAsync();
 
-        await Assert.ThrowsAnyAsync<Exception>(async () =>
+        await Assert.ThrowsAsync<InvalidOperationException>(async () =>
         {
             await initiator.OpenChannelAsync(new ChannelOptions { ChannelId = "after_dispose" }, cts.Token);
         });
@@ -307,16 +296,14 @@ public class NegativeTests
     {
         await using var pipe = new DuplexPipe();
         
-        await using var initiator = new StreamMultiplexer(pipe.Stream1, pipe.Stream1,
-            new MultiplexerOptions());
-        await using var acceptor = new StreamMultiplexer(pipe.Stream2, pipe.Stream2,
-            new MultiplexerOptions());
+        await using var initiator = await TestMuxHelper.CreateMuxAsync(pipe.Stream1);
+        await using var acceptor = await TestMuxHelper.CreateMuxAsync(pipe.Stream2);
 
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
         
-        var initiatorTask = initiator.RunAsync(cts.Token);
-        var acceptorTask = acceptor.RunAsync(cts.Token);
-        await Task.Delay(100);
+        var initiatorTask = initiator.Start(cts.Token);
+        var acceptorTask = acceptor.Start(cts.Token);
+        await Task.WhenAll(initiator.WaitForReadyAsync(cts.Token), acceptor.WaitForReadyAsync(cts.Token));
 
         var writeChannel = await initiator.OpenChannelAsync(new ChannelOptions { ChannelId = "empty_buffer" }, cts.Token);
         
@@ -335,15 +322,15 @@ public class NegativeTests
         // Small credits on BOTH sides - acceptor's ReadChannel determines how many credits the initiator gets
         var smallCredits = new MultiplexerOptions 
         { 
-            DefaultChannelOptions = new DefaultChannelOptions { MinCredits = 1024, MaxCredits = 1024 } 
+             StreamFactory = _ => null!, DefaultChannelOptions = new DefaultChannelOptions { MinCredits = 1024, MaxCredits = 1024 } 
         };
-        await using var initiator = new StreamMultiplexer(pipe.Stream1, pipe.Stream1, smallCredits);
-        await using var acceptor = new StreamMultiplexer(pipe.Stream2, pipe.Stream2, smallCredits);
+        await using var initiator = await TestMuxHelper.CreateMuxAsync(pipe.Stream1, smallCredits);
+        await using var acceptor = await TestMuxHelper.CreateMuxAsync(pipe.Stream2, smallCredits);
 
         using var runCts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
         
-        var initiatorTask = initiator.RunAsync(runCts.Token);
-        var acceptorTask = acceptor.RunAsync(runCts.Token);
+        var initiatorTask = initiator.Start(runCts.Token);
+        var acceptorTask = acceptor.Start(runCts.Token);
         await Task.Delay(100);
 
         ReadChannel? readChannel = null;
@@ -382,15 +369,13 @@ public class NegativeTests
     {
         await using var pipe = new DuplexPipe();
         
-        await using var initiator = new StreamMultiplexer(pipe.Stream1, pipe.Stream1,
-            new MultiplexerOptions());
-        await using var acceptor = new StreamMultiplexer(pipe.Stream2, pipe.Stream2,
-            new MultiplexerOptions());
+        await using var initiator = await TestMuxHelper.CreateMuxAsync(pipe.Stream1);
+        await using var acceptor = await TestMuxHelper.CreateMuxAsync(pipe.Stream2);
 
         using var runCts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
         
-        var initiatorTask = initiator.RunAsync(runCts.Token);
-        var acceptorTask = acceptor.RunAsync(runCts.Token);
+        var initiatorTask = initiator.Start(runCts.Token);
+        var acceptorTask = acceptor.Start(runCts.Token);
         await Task.Delay(100);
 
         using var acceptCts = new CancellationTokenSource();
@@ -431,15 +416,13 @@ public class NegativeTests
     {
         await using var pipe = new DuplexPipe();
         
-        await using var initiator = new StreamMultiplexer(pipe.Stream1, pipe.Stream1,
-            new MultiplexerOptions());
-        await using var acceptor = new StreamMultiplexer(pipe.Stream2, pipe.Stream2,
-            new MultiplexerOptions());
+        await using var initiator = await TestMuxHelper.CreateMuxAsync(pipe.Stream1);
+        await using var acceptor = await TestMuxHelper.CreateMuxAsync(pipe.Stream2);
 
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
         
-        var initiatorTask = initiator.RunAsync(cts.Token);
-        var acceptorTask = acceptor.RunAsync(cts.Token);
+        var initiatorTask = initiator.Start(cts.Token);
+        var acceptorTask = acceptor.Start(cts.Token);
         await Task.Delay(100);
 
         var acceptedCount = 0;
@@ -483,15 +466,13 @@ public class NegativeTests
     {
         await using var pipe = new DuplexPipe();
         
-        await using var initiator = new StreamMultiplexer(pipe.Stream1, pipe.Stream1,
-            new MultiplexerOptions());
-        await using var acceptor = new StreamMultiplexer(pipe.Stream2, pipe.Stream2,
-            new MultiplexerOptions());
+        await using var initiator = await TestMuxHelper.CreateMuxAsync(pipe.Stream1);
+        await using var acceptor = await TestMuxHelper.CreateMuxAsync(pipe.Stream2);
 
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
         
-        var initiatorTask = initiator.RunAsync(cts.Token);
-        var acceptorTask = acceptor.RunAsync(cts.Token);
+        var initiatorTask = initiator.Start(cts.Token);
+        var acceptorTask = acceptor.Start(cts.Token);
         await Task.Delay(100);
 
         ReadChannel? readChannel = null;
@@ -566,15 +547,13 @@ public class NegativeTests
     {
         await using var pipe = new DuplexPipe();
         
-        var initiator = new StreamMultiplexer(pipe.Stream1, pipe.Stream1,
-            new MultiplexerOptions());
-        var acceptor = new StreamMultiplexer(pipe.Stream2, pipe.Stream2,
-            new MultiplexerOptions());
+        var initiator = await TestMuxHelper.CreateMuxAsync(pipe.Stream1);
+        var acceptor = await TestMuxHelper.CreateMuxAsync(pipe.Stream2);
 
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
         
-        var initiatorTask = initiator.RunAsync(cts.Token);
-        var acceptorTask = acceptor.RunAsync(cts.Token);
+        var initiatorTask = initiator.Start(cts.Token);
+        var acceptorTask = acceptor.Start(cts.Token);
         await Task.Delay(100);
 
         // Multiple disposes should not throw
@@ -593,15 +572,13 @@ public class NegativeTests
     {
         await using var pipe = new DuplexPipe();
         
-        await using var initiator = new StreamMultiplexer(pipe.Stream1, pipe.Stream1,
-            new MultiplexerOptions());
-        await using var acceptor = new StreamMultiplexer(pipe.Stream2, pipe.Stream2,
-            new MultiplexerOptions());
+        await using var initiator = await TestMuxHelper.CreateMuxAsync(pipe.Stream1);
+        await using var acceptor = await TestMuxHelper.CreateMuxAsync(pipe.Stream2);
 
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
         
-        var initiatorTask = initiator.RunAsync(cts.Token);
-        var acceptorTask = acceptor.RunAsync(cts.Token);
+        var initiatorTask = initiator.Start(cts.Token);
+        var acceptorTask = acceptor.Start(cts.Token);
         await Task.Delay(100);
 
         var writeChannel = await initiator.OpenChannelAsync(new ChannelOptions { ChannelId = "dispose_idempotent" }, cts.Token);
@@ -619,15 +596,13 @@ public class NegativeTests
     {
         var pipe = new DuplexPipe();
         
-        var initiator = new StreamMultiplexer(pipe.Stream1, pipe.Stream1,
-            new MultiplexerOptions());
-        var acceptor = new StreamMultiplexer(pipe.Stream2, pipe.Stream2,
-            new MultiplexerOptions());
+        var initiator = await TestMuxHelper.CreateMuxAsync(pipe.Stream1);
+        var acceptor = await TestMuxHelper.CreateMuxAsync(pipe.Stream2);
 
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
         
-        var initiatorTask = initiator.RunAsync(cts.Token);
-        var acceptorTask = acceptor.RunAsync(cts.Token);
+        var initiatorTask = initiator.Start(cts.Token);
+        var acceptorTask = acceptor.Start(cts.Token);
         await Task.Delay(100);
 
         // Open channels but don't dispose them
@@ -678,15 +653,15 @@ public class NegativeTests
     {
         await using var pipe = new DuplexPipe();
         
-        await using var initiator = new StreamMultiplexer(pipe.Stream1, pipe.Stream1,
-            new MultiplexerOptions { DefaultChannelOptions = new DefaultChannelOptions { MinCredits = 64, MaxCredits = 64 } }); // Very small
-        await using var acceptor = new StreamMultiplexer(pipe.Stream2, pipe.Stream2,
-            new MultiplexerOptions { DefaultChannelOptions = new DefaultChannelOptions { MinCredits = 64, MaxCredits = 64 } });
+        await using var initiator = await TestMuxHelper.CreateMuxAsync(pipe.Stream1,
+            new MultiplexerOptions { StreamFactory = _ => null!, DefaultChannelOptions = new DefaultChannelOptions { MinCredits = 64, MaxCredits = 64 } }); // Very small
+        await using var acceptor = await TestMuxHelper.CreateMuxAsync(pipe.Stream2,
+            new MultiplexerOptions { StreamFactory = _ => null!, DefaultChannelOptions = new DefaultChannelOptions { MinCredits = 64, MaxCredits = 64 } });
 
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
         
-        var initiatorTask = initiator.RunAsync(cts.Token);
-        var acceptorTask = acceptor.RunAsync(cts.Token);
+        var initiatorTask = initiator.Start(cts.Token);
+        var acceptorTask = acceptor.Start(cts.Token);
         await Task.Delay(100);
 
         ReadChannel? readChannel = null;
@@ -733,15 +708,13 @@ public class NegativeTests
     {
         await using var pipe = new DuplexPipe();
         
-        await using var initiator = new StreamMultiplexer(pipe.Stream1, pipe.Stream1,
-            new MultiplexerOptions());
-        await using var acceptor = new StreamMultiplexer(pipe.Stream2, pipe.Stream2,
-            new MultiplexerOptions());
+        await using var initiator = await TestMuxHelper.CreateMuxAsync(pipe.Stream1);
+        await using var acceptor = await TestMuxHelper.CreateMuxAsync(pipe.Stream2);
 
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
         
-        var initiatorTask = initiator.RunAsync(cts.Token);
-        var acceptorTask = acceptor.RunAsync(cts.Token);
+        var initiatorTask = initiator.Start(cts.Token);
+        var acceptorTask = acceptor.Start(cts.Token);
         await Task.Delay(100);
 
         ReadChannel? readChannel = null;
@@ -769,15 +742,13 @@ public class NegativeTests
     {
         await using var pipe = new DuplexPipe();
         
-        await using var initiator = new StreamMultiplexer(pipe.Stream1, pipe.Stream1,
-            new MultiplexerOptions());
-        await using var acceptor = new StreamMultiplexer(pipe.Stream2, pipe.Stream2,
-            new MultiplexerOptions());
+        await using var initiator = await TestMuxHelper.CreateMuxAsync(pipe.Stream1);
+        await using var acceptor = await TestMuxHelper.CreateMuxAsync(pipe.Stream2);
 
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(60));
         
-        var initiatorTask = initiator.RunAsync(cts.Token);
-        var acceptorTask = acceptor.RunAsync(cts.Token);
+        var initiatorTask = initiator.Start(cts.Token);
+        var acceptorTask = acceptor.Start(cts.Token);
         await Task.Delay(100);
 
         var targetCount = 100;  // Small count to ensure completion
@@ -825,3 +796,9 @@ public class NegativeTests
 
     #endregion
 }
+
+
+
+
+
+

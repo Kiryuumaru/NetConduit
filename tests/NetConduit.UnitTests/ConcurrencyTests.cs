@@ -11,15 +11,13 @@ public class ConcurrencyTests
     {
         await using var pipe = new DuplexPipe();
         
-        await using var initiator = new StreamMultiplexer(pipe.Stream1, pipe.Stream1,
-            new MultiplexerOptions());
-        await using var acceptor = new StreamMultiplexer(pipe.Stream2, pipe.Stream2,
-            new MultiplexerOptions());
+        await using var initiator = await TestMuxHelper.CreateMuxAsync(pipe.Stream1);
+        await using var acceptor = await TestMuxHelper.CreateMuxAsync(pipe.Stream2);
 
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(60));
         
-        var initiatorTask = initiator.RunAsync(cts.Token);
-        var acceptorTask = acceptor.RunAsync(cts.Token);
+        var initiatorTask = initiator.Start(cts.Token);
+        var acceptorTask = acceptor.Start(cts.Token);
 
         await Task.Delay(100);
 
@@ -95,15 +93,13 @@ public class ConcurrencyTests
     {
         await using var pipe = new DuplexPipe();
         
-        await using var initiator = new StreamMultiplexer(pipe.Stream1, pipe.Stream1,
-            new MultiplexerOptions());
-        await using var acceptor = new StreamMultiplexer(pipe.Stream2, pipe.Stream2,
-            new MultiplexerOptions());
+        await using var initiator = await TestMuxHelper.CreateMuxAsync(pipe.Stream1);
+        await using var acceptor = await TestMuxHelper.CreateMuxAsync(pipe.Stream2);
 
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
         
-        var initiatorTask = initiator.RunAsync(cts.Token);
-        var acceptorTask = acceptor.RunAsync(cts.Token);
+        var initiatorTask = initiator.Start(cts.Token);
+        var acceptorTask = acceptor.Start(cts.Token);
 
         await Task.Delay(100);
 
@@ -206,15 +202,13 @@ public class ConcurrencyTests
     {
         await using var pipe = new DuplexPipe();
         
-        await using var initiator = new StreamMultiplexer(pipe.Stream1, pipe.Stream1,
-            new MultiplexerOptions());
-        await using var acceptor = new StreamMultiplexer(pipe.Stream2, pipe.Stream2,
-            new MultiplexerOptions());
+        await using var initiator = await TestMuxHelper.CreateMuxAsync(pipe.Stream1);
+        await using var acceptor = await TestMuxHelper.CreateMuxAsync(pipe.Stream2);
 
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
         
-        var initiatorTask = initiator.RunAsync(cts.Token);
-        var acceptorTask = acceptor.RunAsync(cts.Token);
+        var initiatorTask = initiator.Start(cts.Token);
+        var acceptorTask = acceptor.Start(cts.Token);
 
         await Task.Delay(100);
 
@@ -284,15 +278,13 @@ public class ConcurrencyTests
     {
         await using var pipe = new DuplexPipe();
         
-        await using var initiator = new StreamMultiplexer(pipe.Stream1, pipe.Stream1,
-            new MultiplexerOptions());
-        await using var acceptor = new StreamMultiplexer(pipe.Stream2, pipe.Stream2,
-            new MultiplexerOptions());
+        await using var initiator = await TestMuxHelper.CreateMuxAsync(pipe.Stream1);
+        await using var acceptor = await TestMuxHelper.CreateMuxAsync(pipe.Stream2);
 
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(90));
         
-        var initiatorTask = initiator.RunAsync(cts.Token);
-        var acceptorTask = acceptor.RunAsync(cts.Token);
+        var initiatorTask = initiator.Start(cts.Token);
+        var acceptorTask = acceptor.Start(cts.Token);
 
         await Task.Delay(100);
 
@@ -329,3 +321,6 @@ public class ConcurrencyTests
         cts.Cancel();
     }
 }
+
+
+
