@@ -6,6 +6,7 @@ using NetConduit.Quic;
 
 namespace NetConduit.Quic.IntegrationTests;
 
+[Collection("QuicTests")]
 public class QuicMultiplexerTests
 {
     [Fact(Timeout = 120000)]

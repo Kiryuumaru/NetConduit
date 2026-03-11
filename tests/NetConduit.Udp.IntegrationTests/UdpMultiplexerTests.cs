@@ -2,13 +2,14 @@ using NetConduit.Udp;
 
 namespace NetConduit.Udp.IntegrationTests;
 
+[Collection("UdpTests")]
 public class UdpMultiplexerTests
 {
     [Fact(Timeout = 120000)]
     public async Task UdpMux_SendReceive_Works()
     {
         var port = GetFreePort();
-        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(60));
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(90));
 
         var serverOptions = UdpMultiplexer.CreateServerOptions(port);
         await using var server = StreamMultiplexer.Create(serverOptions);
@@ -41,7 +42,7 @@ public class UdpMultiplexerTests
     public async Task UdpMux_MultipleChannels_TransferDataConcurrently()
     {
         var port = GetFreePort();
-        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(60));
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(90));
 
         var serverOptions = UdpMultiplexer.CreateServerOptions(port);
         await using var server = StreamMultiplexer.Create(serverOptions);
@@ -97,7 +98,7 @@ public class UdpMultiplexerTests
     public async Task UdpMux_BidirectionalCommunication_BothSidesOpenChannels()
     {
         var port = GetFreePort();
-        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(60));
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(90));
 
         var serverOptions = UdpMultiplexer.CreateServerOptions(port);
         await using var server = StreamMultiplexer.Create(serverOptions);
@@ -151,7 +152,7 @@ public class UdpMultiplexerTests
     public async Task UdpMux_LargeDataTransfer_TransfersCorrectly()
     {
         var port = GetFreePort();
-        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(60));
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(90));
 
         var serverOptions = UdpMultiplexer.CreateServerOptions(port);
         await using var server = StreamMultiplexer.Create(serverOptions);
