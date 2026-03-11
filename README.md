@@ -18,53 +18,52 @@ N streams → 1 stream (mux) → N streams (demux)
 - **Native AOT compatible** - no reflection in core
 - **Modern .NET** - targets .NET 8, 9, and 10
 
+## Documentation
+
+📖 **[Full Documentation](docs/index.md)** - Complete guides, API reference, and examples
+
+| Guide | Description |
+|-------|-------------|
+| [Getting Started](docs/getting-started.md) | Installation and first steps |
+| [Transports](docs/transports/index.md) | TCP, WebSocket, UDP, IPC, QUIC |
+| [Transits](docs/transits/index.md) | MessageTransit, DeltaTransit, DuplexStream |
+| [Concepts](docs/concepts/index.md) | Channels, backpressure, priority, reconnection |
+| [API Reference](docs/api/index.md) | Configuration options, statistics |
+
 ## Installation
 
 ```bash
-# Core package
-dotnet add package NetConduit
+dotnet add package NetConduit       # Core
+dotnet add package NetConduit.Tcp   # TCP transport
+```
 
-# TCP transport helper
-dotnet add package NetConduit.Tcp
-
-# WebSocket transport helper  
-dotnet add package NetConduit.WebSocket
-
-# UDP transport (with built-in reliability layer if you want TCP like UDP for some reason)
-dotnet add package NetConduit.Udp
-
-# IPC transport (named pipes on Windows, Unix sockets on Linux/macOS)
-dotnet add package NetConduit.Ipc
-
-# QUIC transport (.NET 9+ only, requires OS support)
-dotnet add package NetConduit.Quic
+Optional transports:
+```bash
+dotnet add package NetConduit.WebSocket  # WebSocket
+dotnet add package NetConduit.Udp        # UDP with reliability
+dotnet add package NetConduit.Ipc        # Named pipes / Unix sockets
+dotnet add package NetConduit.Quic       # QUIC (.NET 9+)
 ```
 
 ## Quick Start
 
-### TCP Client
+### Client
 
 ```csharp
 using NetConduit;
 using NetConduit.Tcp;
 
-// Create options with StreamFactory for connection + reconnection
 var options = TcpMultiplexer.CreateOptions("localhost", 5000);
-
-// Create multiplexer from options
 var mux = StreamMultiplexer.Create(options);
 var runTask = mux.Start();
 await mux.WaitForReadyAsync();
 
-// Open a channel and send data
-var channel = await mux.OpenChannelAsync(
-    new ChannelOptions { ChannelId = "my-channel" });
-
-await channel.WriteAsync(Encoding.UTF8.GetBytes("Hello, Server!"));
-await channel.DisposeAsync();  // Sends FIN, closes channel gracefully
+var channel = await mux.OpenChannelAsync(new() { ChannelId = "my-channel" });
+await channel.WriteAsync("Hello, Server!"u8.ToArray());
+await channel.DisposeAsync();
 ```
 
-### TCP Server
+### Server
 
 ```csharp
 using NetConduit;
@@ -73,539 +72,70 @@ using NetConduit.Tcp;
 var listener = new TcpListener(IPAddress.Any, 5000);
 listener.Start();
 
-// Accept client and create multiplexer with reconnection support
 var options = TcpMultiplexer.CreateServerOptions(listener);
 var mux = StreamMultiplexer.Create(options);
 var runTask = mux.Start();
 await mux.WaitForReadyAsync();
 
-// Accept channels from client
 await foreach (var channel in mux.AcceptChannelsAsync())
 {
-    // Each channel is a Stream - read data
     var buffer = new byte[1024];
     var bytesRead = await channel.ReadAsync(buffer);
-    Console.WriteLine($"Received on {channel.ChannelId}: {Encoding.UTF8.GetString(buffer, 0, bytesRead)}");
+    Console.WriteLine(Encoding.UTF8.GetString(buffer, 0, bytesRead));
 }
 ```
 
-### WebSocket
+### MessageTransit
 
-```csharp
-using NetConduit;
-using NetConduit.WebSocket;
-
-// Client - create options with StreamFactory
-var options = WebSocketMultiplexer.CreateOptions("ws://localhost:5000/ws");
-var mux = StreamMultiplexer.Create(options);
-var runTask = mux.Start();
-await mux.WaitForReadyAsync();
-
-// Server (ASP.NET Core) - create options for accepted WebSocket
-app.MapGet("/ws", async (HttpContext context) =>
-{
-    var webSocket = await context.WebSockets.AcceptWebSocketAsync();
-    var options = WebSocketMultiplexer.CreateServerOptions(webSocket);
-    var mux = StreamMultiplexer.Create(options);
-    var runTask = mux.Start();
-    await mux.WaitForReadyAsync();
-    // ...
-});
-```
-
-### UDP
-
-```csharp
-using NetConduit;
-using NetConduit.Udp;
-
-// Client - create options with StreamFactory
-var clientOptions = UdpMultiplexer.CreateOptions("localhost", 5000);
-var client = StreamMultiplexer.Create(clientOptions);
-var clientRunTask = client.Start();
-await client.WaitForReadyAsync();
-
-// Server - create options to accept connection
-var serverOptions = UdpMultiplexer.CreateServerOptions(port: 5000);
-var server = StreamMultiplexer.Create(serverOptions);
-var serverRunTask = server.Start();
-await server.WaitForReadyAsync();
-
-// Use channels normally - UDP reliability is handled automatically
-var channel = await client.OpenChannelAsync(new() { ChannelId = "data" });
-await channel.WriteAsync(data);
-```
-
-### IPC (Inter-Process Communication)
-
-```csharp
-using NetConduit;
-using NetConduit.Ipc;
-
-// On Windows: uses named pipes
-// On Linux/macOS: uses Unix domain sockets
-
-// Client - create options with StreamFactory
-var clientOptions = IpcMultiplexer.CreateOptions("my-app-ipc");
-var client = StreamMultiplexer.Create(clientOptions);
-var clientRunTask = client.Start();
-await client.WaitForReadyAsync();
-
-// Server - create options to accept connections
-var serverOptions = IpcMultiplexer.CreateServerOptions("my-app-ipc");
-var server = StreamMultiplexer.Create(serverOptions);
-var serverRunTask = server.Start();
-await server.WaitForReadyAsync();
-
-// Use channels normally
-var channel = await client.OpenChannelAsync(new() { ChannelId = "rpc" });
-```
-
-### QUIC
-
-```csharp
-using NetConduit;
-using NetConduit.Quic;
-using System.Net;
-
-// Requires .NET 9+ and OS support (Windows 11+, Linux with msquic)
-
-// Client - create options with StreamFactory
-var clientOptions = QuicMultiplexer.CreateOptions("localhost", 5000, allowInsecure: true);
-var client = StreamMultiplexer.Create(clientOptions);
-var clientRunTask = client.Start();
-await client.WaitForReadyAsync();
-
-// Server - create listener with certificate, then create options
-var listener = await QuicMultiplexer.ListenAsync(
-    new IPEndPoint(IPAddress.Any, 5000), 
-    certificate);
-var serverOptions = QuicMultiplexer.CreateServerOptions(listener);
-var server = StreamMultiplexer.Create(serverOptions);
-var serverRunTask = server.Start();
-await server.WaitForReadyAsync();
-
-// Use channels normally - benefits from QUIC's built-in multiplexing
-var channel = await client.OpenChannelAsync(new() { ChannelId = "stream" });
-```
-
-## Core Concepts
-
-### Channels
-
-Channels are **simplex (one-way)** streams:
-- **WriteChannel**: Opened by this side for sending data
-- **ReadChannel**: Accepted from remote side for receiving data
-
-For bidirectional communication, open two channels:
-
-```csharp
-// Side A opens a channel - gets WriteChannel
-var sendChannel = await muxA.OpenChannelAsync(new() { ChannelId = "A-to-B" });
-
-// Side B accepts it - gets ReadChannel  
-var receiveChannel = await muxB.AcceptChannelAsync("A-to-B");
-
-// For reverse direction, Side B opens another channel
-var reverseSend = await muxB.OpenChannelAsync(new() { ChannelId = "B-to-A" });
-var reverseReceive = await muxA.AcceptChannelAsync("B-to-A");
-```
-
-### Raw Stream Usage
-
-Channels inherit from `Stream`, so they work with any streaming API:
-
-```csharp
-// Open a channel
-var channel = await mux.OpenChannelAsync(new() { ChannelId = "data" });
-
-// Use as Stream - works with StreamReader/Writer, CopyToAsync, etc.
-using var writer = new StreamWriter(channel);
-await writer.WriteLineAsync("Hello!");
-await writer.FlushAsync();
-```
-
-### Priority
-
-Set channel priority at open time (0-255, higher = higher priority):
-
-```csharp
-// Control messages - highest priority
-var controlChannel = await mux.OpenChannelAsync(new() 
-{ 
-    ChannelId = "control",
-    Priority = ChannelPriority.Highest  // 255
-});
-
-// Bulk data - lower priority
-var dataChannel = await mux.OpenChannelAsync(new() 
-{ 
-    ChannelId = "bulk-data",
-    Priority = ChannelPriority.Low  // 64
-});
-```
-
-### Backpressure
-
-Adaptive credit-based flow control prevents fast senders from overwhelming slow receivers:
-
-```csharp
-var options = new ChannelOptions
-{
-    ChannelId = "controlled",
-    MinCredits = 64 * 1024,            // 64KB minimum buffer
-    MaxCredits = 4 * 1024 * 1024,      // 4MB maximum buffer (starts here)
-    CreditGrantThreshold = 0.5,        // Auto-grant when 50% consumed
-    SendTimeout = TimeSpan.FromSeconds(30)  // Timeout if credits exhausted
-};
-
-var channel = await mux.OpenChannelAsync(options);
-```
-
-### Transits
-
-Transits add semantic meaning to channels. Use extension methods on the multiplexer for easy creation:
-
-```csharp
-using NetConduit.Transits;
-
-// Open a write-only stream
-var writeStream = await mux.OpenStreamAsync("upload");
-
-// Accept a read-only stream
-var readStream = await mux.AcceptStreamAsync("download");
-
-// Open a duplex stream with single channel ID
-// Creates "chat>>" for writing and accepts "chat<<" for reading
-var duplex = await mux.OpenDuplexStreamAsync("chat");
-
-// Or specify separate channel IDs
-var duplex2 = await mux.OpenDuplexStreamAsync("my-out", "their-out");
-
-// Open a message transit with single channel ID
-// Creates "rpc>>" for sending and accepts "rpc<<" for receiving
-var transit = await mux.OpenMessageTransitAsync<Request, Response>(
-    "rpc",
-    MyContext.Default.Request,
-    MyContext.Default.Response);
-```
-
-#### MessageTransit - Send/receive JSON messages
+Send/receive typed JSON messages over channels:
 
 ```csharp
 using NetConduit.Transits;
 using System.Text.Json.Serialization;
 
-// Define message types with AOT-compatible serialization
 public record ChatMessage(string User, string Text);
 
 [JsonSerializable(typeof(ChatMessage))]
 public partial class ChatContext : JsonSerializerContext { }
 
-// Create transit with single channel ID (uses "chat>>" and "chat<<")
-var transit = await mux.OpenMessageTransitAsync<ChatMessage, ChatMessage>(
-    "chat",
-    ChatContext.Default.ChatMessage,
-    ChatContext.Default.ChatMessage);
+// Open transit
+var transit = await mux.OpenMessageTransitAsync("chat", ChatContext.Default.ChatMessage);
 
-// Send/receive messages
+// Send messages
 await transit.SendAsync(new ChatMessage("Alice", "Hello!"));
-var msg = await transit.ReceiveAsync();
-Console.WriteLine($"{msg.User}: {msg.Text}");
-```
 
-#### DuplexStreamTransit - Bidirectional stream
-
-```csharp
-// Open duplex stream with single channel ID (uses "data>>" and "data<<")
-var duplex = await mux.OpenDuplexStreamAsync("data");
-
-// Use with any Stream API
-await duplex.WriteAsync(data);
-var bytesRead = await duplex.ReadAsync(buffer);
-```
-
-#### StreamTransit - Simplex stream
-
-```csharp
-// Open/accept streams directly from multiplexer
-var writeStream = await mux.OpenStreamAsync("upload");
-var readStream = await mux.AcceptStreamAsync("download");
-```
-
-#### DeltaTransit - Efficient state synchronization
-
-Send only what changed, not the entire state. Like git commits: only diffs, not the whole codebase.
-
-```csharp
-using NetConduit.Transits;
-using System.Text.Json.Nodes;
-
-// Open channels for delta transit
-var writeChannel = await mux.OpenChannelAsync(new() { ChannelId = "state>>" });
-var readChannel = await mux.AcceptChannelAsync("state<<");
-
-// Create delta transit (JsonObject doesn't need JsonTypeInfo)
-await using var sender = new DeltaTransit<JsonObject>(writeChannel, null);
-await using var receiver = new DeltaTransit<JsonObject>(null, readChannel);
-
-// Send state - first send is full state
-var state = new JsonObject
+// Receive all messages (recommended pattern)
+await foreach (var msg in transit.ReceiveAllAsync(cancellationToken))
 {
-    ["temp"] = 25.5,
-    ["humidity"] = 60,
-    ["device"] = "sensor-1"
-};
-await sender.SendAsync(state);
-
-// Update only temperature - only delta sent (not full state)
-state["temp"] = 26.0;
-await sender.SendAsync(state);  // Sends: [0, ["temp"], 26.0]
-
-// Receive state (reconstructed from deltas)
-var received = await receiver.ReceiveAsync();
-Console.WriteLine(received["temp"]);  // 26.0
-```
-
-**With POCOs (Native AOT compatible):**
-```csharp
-// Define type with source-generated serialization
-public record SensorReading(double Temp, int Humidity, string Device);
-
-[JsonSerializable(typeof(SensorReading))]
-public partial class SensorContext : JsonSerializerContext { }
-
-// POCO types require JsonTypeInfo
-await using var sender = new DeltaTransit<SensorReading>(
-    writeChannel, null, SensorContext.Default.SensorReading);
-await using var receiver = new DeltaTransit<SensorReading>(
-    null, readChannel, SensorContext.Default.SensorReading);
-```
-
-**Bandwidth savings example:**
-```
-Full state:  { "temp": 25.5, "humidity": 60, "device": "sensor-1", ... }  ~100 bytes
-Delta:       [0, ["temp"], 26.0]                                          ~20 bytes
-Savings:     80% bandwidth reduction for incremental updates
-```
-
-**Supported operations:**
-| Operation | Description |
-|-----------|-------------|
-| `Set` | Add or update property |
-| `Remove` | Remove property |
-| `SetNull` | Explicitly set to null |
-| `ArrayInsert` | Insert element at index |
-| `ArrayRemove` | Remove element at index |
-| `ArrayReplace` | Replace entire array |
-
-### Disconnection Events
-
-NetConduit provides detailed disconnection events for both the multiplexer and individual channels:
-
-```csharp
-var options = TcpMultiplexer.CreateOptions("localhost", 5000);
-var mux = StreamMultiplexer.Create(options);
-
-// Multiplexer-level disconnection event
-mux.OnDisconnected += (reason, exception) =>
-{
-    Console.WriteLine($"Disconnected: {reason}");
-    // DisconnectReason: GoAwayReceived, TransportError, LocalDispose
-    if (exception != null)
-        Console.WriteLine($"Error: {exception.Message}");
-};
-
-// Check disconnect reason after disconnect
-if (mux.DisconnectReason.HasValue)
-    Console.WriteLine($"Was disconnected due to: {mux.DisconnectReason}");
-```
-
-Channel-level close events provide granular control:
-
-```csharp
-var channel = await mux.OpenChannelAsync(new() { ChannelId = "data" });
-
-channel.OnClosed += (reason, exception) =>
-{
-    Console.WriteLine($"Channel closed: {reason}");
-    // ChannelCloseReason: LocalClose, RemoteFin, RemoteError, TransportFailed, MuxDisposed
-};
-
-// Check close reason
-if (channel.CloseReason.HasValue)
-    Console.WriteLine($"Channel was closed due to: {channel.CloseReason}");
-```
-
-Writing to a closed channel throws `ChannelClosedException`:
-
-```csharp
-try
-{
-    await channel.WriteAsync(data);
-}
-catch (ChannelClosedException ex)
-{
-    Console.WriteLine($"Cannot write to channel '{ex.ChannelId}': {ex.CloseReason}");
+    Console.WriteLine($"[{msg.User}] {msg.Text}");
 }
 ```
 
-### Graceful Shutdown
+See [MessageTransit docs](docs/transits/message.md) for more patterns.
 
-Configure graceful shutdown timeout for clean disconnection:
+### DeltaTransit
+
+Send only what changed, not the entire state:
 
 ```csharp
-var options = new MultiplexerOptions
+await using var sender = await mux.OpenSendOnlyDeltaTransitAsync("state", MyContext.Default.GameState);
+await using var receiver = await mux.AcceptReceiveOnlyDeltaTransitAsync("state", MyContext.Default.GameState);
+
+// Send state updates (only deltas after first send)
+var state = new GameState { Score = 100, Health = 80 };
+await sender.SendAsync(state);  // Full state
+
+state = state with { Score = 150 };
+await sender.SendAsync(state);  // Sends only: [0, ["Score"], 150]
+
+// Receive all state updates (recommended pattern)
+await foreach (var state in receiver.ReceiveAllAsync(cancellationToken))
 {
-    GracefulShutdownTimeout = TimeSpan.FromSeconds(5)  // Default: 5 seconds
-};
-
-// DisposeAsync sends GOAWAY, waits for channels to close gracefully,
-// then aborts remaining channels after timeout
-await mux.DisposeAsync();
+    UpdateGameWorld(state);
+}
 ```
 
-### Reconnection
-
-NetConduit supports automatic reconnection with channel state restoration via StreamFactory:
-
-```csharp
-// StreamFactory enables automatic reconnection - when connection drops,
-// multiplexer calls StreamFactory again to establish new connection
-var options = TcpMultiplexer.CreateOptions("localhost", 5000);
-options.EnableReconnection = true;
-options.ReconnectTimeout = TimeSpan.FromSeconds(60);
-options.ReconnectBufferSize = 1024 * 1024;  // 1MB buffer for pending data
-
-var mux = StreamMultiplexer.Create(options);
-
-mux.OnDisconnected += (reason, ex) => Console.WriteLine("Disconnected, reconnecting...");
-mux.OnReconnected += () => Console.WriteLine("Reconnected!");
-
-var runTask = mux.Start();
-await mux.WaitForReadyAsync();
-
-// On disconnect, multiplexer automatically calls StreamFactory to reconnect
-// Channels remain open, pending data is buffered and sent after reconnection
-```
-
-## Configuration
-
-### MultiplexerOptions
-
-| Option | Default | Description |
-|--------|---------|-------------|
-| `StreamFactory` | *required* | Async factory that creates stream pairs for connection/reconnection |
-| `MaxFrameSize` | 16MB | Maximum payload per frame |
-| `PingInterval` | 30s | Heartbeat interval |
-| `PingTimeout` | 10s | Max wait for pong |
-| `MaxMissedPings` | 3 | Missed pings before disconnect |
-| `EnableReconnection` | true | Enable reconnection support |
-| `ReconnectTimeout` | 60s | Max wait for reconnection |
-| `GracefulShutdownTimeout` | 5s | Timeout for graceful mux/channel shutdown |
-| `FlushMode` | Batched | Frame flushing strategy |
-| `FlushInterval` | 1ms | Batched flush interval |
-
-### ChannelOptions
-
-| Option | Default | Description |
-|--------|---------|-------------|
-| `ChannelId` | *required* | Unique channel identifier (0-1024 bytes UTF-8) |
-| `MinCredits` | 64KB | Minimum buffer allowance |
-| `MaxCredits` | 4MB | Maximum buffer allowance (starts here, adapts down) |
-| `SendTimeout` | 30s | Max wait for credits |
-| `Priority` | Normal (128) | Channel priority (0-255) |
-
-## Statistics
-
-```csharp
-// Multiplexer stats
-var stats = mux.Stats;
-Console.WriteLine($"Bytes sent: {stats.BytesSent}");
-Console.WriteLine($"Open channels: {stats.OpenChannels}");
-Console.WriteLine($"Last ping RTT: {stats.LastPingRtt}");
-
-// Per-channel stats
-var channelStats = channel.Stats;
-Console.WriteLine($"Channel bytes: {channelStats.BytesSent}");
-```
-
-### Backpressure Visibility
-
-Monitor backpressure in real-time with detailed statistics and events:
-
-```csharp
-// Per-channel backpressure stats
-var channel = await mux.OpenChannelAsync(new() { ChannelId = "data" });
-
-// Subscribe to backpressure events
-channel.OnCreditStarvation += () => 
-    Console.WriteLine($"Channel '{channel.ChannelId}' is blocked - waiting for credits");
-
-channel.OnCreditRestored += (waitTime) => 
-    Console.WriteLine($"Credits restored after {waitTime.TotalMilliseconds}ms");
-
-// Check channel stats
-Console.WriteLine($"Credit starvation events: {channel.Stats.CreditStarvationCount}");
-Console.WriteLine($"Total wait time: {channel.Stats.TotalWaitTimeForCredits}");
-Console.WriteLine($"Longest single wait: {channel.Stats.LongestWaitForCredits}");
-Console.WriteLine($"Currently waiting: {channel.Stats.IsWaitingForCredits}");
-
-// Mux-level aggregated backpressure stats
-Console.WriteLine($"Total starvation events: {mux.Stats.TotalCreditStarvationEvents}");
-Console.WriteLine($"Channels waiting: {mux.Stats.ChannelsCurrentlyWaitingForCredits}");
-Console.WriteLine($"System backpressure: {mux.Stats.IsExperiencingBackpressure}");
-```
-
-| Channel Stat | Description |
-|--------------|-------------|
-| `CreditStarvationCount` | Times credits hit zero while sending |
-| `TotalWaitTimeForCredits` | Cumulative time waiting for credits |
-| `LongestWaitForCredits` | Longest single credit wait |
-| `IsWaitingForCredits` | Currently blocked waiting for credits |
-| `CurrentWaitDuration` | Duration of current wait (if waiting) |
-
-| Mux Stat | Description |
-|----------|-------------|
-| `TotalCreditStarvationEvents` | All starvation events across channels |
-| `ChannelsCurrentlyWaitingForCredits` | Count of blocked channels |
-| `TotalCreditWaitTime` | Cumulative wait time (all channels) |
-| `IsExperiencingBackpressure` | Any channel currently blocked |
-
-## Samples
-
-The repository includes complete sample applications:
-
-| Sample | Description |
-|--------|-------------|
-| [Pong](samples/NetConduit.Samples.Pong) | Real-time multiplayer Pong game using Terminal.Gui |
-| [RemoteShell](samples/NetConduit.Samples.RemoteShell) | SSH-like remote shell with persistent sessions |
-| [GroupChat](samples/NetConduit.Samples.GroupChat) | Multi-user chat room (TCP/WebSocket) with broadcast |
-| [ChatCli](samples/NetConduit.Samples.ChatCli) | CLI chat app with bidirectional messaging |
-| [FileTransfer](samples/NetConduit.Samples.FileTransfer) | File transfer with progress and concurrent transfers |
-| [RpcFramework](samples/NetConduit.Samples.RpcFramework) | Request/response RPC pattern |
-| [VideoStream](samples/NetConduit.Samples.VideoStream) | Simulated video/audio streaming with priority channels |
-
-Run samples:
-```bash
-# Pong server (Terminal.Gui required)
-dotnet run --project samples/NetConduit.Samples.Pong -- server 5000
-
-# Pong client (another terminal)
-dotnet run --project samples/NetConduit.Samples.Pong -- client 5000 127.0.0.1
-
-# Remote shell server
-dotnet run --project samples/NetConduit.Samples.RemoteShell -- server 6000
-
-# Remote shell client
-dotnet run --project samples/NetConduit.Samples.RemoteShell -- client 6000 127.0.0.1
-
-# Group chat server (TCP)
-dotnet run --project samples/NetConduit.Samples.GroupChat -- server tcp 7000
-
-# Group chat client (TCP)
-dotnet run --project samples/NetConduit.Samples.GroupChat -- client tcp 7000 127.0.0.1 Alice
-```
+See [DeltaTransit docs](docs/transits/delta.md) for details.
 
 ## Architecture
 
@@ -617,100 +147,41 @@ dotnet run --project samples/NetConduit.Samples.GroupChat -- client tcp 7000 127
 │  ┌────────────────┐  ┌────────────────┐  ┌────────────────┐  │
 │  │ MessageTransit │  │ DeltaTransit   │  │ DuplexStream   │  │
 │  └───────┬────────┘  └───────┬────────┘  └───────┬────────┘  │
-│  ┌────────────────┐                                          │
-│  │ StreamTransit  │                                          │
-│  └───────┬────────┘                                          │
 ├──────────┴───────────────────────────────────────────────────┤
 │                         NetConduit                           │
-│  - Frame encoding/decoding (9-byte header)                   │
-│  - Channel management (string ChannelId)                     │
-│  - Credit-based backpressure                                 │
-│  - Priority queuing                                          │
-│  - Ping/pong heartbeat                                       │
-│  - GOAWAY graceful shutdown                                  │
+│  Frame encoding • Channel management • Backpressure          │
+│  Priority queuing • Heartbeat • Graceful shutdown            │
 ├──────────────────────────────────────────────────────────────┤
-│  Transport Layer                                             │
-│  ┌────────────┐ ┌────────────┐ ┌────────────┐ ┌────────────┐ │
-│  │   .Tcp     │ │ .WebSocket │ │    .Udp    │ │    .Ipc    │ │
-│  └────────────┘ └────────────┘ └────────────┘ └────────────┘ │
-│  ┌────────────┐ ┌──────────────────────────────────────────┐ │
-│  │   .Quic    │ │            Any Stream                    │ │
-│  └────────────┘ └──────────────────────────────────────────┘ │
+│  Transport: TCP │ WebSocket │ UDP │ IPC │ QUIC │ Any Stream  │
 └──────────────────────────────────────────────────────────────┘
 ```
 
-## Frame Format
+## Benchmarks
 
-```
-┌─────────────────────────────────────────────────────────────┐
-│ Channel Index (4B) │ Flags (1B) │ Length (4B) │ Payload     │
-└─────────────────────────────────────────────────────────────┘
-```
+Raw TCP vs Multiplexed TCP comparison (1000 channels):
 
-- 9-byte header, big-endian encoding
-- Max 16MB payload (configurable)
-- Frame types: DATA, INIT, FIN, ACK, ERR
+| Test | Raw TCP | Mux TCP | Result |
+|------|---------|---------|--------|
+| 1000 × 1KB | 1,282 ms | 1,097 ms | **Mux 15% faster** |
+| 1000 × 100KB | 675 ms | 571 ms | **Mux 15% faster** |
+| 1000 × 1MB | FAILED* | 1,398 ms | **Mux works** |
 
-## Performance
+*Raw TCP fails at 1000 connections due to socket exhaustion
 
-NetConduit uses several techniques for high performance:
-
-- `System.IO.Pipelines` for zero-copy reads
-- `ArrayPool<byte>` for buffer reuse
-- `Channel<T>` for lock-free queuing
-- `stackalloc` for header serialization
-- `BinaryPrimitives` for fast encoding
-
-### Benchmarks
-
-### Raw TCP vs Multiplexed TCP Comparison
-
-Compares N separate TCP connections (Raw TCP) vs 1 TCP connection with N multiplexed channels (Mux TCP):
-
-| Channels | Data/Channel | Raw TCP | Mux TCP | Ratio | Notes |
-|----------|--------------|---------|---------|-------|-------|
-| 1 | 1 KB | 60 ms | 61 ms | 1.02x | Near parity |
-| 1 | 100 KB | 61 ms | 66 ms | 1.09x | Near parity |
-| 1 | 1 MB | 61 ms | 67 ms | 1.09x | Near parity |
-| 10 | 1 KB | 61 ms | 82 ms | 1.34x | Similar performance |
-| 10 | 100 KB | 59 ms | 88 ms | 1.49x | Similar performance |
-| 10 | 1 MB | 64 ms | 97 ms | 1.52x | Similar performance |
-| 100 | 1 KB | 61 ms | 197 ms | 3.22x | Raw TCP faster |
-| 100 | 100 KB | 73 ms | 128 ms | 1.75x | Raw TCP faster |
-| 100 | 1 MB | 82 ms | 238 ms | 2.90x | Raw TCP faster |
-| 1000 | 1 KB | 1,282 ms | 1,097 ms | **0.86x** | **Mux faster!** |
-| 1000 | 100 KB | 675 ms | 571 ms | **0.85x** | **Mux faster!** |
-| 1000 | 1 MB | **FAILED*** | 1,398 ms | - | **Mux works, Raw TCP fails** |
-
-*Raw TCP fails at 1000 connections × 1MB due to socket exhaustion (OS ephemeral port limits)
-
-**Key Insights:**
-- **Low channel counts (1-10)**: Near parity performance, Mux adds minimal overhead (~1.02-1.52x)
-- **High channel counts (1000)**: **Mux outperforms Raw TCP** by 14-15% due to connection pooling efficiency
-- **Resource efficiency**: Mux uses 1 TCP connection vs N connections, drastically reducing OS overhead
-- **Extreme concurrency**: At 100+ channels with 1MB data, Raw TCP hits OS socket limits while Mux's single-connection design avoids this
-- **Trade-off**: Small overhead at low counts, significant advantage at high counts
-- **Best use cases**: Mux excels when you need many logical streams over limited connections (WebSocket, mobile, firewalls, NAT traversal)
-
-### Running Benchmarks
-
+Run benchmarks:
 ```bash
-cd benchmarks/NetConduit.Benchmarks
-dotnet run -c Release
+dotnet run -c Release --project benchmarks/NetConduit.Benchmarks
 ```
 
-Available benchmark classes:
-- `TcpVsMuxBenchmark` - Direct Raw TCP vs Multiplexed comparison
-- `TcpThroughputBenchmark` - TCP throughput with varying channel counts and data sizes
-- `UdpThroughputBenchmark` - UDP transport throughput benchmarks
-- `IpcThroughputBenchmark` - IPC transport throughput benchmarks
-- `WebSocketThroughputBenchmark` - WebSocket transport throughput benchmarks
-- `TransportComparisonBenchmark` - Compare all transports side-by-side
+## Samples
+
+| Sample | Description |
+|--------|-------------|
+| [ChatCli](samples/NetConduit.Samples.ChatCli) | Multi-user chat with MessageTransit |
+| [FileTransfer](samples/NetConduit.Samples.FileTransfer) | File transfer with progress |
+| [VideoStream](samples/NetConduit.Samples.VideoStream) | Real-time video streaming |
+| [RpcFramework](samples/NetConduit.Samples.RpcFramework) | Request/response RPC pattern |
 
 ## License
 
 MIT License - see [LICENSE](LICENSE) for details.
-
-## Contributing
-
-Contributions welcome! Please read our contributing guidelines before submitting PRs.

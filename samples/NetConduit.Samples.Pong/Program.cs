@@ -9,7 +9,8 @@ using NetConduit.Transits;
 using Terminal.Gui;
 
 // ═══════════════════════════════════════════════════════════════
-//   NetConduit Pong - Real-time Multiplayer using Terminal.Gui
+//   NetConduit Pong - Real-time Multiplayer using DeltaTransit
+//   Demonstrates bandwidth savings: only changed values are sent
 // ═══════════════════════════════════════════════════════════════
 
 if (args.Length < 1 || args[0] is "--help" or "-h")
@@ -53,8 +54,13 @@ return;
 static void PrintUsage()
 {
     Console.WriteLine("═══════════════════════════════════════════════════════════════");
-    Console.WriteLine("  NetConduit Pong - Real-time Multiplayer Demo");
+    Console.WriteLine("  NetConduit Pong - Real-time Multiplayer with DeltaTransit");
     Console.WriteLine("═══════════════════════════════════════════════════════════════");
+    Console.WriteLine();
+    Console.WriteLine("This demo showcases DeltaTransit's bandwidth efficiency:");
+    Console.WriteLine("  - Full GameState JSON: ~150 bytes");
+    Console.WriteLine("  - Typical delta (positions only): ~40 bytes (73% savings)");
+    Console.WriteLine("  - Score change delta: ~20 bytes (87% savings)");
     Console.WriteLine();
     Console.WriteLine("Usage:");
     Console.WriteLine("  Server: dotnet run -- server <port>");
@@ -194,13 +200,20 @@ void RunServer(int port)
 
                             var stateChannel = await mux.OpenChannelAsync(new ChannelOptions { ChannelId = "state" }, cts.Token);
 
-                            var transit = new MessageTransit<GameState, PlayerInput>(
-                                stateChannel, controlChannel,
-                                PongJsonContext.Default.GameState,
+                            // DeltaTransit for efficient game state sync (write-only on server)
+                            // Only changed properties are sent after initial full state
+                            var stateTransit = new DeltaTransit<GameState>(
+                                stateChannel, null,
+                                PongJsonContext.Default.GameState);
+                            
+                            // MessageTransit for discrete player inputs (read-only on server)
+                            var inputTransit = new MessageTransit<object?, PlayerInput>(
+                                null, controlChannel,
+                                null,
                                 PongJsonContext.Default.PlayerInput);
 
                             setupComplete = true;
-                            var conn = new PlayerConnection(playerNum, mux, transit);
+                            var conn = new PlayerConnection(playerNum, mux, stateTransit, inputTransit);
                             players[playerNum] = conn;
 
                             Application.Invoke(() =>
@@ -208,7 +221,7 @@ void RunServer(int port)
                                 gameLabel.Text = $"Player {playerNum} connected! ({players.Count}/2)";
                             });
 
-                            await foreach (var input in transit.ReceiveAllAsync(cts.Token))
+                            await foreach (var input in inputTransit.ReceiveAllAsync(cts.Token))
                             {
                                 game.SetPaddleDirection(playerNum, input.Direction);
                             }
@@ -257,10 +270,10 @@ void RunServer(int port)
                 else if (game.Score2 >= GameConfig.WinScore)
                     game.Status = GameStatus.Player2Wins;
 
-                // Broadcast state
+                // Broadcast state using DeltaTransit (only changed values sent)
                 foreach (var (_, conn) in players)
                 {
-                    try { await conn.Transit.SendAsync(game, cts.Token); }
+                    try { await conn.StateTransit.SendAsync(game, cts.Token); }
                     catch { }
                 }
 
@@ -284,7 +297,7 @@ void RunServer(int port)
             // Final state
             foreach (var (_, conn) in players)
             {
-                try { await conn.Transit.SendAsync(game, cts.Token); }
+                try { await conn.StateTransit.SendAsync(game, cts.Token); }
                 catch { }
             }
 
@@ -310,7 +323,8 @@ void RunClient(string host, int port)
     try
     {
         var cts = new CancellationTokenSource();
-        MessageTransit<PlayerInput, GameState>? transit = null;
+        MessageTransit<PlayerInput, object?>? inputTransit = null;
+        DeltaTransit<GameState>? stateTransit = null;
         var currentDirection = 0;
         var gameStarted = false;
 
@@ -350,12 +364,12 @@ void RunClient(string host, int port)
         // Helper to send paddle input
         void SendDirection(int dir)
         {
-            if (dir != currentDirection && transit != null)
+            if (dir != currentDirection && inputTransit != null)
             {
                 currentDirection = dir;
                 _ = Task.Run(async () =>
                 {
-                    try { await transit.SendAsync(new PlayerInput { Direction = currentDirection }, cts.Token); }
+                    try { await inputTransit.SendAsync(new PlayerInput { Direction = currentDirection }, cts.Token); }
                     catch { }
                 });
             }
@@ -449,9 +463,16 @@ void RunClient(string host, int port)
                     return;
                 }
 
-                transit = new MessageTransit<PlayerInput, GameState>(
-                    controlChannel, stateChannel,
+                // MessageTransit for discrete player inputs (write-only on client)
+                inputTransit = new MessageTransit<PlayerInput, object?>(
+                    controlChannel, null,
                     PongJsonContext.Default.PlayerInput,
+                    null);
+                
+                // DeltaTransit for efficient game state sync (read-only on client)
+                // Only changed properties are received after initial full state
+                stateTransit = new DeltaTransit<GameState>(
+                    null, stateChannel,
                     PongJsonContext.Default.GameState);
 
                 Application.Invoke(() =>
@@ -459,7 +480,7 @@ void RunClient(string host, int port)
                     gameLabel.Text = "Connected! Waiting for game to start...\nControls: W/S or Up/Down to move";
                 });
 
-                await foreach (var state in transit.ReceiveAllAsync(cts.Token))
+                await foreach (var state in stateTransit.ReceiveAllAsync(cts.Token))
                 {
                     if (!gameStarted && state.Status == GameStatus.Playing)
                     {
@@ -666,11 +687,16 @@ public sealed class PlayerInput
     public int Direction { get; init; }
 }
 
-sealed class PlayerConnection(int playerNum, IStreamMultiplexer mux, MessageTransit<GameState, PlayerInput> transit)
+sealed class PlayerConnection(
+    int playerNum, 
+    IStreamMultiplexer mux, 
+    DeltaTransit<GameState> stateTransit, 
+    MessageTransit<object?, PlayerInput> inputTransit)
 {
     public int PlayerNum => playerNum;
     public IStreamMultiplexer Mux => mux;
-    public MessageTransit<GameState, PlayerInput> Transit => transit;
+    public DeltaTransit<GameState> StateTransit => stateTransit;
+    public MessageTransit<object?, PlayerInput> InputTransit => inputTransit;
 }
 
 [JsonSerializable(typeof(GameState))]

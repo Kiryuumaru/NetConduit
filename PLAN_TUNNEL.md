@@ -1,5 +1,7 @@
 # TcpTunnel Sample - Port Forwarding via NetConduit
 
+**Status: ✅ Implemented** - See [samples/NetConduit.Samples.TcpTunnel](samples/NetConduit.Samples.TcpTunnel)
+
 ## Overview
 
 TCP port forwarding through a relay server, enabling access to services behind NAT/firewall. Similar to SSH `-L` tunneling or ngrok.

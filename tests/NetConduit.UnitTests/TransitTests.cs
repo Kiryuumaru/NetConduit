@@ -1000,16 +1000,14 @@ public partial class TransitTests
         var runB = muxB.Start(cts.Token);
 
         // Side A opens message transit with single channelId (opens "rpc>>", accepts "rpc<<")
-        var transitATask = muxA.OpenMessageTransitAsync<TestMessage, TestMessage>(
+        var transitATask = muxA.OpenMessageTransitAsync(
             "rpc",
-            TestJsonContext.Default.TestMessage,
             TestJsonContext.Default.TestMessage,
             cancellationToken: cts.Token);
 
         // Side B accepts message transit with single channelId (accepts "rpc>>", opens "rpc<<")
-        var transitBTask = muxB.AcceptMessageTransitAsync<TestMessage, TestMessage>(
+        var transitBTask = muxB.AcceptMessageTransitAsync(
             "rpc",
-            TestJsonContext.Default.TestMessage,
             TestJsonContext.Default.TestMessage,
             cancellationToken: cts.Token);
 

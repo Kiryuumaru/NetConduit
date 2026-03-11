@@ -11,6 +11,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\src\NetConduit.Tcp\NetConduit.Tcp.csproj" />
+    <ProjectReference Include="..\..\src\NetConduit.WebSocket\NetConduit.WebSocket.csproj" />
   </ItemGroup>
 
 </Project>

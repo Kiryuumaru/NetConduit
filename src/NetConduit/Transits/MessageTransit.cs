@@ -37,8 +37,8 @@ public sealed class MessageTransit<TSend, TReceive> : IMessageTransit<TSend, TRe
     public MessageTransit(
         WriteChannel? writeChannel,
         ReadChannel? readChannel,
-        JsonTypeInfo<TSend> sendTypeInfo,
-        JsonTypeInfo<TReceive> receiveTypeInfo,
+        JsonTypeInfo<TSend>? sendTypeInfo,
+        JsonTypeInfo<TReceive>? receiveTypeInfo,
         int maxMessageSize = 16 * 1024 * 1024)
     {
         _writeChannel = writeChannel;
