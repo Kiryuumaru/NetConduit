@@ -48,11 +48,11 @@ For bidirectional, use two channels or [DuplexStreamTransit](../transits/duplex-
 
 ### Credits Control Flow
 
-Receivers advertise how much they can accept. Senders pause when credits exhausted. This prevents fast producers from overwhelming slow consumers.
+Receivers advertise how much they can accept. Senders pause when credits exhausted. This prevents fast producers from overwhelming slow consumers. See [Backpressure](backpressure.md).
 
 ### Priority is Local
 
-Priority determines which frames from this multiplexer get sent first. Higher priority channels get bandwidth preference.
+[Priority](priority.md) determines which frames from this multiplexer get sent first. Higher priority channels get bandwidth preference.
 
 ### Multiplexer Owns the Stream
 

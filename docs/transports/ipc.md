@@ -1,6 +1,6 @@
 # IPC Transport
 
-Inter-Process Communication using named pipes (Windows) or Unix domain sockets (Linux/macOS). Fastest option for same-machine communication.
+Inter-Process Communication using named pipes (Windows) or Unix domain sockets (Linux/macOS). Fastest option for same-machine communication. See [Transport Comparison](index.md) for alternatives.
 
 ## Installation
 

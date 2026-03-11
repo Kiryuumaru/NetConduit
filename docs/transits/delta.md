@@ -1,6 +1,6 @@
 # DeltaTransit
 
-Efficiently synchronize state by sending only what changed. Like git commits: only diffs, not the whole codebase.
+Efficiently synchronize state by sending only what changed. Like git commits: only diffs, not the whole codebase. See [Transit Overview](index.md) for alternatives.
 
 ## Why DeltaTransit?
 

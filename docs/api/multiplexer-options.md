@@ -1,6 +1,6 @@
 # MultiplexerOptions
 
-Configuration for creating a StreamMultiplexer.
+Configuration for creating a StreamMultiplexer. See [Getting Started](../getting-started.md) for basic usage.
 
 ## Properties
 
@@ -50,6 +50,8 @@ var options = new MultiplexerOptions
 
 ## Heartbeat Configuration
 
+Heartbeats detect dead connections. See [Reconnection](../concepts/reconnection.md) for recovery behavior.
+
 ```csharp
 var options = new MultiplexerOptions
 {
@@ -61,6 +63,8 @@ var options = new MultiplexerOptions
 ```
 
 ## Reconnection Configuration
+
+See [Reconnection](../concepts/reconnection.md) for full behavior details.
 
 ```csharp
 var options = new MultiplexerOptions

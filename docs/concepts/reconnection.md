@@ -1,6 +1,6 @@
 # Reconnection
 
-Automatic recovery from network disconnects with channel state restoration.
+Automatic recovery from network disconnects with [channel](channels.md) state restoration. See [Concepts Overview](index.md) for related topics.
 
 ## How It Works
 
@@ -64,6 +64,8 @@ var mux = StreamMultiplexer.Create(options);
 
 ## Reconnection Events
 
+See [Events](events.md) for full event details.
+
 ```csharp
 var mux = StreamMultiplexer.Create(options);
 
@@ -95,6 +97,8 @@ mux.OnReconnectFailed += (exception) =>
 ```
 
 ## Configuration Options
+
+See [MultiplexerOptions](../api/multiplexer-options.md) for full configuration.
 
 | Option | Default | Description |
 |--------|---------|-------------|

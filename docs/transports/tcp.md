@@ -1,6 +1,6 @@
 # TCP Transport
 
-The most common transport for server-to-server or LAN communication.
+The most common transport for server-to-server or LAN communication. See [Transport Comparison](index.md) for alternatives.
 
 ## Installation
 
@@ -108,7 +108,7 @@ options.ConfigureTcpClient = (client) =>
 };
 ```
 
-### Reconnection
+### [Reconnection](../concepts/reconnection.md)
 
 ```csharp
 var options = TcpMultiplexer.CreateOptions("localhost", 5000);

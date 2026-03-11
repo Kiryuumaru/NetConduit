@@ -14,7 +14,11 @@ dotnet add package NetConduit.Ipc        # Named pipes / Unix sockets
 dotnet add package NetConduit.Quic       # QUIC (.NET 9+, requires OS support)
 ```
 
+See [Transports](transports/index.md) for details on each transport: [TCP](transports/tcp.md), [WebSocket](transports/websocket.md), [UDP](transports/udp.md), [IPC](transports/ipc.md), [QUIC](transports/quic.md).
+
 ## Your First Multiplexer
+
+Create a [TCP](transports/tcp.md) server and client that communicate over [channels](concepts/channels.md).
 
 ### TCP Server
 
@@ -25,30 +29,17 @@ using System.Net;
 using System.Net.Sockets;
 using System.Text;
 
-// 1. Start TCP listener
 var listener = new TcpListener(IPAddress.Any, 5000);
 listener.Start();
-Console.WriteLine("Server listening on port 5000...");
 
-// 2. Create multiplexer with server options
-var options = TcpMultiplexer.CreateServerOptions(listener);
-var mux = StreamMultiplexer.Create(options);
+var mux = StreamMultiplexer.Create(TcpMultiplexer.CreateServerOptions(listener));
+_ = mux.Start();
 
-// 3. Start the multiplexer
-var runTask = mux.Start();
-await mux.WaitForReadyAsync();
-Console.WriteLine("Client connected!");
-
-// 4. Accept channels from client
 await foreach (var channel in mux.AcceptChannelsAsync())
 {
-    Console.WriteLine($"New channel: {channel.ChannelId}");
-    
-    // Read data from channel
     var buffer = new byte[1024];
     var bytesRead = await channel.ReadAsync(buffer);
-    var message = Encoding.UTF8.GetString(buffer, 0, bytesRead);
-    Console.WriteLine($"Received: {message}");
+    Console.WriteLine(Encoding.UTF8.GetString(buffer, 0, bytesRead));
 }
 ```
 
@@ -59,60 +50,42 @@ using NetConduit;
 using NetConduit.Tcp;
 using System.Text;
 
-// 1. Create multiplexer with client options
-var options = TcpMultiplexer.CreateOptions("localhost", 5000);
-var mux = StreamMultiplexer.Create(options);
+var mux = StreamMultiplexer.Create(TcpMultiplexer.CreateOptions("localhost", 5000));
+_ = mux.Start();
 
-// 2. Start and wait for connection
-var runTask = mux.Start();
-await mux.WaitForReadyAsync();
-Console.WriteLine("Connected to server!");
-
-// 3. Open a channel and send data
 var channel = await mux.OpenChannelAsync(new() { ChannelId = "greeting" });
 await channel.WriteAsync(Encoding.UTF8.GetBytes("Hello, Server!"));
-
-// 4. Close channel gracefully
 await channel.DisposeAsync();
-
-// 5. Shutdown multiplexer
-await mux.DisposeAsync();
 ```
 
 ## Using Transits (Recommended)
 
-Transits provide higher-level messaging patterns. Here's the most common pattern:
+[Transits](transits/index.md) provide higher-level messaging patterns.
 
-### MessageTransit with ReceiveAllAsync
+### [MessageTransit](transits/message.md)
 
 ```csharp
 using NetConduit.Transits;
 using System.Text.Json.Serialization;
 
-// Define your message type
 public record ChatMessage(string User, string Text);
 
 [JsonSerializable(typeof(ChatMessage))]
 public partial class ChatContext : JsonSerializerContext { }
 
-// Server: accept and process messages
+// Server
 await using var transit = await mux.AcceptMessageTransitAsync("chat", ChatContext.Default.ChatMessage);
+await foreach (var msg in transit.ReceiveAllAsync(ct))
+    Console.WriteLine($"[{msg.User}] {msg.Text}");
 
-await foreach (var message in transit.ReceiveAllAsync(cancellationToken))
-{
-    Console.WriteLine($"[{message.User}] {message.Text}");
-}
-
-// Client: send messages
+// Client
 await using var transit = await mux.OpenMessageTransitAsync("chat", ChatContext.Default.ChatMessage);
-
 await transit.SendAsync(new ChatMessage("Alice", "Hello!"));
-await transit.SendAsync(new ChatMessage("Alice", "How are you?"));
 ```
 
-### DeltaTransit with ReceiveAllAsync
+### [DeltaTransit](transits/delta.md)
 
-For state synchronization:
+For state synchronization - only changed fields are sent:
 
 ```csharp
 public record GameState(int Score, int Health);
@@ -120,70 +93,47 @@ public record GameState(int Score, int Health);
 [JsonSerializable(typeof(GameState))]
 public partial class GameContext : JsonSerializerContext { }
 
-// Receiver: process state updates
+// Receiver
 await using var receiver = await mux.AcceptReceiveOnlyDeltaTransitAsync("state", GameContext.Default.GameState);
-
-await foreach (var state in receiver.ReceiveAllAsync(cancellationToken))
-{
+await foreach (var state in receiver.ReceiveAllAsync(ct))
     UpdateUI(state);
-}
 
-// Sender: push state changes (only deltas are sent)
+// Sender
 await using var sender = await mux.OpenSendOnlyDeltaTransitAsync("state", GameContext.Default.GameState);
-
-var state = new GameState(100, 80);
-await sender.SendAsync(state);
-
-state = state with { Score = 150 };  // Only Score change is sent
-await sender.SendAsync(state);
+await sender.SendAsync(new GameState(100, 80));
+await sender.SendAsync(new GameState(150, 80));  // Only Score delta sent
 ```
 
 ## Key Concepts
 
-### Channels are Simplex (One-Way)
+### [Channels](concepts/channels.md) are Simplex (One-Way)
 
-When you open a channel, you get a **WriteChannel** for sending. The other side accepts it as a **ReadChannel** for receiving.
+`OpenChannelAsync` returns a **WriteChannel**, `AcceptChannelAsync` returns a **ReadChannel**.
 
 ```csharp
-// Client opens → gets WriteChannel
-var sendChannel = await clientMux.OpenChannelAsync(new() { ChannelId = "data" });
+// Client → WriteChannel
+var sendChannel = await mux.OpenChannelAsync(new() { ChannelId = "data" });
 await sendChannel.WriteAsync(data);
 
-// Server accepts → gets ReadChannel
-var receiveChannel = await serverMux.AcceptChannelAsync("data");
-var bytesRead = await receiveChannel.ReadAsync(buffer);
+// Server → ReadChannel  
+var receiveChannel = await mux.AcceptChannelAsync("data");
+await receiveChannel.ReadAsync(buffer);
 ```
 
-For bidirectional communication, use [DuplexStreamTransit](transits/duplex-stream.md) or open two channels.
+For bidirectional, use [DuplexStreamTransit](transits/duplex-stream.md) or open two channels.
 
-### Channels are Streams
+### Channels Inherit from Stream
 
-Channels inherit from `Stream`, so they work with any .NET streaming API:
+[Channels](concepts/channels.md) inherit from `Stream`:
 
 ```csharp
-var channel = await mux.OpenChannelAsync(new() { ChannelId = "text" });
-
-// Use with StreamWriter
-using var writer = new StreamWriter(channel);
-await writer.WriteLineAsync("Hello!");
-await writer.FlushAsync();
-
-// Use with CopyToAsync
+var channel = await mux.OpenChannelAsync(new() { ChannelId = "file" });
 await sourceStream.CopyToAsync(channel);
-```
-
-### Graceful Shutdown
-
-Always dispose the multiplexer when done:
-
-```csharp
-// Sends GOAWAY frame, waits for channels to close gracefully
-await mux.DisposeAsync();
 ```
 
 ## Next Steps
 
 - [Choose a transport](transports/index.md) for your use case
-- [Use transits](transits/index.md) for structured messaging (MessageTransit, DeltaTransit)
+- [Use transits](transits/index.md) for structured messaging
 - [Understand backpressure](concepts/backpressure.md) for flow control
 - [Browse API reference](api/index.md) for configuration options

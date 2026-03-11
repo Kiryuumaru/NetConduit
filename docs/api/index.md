@@ -1,6 +1,6 @@
 # API Reference
 
-Quick reference for NetConduit classes and options.
+Quick reference for NetConduit classes and options. See [Getting Started](../getting-started.md) for usage examples.
 
 ## Core Types
 

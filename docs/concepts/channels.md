@@ -1,6 +1,6 @@
 # Channels
 
-Channels are virtual one-way streams over a single physical connection.
+Channels are virtual one-way streams over a single physical connection. See [Concepts Overview](index.md) for related concepts.
 
 ## Simplex Design
 
@@ -170,6 +170,8 @@ await duplexB.ReadAsync(buffer);
 
 ## Channel Statistics
 
+See [Statistics](../api/statistics.md) for full details.
+
 ```csharp
 var stats = channel.Stats;
 
@@ -181,6 +183,8 @@ Console.WriteLine($"Waiting for credits: {stats.IsWaitingForCredits}");
 
 ## Channel Events
 
+See [Events](events.md) for full details.
+
 ```csharp
 var channel = await mux.OpenChannelAsync(options);
 
@@ -191,7 +195,7 @@ channel.OnClosed += (reason, exception) =>
     // ChannelCloseReason: LocalClose, RemoteFin, RemoteError, TransportFailed, MuxDisposed
 };
 
-// Backpressure events
+// [Backpressure](backpressure.md) events
 channel.OnCreditStarvation += () => Console.WriteLine("Blocked - waiting for credits");
 channel.OnCreditRestored += (waitTime) => Console.WriteLine($"Credits restored after {waitTime}");
 ```

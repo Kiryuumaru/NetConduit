@@ -1,6 +1,6 @@
 # Events
 
-Notifications for connection state changes and channel lifecycle.
+Notifications for connection state changes and [channel](channels.md) lifecycle. See [Concepts Overview](index.md) for related topics.
 
 ## Multiplexer Events
 
@@ -30,7 +30,7 @@ mux.OnDisconnected += (reason, exception) =>
 
 ### OnReconnecting
 
-Fired when attempting to reconnect:
+Fired when attempting to reconnect. See [Reconnection](reconnection.md) for configuration.
 
 ```csharp
 mux.OnReconnecting += () =>
@@ -92,7 +92,7 @@ channel.OnClosed += (reason, exception) =>
 
 ### OnCreditStarvation
 
-Fired when channel blocks waiting for credits:
+Fired when channel blocks waiting for credits. See [Backpressure](backpressure.md) for more details.
 
 ```csharp
 channel.OnCreditStarvation += () =>

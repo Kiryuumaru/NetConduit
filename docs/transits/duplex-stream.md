@@ -1,6 +1,6 @@
 # DuplexStreamTransit
 
-Bidirectional stream abstraction over two simplex channels. Read and write on the same stream object.
+Bidirectional stream abstraction over two simplex [channels](../concepts/channels.md). Read and write on the same stream object. See [Transit Overview](index.md) for alternatives.
 
 ## Basic Usage
 

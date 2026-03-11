@@ -1,6 +1,6 @@
 # MessageTransit
 
-Send and receive JSON-serialized messages. Ideal for RPC, events, and command patterns.
+Send and receive JSON-serialized messages. Ideal for RPC, events, and command patterns. See [Transit Overview](index.md) for alternatives.
 
 ## Basic Usage
 

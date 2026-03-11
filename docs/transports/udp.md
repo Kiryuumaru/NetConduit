@@ -1,6 +1,6 @@
 # UDP Transport
 
-UDP with a built-in reliability layer. Best for scenarios requiring low latency with optional reliability.
+UDP with a built-in reliability layer. Best for scenarios requiring low latency with optional reliability. See [Transport Comparison](index.md) for alternatives.
 
 ## Installation
 
@@ -131,9 +131,9 @@ Default max payload respects typical MTU (~1400 bytes). Larger messages are auto
 | Real-time games | ✅ Yes |
 | Voice/video streaming | ✅ Yes |
 | IoT sensors (same network) | ✅ Yes |
-| File transfer | ❌ Use TCP |
-| Web API calls | ❌ Use WebSocket |
-| Cross-internet reliability | ⚠️ Consider QUIC |
+| File transfer | ❌ Use [TCP](tcp.md) |
+| Web API calls | ❌ Use [WebSocket](websocket.md) |
+| Cross-internet reliability | ⚠️ Consider [QUIC](quic.md) |
 
 ## Performance
 

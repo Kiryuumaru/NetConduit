@@ -11,6 +11,7 @@
 | [Transits](transits/index.md) | MessageTransit, DeltaTransit, DuplexStream, Stream |
 | [Concepts](concepts/index.md) | Channels, backpressure, priority, reconnection |
 | [API Reference](api/index.md) | Options, statistics, events |
+| [Samples](samples/index.md) | Complete example applications |
 
 ## Quick Example
 
@@ -62,25 +63,25 @@ N streams → 1 stream (mux) → N streams (demux)
 ## Architecture Overview
 
 ```
-┌──────────────────────────────────────────────────────────────┐
-│                         Application                          │
-├──────────────────────────────────────────────────────────────┤
-│  Transit Layer (Optional)                                    │
-│  ┌────────────────┐  ┌────────────────┐  ┌────────────────┐  │
-│  │ MessageTransit │  │ DeltaTransit   │  │ DuplexStream   │  │
-│  └────────────────┘  └────────────────┘  └────────────────┘  │
-├──────────────────────────────────────────────────────────────┤
-│                         NetConduit                           │
-│  - Frame encoding/decoding                                   │
-│  - Channel management                                        │
-│  - Credit-based backpressure                                 │
-│  - Priority queuing                                          │
-├──────────────────────────────────────────────────────────────┤
-│  Transport Layer                                             │
-│  ┌────────┐ ┌────────┐ ┌────────┐ ┌────────┐ ┌────────┐     │
-│  │  TCP   │ │   WS   │ │  UDP   │ │  IPC   │ │  QUIC  │     │
-│  └────────┘ └────────┘ └────────┘ └────────┘ └────────┘     │
-└──────────────────────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────────────────────────────┐
+│                              Application                                     │
+├──────────────────────────────────────────────────────────────────────────────┤
+│  Transit Layer (Optional)                                                    │
+│  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐      │
+│  │MessageTransit│  │ DeltaTransit │  │ DuplexStream │  │    Stream    │      │
+│  └──────────────┘  └──────────────┘  └──────────────┘  └──────────────┘      │
+├──────────────────────────────────────────────────────────────────────────────┤
+│                              NetConduit                                      │
+│  - Frame encoding/decoding                                                   │
+│  - Channel management                                                        │
+│  - Credit-based backpressure                                                 │
+│  - Priority queuing                                                          │
+├──────────────────────────────────────────────────────────────────────────────┤
+│  Transport Layer                                                             │
+│  ┌────────┐  ┌────────┐  ┌────────┐  ┌────────┐  ┌────────┐                  │
+│  │  TCP   │  │   WS   │  │  UDP   │  │  IPC   │  │  QUIC  │                  │
+│  └────────┘  └────────┘  └────────┘  └────────┘  └────────┘                  │
+└──────────────────────────────────────────────────────────────────────────────┘
 ```
 
 ## Next Steps
@@ -89,3 +90,4 @@ N streams → 1 stream (mux) → N streams (demux)
 2. **Choosing a transport?** See [Transport Comparison](transports/index.md#comparison)
 3. **Need structured data?** Check out [Transits](transits/index.md)
 4. **Configuration options?** Browse [API Reference](api/index.md)
+5. **Learn by example?** Explore [Samples](samples/index.md)

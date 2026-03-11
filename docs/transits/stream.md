@@ -1,6 +1,6 @@
 # StreamTransit
 
-Simple one-way stream wrapper for channels. Write to one side, read from the other.
+Simple one-way stream wrapper for [channels](../concepts/channels.md). Write to one side, read from the other. See [Transit Overview](index.md) for alternatives.
 
 ## Basic Usage
 
@@ -33,7 +33,7 @@ Use StreamTransit when you need:
 - **Stream API compatibility**
 - **File uploads/downloads**
 
-Use raw channels directly when you want more control.
+Use [raw channels](../concepts/channels.md) directly when you want more control.
 
 ## Open vs Accept
 

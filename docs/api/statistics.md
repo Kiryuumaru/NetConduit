@@ -1,6 +1,6 @@
 # Statistics
 
-Runtime metrics exposed by the multiplexer.
+Runtime metrics exposed by the multiplexer. Use with [Events](../concepts/events.md) for monitoring.
 
 ## Accessing Statistics
 

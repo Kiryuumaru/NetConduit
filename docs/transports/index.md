@@ -36,7 +36,7 @@ Need to work through firewalls/proxies?
 
 ## Using Any Stream
 
-NetConduit works with any bidirectional `Stream`. You can provide your own:
+NetConduit works with any bidirectional `Stream`. You can provide your own via [MultiplexerOptions](../api/multiplexer-options.md):
 
 ```csharp
 // Your custom stream (must be bidirectional)

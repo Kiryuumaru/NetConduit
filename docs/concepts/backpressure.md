@@ -1,6 +1,6 @@
 # Backpressure
 
-Credit-based flow control prevents fast senders from overwhelming slow receivers.
+Credit-based flow control prevents fast senders from overwhelming slow receivers. See [Concepts Overview](index.md) for related topics.
 
 ## How It Works
 
@@ -36,6 +36,8 @@ await channel.WriteAsync(largeData);  // Might wait for credits
 ## Configuration
 
 ### Per-Channel Options
+
+See [ChannelOptions](../api/channel-options.md) for full details.
 
 ```csharp
 var options = new ChannelOptions

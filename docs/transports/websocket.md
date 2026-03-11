@@ -1,6 +1,6 @@
 # WebSocket Transport
 
-Ideal for web applications, browser communication, and traversing firewalls/proxies.
+Ideal for web applications, browser communication, and traversing firewalls/proxies. See [Transport Comparison](index.md) for alternatives.
 
 ## Installation
 
@@ -114,7 +114,7 @@ options.ConfigureWebSocket = (ws) =>
 };
 ```
 
-### Reconnection
+### [Reconnection](../concepts/reconnection.md)
 
 ```csharp
 var options = WebSocketMultiplexer.CreateOptions("ws://localhost:5000/ws");

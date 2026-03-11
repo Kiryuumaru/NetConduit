@@ -1,6 +1,6 @@
 # QUIC Transport
 
-Modern transport protocol with built-in multiplexing, 0-RTT connection establishment, and improved performance on lossy networks.
+Modern transport protocol with built-in multiplexing, 0-RTT connection establishment, and improved performance on lossy networks. See [Transport Comparison](index.md) for alternatives.
 
 ## Requirements
 

@@ -1,6 +1,6 @@
 # ChannelOptions
 
-Configuration for opening individual channels.
+Configuration for opening individual [channels](../concepts/channels.md).
 
 ## Properties
 
@@ -14,7 +14,7 @@ Configuration for opening individual channels.
 
 ## Priority
 
-Higher values get more bandwidth:
+Higher values get more bandwidth. See [Priority](../concepts/priority.md) for details.
 
 ```csharp
 // Video stream - highest priority
@@ -38,7 +38,7 @@ var regularChannel = await mux.OpenChannelAsync("chat", new ChannelOptions
 
 ## Flow Control
 
-Credits control backpressure:
+Credits control [backpressure](../concepts/backpressure.md):
 
 ```csharp
 // Small buffer - memory constrained

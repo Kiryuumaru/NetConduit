@@ -1,6 +1,6 @@
 # Transits
 
-Transits add semantic meaning to raw channels, providing higher-level messaging patterns.
+Transits add semantic meaning to raw [channels](../concepts/channels.md), providing higher-level messaging patterns.
 
 ## Overview
 
@@ -103,7 +103,7 @@ All transits expose:
 
 ## Native AOT Support
 
-All transits support Native AOT via `JsonTypeInfo`:
+All transits support Native AOT via `JsonTypeInfo`. See [API Reference](../api/index.md) for configuration options.
 
 ```csharp
 // Define source-generated serialization

@@ -1,6 +1,6 @@
 # Priority
 
-Frame scheduling based on channel importance. Higher priority channels get bandwidth preference.
+Frame scheduling based on [channel](channels.md) importance. Higher priority channels get bandwidth preference. See [Concepts Overview](index.md) for related topics.
 
 ## How It Works
 
@@ -28,6 +28,8 @@ Frame scheduling based on channel importance. Higher priority channels get bandw
 | `Lowest` | 0 | Best-effort, can be delayed |
 
 ## Setting Priority
+
+See [ChannelOptions](../api/channel-options.md) for full configuration.
 
 ```csharp
 // Use predefined levels
@@ -200,7 +202,7 @@ background: Low
 // Test with concurrent bulk transfers
 ```
 
-**Combine with backpressure:**
+**Combine with [backpressure](backpressure.md):**
 ```csharp
 // Low priority + small credit buffer = background transfer
 var background = await mux.OpenChannelAsync(new()
