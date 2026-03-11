@@ -100,16 +100,28 @@ public static class UdpMultiplexer
 
     private static async Task TryReceiveHelloAckAsync(UdpClient client, CancellationToken cancellationToken)
     {
-        try
+        // Retry sending HELLO until we get ACK or max retries exceeded
+        const int maxRetries = 10;
+        const int retryDelayMs = 100;
+        
+        for (int i = 0; i < maxRetries; i++)
         {
-            using var cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-            cts.CancelAfter(TimeSpan.FromSeconds(1));
-            var result = await client.ReceiveAsync(cts.Token).ConfigureAwait(false);
-            _ = result;
+            try
+            {
+                using var cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+                cts.CancelAfter(TimeSpan.FromMilliseconds(retryDelayMs));
+                var result = await client.ReceiveAsync(cts.Token).ConfigureAwait(false);
+                if (result.Buffer.AsSpan().SequenceEqual(HelloAckPayload))
+                {
+                    return; // Got ACK
+                }
+            }
+            catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+            {
+                // Timeout - retry sending HELLO
+                await client.SendAsync(HelloPayload, cancellationToken).ConfigureAwait(false);
+            }
         }
-        catch
-        {
-            // Best-effort: ignore timeouts/failures
-        }
+        // Best-effort: proceed even without ACK after max retries
     }
 }

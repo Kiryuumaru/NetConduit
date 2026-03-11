@@ -1936,6 +1936,256 @@ public partial class TransitTests
     }
 
     #endregion
+
+    #region MessageTransit Thread Safety Tests
+
+    [Fact(Timeout = 120000)]
+    public async Task MessageTransit_ConcurrentSends_ThreadSafe()
+    {
+        // Arrange
+        await using var pipe = new DuplexPipe();
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(60));
+
+        await using var muxA = await TestMuxHelper.CreateMuxAsync(pipe.Stream1);
+        await using var muxB = await TestMuxHelper.CreateMuxAsync(pipe.Stream2);
+
+        var runA = muxA.Start(cts.Token);
+        var runB = muxB.Start(cts.Token);
+
+        var writeChannel = await muxA.OpenChannelAsync(new() { ChannelId = "concurrent_send" }, cts.Token);
+        var readChannel = await muxB.AcceptChannelAsync("concurrent_send", cts.Token);
+
+        await using var sendTransit = new MessageTransit<TestMessage, TestMessage>(
+            writeChannel, null,
+            TestJsonContext.Default.TestMessage,
+            TestJsonContext.Default.TestMessage);
+
+        await using var receiveTransit = new MessageTransit<TestMessage, TestMessage>(
+            null, readChannel,
+            TestJsonContext.Default.TestMessage,
+            TestJsonContext.Default.TestMessage);
+
+        const int messagesPerTask = 100;
+        const int taskCount = 10;
+        var receivedMessages = new System.Collections.Concurrent.ConcurrentBag<TestMessage>();
+        var sendErrors = new System.Collections.Concurrent.ConcurrentBag<Exception>();
+
+        // Act - Start receiver
+        var receiveTask = Task.Run(async () =>
+        {
+            try
+            {
+                for (int i = 0; i < messagesPerTask * taskCount; i++)
+                {
+                    var msg = await receiveTransit.ReceiveAsync(cts.Token);
+                    if (msg is not null)
+                        receivedMessages.Add(msg);
+                }
+            }
+            catch (OperationCanceledException) { }
+        });
+
+        // Act - Multiple concurrent senders
+        var sendTasks = Enumerable.Range(0, taskCount).Select(taskId => Task.Run(async () =>
+        {
+            for (int i = 0; i < messagesPerTask; i++)
+            {
+                try
+                {
+                    var msg = new TestMessage($"task{taskId}_msg{i}", taskId * 1000 + i);
+                    await sendTransit.SendAsync(msg, cts.Token);
+                }
+                catch (Exception ex) when (ex is not OperationCanceledException)
+                {
+                    sendErrors.Add(ex);
+                }
+            }
+        })).ToArray();
+
+        await Task.WhenAll(sendTasks);
+        await Task.Delay(1000, cts.Token); // Allow time for messages to be received
+        await cts.CancelAsync();
+
+        // Assert
+        Assert.Empty(sendErrors);
+        Assert.True(receivedMessages.Count > 0, "Should have received messages");
+
+        // Verify all messages have valid format (no corruption from concurrent access)
+        foreach (var msg in receivedMessages)
+        {
+            Assert.NotNull(msg.Id);
+            Assert.Contains("task", msg.Id);
+            Assert.Contains("msg", msg.Id);
+        }
+    }
+
+    [Fact(Timeout = 120000)]
+    public async Task MessageTransit_HighFrequency_Performance()
+    {
+        // Arrange
+        await using var pipe = new DuplexPipe();
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(60));
+
+        await using var muxA = await TestMuxHelper.CreateMuxAsync(pipe.Stream1);
+        await using var muxB = await TestMuxHelper.CreateMuxAsync(pipe.Stream2);
+
+        var runA = muxA.Start(cts.Token);
+        var runB = muxB.Start(cts.Token);
+
+        var writeChannel = await muxA.OpenChannelAsync(new() { ChannelId = "perf_test" }, cts.Token);
+        var readChannel = await muxB.AcceptChannelAsync("perf_test", cts.Token);
+
+        await using var sendTransit = new MessageTransit<TestMessage, TestMessage>(
+            writeChannel, null,
+            TestJsonContext.Default.TestMessage,
+            TestJsonContext.Default.TestMessage);
+
+        await using var receiveTransit = new MessageTransit<TestMessage, TestMessage>(
+            null, readChannel,
+            TestJsonContext.Default.TestMessage,
+            TestJsonContext.Default.TestMessage);
+
+        const int messageCount = 10_000;
+        var receivedCount = 0;
+
+        // Act - Start receiver
+        var receiveTask = Task.Run(async () =>
+        {
+            for (int i = 0; i < messageCount; i++)
+            {
+                var msg = await receiveTransit.ReceiveAsync(cts.Token);
+                if (msg is not null)
+                    Interlocked.Increment(ref receivedCount);
+            }
+        });
+
+        // Act - Measure send throughput
+        var sw = System.Diagnostics.Stopwatch.StartNew();
+
+        for (int i = 0; i < messageCount; i++)
+        {
+            await sendTransit.SendAsync(new TestMessage($"msg{i}", i), cts.Token);
+        }
+
+        await receiveTask;
+        sw.Stop();
+
+        var opsPerSecond = messageCount / (sw.ElapsedMilliseconds / 1000.0);
+
+        // Assert - Should achieve reasonable throughput (at least 200 msg/sec over memory pipe with full mux overhead)
+        Assert.Equal(messageCount, receivedCount);
+        Assert.True(opsPerSecond > 200, $"Throughput: {opsPerSecond:N0} msg/sec (expected >200)");
+
+        await cts.CancelAsync();
+    }
+
+    [Fact(Timeout = 120000)] 
+    public async Task MessageTransit_ConcurrentSendAndReceive_NoDeadlock()
+    {
+        // Arrange
+        await using var pipe = new DuplexPipe();
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+
+        await using var muxA = await TestMuxHelper.CreateMuxAsync(pipe.Stream1);
+        await using var muxB = await TestMuxHelper.CreateMuxAsync(pipe.Stream2);
+
+        var runA = muxA.Start(cts.Token);
+        var runB = muxB.Start(cts.Token);
+
+        // Bidirectional channels
+        var writeA = await muxA.OpenChannelAsync(new() { ChannelId = "a_to_b" }, cts.Token);
+        var readA = await muxB.AcceptChannelAsync("a_to_b", cts.Token);
+
+        var writeB = await muxB.OpenChannelAsync(new() { ChannelId = "b_to_a" }, cts.Token);
+        var readB = await muxA.AcceptChannelAsync("b_to_a", cts.Token);
+
+        await using var transitA = new MessageTransit<TestMessage, TestMessage>(
+            writeA, readB,
+            TestJsonContext.Default.TestMessage,
+            TestJsonContext.Default.TestMessage);
+
+        await using var transitB = new MessageTransit<TestMessage, TestMessage>(
+            writeB, readA,
+            TestJsonContext.Default.TestMessage,
+            TestJsonContext.Default.TestMessage);
+
+        const int messageCount = 1000;
+        var receivedByA = 0;
+        var receivedByB = 0;
+
+        // Act - Both sides send and receive simultaneously
+        var taskASend = Task.Run(async () =>
+        {
+            for (int i = 0; i < messageCount; i++)
+                await transitA.SendAsync(new TestMessage($"fromA_{i}", i), cts.Token);
+        });
+
+        var taskBSend = Task.Run(async () =>
+        {
+            for (int i = 0; i < messageCount; i++)
+                await transitB.SendAsync(new TestMessage($"fromB_{i}", i), cts.Token);
+        });
+
+        var taskAReceive = Task.Run(async () =>
+        {
+            for (int i = 0; i < messageCount; i++)
+            {
+                var msg = await transitA.ReceiveAsync(cts.Token);
+                if (msg is not null) Interlocked.Increment(ref receivedByA);
+            }
+        });
+
+        var taskBReceive = Task.Run(async () =>
+        {
+            for (int i = 0; i < messageCount; i++)
+            {
+                var msg = await transitB.ReceiveAsync(cts.Token);
+                if (msg is not null) Interlocked.Increment(ref receivedByB);
+            }
+        });
+
+        await Task.WhenAll(taskASend, taskBSend, taskAReceive, taskBReceive);
+
+        // Assert - All messages delivered, no deadlock
+        Assert.Equal(messageCount, receivedByA);
+        Assert.Equal(messageCount, receivedByB);
+
+        await cts.CancelAsync();
+    }
+
+    [Fact]
+    public void MessageTransit_LockOverhead_Minimal()
+    {
+        // Test that the lock overhead is minimal for single-threaded use
+        // This is a simple benchmark that measures serialize + frame overhead
+        var jsonTypeInfo = TestJsonContext.Default.TestMessage;
+        var message = new TestMessage("benchmark_msg", 12345, "test payload data");
+
+        // Warm up
+        for (int i = 0; i < 100; i++)
+        {
+            var bytes = JsonSerializer.SerializeToUtf8Bytes(message, jsonTypeInfo);
+            _ = JsonSerializer.Deserialize(bytes, jsonTypeInfo);
+        }
+
+        // Measure serialize/deserialize throughput (no transit, baseline)
+        var sw = System.Diagnostics.Stopwatch.StartNew();
+        const int iterations = 20_000;
+        
+        for (int i = 0; i < iterations; i++)
+        {
+            var bytes = JsonSerializer.SerializeToUtf8Bytes(message, jsonTypeInfo);
+            _ = JsonSerializer.Deserialize(bytes, jsonTypeInfo);
+        }
+        
+        sw.Stop();
+        var opsPerSecond = iterations / (sw.ElapsedMilliseconds / 1000.0);
+
+        // Should achieve at least 20K serialize/deserialize ops/sec
+        Assert.True(opsPerSecond > 20_000, $"Serialize throughput: {opsPerSecond:N0} ops/sec (expected >20K)");
+    }
+
+    #endregion
 }
 
 

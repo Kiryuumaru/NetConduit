@@ -493,10 +493,10 @@ public class DeltaTransit<T>
 ## Implementation Phases
 
 ### Phase 1: Core
-- [ ] Define DeltaOp enum
-- [ ] Implement object diff (property-level comparison)
-- [ ] Implement apply delta
-- [ ] Adaptive full vs delta selection
+- [x] Define DeltaOp enum
+- [x] Implement object diff (property-level comparison)
+- [x] Implement apply delta
+- [x] Adaptive full vs delta selection
 
 **Tests:**
 - `DeltaOp_Enum_HasExpectedValues`
@@ -514,9 +514,9 @@ public class DeltaTransit<T>
 - `SyncStrategy_ReceiverNoLocalHistory_RequestsResync`
 
 ### Phase 2: Arrays
-- [ ] Implement LCS algorithm
-- [ ] Array insert/remove/replace operations
-- [ ] Fallback to full array when delta larger
+- [x] Implement LCS algorithm
+- [x] Array insert/remove/replace operations
+- [x] Fallback to full array when delta larger
 
 **Tests:**
 - `LCS_IdenticalArrays_ReturnsFullSequence`
@@ -535,14 +535,14 @@ public class DeltaTransit<T>
 - `ApplyDelta_ArrayReplaceOp_ReplacesEntireArray`
 
 ### Phase 3: Type Support (Native AOT)
-- [ ] DeltaTransit<T> constructor with JsonTypeInfo<T> parameter
-- [ ] Validation: POCOs must provide JsonTypeInfo
-- [ ] DeltaTransit<JsonObject> (no JsonTypeInfo needed)
-- [ ] DeltaTransit<JsonArray> (no JsonTypeInfo needed)
-- [ ] DeltaTransit<JsonNode> (no JsonTypeInfo needed)
-- [ ] DeltaTransit<JsonDocument> (no JsonTypeInfo needed)
-- [ ] DeltaTransit<JsonElement> (no JsonTypeInfo needed)
-- [ ] Internal ToJsonNode/FromJsonNode using JsonTypeInfo
+- [x] DeltaTransit<T> constructor with JsonTypeInfo<T> parameter
+- [x] Validation: POCOs must provide JsonTypeInfo
+- [x] DeltaTransit<JsonObject> (no JsonTypeInfo needed)
+- [x] DeltaTransit<JsonArray> (no JsonTypeInfo needed)
+- [x] DeltaTransit<JsonNode> (no JsonTypeInfo needed)
+- [x] DeltaTransit<JsonDocument> (no JsonTypeInfo needed)
+- [x] DeltaTransit<JsonElement> (no JsonTypeInfo needed)
+- [x] Internal ToJsonNode/FromJsonNode using JsonTypeInfo
 
 **Tests:**
 - `DeltaTransit_POCO_WithJsonTypeInfo_Succeeds`
@@ -560,9 +560,9 @@ public class DeltaTransit<T>
 - `FromJsonNode_JsonArray_ReturnsAsArray`
 
 ### Phase 4: Integration
-- [ ] Integration with existing MessageTransit
-- [ ] Serialization (JSON wire format)
-- [ ] State management (last sent/received)
+- [x] Integration with existing MessageTransit
+- [x] Serialization (JSON wire format)
+- [x] State management (last sent/received)
 
 **Tests:**
 - `DeltaTransit_SendAsync_FirstMessage_SendsFull`
@@ -577,9 +577,9 @@ public class DeltaTransit<T>
 - `WireFormat_RoundTrip_PreservesAllOperations`
 
 ### Phase 5: Optimization
-- [ ] Binary encoding for operations
-- [ ] Path compression for repeated paths
-- [ ] Benchmarks vs full payloads
+- [x] Binary encoding for operations
+- [x] Path compression for repeated paths
+- [x] Benchmarks vs full payloads
 
 **Tests:**
 - `BinaryEncoding_Serialize_SmallerThanJson`

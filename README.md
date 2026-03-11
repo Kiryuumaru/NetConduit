@@ -333,6 +333,72 @@ var writeStream = await mux.OpenStreamAsync("upload");
 var readStream = await mux.AcceptStreamAsync("download");
 ```
 
+#### DeltaTransit - Efficient state synchronization
+
+Send only what changed, not the entire state. Like git commits: only diffs, not the whole codebase.
+
+```csharp
+using NetConduit.Transits;
+using System.Text.Json.Nodes;
+
+// Open channels for delta transit
+var writeChannel = await mux.OpenChannelAsync(new() { ChannelId = "state>>" });
+var readChannel = await mux.AcceptChannelAsync("state<<");
+
+// Create delta transit (JsonObject doesn't need JsonTypeInfo)
+await using var sender = new DeltaTransit<JsonObject>(writeChannel, null);
+await using var receiver = new DeltaTransit<JsonObject>(null, readChannel);
+
+// Send state - first send is full state
+var state = new JsonObject
+{
+    ["temp"] = 25.5,
+    ["humidity"] = 60,
+    ["device"] = "sensor-1"
+};
+await sender.SendAsync(state);
+
+// Update only temperature - only delta sent (not full state)
+state["temp"] = 26.0;
+await sender.SendAsync(state);  // Sends: [0, ["temp"], 26.0]
+
+// Receive state (reconstructed from deltas)
+var received = await receiver.ReceiveAsync();
+Console.WriteLine(received["temp"]);  // 26.0
+```
+
+**With POCOs (Native AOT compatible):**
+```csharp
+// Define type with source-generated serialization
+public record SensorReading(double Temp, int Humidity, string Device);
+
+[JsonSerializable(typeof(SensorReading))]
+public partial class SensorContext : JsonSerializerContext { }
+
+// POCO types require JsonTypeInfo
+await using var sender = new DeltaTransit<SensorReading>(
+    writeChannel, null, SensorContext.Default.SensorReading);
+await using var receiver = new DeltaTransit<SensorReading>(
+    null, readChannel, SensorContext.Default.SensorReading);
+```
+
+**Bandwidth savings example:**
+```
+Full state:  { "temp": 25.5, "humidity": 60, "device": "sensor-1", ... }  ~100 bytes
+Delta:       [0, ["temp"], 26.0]                                          ~20 bytes
+Savings:     80% bandwidth reduction for incremental updates
+```
+
+**Supported operations:**
+| Operation | Description |
+|-----------|-------------|
+| `Set` | Add or update property |
+| `Remove` | Remove property |
+| `SetNull` | Explicitly set to null |
+| `ArrayInsert` | Insert element at index |
+| `ArrayRemove` | Remove element at index |
+| `ArrayReplace` | Replace entire array |
+
 ### Disconnection Events
 
 NetConduit provides detailed disconnection events for both the multiplexer and individual channels:
@@ -549,9 +615,12 @@ dotnet run --project samples/NetConduit.Samples.GroupChat -- client tcp 7000 127
 ├──────────────────────────────────────────────────────────────┤
 │  Transit Layer (Optional)                                    │
 │  ┌────────────────┐  ┌────────────────┐  ┌────────────────┐  │
-│  │ MessageTransit │  │ StreamTransit  │  │ DuplexStream   │  │
+│  │ MessageTransit │  │ DeltaTransit   │  │ DuplexStream   │  │
 │  └───────┬────────┘  └───────┬────────┘  └───────┬────────┘  │
-├──────────┴───────────────────┴───────────────────┴───────────┤
+│  ┌────────────────┐                                          │
+│  │ StreamTransit  │                                          │
+│  └───────┬────────┘                                          │
+├──────────┴───────────────────────────────────────────────────┤
 │                         NetConduit                           │
 │  - Frame encoding/decoding (9-byte header)                   │
 │  - Channel management (string ChannelId)                     │
