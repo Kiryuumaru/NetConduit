@@ -6,11 +6,13 @@ Configuration for opening individual [channels](../concepts/channels.md).
 
 | Property | Type | Default | Description |
 |----------|------|---------|-------------|
-| `Priority` | `byte` | 128 | Frame scheduling priority (0-255) |
-| `InitialCredits` | `int` | 64KB | Initial flow control credits |
-| `MaxCredits` | `int` | 256KB | Maximum credits to accumulate |
-| `CreditReplenishThreshold` | `float` | 0.25 | Replenish when credits drop below % |
-| `WriteTimeout` | `TimeSpan?` | null | Timeout for blocked writes |
+| `ChannelId` | `string` | *(required)* | Unique channel identifier (max 1024 UTF-8 bytes) |
+| `Priority` | `ChannelPriority` | `Normal` (128) | Frame scheduling priority (0-255 enum) |
+| `MinCredits` | `uint` | 64KB | Minimum credits — adaptive windowing floor |
+| `MaxCredits` | `uint` | 4MB | Maximum credits — window starts here on open |
+| `SendTimeout` | `TimeSpan` | 30s | Timeout for writes waiting for credits |
+
+Adaptive flow control starts each channel at `MaxCredits` and shrinks the window toward `MinCredits` after idle periods. See [Backpressure](../concepts/backpressure.md) for details.
 
 ## Priority
 
@@ -18,58 +20,57 @@ Higher values get more bandwidth. See [Priority](../concepts/priority.md) for de
 
 ```csharp
 // Video stream - highest priority
-var videoChannel = await mux.OpenChannelAsync("video", new ChannelOptions
+var videoChannel = await mux.OpenChannelAsync(new ChannelOptions
 {
-    Priority = 255  // Maximum
+    ChannelId = "video",
+    Priority = ChannelPriority.Highest
 });
 
 // File download - lowest priority
-var fileChannel = await mux.OpenChannelAsync("download", new ChannelOptions
+var fileChannel = await mux.OpenChannelAsync(new ChannelOptions
 {
-    Priority = 1  // Minimum
+    ChannelId = "download",
+    Priority = ChannelPriority.Lowest
 });
 
 // Default priority
-var regularChannel = await mux.OpenChannelAsync("chat", new ChannelOptions
+var regularChannel = await mux.OpenChannelAsync(new ChannelOptions
 {
-    Priority = 128  // Default
+    ChannelId = "chat",
+    Priority = ChannelPriority.Normal
 });
 ```
 
 ## Flow Control
 
-Credits control [backpressure](../concepts/backpressure.md):
+Credits control [backpressure](../concepts/backpressure.md). The window starts at `MaxCredits` on channel open and adapts automatically — shrinking after idle periods, growing back under active use. Credits never drop below `MinCredits` or exceed `MaxCredits`.
 
 ```csharp
 // Small buffer - memory constrained
 var options = new ChannelOptions
 {
-    InitialCredits = 16 * 1024,      // 16KB
-    MaxCredits = 64 * 1024           // 64KB
+    ChannelId = "telemetry",
+    MinCredits = 16 * 1024,          // 16KB floor
+    MaxCredits = 64 * 1024           // 64KB ceiling (starts here)
 };
 
 // Large buffer - high throughput
 var options = new ChannelOptions
 {
-    InitialCredits = 256 * 1024,     // 256KB
-    MaxCredits = 1024 * 1024         // 1MB
-};
-
-// Replenish threshold
-var options = new ChannelOptions
-{
-    MaxCredits = 256 * 1024,
-    CreditReplenishThreshold = 0.5f  // Replenish at 50% consumed
+    ChannelId = "bulk-data",
+    MinCredits = 128 * 1024,         // 128KB floor
+    MaxCredits = 8 * 1024 * 1024     // 8MB ceiling (starts here)
 };
 ```
 
-## Write Timeout
+## Send Timeout
 
 ```csharp
-// Timeout blocked writes
+// Short timeout for interactive channels
 var options = new ChannelOptions
 {
-    WriteTimeout = TimeSpan.FromSeconds(10)
+    ChannelId = "interactive",
+    SendTimeout = TimeSpan.FromSeconds(5)
 };
 
 try
@@ -78,13 +79,14 @@ try
 }
 catch (TimeoutException)
 {
-    // Write blocked for > 10 seconds
+    // Write blocked for > 5 seconds waiting for credits
 }
 
-// No timeout (default) - wait indefinitely
+// Wait forever (explicit)
 var options = new ChannelOptions
 {
-    WriteTimeout = null
+    ChannelId = "background",
+    SendTimeout = Timeout.InfiniteTimeSpan
 };
 ```
 
@@ -95,10 +97,11 @@ var options = new ChannelOptions
 ```csharp
 new ChannelOptions
 {
-    Priority = 200,
-    InitialCredits = 32 * 1024,  // Small buffer
-    MaxCredits = 64 * 1024,
-    WriteTimeout = TimeSpan.FromSeconds(5)
+    ChannelId = "control",
+    Priority = ChannelPriority.High,
+    MinCredits = 16 * 1024,      // 16KB floor
+    MaxCredits = 64 * 1024,      // 64KB ceiling
+    SendTimeout = TimeSpan.FromSeconds(5)
 }
 ```
 
@@ -107,10 +110,11 @@ new ChannelOptions
 ```csharp
 new ChannelOptions
 {
-    Priority = 50,
-    InitialCredits = 512 * 1024,  // 512KB
-    MaxCredits = 2 * 1024 * 1024, // 2MB
-    WriteTimeout = TimeSpan.FromMinutes(1)
+    ChannelId = "file-transfer",
+    Priority = ChannelPriority.Low,
+    MinCredits = 256 * 1024,         // 256KB floor
+    MaxCredits = 8 * 1024 * 1024,    // 8MB ceiling
+    SendTimeout = TimeSpan.FromMinutes(1)
 }
 ```
 
@@ -119,10 +123,11 @@ new ChannelOptions
 ```csharp
 new ChannelOptions
 {
-    Priority = 1,  // Lowest
-    InitialCredits = 64 * 1024,
-    MaxCredits = 128 * 1024,
-    WriteTimeout = null  // Wait forever
+    ChannelId = "sync",
+    Priority = ChannelPriority.Lowest,
+    MinCredits = 64 * 1024,          // 64KB floor
+    MaxCredits = 128 * 1024,         // 128KB ceiling
+    SendTimeout = Timeout.InfiniteTimeSpan
 }
 ```
 
@@ -130,16 +135,13 @@ new ChannelOptions
 
 ```csharp
 // Open channel with options
-var channel = await mux.OpenChannelAsync("data", new ChannelOptions
+var channel = await mux.OpenChannelAsync(new ChannelOptions
 {
-    Priority = 200,
-    InitialCredits = 128 * 1024
+    ChannelId = "data",
+    Priority = ChannelPriority.High,
+    MaxCredits = 8 * 1024 * 1024
 });
 
-// Accept with options
-var channel = await mux.AcceptChannelAsync("data", new ChannelOptions
-{
-    Priority = 200,
-    InitialCredits = 128 * 1024
-});
+// Accept channel by ID
+var channel = await mux.AcceptChannelAsync("data");
 ```

@@ -50,70 +50,44 @@ await foreach (var channel in mux.AcceptChannelsAsync())
 
 ## Multi-Client Server
 
-For multiple concurrent IPC clients:
+For multiple concurrent IPC clients, create a multiplexer per connection:
 
 ```csharp
-var server = new IpcServer("my-app-ipc");
-
-server.OnClientConnected += async (clientStream) =>
+while (true)
 {
-    var options = new MultiplexerOptions
-    {
-        StreamFactory = async (ct) => (clientStream, clientStream)
-    };
-    
+    var options = IpcMultiplexer.CreateServerOptions("my-app-ipc");
     var mux = StreamMultiplexer.Create(options);
     var runTask = mux.Start();
     await mux.WaitForReadyAsync();
-    
-    // Handle this client's channels...
-};
 
-await server.StartAsync();
+    // Handle this client's channels...
+    await foreach (var channel in mux.AcceptChannelsAsync())
+    {
+        _ = HandleChannelAsync(channel);
+    }
+}
 ```
 
 ## Platform Behavior
 
-| Platform | Implementation | Path |
-|----------|---------------|------|
-| Windows | Named Pipes | `\\.\pipe\my-app-ipc` |
-| Linux | Unix Domain Socket | `/tmp/my-app-ipc.sock` |
-| macOS | Unix Domain Socket | `/tmp/my-app-ipc.sock` |
+| Platform | Implementation | Notes |
+|----------|---------------|-------|
+| Windows | TCP loopback | Deterministic port from endpoint name (SHA256 hash, range 49152–65535) |
+| Linux | Unix Domain Socket | Socket at path derived from endpoint name |
+| macOS | Unix Domain Socket | Socket at path derived from endpoint name |
 
 The IPC transport automatically uses the correct mechanism for the current OS.
 
 ## Configuration
 
-### Pipe Settings (Windows)
+IPC transport uses the standard `configure` callback for multiplexer options:
 
 ```csharp
-var options = IpcMultiplexer.CreateServerOptions("my-app-ipc");
-
-// Configure pipe security
-options.ConfigurePipeSecurity = (security) =>
+var options = IpcMultiplexer.CreateOptions("my-app-ipc", configure: o =>
 {
-    // Allow all users
-    security.AddAccessRule(new PipeAccessRule(
-        new SecurityIdentifier(WellKnownSidType.WorldSid, null),
-        PipeAccessRights.ReadWrite,
-        AccessControlType.Allow));
-};
-```
-
-### Socket Permissions (Linux/macOS)
-
-```csharp
-var options = IpcMultiplexer.CreateServerOptions("my-app-ipc");
-
-// Socket file permissions (octal)
-options.UnixSocketPermissions = 0x1FF;  // 0777 - all users
-```
-
-### Custom Path
-
-```csharp
-// Specify custom socket/pipe path
-var options = IpcMultiplexer.CreateOptions("/var/run/myapp/socket");
+    o.FlushMode = FlushMode.Immediate;
+    o.EnableReconnection = false;
+});
 ```
 
 ## Use Cases

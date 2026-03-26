@@ -29,18 +29,19 @@ Automatic recovery from network disconnects with [channel](channels.md) state re
 
 ## Enabling Reconnection
 
-Reconnection requires `StreamFactory`:
+Reconnection requires `StreamFactory`. Transport helpers set this automatically:
 
 ```csharp
 using NetConduit;
 using NetConduit.Tcp;
 
-// StreamFactory enables reconnection - multiplexer calls it 
-// to establish new connections when needed
-var options = TcpMultiplexer.CreateOptions("localhost", 5000);
-options.EnableReconnection = true;
-options.ReconnectTimeout = TimeSpan.FromSeconds(60);
-options.ReconnectBufferSize = 1024 * 1024;  // 1MB buffer
+// StreamFactory is set by the transport helper — reconnection works automatically
+var options = TcpMultiplexer.CreateOptions("localhost", 5000, configure: o =>
+{
+    o.EnableReconnection = true;
+    o.ReconnectTimeout = TimeSpan.FromSeconds(60);
+    o.ReconnectBufferSize = 1024 * 1024;  // 1MB buffer
+});
 
 var mux = StreamMultiplexer.Create(options);
 var runTask = mux.Start();
@@ -54,9 +55,11 @@ await mux.WaitForReadyAsync();
 Server must also support reconnection:
 
 ```csharp
-var options = TcpMultiplexer.CreateServerOptions(listener);
-options.EnableReconnection = true;
-options.ReconnectTimeout = TimeSpan.FromSeconds(60);
+var options = TcpMultiplexer.CreateServerOptions(listener, configure: o =>
+{
+    o.EnableReconnection = true;
+    o.ReconnectTimeout = TimeSpan.FromSeconds(60);
+});
 
 var mux = StreamMultiplexer.Create(options);
 // Server accepts reconnecting clients transparently
@@ -72,24 +75,23 @@ var mux = StreamMultiplexer.Create(options);
 mux.OnDisconnected += (reason, exception) =>
 {
     Console.WriteLine($"Disconnected: {reason}");
-    // DisconnectReason: TransportError, PingTimeout, GoAwayReceived, etc.
+    // DisconnectReason: GoAwayReceived, TransportError, LocalDispose
     
     if (exception != null)
         Console.WriteLine($"Error: {exception.Message}");
 };
 
-mux.OnReconnecting += () =>
+mux.OnAutoReconnecting += (args) =>
 {
-    Console.WriteLine("Attempting to reconnect...");
+    Console.WriteLine($"Reconnect attempt {args.AttemptNumber}/{args.MaxAttempts}");
+    Console.WriteLine($"Next delay: {args.NextDelay}");
+    
+    // Cancel if needed
+    if (args.AttemptNumber > 10)
+        args.Cancel = true;
 };
 
-mux.OnReconnected += () =>
-{
-    Console.WriteLine("Reconnected successfully!");
-    // Channels are still valid, buffered data will be sent
-};
-
-mux.OnReconnectFailed += (exception) =>
+mux.OnAutoReconnectFailed += (exception) =>
 {
     Console.WriteLine($"Reconnection failed: {exception.Message}");
     // Maximum attempts exceeded or timeout reached
@@ -103,17 +105,23 @@ See [MultiplexerOptions](../api/multiplexer-options.md) for full configuration.
 | Option | Default | Description |
 |--------|---------|-------------|
 | `EnableReconnection` | true | Enable automatic reconnection |
-| `ReconnectTimeout` | 60s | Maximum time to attempt reconnection |
+| `ReconnectTimeout` | 60s | Maximum time to hold state during disconnect |
 | `ReconnectBufferSize` | 1MB | Buffer for pending data during disconnect |
-| `ReconnectDelay` | 1s | Delay between reconnect attempts |
-| `MaxReconnectAttempts` | unlimited | Max reconnection attempts (in timeout window) |
+| `MaxAutoReconnectAttempts` | 0 (unlimited) | Max reconnection attempts before giving up |
+| `AutoReconnectDelay` | 1s | Initial delay between reconnect attempts |
+| `MaxAutoReconnectDelay` | 30s | Maximum delay (exponential backoff cap) |
+| `AutoReconnectBackoffMultiplier` | 2.0 | Multiplier for exponential backoff |
 
 ```csharp
-var options = TcpMultiplexer.CreateOptions("localhost", 5000);
-options.EnableReconnection = true;
-options.ReconnectTimeout = TimeSpan.FromMinutes(2);
-options.ReconnectBufferSize = 4 * 1024 * 1024;  // 4MB
-options.ReconnectDelay = TimeSpan.FromSeconds(2);
+var options = TcpMultiplexer.CreateOptions("localhost", 5000, configure: o =>
+{
+    o.EnableReconnection = true;
+    o.ReconnectTimeout = TimeSpan.FromMinutes(2);
+    o.ReconnectBufferSize = 4 * 1024 * 1024;  // 4MB
+    o.MaxAutoReconnectAttempts = 10;
+    o.AutoReconnectDelay = TimeSpan.FromSeconds(2);
+    o.MaxAutoReconnectDelay = TimeSpan.FromSeconds(30);
+});
 ```
 
 ## Channel Behavior During Reconnection
@@ -146,8 +154,9 @@ Channels remain open during reconnection:
 // Channel is still valid
 Console.WriteLine(channel.State);  // Still "Open" during reconnection
 
-// Check multiplexer state for connection status
-Console.WriteLine(mux.State);  // "Reconnecting" or "Connected"
+// Check multiplexer connection status
+Console.WriteLine($"Connected: {mux.IsConnected}");
+Console.WriteLine($"Running: {mux.IsRunning}");
 ```
 
 ## Reconnection Strategies
@@ -155,24 +164,34 @@ Console.WriteLine(mux.State);  // "Reconnecting" or "Connected"
 ### Quick Reconnect (Default)
 
 ```csharp
-options.ReconnectTimeout = TimeSpan.FromSeconds(30);
-options.ReconnectDelay = TimeSpan.FromSeconds(1);
+var options = TcpMultiplexer.CreateOptions("localhost", 5000, configure: o =>
+{
+    o.ReconnectTimeout = TimeSpan.FromSeconds(30);
+    o.AutoReconnectDelay = TimeSpan.FromSeconds(1);
+});
 // Fast reconnection for transient network issues
 ```
 
 ### Persistent Connection
 
 ```csharp
-options.ReconnectTimeout = TimeSpan.FromMinutes(10);
-options.ReconnectDelay = TimeSpan.FromSeconds(5);
-options.ReconnectBufferSize = 10 * 1024 * 1024;  // 10MB
+var options = TcpMultiplexer.CreateOptions("localhost", 5000, configure: o =>
+{
+    o.ReconnectTimeout = TimeSpan.FromMinutes(10);
+    o.AutoReconnectDelay = TimeSpan.FromSeconds(5);
+    o.MaxAutoReconnectDelay = TimeSpan.FromMinutes(1);
+    o.ReconnectBufferSize = 10 * 1024 * 1024;  // 10MB
+});
 // Long reconnection window for mobile/unstable networks
 ```
 
 ### No Reconnection
 
 ```csharp
-options.EnableReconnection = false;
+var options = TcpMultiplexer.CreateOptions("localhost", 5000, configure: o =>
+{
+    o.EnableReconnection = false;
+});
 // Disconnect = game over
 // Application handles reconnection manually
 ```
@@ -180,7 +199,7 @@ options.EnableReconnection = false;
 ## Handling Reconnection Failure
 
 ```csharp
-mux.OnReconnectFailed += async (exception) =>
+mux.OnAutoReconnectFailed += async (exception) =>
 {
     Console.WriteLine("Reconnection failed permanently");
     
@@ -191,7 +210,7 @@ mux.OnReconnectFailed += async (exception) =>
     var newMux = StreamMultiplexer.Create(options);
     await newMux.Start();
     
-    // Note: Channels from old mux are invalid
+    // Channels from old mux are invalid
 };
 ```
 
@@ -200,7 +219,7 @@ mux.OnReconnectFailed += async (exception) =>
 For full session restoration:
 
 ```csharp
-// Multiplexer assigns session ID
+// Multiplexer assigns session ID (Guid)
 var sessionId = mux.SessionId;
 
 // On reconnect, server validates session
@@ -226,24 +245,16 @@ mux.OnDisconnected += (r, e) =>
     // Update UI: "Reconnecting..."
 };
 
-mux.OnReconnected += () =>
+mux.OnAutoReconnecting += (args) =>
 {
-    // Update UI: "Connected"
+    // Update UI: "Attempt {args.AttemptNumber}..."
 };
 
-mux.OnReconnectFailed += (e) =>
+mux.OnAutoReconnectFailed += (e) =>
 {
     // Update UI: "Connection lost"
     // Prompt user to retry
 };
-```
-
-**Test reconnection:**
-```csharp
-// Simulate disconnect for testing
-await mux.SimulateDisconnectAsync();  // If available
-
-// Or physically disconnect network
 ```
 
 **Graceful degradation:**

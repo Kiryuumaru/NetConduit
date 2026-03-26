@@ -14,12 +14,12 @@ dotnet add package NetConduit.Tcp
 using NetConduit;
 using NetConduit.Tcp;
 
-// Create client options
-var options = TcpMultiplexer.CreateOptions("localhost", 5000);
-
-// Optional: configure reconnection
-options.EnableReconnection = true;
-options.ReconnectTimeout = TimeSpan.FromSeconds(60);
+// Create client options (with optional configuration)
+var options = TcpMultiplexer.CreateOptions("localhost", 5000, configure: o =>
+{
+    o.EnableReconnection = true;
+    o.ReconnectTimeout = TimeSpan.FromSeconds(60);
+});
 
 // Create and start multiplexer
 var mux = StreamMultiplexer.Create(options);
@@ -77,7 +77,7 @@ async Task HandleClientAsync(TcpClient tcpClient)
     var stream = tcpClient.GetStream();
     var options = new MultiplexerOptions
     {
-        StreamFactory = async (ct) => (stream, stream)
+        StreamFactory = async (ct) => new StreamPair(stream)
     };
     
     var mux = StreamMultiplexer.Create(options);
@@ -94,40 +94,23 @@ async Task HandleClientAsync(TcpClient tcpClient)
 
 ## Configuration
 
-### TcpClient Settings
-
-```csharp
-var options = TcpMultiplexer.CreateOptions("localhost", 5000);
-
-// Access underlying TcpClient configuration
-options.ConfigureTcpClient = (client) =>
-{
-    client.NoDelay = true;  // Disable Nagle's algorithm
-    client.ReceiveBufferSize = 64 * 1024;
-    client.SendBufferSize = 64 * 1024;
-};
-```
-
 ### [Reconnection](../concepts/reconnection.md)
 
 ```csharp
-var options = TcpMultiplexer.CreateOptions("localhost", 5000);
-options.EnableReconnection = true;
-options.ReconnectTimeout = TimeSpan.FromSeconds(60);
-options.ReconnectBufferSize = 1024 * 1024;  // 1MB buffer for pending data
+var options = TcpMultiplexer.CreateOptions("localhost", 5000, configure: o =>
+{
+    o.EnableReconnection = true;
+    o.ReconnectTimeout = TimeSpan.FromSeconds(60);
+    o.ReconnectBufferSize = 1024 * 1024;  // 1MB buffer for pending data
+});
 
 var mux = StreamMultiplexer.Create(options);
 
 mux.OnDisconnected += (reason, ex) => Console.WriteLine("Disconnected");
-mux.OnReconnected += () => Console.WriteLine("Reconnected!");
+mux.OnAutoReconnecting += (args) => Console.WriteLine($"Reconnecting (attempt {args.AttemptNumber})...");
 ```
 
 ## Tips
-
-**Disable Nagle for low latency:**
-```csharp
-options.ConfigureTcpClient = (client) => client.NoDelay = true;
-```
 
 **Handle connection failures:**
 ```csharp

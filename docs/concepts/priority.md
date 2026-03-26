@@ -51,24 +51,24 @@ var bulkChannel = await mux.OpenChannelAsync(new()
     Priority = ChannelPriority.Low
 });
 
-// Or use numeric value (0-255)
+// Or use numeric value (0-255) with cast
 var customPriority = await mux.OpenChannelAsync(new()
 {
     ChannelId = "custom",
-    Priority = 200  // Between High and Highest
+    Priority = (ChannelPriority)200  // Between High and Highest
 });
 ```
 
 ## Priority Values
 
 ```csharp
-public static class ChannelPriority
+public enum ChannelPriority : byte
 {
-    public const byte Lowest = 0;
-    public const byte Low = 64;
-    public const byte Normal = 128;
-    public const byte High = 192;
-    public const byte Highest = 255;
+    Lowest = 0,
+    Low = 64,
+    Normal = 128,
+    High = 192,
+    Highest = 255
 }
 ```
 

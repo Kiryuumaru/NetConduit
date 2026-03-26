@@ -22,45 +22,81 @@ mux.OnDisconnected += (reason, exception) =>
 
 | Reason | Description |
 |--------|-------------|
-| `TransportError` | Underlying stream error (network failure) |
-| `PingTimeout` | No pong response within timeout |
 | `GoAwayReceived` | Remote sent GOAWAY (graceful shutdown) |
+| `TransportError` | Underlying stream error (network failure) |
 | `LocalDispose` | Local DisposeAsync() called |
-| `ProtocolError` | Invalid frame received |
 
-### OnReconnecting
+### OnAutoReconnecting
 
-Fired when attempting to reconnect. See [Reconnection](reconnection.md) for configuration.
+Fired during auto-reconnection attempts. Provides `AutoReconnectEventArgs` with attempt details and ability to cancel. See [Reconnection](reconnection.md) for configuration.
 
 ```csharp
-mux.OnReconnecting += () =>
+mux.OnAutoReconnecting += (args) =>
 {
-    Console.WriteLine("Attempting to reconnect...");
-    // UI: Show "Reconnecting" spinner
+    Console.WriteLine($"Reconnect attempt {args.AttemptNumber}/{args.MaxAttempts}");
+    Console.WriteLine($"Next delay: {args.NextDelay}");
+    
+    // Optionally cancel reconnection
+    if (args.AttemptNumber > 5)
+        args.Cancel = true;
 };
 ```
 
-### OnReconnected
+**AutoReconnectEventArgs properties:**
 
-Fired when reconnection succeeds:
+| Property | Type | Description |
+|----------|------|-------------|
+| `AttemptNumber` | `int` | Current attempt (1-based) |
+| `MaxAttempts` | `int` | Maximum configured attempts |
+| `NextDelay` | `TimeSpan` | Delay before next attempt |
+| `LastException` | `Exception?` | Exception from last attempt |
+| `IsReconnecting` | `bool` | True if reconnecting, false if initial connection |
+| `Cancel` | `bool` | Set to true to cancel reconnection |
+
+### OnAutoReconnectFailed
+
+Fired when auto-reconnection has permanently failed:
 
 ```csharp
-mux.OnReconnected += () =>
-{
-    Console.WriteLine("Reconnected!");
-    // UI: Show "Connected" status
-};
-```
-
-### OnReconnectFailed
-
-Fired when reconnection ultimately fails:
-
-```csharp
-mux.OnReconnectFailed += (exception) =>
+mux.OnAutoReconnectFailed += (exception) =>
 {
     Console.WriteLine($"Reconnection failed: {exception.Message}");
     // UI: Show "Connection lost" error
+};
+```
+
+### OnChannelOpened
+
+Fired when a channel is opened:
+
+```csharp
+mux.OnChannelOpened += (channelId) =>
+{
+    Console.WriteLine($"Channel opened: {channelId}");
+};
+```
+
+### OnChannelClosed
+
+Fired when a channel is closed:
+
+```csharp
+mux.OnChannelClosed += (channelId, exception) =>
+{
+    Console.WriteLine($"Channel closed: {channelId}");
+    if (exception != null)
+        Console.WriteLine($"Error: {exception.Message}");
+};
+```
+
+### OnError
+
+Fired when an error occurs:
+
+```csharp
+mux.OnError += (exception) =>
+{
+    Console.WriteLine($"Error: {exception.Message}");
 };
 ```
 
@@ -92,25 +128,23 @@ channel.OnClosed += (reason, exception) =>
 
 ### OnCreditStarvation
 
-Fired when channel blocks waiting for credits. See [Backpressure](backpressure.md) for more details.
+Fired when channel blocks waiting for credits (WriteChannel only). See [Backpressure](backpressure.md) for more details.
 
 ```csharp
 channel.OnCreditStarvation += () =>
 {
     Console.WriteLine($"Channel '{channel.ChannelId}' blocked - waiting for credits");
-    // Log backpressure event
 };
 ```
 
 ### OnCreditRestored
 
-Fired when credits are received after starvation:
+Fired when credits are received after starvation (WriteChannel only):
 
 ```csharp
 channel.OnCreditRestored += (waitTime) =>
 {
     Console.WriteLine($"Credits restored after {waitTime.TotalMilliseconds}ms");
-    // Log recovery
 };
 ```
 
@@ -125,9 +159,10 @@ if (mux.DisconnectReason.HasValue)
     Console.WriteLine($"Was disconnected due to: {mux.DisconnectReason}");
 }
 
-// Check current state
-Console.WriteLine($"Mux state: {mux.State}");
-// States: Created, Connecting, Connected, Reconnecting, Disconnected, Disposed
+// Check connection status via boolean properties
+Console.WriteLine($"Connected: {mux.IsConnected}");
+Console.WriteLine($"Running: {mux.IsRunning}");
+Console.WriteLine($"Shutting down: {mux.IsShuttingDown}");
 ```
 
 ### Channel State
@@ -141,7 +176,7 @@ if (channel.CloseReason.HasValue)
 
 // Check current state
 Console.WriteLine($"Channel state: {channel.State}");
-// States: Open, Closing, Closed
+// States: Opening, Open, Closing, Closed
 ```
 
 ## Exception Handling
@@ -198,7 +233,6 @@ mux.OnDisconnected += async (reason, ex) =>
 mux.OnDisconnected += (reason, ex) =>
 {
     _ = SaveStateAsync();  // Fire and forget
-    // Or: eventQueue.Enqueue(new DisconnectEvent(reason));
 };
 ```
 
@@ -218,20 +252,6 @@ mux.OnDisconnected += (reason, ex) =>
 };
 ```
 
-### Unsubscribe When Done
-
-```csharp
-EventHandler<(DisconnectReason, Exception?)> handler = (r, e) =>
-{
-    Console.WriteLine("Disconnected");
-};
-
-mux.OnDisconnected += handler;
-
-// Later, when disposing
-mux.OnDisconnected -= handler;
-```
-
 ## Full Example
 
 ```csharp
@@ -244,19 +264,13 @@ mux.OnDisconnected += (reason, ex) =>
     UpdateStatus("Disconnected");
 };
 
-mux.OnReconnecting += () =>
+mux.OnAutoReconnecting += (args) =>
 {
-    logger.Info("Reconnecting...");
+    logger.Info($"Reconnecting (attempt {args.AttemptNumber})...");
     UpdateStatus("Reconnecting");
 };
 
-mux.OnReconnected += () =>
-{
-    logger.Info("Reconnected");
-    UpdateStatus("Connected");
-};
-
-mux.OnReconnectFailed += (ex) =>
+mux.OnAutoReconnectFailed += (ex) =>
 {
     logger.Error($"Reconnection failed: {ex.Message}");
     UpdateStatus("Connection Failed");

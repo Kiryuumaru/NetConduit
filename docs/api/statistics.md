@@ -1,92 +1,84 @@
 # Statistics
 
-Runtime metrics exposed by the multiplexer. Use with [Events](../concepts/events.md) for monitoring.
+Runtime metrics exposed by the multiplexer and channels. Use with [Events](../concepts/events.md) for monitoring.
 
-## Accessing Statistics
+## Multiplexer Statistics
+
+Access via `mux.Stats` (type: `MultiplexerStats`):
 
 ```csharp
-var stats = mux.Statistics;
+var stats = mux.Stats;
 
 Console.WriteLine($"Sent: {stats.BytesSent}");
 Console.WriteLine($"Received: {stats.BytesReceived}");
-Console.WriteLine($"Active channels: {stats.ActiveChannelCount}");
+Console.WriteLine($"Active channels: {stats.OpenChannels}");
 ```
 
-## Properties
-
-### Byte Counters
+### Properties
 
 | Property | Type | Description |
 |----------|------|-------------|
-| `BytesSent` | `long` | Total bytes sent |
-| `BytesReceived` | `long` | Total bytes received |
+| `BytesSent` | `long` | Total bytes sent across all channels |
+| `BytesReceived` | `long` | Total bytes received across all channels |
+| `OpenChannels` | `int` | Currently open channels |
+| `TotalChannelsOpened` | `int` | Lifetime channels opened |
+| `TotalChannelsClosed` | `int` | Lifetime channels closed |
+| `Uptime` | `TimeSpan` | How long the multiplexer has been running |
+| `LastPingRtt` | `TimeSpan` | Round-trip time of the last successful ping |
+| `MissedPings` | `int` | Consecutive missed pings |
+| `TotalCreditStarvationEvents` | `long` | Total backpressure events across all channels |
+| `ChannelsCurrentlyWaitingForCredits` | `int` | Channels currently experiencing backpressure |
+| `TotalCreditWaitTime` | `TimeSpan` | Total time all channels spent waiting for credits |
+| `IsExperiencingBackpressure` | `bool` | Whether any channel is currently waiting for credits |
 
-### Frame Counters
+## Channel Statistics
 
-| Property | Type | Description |
-|----------|------|-------------|
-| `FramesSent` | `long` | Total frames sent |
-| `FramesReceived` | `long` | Total frames received |
-
-### Channel Metrics
-
-| Property | Type | Description |
-|----------|------|-------------|
-| `ActiveChannelCount` | `int` | Currently open channels |
-| `TotalChannelsOpened` | `long` | Lifetime channels opened |
-| `TotalChannelsClosed` | `long` | Lifetime channels closed |
-
-### Connection Metrics
-
-| Property | Type | Description |
-|----------|------|-------------|
-| `ConnectionState` | `ConnectionState` | Current state |
-| `ConnectedTime` | `TimeSpan` | Duration connected |
-| `DisconnectedTime` | `TimeSpan` | Duration disconnected |
-| `ReconnectionAttempts` | `int` | Current reconnection attempts |
-| `TotalReconnections` | `long` | Lifetime reconnections |
-
-### Heartbeat Metrics
-
-| Property | Type | Description |
-|----------|------|-------------|
-| `LastPingSent` | `DateTimeOffset` | When last ping sent |
-| `LastPongReceived` | `DateTimeOffset` | When last pong received |
-| `RoundTripTime` | `TimeSpan` | Latest RTT measurement |
-| `AverageRoundTripTime` | `TimeSpan` | Smoothed RTT average |
-
-## ConnectionState Enum
+Access via `channel.Stats` (type: `ChannelStats`):
 
 ```csharp
-public enum ConnectionState
-{
-    Connecting,     // Establishing connection
-    Connected,      // Fully connected
-    Disconnected,   // Lost connection
-    Reconnecting,   // Attempting reconnection
-    Closed          // Permanently closed
-}
+var stats = channel.Stats;
+
+Console.WriteLine($"Sent: {stats.BytesSent}");
+Console.WriteLine($"Frames sent: {stats.FramesSent}");
+Console.WriteLine($"Starvation events: {stats.CreditStarvationCount}");
 ```
+
+### Properties
+
+| Property | Type | Description |
+|----------|------|-------------|
+| `BytesSent` | `long` | Total bytes sent on this channel |
+| `BytesReceived` | `long` | Total bytes received on this channel |
+| `FramesSent` | `long` | Total frames sent |
+| `FramesReceived` | `long` | Total frames received |
+| `CreditsGranted` | `long` | Total credits granted |
+| `CreditsConsumed` | `long` | Total credits consumed |
+| `OpenDuration` | `TimeSpan` | How long the channel has been open |
+| `CreditStarvationCount` | `long` | Number of backpressure events |
+| `TotalWaitTimeForCredits` | `TimeSpan` | Total time spent waiting for credits |
+| `LongestWaitForCredits` | `TimeSpan` | Longest single credit wait |
+| `IsWaitingForCredits` | `bool` | Whether currently waiting for credits |
+| `CurrentWaitDuration` | `TimeSpan` | How long the current wait has lasted (zero if not waiting) |
 
 ## Example: Monitoring Dashboard
 
 ```csharp
-async Task MonitorLoop(IStreamMultiplexer mux)
+async Task MonitorLoop(IStreamMultiplexer mux, CancellationToken ct)
 {
-    while (!mux.IsClosed)
+    while (mux.IsRunning && !ct.IsCancellationRequested)
     {
-        var stats = mux.Statistics;
-        
+        var stats = mux.Stats;
+
         Console.Clear();
         Console.WriteLine($"=== NetConduit Stats ===");
-        Console.WriteLine($"State: {stats.ConnectionState}");
-        Console.WriteLine($"RTT: {stats.RoundTripTime.TotalMilliseconds:F1}ms");
-        Console.WriteLine($"Channels: {stats.ActiveChannelCount}");
+        Console.WriteLine($"Connected: {mux.IsConnected}");
+        Console.WriteLine($"RTT: {stats.LastPingRtt.TotalMilliseconds:F1}ms");
+        Console.WriteLine($"Channels: {stats.OpenChannels}");
         Console.WriteLine($"Sent: {FormatBytes(stats.BytesSent)}");
         Console.WriteLine($"Received: {FormatBytes(stats.BytesReceived)}");
-        Console.WriteLine($"Reconnections: {stats.TotalReconnections}");
-        
-        await Task.Delay(1000);
+        Console.WriteLine($"Backpressure: {stats.IsExperiencingBackpressure}");
+
+        await Task.Delay(1000, ct);
     }
 }
 
@@ -113,23 +105,23 @@ void StartStatsLogging(IStreamMultiplexer mux)
 {
     long lastBytesSent = 0;
     long lastBytesReceived = 0;
-    
+
     _statsTimer = new Timer(_ =>
     {
-        var stats = mux.Statistics;
-        
+        var stats = mux.Stats;
+
         var sentRate = stats.BytesSent - lastBytesSent;
         var recvRate = stats.BytesReceived - lastBytesReceived;
-        
+
         _logger.LogInformation(
             "Throughput: TX={TxRate}/s RX={RxRate}/s Channels={Channels}",
             FormatBytes(sentRate),
             FormatBytes(recvRate),
-            stats.ActiveChannelCount);
-        
+            stats.OpenChannels);
+
         lastBytesSent = stats.BytesSent;
         lastBytesReceived = stats.BytesReceived;
-        
+
     }, null, TimeSpan.Zero, TimeSpan.FromSeconds(1));
 }
 ```
@@ -139,21 +131,20 @@ void StartStatsLogging(IStreamMultiplexer mux)
 ```csharp
 bool IsHealthy(IStreamMultiplexer mux)
 {
-    var stats = mux.Statistics;
-    
-    // Check connection state
-    if (stats.ConnectionState != ConnectionState.Connected)
+    // Check connection
+    if (!mux.IsConnected)
         return false;
-    
-    // Check for stale connection (no recent pong)
-    var staleness = DateTimeOffset.UtcNow - stats.LastPongReceived;
-    if (staleness > TimeSpan.FromMinutes(1))
+
+    var stats = mux.Stats;
+
+    // Check for excessive missed pings
+    if (stats.MissedPings > 2)
         return false;
-    
+
     // Check RTT isn't too high
-    if (stats.AverageRoundTripTime > TimeSpan.FromSeconds(5))
+    if (stats.LastPingRtt > TimeSpan.FromSeconds(5))
         return false;
-    
+
     return true;
 }
 ```

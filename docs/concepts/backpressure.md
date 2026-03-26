@@ -48,9 +48,6 @@ var options = new ChannelOptions
     MinCredits = 64 * 1024,        // 64KB minimum
     MaxCredits = 4 * 1024 * 1024,  // 4MB maximum (starts here)
     
-    // When to auto-grant credits (50% = grant when half consumed)
-    CreditGrantThreshold = 0.5,
-    
     // Timeout if credits exhausted
     SendTimeout = TimeSpan.FromSeconds(30)
 };
@@ -64,8 +61,9 @@ var channel = await mux.OpenChannelAsync(options);
 |--------|---------|-------------|
 | `MinCredits` | 64KB | Minimum credit buffer (adapts down to this) |
 | `MaxCredits` | 4MB | Maximum credit buffer (starts here) |
-| `CreditGrantThreshold` | 0.5 | Auto-grant when this fraction consumed |
 | `SendTimeout` | 30s | Timeout waiting for credits |
+
+Credits are automatically granted back when the receiver has consumed 50% of the window.
 
 ## Adaptive Credits
 

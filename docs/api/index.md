@@ -14,7 +14,7 @@ Quick reference for NetConduit classes and options. See [Getting Started](../get
 
 ### StreamMultiplexer
 
-The main entry point:
+The main entry point. Implements `IStreamMultiplexer`.
 
 ```csharp
 // Create
@@ -23,50 +23,67 @@ var mux = StreamMultiplexer.Create(options);
 // Lifecycle
 Task Start(CancellationToken ct = default);
 Task WaitForReadyAsync(CancellationToken ct = default);
+ValueTask GoAwayAsync(CancellationToken ct = default);
 ValueTask DisposeAsync();
 
 // Channels
-Task<WriteChannel> OpenChannelAsync(ChannelOptions options, CancellationToken ct = default);
-Task<ReadChannel> AcceptChannelAsync(string channelId, CancellationToken ct = default);
+ValueTask<WriteChannel> OpenChannelAsync(ChannelOptions options, CancellationToken ct = default);
+ValueTask<ReadChannel> AcceptChannelAsync(string channelId, CancellationToken ct = default);
 IAsyncEnumerable<ReadChannel> AcceptChannelsAsync(CancellationToken ct = default);
+WriteChannel? GetWriteChannel(string channelId);
+ReadChannel? GetReadChannel(string channelId);
 
 // Properties
-MultiplexerState State { get; }
+bool IsConnected { get; }
+bool IsRunning { get; }
+bool IsShuttingDown { get; }
+Guid SessionId { get; }
+Guid RemoteSessionId { get; }
 DisconnectReason? DisconnectReason { get; }
 MultiplexerStats Stats { get; }
-string SessionId { get; }
+MultiplexerOptions Options { get; }
+IReadOnlyCollection<string> ActiveChannelIds { get; }
+IReadOnlyCollection<string> OpenedChannelIds { get; }
+IReadOnlyCollection<string> AcceptedChannelIds { get; }
+int ActiveChannelCount { get; }
 
 // Events
-event Action<DisconnectReason, Exception?> OnDisconnected;
-event Action OnReconnecting;
-event Action OnReconnected;
-event Action<Exception> OnReconnectFailed;
+event Action<string>? OnChannelOpened;
+event Action<string, Exception?>? OnChannelClosed;
+event Action<Exception>? OnError;
+event Action<DisconnectReason, Exception?>? OnDisconnected;
+event Action<AutoReconnectEventArgs>? OnAutoReconnecting;
+event Action<Exception>? OnAutoReconnectFailed;
 ```
 
 ### WriteChannel
 
-Channel for sending data:
+Channel for sending data. Inherits from `Stream`.
 
 ```csharp
 // Stream operations
-ValueTask<int> WriteAsync(ReadOnlyMemory<byte> buffer, CancellationToken ct = default);
+ValueTask WriteAsync(ReadOnlyMemory<byte> buffer, CancellationToken ct = default);
 ValueTask FlushAsync(CancellationToken ct = default);
+ValueTask CloseAsync();
 
 // Properties
 string ChannelId { get; }
 ChannelState State { get; }
+ChannelPriority Priority { get; }
+long AvailableCredits { get; }
 ChannelCloseReason? CloseReason { get; }
+Exception? CloseException { get; }
 ChannelStats Stats { get; }
 
 // Events
-event Action<ChannelCloseReason, Exception?> OnClosed;
-event Action OnCreditStarvation;
-event Action<TimeSpan> OnCreditRestored;
+event Action<ChannelCloseReason, Exception?>? OnClosed;
+event Action? OnCreditStarvation;
+event Action<TimeSpan>? OnCreditRestored;
 ```
 
 ### ReadChannel
 
-Channel for receiving data:
+Channel for receiving data. Inherits from `Stream`.
 
 ```csharp
 // Stream operations
@@ -75,37 +92,27 @@ ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken ct = default);
 // Properties
 string ChannelId { get; }
 ChannelState State { get; }
+ChannelPriority Priority { get; }
+long CurrentWindowSize { get; }
 ChannelCloseReason? CloseReason { get; }
+Exception? CloseException { get; }
 ChannelStats Stats { get; }
 
 // Events
-event Action<ChannelCloseReason, Exception?> OnClosed;
+event Action<ChannelCloseReason, Exception?>? OnClosed;
 ```
 
 ## Enums
 
-### MultiplexerState
-
-```csharp
-public enum MultiplexerState
-{
-    Created,
-    Connecting,
-    Connected,
-    Reconnecting,
-    Disconnected,
-    Disposed
-}
-```
-
 ### ChannelState
 
 ```csharp
-public enum ChannelState
+public enum ChannelState : byte
 {
-    Open,
-    Closing,
-    Closed
+    Opening,    // Waiting for ACK
+    Open,       // Ready for data transfer
+    Closing,    // FIN sent or received
+    Closed      // Fully closed
 }
 ```
 
@@ -114,11 +121,9 @@ public enum ChannelState
 ```csharp
 public enum DisconnectReason
 {
-    TransportError,
-    PingTimeout,
-    GoAwayReceived,
-    LocalDispose,
-    ProtocolError
+    GoAwayReceived,  // Remote sent GOAWAY (graceful shutdown)
+    TransportError,  // Underlying stream error (network failure)
+    LocalDispose     // Local DisposeAsync() called
 }
 ```
 
@@ -127,24 +132,35 @@ public enum DisconnectReason
 ```csharp
 public enum ChannelCloseReason
 {
-    LocalClose,
-    RemoteFin,
-    RemoteError,
-    TransportFailed,
-    MuxDisposed
+    LocalClose,       // Local side closed gracefully
+    RemoteFin,        // Remote sent FIN (graceful close)
+    RemoteError,      // Remote sent error frame
+    TransportFailed,  // Underlying transport failed
+    MuxDisposed       // Multiplexer was disposed
 }
 ```
 
 ### ChannelPriority
 
 ```csharp
-public static class ChannelPriority
+public enum ChannelPriority : byte
 {
-    public const byte Lowest = 0;
-    public const byte Low = 64;
-    public const byte Normal = 128;
-    public const byte High = 192;
-    public const byte Highest = 255;
+    Lowest  = 0,
+    Low     = 64,
+    Normal  = 128,
+    High    = 192,
+    Highest = 255
+}
+```
+
+### FlushMode
+
+```csharp
+public enum FlushMode
+{
+    Immediate,  // Flush after every frame
+    Batched,    // Flush periodically based on FlushInterval
+    Manual      // Never explicitly flush, rely on stream buffering
 }
 ```
 
@@ -189,35 +205,37 @@ Task<StreamTransit> AcceptStreamAsync(channelId, ...)
 ### TcpMultiplexer
 
 ```csharp
-MultiplexerOptions CreateOptions(string host, int port);
-MultiplexerOptions CreateServerOptions(TcpListener listener);
+MultiplexerOptions CreateOptions(string host, int port, Action<MultiplexerOptions>? configure = null);
+MultiplexerOptions CreateOptions(IPEndPoint endpoint, Action<MultiplexerOptions>? configure = null);
+MultiplexerOptions CreateServerOptions(TcpListener listener, Action<MultiplexerOptions>? configure = null);
 ```
 
 ### WebSocketMultiplexer
 
 ```csharp
-MultiplexerOptions CreateOptions(string uri);
-MultiplexerOptions CreateServerOptions(WebSocket webSocket);
+MultiplexerOptions CreateOptions(Uri uri, Action<ClientWebSocketOptions>? clientOptions = null, Action<MultiplexerOptions>? configure = null);
+MultiplexerOptions CreateOptions(string url, Action<ClientWebSocketOptions>? clientOptions = null, Action<MultiplexerOptions>? configure = null);
+MultiplexerOptions CreateServerOptions(WebSocket webSocket, Action<MultiplexerOptions>? configure = null);
 ```
 
 ### UdpMultiplexer
 
 ```csharp
-MultiplexerOptions CreateOptions(string host, int port);
-MultiplexerOptions CreateServerOptions(int port);
+MultiplexerOptions CreateOptions(string host, int port, ReliableUdpOptions? udpOptions = null, Action<MultiplexerOptions>? configure = null);
+MultiplexerOptions CreateServerOptions(int listenPort, ReliableUdpOptions? udpOptions = null, Action<MultiplexerOptions>? configure = null);
 ```
 
 ### IpcMultiplexer
 
 ```csharp
-MultiplexerOptions CreateOptions(string pipeName);
-MultiplexerOptions CreateServerOptions(string pipeName);
+MultiplexerOptions CreateOptions(string endpoint, Action<MultiplexerOptions>? configure = null);
+MultiplexerOptions CreateServerOptions(string endpoint, Action<MultiplexerOptions>? configure = null);
 ```
 
 ### QuicMultiplexer
 
 ```csharp
-MultiplexerOptions CreateOptions(string host, int port, bool allowInsecure = false);
-MultiplexerOptions CreateServerOptions(QuicListener listener);
-Task<QuicListener> ListenAsync(IPEndPoint endpoint, X509Certificate2 cert);
+MultiplexerOptions CreateOptions(string host, int port, string? alpn = null, bool allowInsecure = true, Action<MultiplexerOptions>? configure = null);
+MultiplexerOptions CreateServerOptions(QuicListener listener, Action<MultiplexerOptions>? configure = null);
+Task<QuicListener> ListenAsync(IPEndPoint endPoint, X509Certificate2 certificate, string? alpn = null, CancellationToken ct = default);
 ```

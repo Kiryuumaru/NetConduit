@@ -104,27 +104,29 @@ async Task HandleWebSocketAsync(WebSocket webSocket)
 ### Client Options
 
 ```csharp
-var options = WebSocketMultiplexer.CreateOptions("ws://localhost:5000/ws");
-
-// Configure underlying ClientWebSocket
-options.ConfigureWebSocket = (ws) =>
-{
-    ws.Options.SetRequestHeader("Authorization", "Bearer token");
-    ws.Options.KeepAliveInterval = TimeSpan.FromSeconds(30);
-};
+// Configure underlying ClientWebSocket via the factory method
+var options = WebSocketMultiplexer.CreateOptions(
+    "ws://localhost:5000/ws",
+    clientOptions: ws =>
+    {
+        ws.SetRequestHeader("Authorization", "Bearer token");
+        ws.KeepAliveInterval = TimeSpan.FromSeconds(30);
+    });
 ```
 
 ### [Reconnection](../concepts/reconnection.md)
 
 ```csharp
-var options = WebSocketMultiplexer.CreateOptions("ws://localhost:5000/ws");
-options.EnableReconnection = true;
-options.ReconnectTimeout = TimeSpan.FromSeconds(60);
+var options = WebSocketMultiplexer.CreateOptions("ws://localhost:5000/ws", configure: o =>
+{
+    o.EnableReconnection = true;
+    o.ReconnectTimeout = TimeSpan.FromSeconds(60);
+});
 
 var mux = StreamMultiplexer.Create(options);
 
 mux.OnDisconnected += (reason, ex) => Console.WriteLine("WebSocket disconnected");
-mux.OnReconnected += () => Console.WriteLine("WebSocket reconnected!");
+mux.OnAutoReconnecting += (args) => Console.WriteLine($"Reconnecting (attempt {args.AttemptNumber})...");
 ```
 
 ## Subprotocols
@@ -132,10 +134,13 @@ mux.OnReconnected += () => Console.WriteLine("WebSocket reconnected!");
 Specify WebSocket subprotocol:
 
 ```csharp
-options.ConfigureWebSocket = (ws) =>
-{
-    ws.Options.AddSubProtocol("netconduit");
-};
+var options = WebSocketMultiplexer.CreateOptions(
+    "ws://localhost:5000/ws",
+    clientOptions: ws =>
+    {
+        ws.AddSubProtocol("netconduit");
+    });
+```
 ```
 
 Server side (ASP.NET Core):

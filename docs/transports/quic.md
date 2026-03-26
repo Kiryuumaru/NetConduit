@@ -35,11 +35,12 @@ using NetConduit.Quic;
 // Create client options (allowInsecure for development only)
 var options = QuicMultiplexer.CreateOptions("localhost", 5000, allowInsecure: true);
 
-// For production - specify expected certificate
+// For production - use a custom ALPN protocol
 var prodOptions = QuicMultiplexer.CreateOptions(
     "example.com", 
     5000,
-    expectedCertificate: serverCert);
+    alpn: "my-app",
+    allowInsecure: false);
 
 // Create and start multiplexer
 var mux = StreamMultiplexer.Create(options);
@@ -132,24 +133,21 @@ var cert = new X509Certificate2("server.pfx", "password");
 
 ## Configuration
 
-### QUIC-Specific Options
+### QUIC-Specific Parameters
+
+QUIC parameters are passed directly to the factory method:
 
 ```csharp
-var options = QuicMultiplexer.CreateOptions("localhost", 5000, allowInsecure: true);
-
-// Configure QUIC connection
-options.ConfigureQuicConnection = (quicOptions) =>
-{
-    quicOptions.MaxInboundBidirectionalStreams = 100;
-    quicOptions.MaxInboundUnidirectionalStreams = 100;
-    quicOptions.IdleTimeout = TimeSpan.FromMinutes(2);
-};
-```
-
-### ALPN Protocol
-
-```csharp
-options.ApplicationProtocols = new[] { "netconduit" };
+// alpn: Application-Layer Protocol Negotiation identifier (default: "netconduit")
+// allowInsecure: Bypass certificate validation (default: true — set false in production)
+var options = QuicMultiplexer.CreateOptions(
+    "localhost", 5000,
+    alpn: "my-protocol",
+    allowInsecure: false,
+    configure: o =>
+    {
+        o.PingInterval = TimeSpan.FromSeconds(15);
+    });
 ```
 
 ## QUIC vs NetConduit Multiplexing

@@ -50,22 +50,12 @@ await foreach (var channel in mux.AcceptChannelsAsync())
 
 ## Multi-Client Server
 
-For multiple UDP clients:
+For multiple UDP clients, create a multiplexer per client with separate server options:
 
 ```csharp
-var server = new UdpServer(5000);
-
-server.OnClientConnected += async (clientEndpoint) =>
-{
-    var options = UdpMultiplexer.CreateServerOptions(server, clientEndpoint);
-    var mux = StreamMultiplexer.Create(options);
-    var runTask = mux.Start();
-    await mux.WaitForReadyAsync();
-    
-    // Handle this client...
-};
-
-await server.StartAsync();
+// Each client gets its own mux from a separate server options instance
+var options = UdpMultiplexer.CreateServerOptions(port: 5000);
+var mux = StreamMultiplexer.Create(options);
 ```
 
 ## Reliability Layer
@@ -84,38 +74,35 @@ This gives you TCP-like reliability over UDP when needed.
 ### Reliability Settings
 
 ```csharp
-var options = UdpMultiplexer.CreateOptions("localhost", 5000);
-
-// Configure reliability
-options.UdpReliability = new UdpReliabilityOptions
+var udpOptions = new ReliableUdpOptions
 {
-    MaxRetries = 5,
-    RetryTimeout = TimeSpan.FromMilliseconds(100),
-    AckTimeout = TimeSpan.FromMilliseconds(50)
+    MaxRetransmits = 5,
+    RetransmitTimeout = TimeSpan.FromSeconds(1),
+    Mtu = 1200
 };
+
+var options = UdpMultiplexer.CreateOptions("localhost", 5000, udpOptions: udpOptions);
 ```
 
-### Buffer Sizes
+**ReliableUdpOptions properties:**
 
-```csharp
-options.ConfigureUdpClient = (client) =>
-{
-    client.Client.ReceiveBufferSize = 128 * 1024;
-    client.Client.SendBufferSize = 128 * 1024;
-};
+| Property | Default | Description |
+|----------|---------|-------------|
+| `Mtu` | 1200 | Maximum transmission unit |
+| `RetransmitTimeout` | 1s | Timeout before retransmitting |
+| `MaxRetransmits` | 5 | Max retransmission attempts |
 ```
 
 ## Tips
 
 **Low latency gaming:**
 ```csharp
-// For game state that can tolerate some loss,
-// consider smaller retry counts
-options.UdpReliability = new UdpReliabilityOptions
+var udpOptions = new ReliableUdpOptions
 {
-    MaxRetries = 2,  // Don't wait too long for old data
-    RetryTimeout = TimeSpan.FromMilliseconds(50)
+    MaxRetransmits = 2,  // Don't wait too long for old data
+    RetransmitTimeout = TimeSpan.FromMilliseconds(50)
 };
+var options = UdpMultiplexer.CreateOptions("localhost", 5000, udpOptions: udpOptions);
 ```
 
 **NAT traversal:**
