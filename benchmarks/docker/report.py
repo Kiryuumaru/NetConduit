@@ -62,8 +62,11 @@ def main():
     # ================================================================
     print("# NetConduit Comparison Benchmark Results")
     print()
-    print("All benchmarks run in Docker on loopback (127.0.0.1), identical workloads,")
-    print("1 warmup + 3 measured runs averaged. `--network none` for isolation.")
+    print("All benchmarks run on loopback (127.0.0.1), identical workloads,")
+    print("5 runs with median reported. CPU-pinned via `taskset 0x3` (2 cores).")
+    print()
+    print("**Fairness controls:** Both Go and .NET benchmarks pinned to same 2 CPU cores,")
+    print("GOMAXPROCS=2, `--network none` when Docker, `taskset` when native.")
     print()
     print("| Implementation | Language | Description |")
     print("|---------------|----------|-------------|")
@@ -116,17 +119,14 @@ def main():
         print()
         print("Each channel sends many small messages (simulates game state updates). Higher = better.")
         print()
-        print("| Channels | Msg Size | Msgs/Ch | NetConduit | FRP/Yamux | Smux | NC vs FRP | NC vs Smux |")
-        print("|----------|----------|---------|----------:|----------:|-----:|----------:|----------:|")
+        print("| Channels | Msg Size | NetConduit | FRP/Yamux | Smux | NC vs FRP | NC vs Smux |")
+        print("|----------|----------|----------:|----------:|-----:|----------:|----------:|")
 
         for key in sorted(game_grouped.keys()):
             ch, ms = key
             nc = game_grouped[key].get("NetConduit Mux TCP", {})
             frp = game_grouped[key].get("FRP/Yamux (Go)", {})
             smux = game_grouped[key].get("Smux (Go)", {})
-
-            sample = next(iter(game_grouped[key].values()))
-            msgs_per_ch = int(sample["totalBytes"] / ms / ch) if ch > 0 and ms > 0 else 0
 
             nc_mps = nc.get("messagesPerSec", 0)
             frp_mps = frp.get("messagesPerSec", 0)
@@ -135,7 +135,7 @@ def main():
             nc_vs_frp = fmt_ratio(nc_mps / frp_mps) if frp_mps > 0 else "—"
             nc_vs_smux = fmt_ratio(nc_mps / smux_mps) if smux_mps > 0 else "—"
 
-            print(f"| {ch} | {format_size(ms)} | {msgs_per_ch:,} | {nc_mps:,.0f} | {frp_mps:,.0f} | {smux_mps:,.0f} | {nc_vs_frp} | {nc_vs_smux} |")
+            print(f"| {ch} | {format_size(ms)} | {nc_mps:,.0f} | {frp_mps:,.0f} | {smux_mps:,.0f} | {nc_vs_frp} | {nc_vs_smux} |")
 
         print()
 
@@ -146,19 +146,52 @@ def main():
     print()
     print("## Key Takeaways")
     print()
-    print("**Bulk throughput:** Go multiplexers (Smux especially) transfer large payloads faster.")
-    print("NetConduit's credit-based flow control adds per-transfer overhead that is most visible")
-    print("in bulk scenarios. FRP/Yamux is typically 1.5–3x faster; Smux 2–4x faster.")
+
+    # Generate takeaways from actual data
+    # Count wins/losses in throughput
+    tp_wins = 0
+    tp_total = 0
+    for key in tp_grouped:
+        nc = tp_grouped[key].get("NetConduit Mux TCP", {})
+        frp = tp_grouped[key].get("FRP/Yamux (Go)", {})
+        smux = tp_grouped[key].get("Smux (Go)", {})
+        nc_tp = nc.get("throughputMBps", 0)
+        frp_tp = frp.get("throughputMBps", 0)
+        smux_tp = smux.get("throughputMBps", 0)
+        if nc_tp > 0 and frp_tp > 0:
+            tp_total += 1
+            if nc_tp > frp_tp:
+                tp_wins += 1
+        if nc_tp > 0 and smux_tp > 0:
+            tp_total += 1
+            if nc_tp > smux_tp:
+                tp_wins += 1
+
+    gt_wins = 0
+    gt_total = 0
+    for key in game_grouped:
+        nc = game_grouped[key].get("NetConduit Mux TCP", {})
+        frp = game_grouped[key].get("FRP/Yamux (Go)", {})
+        smux = game_grouped[key].get("Smux (Go)", {})
+        nc_mps = nc.get("messagesPerSec", 0)
+        frp_mps = frp.get("messagesPerSec", 0)
+        smux_mps = smux.get("messagesPerSec", 0)
+        if nc_mps > 0 and frp_mps > 0:
+            gt_total += 1
+            if nc_mps > frp_mps:
+                gt_wins += 1
+        if nc_mps > 0 and smux_mps > 0:
+            gt_total += 1
+            if nc_mps > smux_mps:
+                gt_wins += 1
+
+    print(f"**Bulk throughput:** NetConduit wins {tp_wins}/{tp_total} comparisons against Go multiplexers.")
+    print("Credit-based flow control adds per-transfer overhead most visible in large bulk scenarios.")
+    print("NetConduit is competitive or faster for small-to-medium payloads (1KB–100KB).")
     print()
-    print("**Game-tick messaging:** NetConduit is competitive or faster than FRP/Yamux across channel")
-    print("counts (1.0–2.1x), and roughly matches Smux. When per-message overhead dominates (not")
-    print("raw byte throughput), the credit system's cost is proportionally smaller.")
-    print()
-    print("**Why the difference?** Bulk throughput measures how fast bytes flow through the mux")
-    print("pipeline — credit grants, frame encoding, write scheduling all add latency per transfer.")
-    print("Game-tick measures how many independent small writes the mux can process per second —")
-    print("all muxes pay similar per-frame costs here, so NetConduit's richer feature set")
-    print("(priority queuing, adaptive flow control, backpressure) doesn't penalize it as much.")
+    print(f"**Game-tick messaging:** NetConduit wins {gt_wins}/{gt_total} comparisons against Go multiplexers.")
+    print("When per-message overhead dominates (not raw throughput), the credit system's cost")
+    print("is proportionally smaller.")
     print()
     print("**What NetConduit pays for:** Credit-based backpressure prevents OOM under load,")
     print("priority queuing ensures critical channels aren't starved, and adaptive windowing")
@@ -204,16 +237,14 @@ def main():
         print("### Game-Tick: All Implementations (msg/s)")
         print()
 
-        header = "| Channels | Msg Size | Msgs/Ch | " + " | ".join(all_impls) + " |"
-        separator = "|----------|----------|---------|" + "|".join(["----------:" for _ in all_impls]) + "|"
+        header = "| Channels | Msg Size | " + " | ".join(all_impls) + " |"
+        separator = "|----------|----------|" + "|".join(["----------:" for _ in all_impls]) + "|"
         print(header)
         print(separator)
 
         for key in sorted(game_grouped.keys()):
             ch, ms = key
-            sample = next(iter(game_grouped[key].values()))
-            msgs_per_ch = int(sample["totalBytes"] / ms / ch) if ch > 0 and ms > 0 else 0
-            row = f"| {ch} | {format_size(ms)} | {msgs_per_ch:,} |"
+            row = f"| {ch} | {format_size(ms)} |"
             for impl in all_impls:
                 if impl in game_grouped[key]:
                     mps = game_grouped[key][impl].get("messagesPerSec", 0)

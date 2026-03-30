@@ -38,7 +38,7 @@ internal sealed class ChannelSyncState
     /// Records data being sent and buffers it for potential replay.
     /// Returns the byte offset where this data starts.
     /// </summary>
-    public long RecordSend(byte[] data)
+    public long RecordSend(ReadOnlySpan<byte> data)
     {
         lock (_lock)
         {
@@ -58,7 +58,10 @@ internal sealed class ChannelSyncState
                     _bytesAcked = Math.Max(_bytesAcked, old.StartOffset + old.Data.Length);
                 }
                 
-                _sendBuffer.Add(new BufferedSegment(startOffset, data));
+                // Copy data into owned buffer (single allocation, no caller .ToArray() needed)
+                var owned = new byte[data.Length];
+                data.CopyTo(owned);
+                _sendBuffer.Add(new BufferedSegment(startOffset, owned));
                 _bufferedBytes += data.Length;
             }
             

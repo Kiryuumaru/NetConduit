@@ -1,4 +1,3 @@
-using System.Buffers;
 using System.Threading.Channels;
 using NetConduit.Internal;
 
@@ -239,24 +238,10 @@ public sealed class WriteChannel : Stream
             var slice = remaining[..toSend];
             if (_multiplexer.Options.EnableReconnection)
             {
-                // Rent buffer, copy, record for replay, then send
-                var rented = ArrayPool<byte>.Shared.Rent(toSend);
-                try
-                {
-                    slice.CopyTo(rented);
-                    _syncState.RecordSend(rented.AsMemory(0, toSend).ToArray()); // sync state needs owned copy
-                    await _multiplexer.SendDataFrameAsync(ChannelIndex, rented.AsMemory(0, toSend), Priority, cancellationToken).ConfigureAwait(false);
-                }
-                finally
-                {
-                    ArrayPool<byte>.Shared.Return(rented);
-                }
+                // Record for replay, then send — RecordSend copies internally
+                _syncState.RecordSend(slice.Span);
             }
-            else
-            {
-                // No reconnection - pass memory directly without copying
-                await _multiplexer.SendDataFrameAsync(ChannelIndex, slice, Priority, cancellationToken).ConfigureAwait(false);
-            }
+            await _multiplexer.SendDataFrameAsync(ChannelIndex, slice, Priority, cancellationToken).ConfigureAwait(false);
             
             Stats.AddBytesSent(toSend);
             Stats.IncrementFramesSent();

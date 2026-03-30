@@ -53,8 +53,10 @@ internal sealed class AdaptiveFlowControl
             _bytesConsumedInWindow += bytesConsumed;
             _lastActivityTime = Environment.TickCount64;
             
-            // Grant when we've consumed at least 50% of the current window
-            var threshold = _currentWindowSize / 2;
+            // Grant at 25% of window to keep sender busy (was 50%, caused stop-and-wait stalls)
+            // For small windows, ensure threshold doesn't exceed the window itself
+            var quarterWindow = _currentWindowSize / 4;
+            var threshold = Math.Min(Math.Max(quarterWindow, 1), _currentWindowSize);
             if (_bytesConsumedInWindow < threshold)
                 return 0;
             

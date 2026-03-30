@@ -39,9 +39,6 @@ public sealed class StreamMultiplexer : IStreamMultiplexer
     private readonly SemaphoreSlim _writeLock = new(1, 1);
     private readonly CancellationTokenSource _shutdownCts = new();
     private TaskCompletionSource _handshakeCompleted = new(TaskCreationOptions.RunContinuationsAsynchronously);
-    private readonly PriorityQueue<(uint ChannelIndex, ReadOnlyMemory<byte> Data), byte> _sendQueue = new();
-    private readonly SemaphoreSlim _sendQueueSemaphore = new(0);
-    private readonly object _sendQueueLock = new();
     
     // Reconnection support
     private readonly SemaphoreSlim _reconnectLock = new(1, 1);
@@ -71,13 +68,11 @@ public sealed class StreamMultiplexer : IStreamMultiplexer
     private DisconnectReason? _disconnectReason;
     private Exception? _disconnectException;
     private Task? _readTask;
-    private Task? _writeTask;
     private Task? _pingTask;
     private Task? _flushTask;
     private long _lastPingTimestamp;
     private Guid _remoteSessionId;
     private volatile bool _pendingFlush;
-    private readonly byte[] _headerBuffer = new byte[FrameHeader.Size]; // Reusable header buffer
 
     /// <summary>
     /// Creates a new stream multiplexer (no I/O). Use <see cref="Create"/> to create an instance.
@@ -610,7 +605,6 @@ public sealed class StreamMultiplexer : IStreamMultiplexer
             {
                 // Start background tasks with linked token
                 _readTask = ReadLoopAsync(linkedToken);
-                _writeTask = WriteLoopAsync(linkedToken);
                 _pingTask = PingLoopAsync(linkedToken);
                 
                 // Start flush task only if batched mode
@@ -619,8 +613,8 @@ public sealed class StreamMultiplexer : IStreamMultiplexer
 
                 // Wait for any task to complete (or fail)
                 var tasks = _flushTask != null 
-                    ? new[] { _readTask, _writeTask, _pingTask, _flushTask }
-                    : new[] { _readTask, _writeTask, _pingTask };
+                    ? new[] { _readTask, _pingTask, _flushTask }
+                    : new[] { _readTask, _pingTask };
                 
                 // Wait for first task to complete
                 var completedTask = await Task.WhenAny(tasks).ConfigureAwait(false);
@@ -1174,8 +1168,6 @@ public sealed class StreamMultiplexer : IStreamMultiplexer
     }
 
     #region Send Methods
-    
-    private const int CombinedBufferThreshold = 8192; // Combine writes for payloads <= 8KB
 
     internal ValueTask SendDataFrameAsync(uint channelIndex, ReadOnlyMemory<byte> data, ChannelPriority priority, CancellationToken ct)
     {
@@ -1185,51 +1177,21 @@ public sealed class StreamMultiplexer : IStreamMultiplexer
     
     private async ValueTask SendFrameOptimizedAsync(FrameHeader header, ReadOnlyMemory<byte> payload, CancellationToken ct)
     {
-        var writeStream = WriteStream; // Capture non-null stream
+        var writeStream = WriteStream;
+        var combinedLength = FrameHeader.Size + payload.Length;
         
-        // Fast path: combine header + payload into single write for small frames
-        if (payload.Length <= CombinedBufferThreshold)
+        var buffer = ArrayPool<byte>.Shared.Rent(combinedLength);
+        try
         {
-            var combinedLength = FrameHeader.Size + payload.Length;
+            // Prepare combined header+payload OUTSIDE the lock
+            header.Write(buffer);
+            payload.Span.CopyTo(buffer.AsSpan(FrameHeader.Size));
             
-            // Rent buffer from pool - each call gets its own buffer, safe for concurrency
-            var buffer = ArrayPool<byte>.Shared.Rent(combinedLength);
-            try
-            {
-                // Prepare buffer OUTSIDE the lock (can run in parallel)
-                header.Write(buffer);
-                payload.Span.CopyTo(buffer.AsSpan(FrameHeader.Size));
-                
-                // Only hold lock for the actual write
-                await _writeLock.WaitAsync(ct).ConfigureAwait(false);
-                try
-                {
-                    await writeStream.WriteAsync(buffer.AsMemory(0, combinedLength), ct).ConfigureAwait(false);
-                    
-                    if (_options.FlushMode == FlushMode.Immediate)
-                        await writeStream.FlushAsync(ct).ConfigureAwait(false);
-                    else if (_options.FlushMode == FlushMode.Batched)
-                        _pendingFlush = true;
-                }
-                finally
-                {
-                    _writeLock.Release();
-                }
-            }
-            finally
-            {
-                ArrayPool<byte>.Shared.Return(buffer);
-            }
-        }
-        else
-        {
-            // Large payload: two writes but still single lock acquisition
+            // Single write under lock — minimizes lock hold time
             await _writeLock.WaitAsync(ct).ConfigureAwait(false);
             try
             {
-                header.Write(_headerBuffer);
-                await writeStream.WriteAsync(_headerBuffer, ct).ConfigureAwait(false);
-                await writeStream.WriteAsync(payload, ct).ConfigureAwait(false);
+                await writeStream.WriteAsync(buffer.AsMemory(0, combinedLength), ct).ConfigureAwait(false);
                 
                 if (_options.FlushMode == FlushMode.Immediate)
                     await writeStream.FlushAsync(ct).ConfigureAwait(false);
@@ -1241,59 +1203,12 @@ public sealed class StreamMultiplexer : IStreamMultiplexer
                 _writeLock.Release();
             }
         }
+        finally
+        {
+            ArrayPool<byte>.Shared.Return(buffer);
+        }
         
         Stats.AddBytesSent(FrameHeader.Size + payload.Length);
-    }
-
-    private async Task WriteLoopAsync(CancellationToken ct)
-    {
-        var writeStream = WriteStream; // Capture non-null stream
-        var headerBuffer = new byte[FrameHeader.Size];
-        
-        while (!ct.IsCancellationRequested)
-        {
-            try
-            {
-                await _sendQueueSemaphore.WaitAsync(ct).ConfigureAwait(false);
-                
-                (uint channelIndex, ReadOnlyMemory<byte> data) item;
-                lock (_sendQueueLock)
-                {
-                    if (!_sendQueue.TryDequeue(out item, out _))
-                        continue;
-                }
-
-                var header = new FrameHeader(item.channelIndex, FrameFlags.Data, (uint)item.data.Length);
-                header.Write(headerBuffer);
-
-                await _writeLock.WaitAsync(ct).ConfigureAwait(false);
-                try
-                {
-                    await writeStream.WriteAsync(headerBuffer, ct).ConfigureAwait(false);
-                    if (!item.data.IsEmpty)
-                        await writeStream.WriteAsync(item.data, ct).ConfigureAwait(false);
-                    
-                    // Conditional flush based on FlushMode
-                    if (_options.FlushMode == FlushMode.Immediate)
-                        await writeStream.FlushAsync(ct).ConfigureAwait(false);
-                    else if (_options.FlushMode == FlushMode.Batched)
-                        _pendingFlush = true;
-                }
-                finally
-                {
-                    _writeLock.Release();
-                }
-            }
-            catch (OperationCanceledException) when (ct.IsCancellationRequested)
-            {
-                break;
-            }
-            catch (Exception ex)
-            {
-                OnError?.Invoke(ex);
-                break;
-            }
-        }
     }
     
     private async Task FlushLoopAsync(CancellationToken ct)
@@ -1333,35 +1248,40 @@ public sealed class StreamMultiplexer : IStreamMultiplexer
 
     private async ValueTask SendFrameDirectAsync(FrameHeader header, ReadOnlyMemory<byte> payload, CancellationToken ct)
     {
-        var writeStream = WriteStream; // Capture non-null stream
-        await _writeLock.WaitAsync(ct).ConfigureAwait(false);
+        var writeStream = WriteStream;
+        var combinedLength = FrameHeader.Size + payload.Length;
+        var buffer = ArrayPool<byte>.Shared.Rent(combinedLength);
         try
         {
-            // Write header using reusable buffer
-            header.Write(_headerBuffer);
-            await writeStream.WriteAsync(_headerBuffer, ct).ConfigureAwait(false);
-            
+            header.Write(buffer);
             if (!payload.IsEmpty)
-                await writeStream.WriteAsync(payload, ct).ConfigureAwait(false);
+                payload.Span.CopyTo(buffer.AsSpan(FrameHeader.Size));
             
-            // Conditional flush based on FlushMode
-            switch (_options.FlushMode)
+            await _writeLock.WaitAsync(ct).ConfigureAwait(false);
+            try
             {
-                case FlushMode.Immediate:
-                    await writeStream.FlushAsync(ct).ConfigureAwait(false);
-                    break;
-                case FlushMode.Batched:
-                    _pendingFlush = true;
-                    // Flush task will handle periodic flushing
-                    break;
-                case FlushMode.Manual:
-                    // Do not flush - rely on underlying stream buffering
-                    break;
+                await writeStream.WriteAsync(buffer.AsMemory(0, combinedLength), ct).ConfigureAwait(false);
+                
+                switch (_options.FlushMode)
+                {
+                    case FlushMode.Immediate:
+                        await writeStream.FlushAsync(ct).ConfigureAwait(false);
+                        break;
+                    case FlushMode.Batched:
+                        _pendingFlush = true;
+                        break;
+                    case FlushMode.Manual:
+                        break;
+                }
+            }
+            finally
+            {
+                _writeLock.Release();
             }
         }
         finally
         {
-            _writeLock.Release();
+            ArrayPool<byte>.Shared.Return(buffer);
         }
         
         Stats.AddBytesSent(FrameHeader.Size + payload.Length);
@@ -1409,16 +1329,11 @@ public sealed class StreamMultiplexer : IStreamMultiplexer
 
     internal async ValueTask SendFinAsync(uint channelIndex, CancellationToken ct)
     {
-        // Wait for any pending data in the queue for this channel to be sent
-        // FIN must come after all data for proper stream semantics
-        await FlushSendQueueAsync(ct).ConfigureAwait(false);
-        
         var header = new FrameHeader(channelIndex, FrameFlags.Fin, 0);
         await SendFrameDirectAsync(header, ReadOnlyMemory<byte>.Empty, ct).ConfigureAwait(false);
         
-        // Force flush after FIN to ensure all data is sent immediately
-        // This guarantees the peer receives the FIN and all preceding data
-        var writeStream = WriteStream; // Capture non-null stream
+        // Force flush after FIN to ensure peer receives it immediately
+        var writeStream = WriteStream;
         await _writeLock.WaitAsync(ct).ConfigureAwait(false);
         try
         {
@@ -1427,23 +1342,6 @@ public sealed class StreamMultiplexer : IStreamMultiplexer
         finally
         {
             _writeLock.Release();
-        }
-    }
-    
-    private async ValueTask FlushSendQueueAsync(CancellationToken ct)
-    {
-        // Wait a brief moment for pending queue items to be processed
-        // This is a simple approach - a more robust solution would track per-channel pending writes
-        var maxWait = 100; // Max 100 iterations (1 second total)
-        while (maxWait-- > 0)
-        {
-            bool isEmpty;
-            lock (_sendQueueLock)
-            {
-                isEmpty = _sendQueue.Count == 0;
-            }
-            if (isEmpty) break;
-            await Task.Delay(10, ct).ConfigureAwait(false);
         }
     }
 
@@ -1540,10 +1438,38 @@ public sealed class StreamMultiplexer : IStreamMultiplexer
                         $"Frame size {header.Length} exceeds maximum {_options.MaxFrameSize}");
                 }
 
-                // Read payload into owned buffer (not pooled - workers will return it)
-                byte[] payload;
                 int payloadLength = (int)header.Length;
-                
+
+                // Fast path for data frames: read directly into OwnedMemory, skip double copy
+                if (header.ChannelId != ChannelIndexLimits.ControlChannel
+                    && header.Flags == FrameFlags.Data
+                    && payloadLength > 0)
+                {
+                    if (_readChannelsByIndex.TryGetValue(header.ChannelId, out var channel))
+                    {
+                        var owned = OwnedMemory.Rent(payloadLength);
+                        await ReadExactlyAsync(readStream, owned.Memory, ct).ConfigureAwait(false);
+                        Stats.AddBytesReceived(header.Length);
+                        channel.EnqueueData(owned);
+                    }
+                    else
+                    {
+                        var discard = ArrayPool<byte>.Shared.Rent(payloadLength);
+                        try
+                        {
+                            await ReadExactlyAsync(readStream, discard.AsMemory(0, payloadLength), ct).ConfigureAwait(false);
+                        }
+                        finally
+                        {
+                            ArrayPool<byte>.Shared.Return(discard);
+                        }
+                        Stats.AddBytesReceived(header.Length);
+                    }
+                    continue;
+                }
+
+                // All other frames: read into ArrayPool buffer
+                byte[] payload;
                 if (payloadLength > 0)
                 {
                     payload = ArrayPool<byte>.Shared.Rent(payloadLength);
@@ -1555,34 +1481,14 @@ public sealed class StreamMultiplexer : IStreamMultiplexer
                     payload = Array.Empty<byte>();
                 }
                 
-                // Dispatch to worker pool for parallel processing
-                // Control frames (channel 0) are processed inline for ordering guarantees
-                if (header.ChannelId == ChannelIndexLimits.ControlChannel)
+                try
                 {
-                    try
-                    {
-                        await ProcessFrameAsync(header, payload.AsMemory(0, payloadLength), ct).ConfigureAwait(false);
-                    }
-                    finally
-                    {
-                        if (payloadLength > 0)
-                            ArrayPool<byte>.Shared.Return(payload);
-                    }
+                    await ProcessFrameAsync(header, payload.AsMemory(0, payloadLength), ct).ConfigureAwait(false);
                 }
-                else
+                finally
                 {
-                    // For data frames, process inline to maintain per-channel ordering
-                    // The parallelism happens at the channel level (multiple channels can be read concurrently)
-                    // not at the frame level within a single channel
-                    try
-                    {
-                        await ProcessFrameAsync(header, payload.AsMemory(0, payloadLength), ct).ConfigureAwait(false);
-                    }
-                    finally
-                    {
-                        if (payloadLength > 0)
-                            ArrayPool<byte>.Shared.Return(payload);
-                    }
+                    if (payloadLength > 0)
+                        ArrayPool<byte>.Shared.Return(payload);
                 }
             }
             catch (OperationCanceledException) when (ct.IsCancellationRequested)
@@ -2275,7 +2181,6 @@ public sealed class StreamMultiplexer : IStreamMultiplexer
             {
                 var tasks = new List<Task>();
                 if (_readTask != null) tasks.Add(_readTask);
-                if (_writeTask != null) tasks.Add(_writeTask);
                 if (_pingTask != null) tasks.Add(_pingTask);
                 if (_flushTask != null) tasks.Add(_flushTask);
                 
@@ -2309,7 +2214,6 @@ public sealed class StreamMultiplexer : IStreamMultiplexer
             _writeStream = null;
             
             try { _writeLock.Dispose(); } catch { }
-            try { _sendQueueSemaphore.Dispose(); } catch { }
             try { _shutdownCts.Dispose(); } catch { }
             try { _reconnectLock.Dispose(); } catch { }
             try { _autoReconnectCts?.Dispose(); } catch { }

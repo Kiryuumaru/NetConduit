@@ -27,7 +27,7 @@ public static class TcpMultiplexer
         {
             StreamFactory = async ct =>
             {
-                var client = new TcpClient();
+                var client = new TcpClient { NoDelay = true };
                 await client.ConnectAsync(host, port, ct).ConfigureAwait(false);
                 var stream = client.GetStream();
                 return new StreamPair(stream, client);
@@ -55,7 +55,7 @@ public static class TcpMultiplexer
         {
             StreamFactory = async ct =>
             {
-                var client = new TcpClient();
+                var client = new TcpClient { NoDelay = true };
                 await client.ConnectAsync(endpoint, ct).ConfigureAwait(false);
                 var stream = client.GetStream();
                 return new StreamPair(stream, client);
@@ -94,6 +94,7 @@ public static class TcpMultiplexer
                 
                 accepted = true;
                 var client = await listener.AcceptTcpClientAsync(ct).ConfigureAwait(false);
+                client.NoDelay = true;
                 var stream = client.GetStream();
                 return new StreamPair(stream, client);
             }
