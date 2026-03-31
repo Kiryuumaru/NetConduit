@@ -37,6 +37,8 @@ public sealed class StreamMultiplexer : IStreamMultiplexer
     private readonly ConcurrentDictionary<string, TaskCompletionSource<ReadChannel>> _pendingAccepts = new();
     private readonly Channel<ReadChannel> _acceptChannel;
     private readonly SemaphoreSlim _writeLock = new(1, 1);
+    private readonly SemaphoreSlim _flushSignal = new(0, 1);
+    private readonly byte[] _controlFrameBuffer = new byte[FrameHeader.Size + 9];
     private readonly CancellationTokenSource _shutdownCts = new();
     private TaskCompletionSource _handshakeCompleted = new(TaskCreationOptions.RunContinuationsAsynchronously);
     
@@ -1219,13 +1221,20 @@ public sealed class StreamMultiplexer : IStreamMultiplexer
         {
             try
             {
-                await Task.Delay(_options.FlushInterval, ct).ConfigureAwait(false);
+                // Wait for signal or timer — whichever comes first
+                await _flushSignal.WaitAsync(_options.FlushInterval, ct).ConfigureAwait(false);
                 
-                if (_pendingFlush)
+                var hasPendingGrants = HasPendingCreditGrants();
+                
+                if (_pendingFlush || hasPendingGrants)
                 {
                     await _writeLock.WaitAsync(ct).ConfigureAwait(false);
                     try
                     {
+                        // Drain all pending credit grants under this single lock hold
+                        if (hasPendingGrants)
+                            await WritePendingCreditGrantsAsync(writeStream, ct).ConfigureAwait(false);
+                        
                         _pendingFlush = false;
                         await writeStream.FlushAsync(ct).ConfigureAwait(false);
                     }
@@ -1243,6 +1252,42 @@ public sealed class StreamMultiplexer : IStreamMultiplexer
             {
                 // Ignore flush errors - write loop will catch stream issues
             }
+        }
+    }
+    
+    internal void SignalFlush()
+    {
+        try { _flushSignal.Release(); }
+        catch (SemaphoreFullException) { }
+    }
+    
+    private bool HasPendingCreditGrants()
+    {
+        foreach (var kvp in _readChannelsByIndex)
+        {
+            if (kvp.Value.PendingGrantCredits > 0)
+                return true;
+        }
+        return false;
+    }
+    
+    private async ValueTask WritePendingCreditGrantsAsync(Stream writeStream, CancellationToken ct)
+    {
+        // Already under _writeLock — reuse pre-allocated buffer, no allocs per grant
+        var buf = _controlFrameBuffer;
+        foreach (var kvp in _readChannelsByIndex)
+        {
+            var credits = kvp.Value.DrainPendingCredits();
+            if (credits == 0) continue;
+            
+            var header = new FrameHeader(ChannelIndexLimits.ControlChannel, FrameFlags.Data, 9);
+            header.Write(buf);
+            buf[FrameHeader.Size] = (byte)ControlSubtype.CreditGrant;
+            BinaryPrimitives.WriteUInt32BigEndian(buf.AsSpan(FrameHeader.Size + 1), kvp.Key);
+            BinaryPrimitives.WriteUInt32BigEndian(buf.AsSpan(FrameHeader.Size + 5), credits);
+            
+            await writeStream.WriteAsync(buf.AsMemory(0, FrameHeader.Size + 9), ct).ConfigureAwait(false);
+            Stats.AddBytesSent(FrameHeader.Size + 9);
         }
     }
 
@@ -1347,43 +1392,131 @@ public sealed class StreamMultiplexer : IStreamMultiplexer
 
     private async ValueTask SendAckAsync(uint channelIndex, uint credits, CancellationToken ct)
     {
-        var payload = new byte[4];
-        BinaryPrimitives.WriteUInt32BigEndian(payload, credits);
+        var writeStream = WriteStream;
+        const int frameLen = FrameHeader.Size + 4;
         
-        var header = new FrameHeader(channelIndex, FrameFlags.Ack, (uint)payload.Length);
-        await SendFrameDirectAsync(header, payload, ct).ConfigureAwait(false);
+        await _writeLock.WaitAsync(ct).ConfigureAwait(false);
+        try
+        {
+            var buf = _controlFrameBuffer;
+            var header = new FrameHeader(channelIndex, FrameFlags.Ack, 4);
+            header.Write(buf);
+            BinaryPrimitives.WriteUInt32BigEndian(buf.AsSpan(FrameHeader.Size), credits);
+            
+            await writeStream.WriteAsync(buf.AsMemory(0, frameLen), ct).ConfigureAwait(false);
+            switch (_options.FlushMode)
+            {
+                case FlushMode.Immediate:
+                    await writeStream.FlushAsync(ct).ConfigureAwait(false);
+                    break;
+                case FlushMode.Batched:
+                    _pendingFlush = true;
+                    break;
+            }
+        }
+        finally
+        {
+            _writeLock.Release();
+        }
+        Stats.AddBytesSent(frameLen);
     }
 
     internal async ValueTask SendCreditGrantAsync(uint channelIndex, uint credits, CancellationToken ct)
     {
-        var payload = new byte[9];
-        payload[0] = (byte)ControlSubtype.CreditGrant;
-        BinaryPrimitives.WriteUInt32BigEndian(payload.AsSpan(1), channelIndex);
-        BinaryPrimitives.WriteUInt32BigEndian(payload.AsSpan(5), credits);
+        var writeStream = WriteStream;
+        const int frameLen = FrameHeader.Size + 9;
         
-        var header = new FrameHeader(ChannelIndexLimits.ControlChannel, FrameFlags.Data, (uint)payload.Length);
-        await SendFrameDirectAsync(header, payload, ct).ConfigureAwait(false);
+        await _writeLock.WaitAsync(ct).ConfigureAwait(false);
+        try
+        {
+            var buf = _controlFrameBuffer;
+            var header = new FrameHeader(ChannelIndexLimits.ControlChannel, FrameFlags.Data, 9);
+            header.Write(buf);
+            buf[FrameHeader.Size] = (byte)ControlSubtype.CreditGrant;
+            BinaryPrimitives.WriteUInt32BigEndian(buf.AsSpan(FrameHeader.Size + 1), channelIndex);
+            BinaryPrimitives.WriteUInt32BigEndian(buf.AsSpan(FrameHeader.Size + 5), credits);
+            
+            await writeStream.WriteAsync(buf.AsMemory(0, frameLen), ct).ConfigureAwait(false);
+            switch (_options.FlushMode)
+            {
+                case FlushMode.Immediate:
+                    await writeStream.FlushAsync(ct).ConfigureAwait(false);
+                    break;
+                case FlushMode.Batched:
+                    _pendingFlush = true;
+                    break;
+            }
+        }
+        finally
+        {
+            _writeLock.Release();
+        }
+        Stats.AddBytesSent(frameLen);
     }
 
     private async ValueTask SendPingAsync(CancellationToken ct)
     {
-        var payload = new byte[9];
-        payload[0] = (byte)ControlSubtype.Ping;
-        _lastPingTimestamp = DateTime.UtcNow.Ticks;
-        BinaryPrimitives.WriteInt64BigEndian(payload.AsSpan(1), _lastPingTimestamp);
+        var writeStream = WriteStream;
+        const int frameLen = FrameHeader.Size + 9;
         
-        var header = new FrameHeader(ChannelIndexLimits.ControlChannel, FrameFlags.Data, (uint)payload.Length);
-        await SendFrameDirectAsync(header, payload, ct).ConfigureAwait(false);
+        await _writeLock.WaitAsync(ct).ConfigureAwait(false);
+        try
+        {
+            var buf = _controlFrameBuffer;
+            var header = new FrameHeader(ChannelIndexLimits.ControlChannel, FrameFlags.Data, 9);
+            header.Write(buf);
+            buf[FrameHeader.Size] = (byte)ControlSubtype.Ping;
+            _lastPingTimestamp = DateTime.UtcNow.Ticks;
+            BinaryPrimitives.WriteInt64BigEndian(buf.AsSpan(FrameHeader.Size + 1), _lastPingTimestamp);
+            
+            await writeStream.WriteAsync(buf.AsMemory(0, frameLen), ct).ConfigureAwait(false);
+            switch (_options.FlushMode)
+            {
+                case FlushMode.Immediate:
+                    await writeStream.FlushAsync(ct).ConfigureAwait(false);
+                    break;
+                case FlushMode.Batched:
+                    _pendingFlush = true;
+                    break;
+            }
+        }
+        finally
+        {
+            _writeLock.Release();
+        }
+        Stats.AddBytesSent(frameLen);
     }
 
     private async ValueTask SendPongAsync(long timestamp, CancellationToken ct)
     {
-        var payload = new byte[9];
-        payload[0] = (byte)ControlSubtype.Pong;
-        BinaryPrimitives.WriteInt64BigEndian(payload.AsSpan(1), timestamp);
+        var writeStream = WriteStream;
+        const int frameLen = FrameHeader.Size + 9;
         
-        var header = new FrameHeader(ChannelIndexLimits.ControlChannel, FrameFlags.Data, (uint)payload.Length);
-        await SendFrameDirectAsync(header, payload, ct).ConfigureAwait(false);
+        await _writeLock.WaitAsync(ct).ConfigureAwait(false);
+        try
+        {
+            var buf = _controlFrameBuffer;
+            var header = new FrameHeader(ChannelIndexLimits.ControlChannel, FrameFlags.Data, 9);
+            header.Write(buf);
+            buf[FrameHeader.Size] = (byte)ControlSubtype.Pong;
+            BinaryPrimitives.WriteInt64BigEndian(buf.AsSpan(FrameHeader.Size + 1), timestamp);
+            
+            await writeStream.WriteAsync(buf.AsMemory(0, frameLen), ct).ConfigureAwait(false);
+            switch (_options.FlushMode)
+            {
+                case FlushMode.Immediate:
+                    await writeStream.FlushAsync(ct).ConfigureAwait(false);
+                    break;
+                case FlushMode.Batched:
+                    _pendingFlush = true;
+                    break;
+            }
+        }
+        finally
+        {
+            _writeLock.Release();
+        }
+        Stats.AddBytesSent(frameLen);
     }
 
     private async ValueTask SendGoAwayAsync(ErrorCode code, CancellationToken ct)

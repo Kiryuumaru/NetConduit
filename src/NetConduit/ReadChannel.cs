@@ -23,6 +23,7 @@ public sealed class ReadChannel : Stream
     private volatile bool _isDisposing;
     private ChannelCloseReason? _closeReason;
     private Exception? _closeException;
+    private long _pendingGrantCredits;
 
     internal ReadChannel(
         StreamMultiplexer multiplexer,
@@ -72,6 +73,14 @@ public sealed class ReadChannel : Stream
     
     /// <summary>Gets the initial credits to grant for this channel.</summary>
     internal uint GetInitialCredits() => _flowControl.GetInitialCredits();
+    
+    internal long PendingGrantCredits => Volatile.Read(ref _pendingGrantCredits);
+    
+    internal uint DrainPendingCredits()
+    {
+        var credits = Interlocked.Exchange(ref _pendingGrantCredits, 0);
+        return credits > 0 ? (uint)credits : 0;
+    }
     
     /// <summary>Event raised when the channel is closed.</summary>
     public event Action<ChannelCloseReason, Exception?>? OnClosed;
@@ -199,9 +208,19 @@ public sealed class ReadChannel : Stream
         var toGrant = _flowControl.RecordConsumptionAndGetGrant(toCopy);
         if (toGrant > 0)
         {
-            // Fire and forget credit grant
-            _ = _multiplexer.SendCreditGrantAsync(ChannelIndex, toGrant, CancellationToken.None);
             Stats.AddCreditsGranted(toGrant);
+            
+            if (_multiplexer.Options.FlushMode == FlushMode.Batched)
+            {
+                // Accumulate — FlushLoopAsync drains all channels under one lock
+                Interlocked.Add(ref _pendingGrantCredits, toGrant);
+                _multiplexer.SignalFlush();
+            }
+            else
+            {
+                // Non-batched modes: send immediately (no flush loop running)
+                _ = _multiplexer.SendCreditGrantAsync(ChannelIndex, toGrant, CancellationToken.None);
+            }
         }
 
         return toCopy;
