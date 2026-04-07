@@ -273,9 +273,9 @@ def main():
         print()
 
         mux_pairs = [
-            ("NetConduit Mux TCP", "Raw TCP (.NET)"),
-            ("FRP/Yamux (Go)", "Raw TCP (Go)"),
-            ("Smux (Go)", "Raw TCP (Go)"),
+            ("NetConduit Mux TCP", "Raw TCP (.NET)", "Raw TCP (Go)"),
+            ("FRP/Yamux (Go)", "Raw TCP (Go)", None),
+            ("Smux (Go)", "Raw TCP (Go)", None),
         ]
         mux_labels = ["NetConduit", "FRP/Yamux", "Smux"]
 
@@ -287,9 +287,11 @@ def main():
         for key in sorted(tp_grouped.keys()):
             ch, ds = key
             row = f"| {ch} | {format_size(ds)} |"
-            for mux_impl, raw_impl in mux_pairs:
+            for mux_impl, raw_impl, raw_fallback in mux_pairs:
                 mux_r = tp_grouped[key].get(mux_impl)
                 raw_r = tp_grouped[key].get(raw_impl)
+                if not raw_r and raw_fallback:
+                    raw_r = tp_grouped[key].get(raw_fallback)
                 if mux_r and raw_r:
                     mux_tp = mux_r["throughputMBps"]
                     raw_tp = raw_r["throughputMBps"]
@@ -318,9 +320,11 @@ def main():
         for key in sorted(game_grouped.keys()):
             ch, ms = key
             row = f"| {ch} | {format_size(ms)} |"
-            for mux_impl, raw_impl in mux_pairs:
+            for mux_impl, raw_impl, raw_fallback in mux_pairs:
                 mux_r = game_grouped[key].get(mux_impl)
                 raw_r = game_grouped[key].get(raw_impl)
+                if not raw_r and raw_fallback:
+                    raw_r = game_grouped[key].get(raw_fallback)
                 if mux_r and raw_r:
                     mux_mps = mux_r.get("messagesPerSec", 0)
                     raw_mps = raw_r.get("messagesPerSec", 0)

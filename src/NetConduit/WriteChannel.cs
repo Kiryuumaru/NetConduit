@@ -11,13 +11,13 @@ public sealed class WriteChannel : Stream
     private readonly StreamMultiplexer _multiplexer;
     private readonly ChannelOptions _options;
     private readonly SemaphoreSlim _creditSemaphore;
-    private readonly SemaphoreSlim _writeLock;
     private readonly CancellationTokenSource _closeCts;
     private readonly ChannelSyncState _syncState;
     private readonly TaskCompletionSource _openTcs;
     
     private volatile ChannelState _state;
     private long _availableCredits;
+    private int _writeActive; // 0 = idle, 1 = writing (lightweight write serialization)
     private bool _disposed;
     private ChannelCloseReason? _closeReason;
     private Exception? _closeException;
@@ -37,7 +37,6 @@ public sealed class WriteChannel : Stream
         _state = ChannelState.Opening;
         _availableCredits = 0;
         _creditSemaphore = new SemaphoreSlim(0, int.MaxValue);
-        _writeLock = new SemaphoreSlim(1, 1);
         _closeCts = new CancellationTokenSource();
         _syncState = new ChannelSyncState(multiplexer.Options.ReconnectBufferSize);
         _openTcs = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -141,9 +140,13 @@ public sealed class WriteChannel : Stream
         if (buffer.Length == 0)
             return;
 
-        // Acquire write lock to ensure this entire WriteAsync completes atomically
-        // This prevents interleaving when multiple threads write to the same channel
-        await _writeLock.WaitAsync(cancellationToken).ConfigureAwait(false);
+        // Acquire write serialization — lightweight spin + yield for the rare multi-writer case
+        var spinner = new SpinWait();
+        while (Interlocked.CompareExchange(ref _writeActive, 1, 0) != 0)
+        {
+            spinner.SpinOnce();
+            cancellationToken.ThrowIfCancellationRequested();
+        }
         try
         {
             var remaining = buffer;
@@ -234,14 +237,10 @@ public sealed class WriteChannel : Stream
                 
             Stats.AddCreditsConsumed(toSend);
 
-            // Buffer for potential replay (if reconnection enabled) and send the data frame
+            // Buffer for potential replay and send the data frame
             var slice = remaining[..toSend];
-            if (_multiplexer.Options.EnableReconnection)
-            {
-                // Record for replay, then send — RecordSend copies internally
-                _syncState.RecordSend(slice.Span);
-            }
-            await _multiplexer.SendDataFrameAsync(ChannelIndex, slice, Priority, cancellationToken).ConfigureAwait(false);
+            _syncState.RecordSend(slice.Span);
+            _multiplexer.SendDataFrame(ChannelIndex, slice, Priority, cancellationToken);
             
             Stats.AddBytesSent(toSend);
             Stats.IncrementFramesSent();
@@ -255,20 +254,21 @@ public sealed class WriteChannel : Stream
         }
         finally
         {
-            _writeLock.Release();
+            Volatile.Write(ref _writeActive, 0);
         }
     }
 
     /// <summary>
     /// Gracefully close the channel.
     /// </summary>
-    public async ValueTask CloseAsync(CancellationToken cancellationToken = default)
+    public ValueTask CloseAsync(CancellationToken cancellationToken = default)
     {
         if (_state == ChannelState.Closed || _state == ChannelState.Closing)
-            return;
+            return default;
 
         _state = ChannelState.Closing;
-        await _multiplexer.SendFinAsync(ChannelIndex, cancellationToken).ConfigureAwait(false);
+        _multiplexer.SendFin(ChannelIndex, cancellationToken);
+        return default;
     }
 
     /// <summary>
@@ -280,6 +280,8 @@ public sealed class WriteChannel : Stream
     internal void SetOpen(uint initialCredits)
     {
         _state = ChannelState.Open;
+        if (_multiplexer.Options.EnableReconnection)
+            _syncState.StartRecording();
         GrantCredits(initialCredits);
         _openTcs.TrySetResult();
     }
@@ -359,7 +361,6 @@ public sealed class WriteChannel : Stream
         {
             _closeCts.Cancel();
             _creditSemaphore.Dispose();
-            _writeLock.Dispose();
             _closeCts.Dispose();
             _multiplexer.OnWriteChannelDisposed(ChannelIndex, ChannelId);
         }
@@ -386,12 +387,12 @@ public sealed class WriteChannel : Stream
             {
                 // Wait for pending writes to complete with timeout
                 var timeout = _multiplexer.Options.GracefulShutdownTimeout;
-                using var timeoutCts = new CancellationTokenSource(timeout);
-                
-                // Try to acquire write lock to ensure pending writes complete
-                if (await _writeLock.WaitAsync(timeout).ConfigureAwait(false))
+                var deadline = Environment.TickCount64 + (long)timeout.TotalMilliseconds;
+                var spinner = new SpinWait();
+                while (Volatile.Read(ref _writeActive) != 0)
                 {
-                    _writeLock.Release();
+                    if (Environment.TickCount64 >= deadline) break;
+                    spinner.SpinOnce();
                 }
                 
                 await CloseAsync().ConfigureAwait(false);

@@ -1,4 +1,5 @@
-using System.Threading.Channels;
+using System.Buffers;
+using System.IO.Pipelines;
 using NetConduit.Internal;
 
 namespace NetConduit;
@@ -10,15 +11,17 @@ public sealed class ReadChannel : Stream
 {
     private readonly StreamMultiplexer _multiplexer;
     private readonly ChannelOptions _options;
-    private readonly Channel<OwnedMemory> _dataChannel;
+    private readonly Pipe _dataPipe;
+    private readonly PipeReader _dataPipeReader;
+    private readonly PipeWriter _dataPipeWriter;
     private readonly CancellationTokenSource _closeCts;
     private readonly ChannelSyncState _syncState;
     private readonly AdaptiveFlowControl _flowControl;
     private readonly object _disposeLock = new();
     
     private volatile ChannelState _state;
-    private OwnedMemory _currentOwnedBuffer;
-    private ReadOnlyMemory<byte> _currentRemainingData;
+    private ReadOnlySequence<byte> _bufferedData;
+    private bool _hasBufferedData;
     private bool _disposed;
     private volatile bool _isDisposing;
     private ChannelCloseReason? _closeReason;
@@ -38,11 +41,12 @@ public sealed class ReadChannel : Stream
         Priority = priority;
         _options = options;
         _state = ChannelState.Open;
-        _dataChannel = Channel.CreateUnbounded<OwnedMemory>(new UnboundedChannelOptions
-        {
-            SingleReader = true,
-            SingleWriter = true
-        });
+        _dataPipe = new Pipe(new PipeOptions(
+            pauseWriterThreshold: 0,
+            resumeWriterThreshold: 0,
+            useSynchronizationContext: false));
+        _dataPipeReader = _dataPipe.Reader;
+        _dataPipeWriter = _dataPipe.Writer;
         _closeCts = new CancellationTokenSource();
         _syncState = new ChannelSyncState(0); // Read channels don't buffer, just track sequence
         _flowControl = new AdaptiveFlowControl(options.MinCredits, options.MaxCredits);
@@ -92,7 +96,7 @@ public sealed class ReadChannel : Stream
     public Exception? CloseException => _closeException;
 
     /// <inheritdoc/>
-    public override bool CanRead => _state == ChannelState.Open || !_currentRemainingData.IsEmpty || _dataChannel.Reader.TryPeek(out _);
+    public override bool CanRead => _state == ChannelState.Open || _hasBufferedData;
     /// <inheritdoc/>
     public override bool CanSeek => false;
     /// <inheritdoc/>
@@ -124,105 +128,143 @@ public sealed class ReadChannel : Stream
         if (buffer.Length == 0)
             return 0;
 
+        if (HotPathProfiler.IsEnabled) HotPathProfiler.RecordReadAsync();
+
         // If we have leftover data from previous read, use it first
-        if (!_currentRemainingData.IsEmpty)
+        if (_hasBufferedData)
         {
+            if (HotPathProfiler.IsEnabled) HotPathProfiler.RecordReadAsyncFastPath();
             return ConsumeBuffer(buffer);
         }
 
-        // Try to read any remaining data first, even if channel is closing
-        if (_dataChannel.Reader.TryRead(out var data))
+        // Try non-blocking read from the pipe
+        if (_dataPipeReader.TryRead(out var readResult))
         {
-            SetCurrentBuffer(data);
-            Stats.IncrementFramesReceived();
-            return ConsumeBuffer(buffer);
+            if (readResult.Buffer.Length > 0)
+            {
+                if (HotPathProfiler.IsEnabled) HotPathProfiler.RecordReadAsyncFastPath();
+                _bufferedData = readResult.Buffer;
+                _hasBufferedData = true;
+                Stats.IncrementFramesReceived();
+                return ConsumeBuffer(buffer);
+            }
+            _dataPipeReader.AdvanceTo(readResult.Buffer.Start);
+            if (readResult.IsCompleted)
+                return 0;
         }
 
         // If channel is closed and no more data, return 0
-        if (_state == ChannelState.Closed && !_dataChannel.Reader.TryPeek(out _))
+        if (_state == ChannelState.Closed)
         {
             return 0;
         }
 
+        if (HotPathProfiler.IsEnabled) HotPathProfiler.RecordReadAsyncSlowPath();
         // Wait for more data
         using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, _closeCts.Token);
         
         try
         {
-            if (!await _dataChannel.Reader.WaitToReadAsync(linkedCts.Token).ConfigureAwait(false))
+            var result = await _dataPipeReader.ReadAsync(linkedCts.Token).ConfigureAwait(false);
+            
+            if (result.Buffer.Length > 0)
             {
-                // Channel completed (closed)
-                return 0;
-            }
-
-            if (_dataChannel.Reader.TryRead(out data))
-            {
-                SetCurrentBuffer(data);
+                _bufferedData = result.Buffer;
+                _hasBufferedData = true;
                 Stats.IncrementFramesReceived();
                 return ConsumeBuffer(buffer);
             }
+            
+            _dataPipeReader.AdvanceTo(result.Buffer.Start);
+            if (result.IsCompleted)
+                return 0;
         }
         catch (OperationCanceledException) when (_closeCts.IsCancellationRequested)
         {
-            // Channel closed - but try to drain any remaining data first
-            if (_dataChannel.Reader.TryRead(out data))
+            // Channel closed - try to drain any remaining data
+            if (_dataPipeReader.TryRead(out var finalResult) && finalResult.Buffer.Length > 0)
             {
-                SetCurrentBuffer(data);
+                _bufferedData = finalResult.Buffer;
+                _hasBufferedData = true;
                 Stats.IncrementFramesReceived();
                 return ConsumeBuffer(buffer);
             }
-            return 0; // No more data
+            if (finalResult.Buffer.Length == 0)
+                _dataPipeReader.AdvanceTo(finalResult.Buffer.Start);
+            return 0;
         }
 
         return 0;
     }
 
-    private void SetCurrentBuffer(OwnedMemory owned)
+    private void SetCurrentBuffer(ReadOnlySequence<byte> data)
     {
-        // Dispose any previous buffer that wasn't fully consumed
-        if (!_currentOwnedBuffer.IsDisposed && !_currentRemainingData.IsEmpty)
-        {
-            _currentOwnedBuffer.Dispose();
-        }
-        
-        _currentOwnedBuffer = owned;
-        _currentRemainingData = owned.ReadOnlyMemory;
+        _bufferedData = data;
+        _hasBufferedData = true;
     }
 
     private int ConsumeBuffer(Memory<byte> destination)
     {
-        var toCopy = Math.Min(destination.Length, _currentRemainingData.Length);
-        _currentRemainingData[..toCopy].CopyTo(destination);
-        _currentRemainingData = _currentRemainingData[toCopy..];
+        var profiling = HotPathProfiler.IsEnabled;
+        long cbStart = profiling ? HotPathProfiler.Timestamp() : 0;
+        long t0;
         
-        // If buffer is fully consumed, dispose it and return to pool
-        if (_currentRemainingData.IsEmpty && !_currentOwnedBuffer.IsDisposed)
+        var toCopy = (int)Math.Min(destination.Length, _bufferedData.Length);
+        t0 = profiling ? HotPathProfiler.Timestamp() : 0;
+        _bufferedData.Slice(0, toCopy).CopyTo(destination.Span);
+        if (profiling) HotPathProfiler.RecordConsumeBufferCopy(HotPathProfiler.Timestamp() - t0);
+        
+        var consumed = _bufferedData.GetPosition(toCopy);
+        var remaining = _bufferedData.Slice(toCopy);
+        
+        // If buffer is fully consumed, advance the PipeReader
+        if (remaining.Length == 0)
         {
-            _currentOwnedBuffer.Dispose();
-            _currentOwnedBuffer = default;
+            t0 = profiling ? HotPathProfiler.Timestamp() : 0;
+            _dataPipeReader.AdvanceTo(consumed);
+            _hasBufferedData = false;
+            _bufferedData = default;
+            if (profiling)
+            {
+                HotPathProfiler.RecordConsumeBufferDispose(HotPathProfiler.Timestamp() - t0);
+                HotPathProfiler.RecordReturn();
+            }
+        }
+        else
+        {
+            // Partial consume: tell PipeReader what was examined but not consumed
+            _bufferedData = remaining;
         }
         
         Stats.AddBytesReceived(toCopy);
         
         // Use adaptive flow control to determine credit grant
+        t0 = profiling ? HotPathProfiler.Timestamp() : 0;
         var toGrant = _flowControl.RecordConsumptionAndGetGrant(toCopy);
         if (toGrant > 0)
         {
+            if (profiling) HotPathProfiler.RecordCreditGrant(HotPathProfiler.Timestamp() - t0);
             Stats.AddCreditsGranted(toGrant);
             
             if (_multiplexer.Options.FlushMode == FlushMode.Batched)
             {
-                // Accumulate — FlushLoopAsync drains all channels under one lock
+                // Accumulate — FlushLoopAsync drains pending queue under one lock
                 Interlocked.Add(ref _pendingGrantCredits, toGrant);
+                _multiplexer.EnqueuePendingCredit(this);
                 _multiplexer.SignalFlush();
             }
             else
             {
                 // Non-batched modes: send immediately (no flush loop running)
-                _ = _multiplexer.SendCreditGrantAsync(ChannelIndex, toGrant, CancellationToken.None);
+                _multiplexer.SendCreditGrant(ChannelIndex, toGrant, CancellationToken.None);
             }
         }
+        else if (profiling)
+        {
+            HotPathProfiler.RecordCreditGrant(HotPathProfiler.Timestamp() - t0);
+        }
 
+        if (profiling) HotPathProfiler.RecordConsumeBuffer(HotPathProfiler.Timestamp() - cbStart);
         return toCopy;
     }
 
@@ -252,26 +294,27 @@ public sealed class ReadChannel : Stream
         // The flow control handles this internally, nothing more to do here
     }
 
-    internal void EnqueueData(OwnedMemory data)
+    internal void EnqueueData(ReadOnlySequence<byte> payload)
     {
+        var profiling = HotPathProfiler.IsEnabled;
+        long t0 = profiling ? HotPathProfiler.Timestamp() : 0;
         // Use lock to synchronize with Dispose
         lock (_disposeLock)
         {
+            if (profiling) HotPathProfiler.RecordEnqueueDataLock(HotPathProfiler.Timestamp() - t0);
             if (_state == ChannelState.Closed || _isDisposing)
             {
-                // Channel is closed/disposing - dispose the data immediately
-                data.Dispose();
                 return;
             }
             
             // Track bytes received for reconnection sync
-            _syncState.RecordReceive(data.Length);
+            _syncState.RecordReceive((int)payload.Length);
             
-            if (!_dataChannel.Writer.TryWrite(data))
-            {
-                // If we can't write (shouldn't happen with unbounded), dispose
-                data.Dispose();
-            }
+            // Copy payload into per-channel PipeWriter
+            var span = _dataPipeWriter.GetSpan((int)payload.Length);
+            payload.CopyTo(span);
+            _dataPipeWriter.Advance((int)payload.Length);
+            _dataPipeWriter.FlushAsync().GetAwaiter().GetResult();
         }
     }
 
@@ -288,7 +331,7 @@ public sealed class ReadChannel : Stream
         _closeReason = reason;
         _closeException = exception;
         _state = ChannelState.Closed;
-        _dataChannel.Writer.TryComplete();
+        _dataPipeWriter.Complete();
         _closeCts.Cancel();
         
         try
@@ -315,7 +358,7 @@ public sealed class ReadChannel : Stream
         _closeReason = ChannelCloseReason.RemoteError;
         _closeException = exception;
         _state = ChannelState.Closed;
-        _dataChannel.Writer.TryComplete(exception);
+        _dataPipeWriter.Complete(exception);
         _closeCts.Cancel();
         
         try
@@ -342,21 +385,11 @@ public sealed class ReadChannel : Stream
             if (disposing)
             {
                 _closeCts.Cancel();
-                _dataChannel.Writer.TryComplete();
+                _dataPipeWriter.Complete();
+                _dataPipeReader.Complete();
                 
-                // Dispose the current buffer if not already disposed
-                if (!_currentOwnedBuffer.IsDisposed)
-                {
-                    _currentOwnedBuffer.Dispose();
-                    _currentOwnedBuffer = default;
-                    _currentRemainingData = default;
-                }
-                
-                // Drain and dispose any remaining queued buffers
-                while (_dataChannel.Reader.TryRead(out var remainingData))
-                {
-                    remainingData.Dispose();
-                }
+                _hasBufferedData = false;
+                _bufferedData = default;
                 
                 _closeCts.Dispose();
                 _multiplexer.OnReadChannelDisposed(ChannelIndex, ChannelId);
@@ -388,7 +421,7 @@ public sealed class ReadChannel : Stream
                 using var timeoutCts = new CancellationTokenSource(timeout);
                 
                 // Wait until buffer is drained or timeout
-                while (!_currentRemainingData.IsEmpty || _dataChannel.Reader.TryPeek(out _))
+                while (_hasBufferedData)
                 {
                     if (timeoutCts.IsCancellationRequested)
                         break;

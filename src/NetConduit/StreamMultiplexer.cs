@@ -37,9 +37,13 @@ public sealed class StreamMultiplexer : IStreamMultiplexer
     private readonly ConcurrentDictionary<string, ReadChannel> _readChannelsById = new();
     private readonly ConcurrentDictionary<string, TaskCompletionSource<ReadChannel>> _pendingAccepts = new();
     private readonly Channel<ReadChannel> _acceptChannel;
-    private readonly SemaphoreSlim _writeLock = new(1, 1);
+    private readonly object _writeLock = new();
+    private readonly SemaphoreSlim _streamLock = new(1, 1);
     private readonly SemaphoreSlim _flushSignal = new(0, 1);
-    private PipeWriter? _pipeWriter;
+    private readonly ConcurrentQueue<ReadChannel> _pendingCreditChannels = new();
+    private Pipe? _pipe;
+    private PipeReader? _readPipeReader;
+    private volatile Exception? _writeError;
     private readonly CancellationTokenSource _shutdownCts = new();
     private TaskCompletionSource _handshakeCompleted = new(TaskCreationOptions.RunContinuationsAsynchronously);
     
@@ -434,7 +438,9 @@ public sealed class StreamMultiplexer : IStreamMultiplexer
                     _streamPair = streamPair;
                     _readStream = streamPair.ReadStream;
                     _writeStream = streamPair.WriteStream;
-                    _pipeWriter = PipeWriter.Create(_writeStream, new StreamPipeWriterOptions(leaveOpen: true));
+                    _pipe = new Pipe(new PipeOptions(pauseWriterThreshold: 0, resumeWriterThreshold: 0));
+                    _readPipeReader = PipeReader.Create(_readStream, new StreamPipeReaderOptions(bufferSize: 16384));
+                    _writeError = null;
                     
                     // Step 2: Perform handshake (with optional timeout)
                     await PerformHandshakeAsync(ct).ConfigureAwait(false);
@@ -531,47 +537,27 @@ public sealed class StreamMultiplexer : IStreamMultiplexer
     }
     
     /// <summary>
-    /// Reads a single frame from the read stream.
+    /// Reads a single frame from the PipeReader (used during handshake).
     /// </summary>
     private async Task ReadSingleFrameAsync(CancellationToken ct)
     {
-        var readStream = ReadStream; // Capture non-null stream
-        var headerBuffer = new byte[FrameHeader.Size];
-        await ReadExactlyAsync(readStream, headerBuffer, ct).ConfigureAwait(false);
-        var header = FrameHeader.Read(headerBuffer);
+        var pipeReader = _readPipeReader ?? throw new InvalidOperationException("Not connected.");
         
-        Stats.AddBytesReceived(FrameHeader.Size);
-        
-        // Validate frame size
-        if (header.Length > _options.MaxFrameSize)
+        while (true)
         {
-            throw new MultiplexerException(ErrorCode.ProtocolError, 
-                $"Frame size {header.Length} exceeds maximum {_options.MaxFrameSize}");
-        }
-        
-        // Read payload
-        byte[] payload;
-        int payloadLength = (int)header.Length;
-        
-        if (payloadLength > 0)
-        {
-            payload = ArrayPool<byte>.Shared.Rent(payloadLength);
-            await ReadExactlyAsync(readStream, payload.AsMemory(0, payloadLength), ct).ConfigureAwait(false);
-            Stats.AddBytesReceived(header.Length);
-        }
-        else
-        {
-            payload = Array.Empty<byte>();
-        }
-        
-        try
-        {
-            await ProcessFrameAsync(header, payload.AsMemory(0, payloadLength), ct).ConfigureAwait(false);
-        }
-        finally
-        {
-            if (payloadLength > 0)
-                ArrayPool<byte>.Shared.Return(payload);
+            var readResult = await pipeReader.ReadAsync(ct).ConfigureAwait(false);
+            var buffer = readResult.Buffer;
+            
+            if (TryParseFrame(ref buffer, ct))
+            {
+                pipeReader.AdvanceTo(buffer.Start, buffer.End);
+                return;
+            }
+            
+            pipeReader.AdvanceTo(buffer.Start, buffer.End);
+            
+            if (readResult.IsCompleted)
+                throw new EndOfStreamException("Connection closed.");
         }
     }
     
@@ -582,10 +568,21 @@ public sealed class StreamMultiplexer : IStreamMultiplexer
     {
         try
         {
-            if (_pipeWriter != null)
+            if (_readPipeReader != null)
             {
-                await _pipeWriter.CompleteAsync().ConfigureAwait(false);
-                _pipeWriter = null;
+                await _readPipeReader.CompleteAsync().ConfigureAwait(false);
+                _readPipeReader = null;
+            }
+        }
+        catch { }
+        
+        try
+        {
+            if (_pipe != null)
+            {
+                await _pipe.Writer.CompleteAsync().ConfigureAwait(false);
+                await _pipe.Reader.CompleteAsync().ConfigureAwait(false);
+                _pipe = null;
             }
         }
         catch { }
@@ -621,14 +618,11 @@ public sealed class StreamMultiplexer : IStreamMultiplexer
                 _readTask = ReadLoopAsync(linkedToken);
                 _pingTask = PingLoopAsync(linkedToken);
                 
-                // Start flush task only if batched mode
-                if (_options.FlushMode == FlushMode.Batched)
-                    _flushTask = FlushLoopAsync(linkedToken);
+                // Start flush task for all modes (drains Pipe to stream)
+                _flushTask = FlushLoopAsync(linkedToken);
 
                 // Wait for any task to complete (or fail)
-                var tasks = _flushTask != null 
-                    ? new[] { _readTask, _pingTask, _flushTask }
-                    : new[] { _readTask, _pingTask };
+                var tasks = new[] { _readTask, _pingTask, _flushTask };
                 
                 // Wait for first task to complete
                 var completedTask = await Task.WhenAny(tasks).ConfigureAwait(false);
@@ -774,17 +768,8 @@ public sealed class StreamMultiplexer : IStreamMultiplexer
         Stats.IncrementTotalChannelsOpened();
         Stats.IncrementOpenChannels();
 
-        // Send INIT frame with ChannelId (fail fast if the transport stalls)
-        var initTask = SendInitAsync(channelIndex, options.ChannelId, options.Priority, cancellationToken).AsTask();
-        var initSendCompleted = await Task.WhenAny(initTask, Task.Delay(TimeSpan.FromSeconds(5), cancellationToken)).ConfigureAwait(false);
-        if (initSendCompleted != initTask)
-        {
-            _writeChannelsByIndex.TryRemove(channelIndex, out _);
-            _writeChannelsById.TryRemove(options.ChannelId, out _);
-            Stats.DecrementOpenChannels();
-            throw new TimeoutException("Channel open timed out before INIT frame was sent.");
-        }
-        await initTask.ConfigureAwait(false);
+        // Send INIT frame — writes to in-memory PipeWriter, always fast
+        SendInit(channelIndex, options.ChannelId, options.Priority, cancellationToken);
 
         // Wait for ACK (will be handled by read loop calling SetOpen/SetClosed/SetError)
         var timeout = TimeSpan.FromSeconds(30);
@@ -1183,33 +1168,29 @@ public sealed class StreamMultiplexer : IStreamMultiplexer
 
     #region Send Methods
 
-    internal ValueTask SendDataFrameAsync(uint channelIndex, ReadOnlyMemory<byte> data, ChannelPriority priority, CancellationToken ct)
+    internal void SendDataFrame(uint channelIndex, ReadOnlyMemory<byte> data, ChannelPriority priority, CancellationToken ct)
     {
         var header = new FrameHeader(channelIndex, FrameFlags.Data, (uint)data.Length);
-        return SendFrameOptimizedAsync(header, data, ct);
+        SendFrameToWriter(header, data, priority >= ChannelPriority.High, ct);
     }
     
-    private async ValueTask SendFrameOptimizedAsync(FrameHeader header, ReadOnlyMemory<byte> payload, CancellationToken ct)
+    private void SendFrameToWriter(FrameHeader header, ReadOnlyMemory<byte> payload, bool forceFlush, CancellationToken ct)
     {
+        ct.ThrowIfCancellationRequested();
         var combinedLength = FrameHeader.Size + payload.Length;
         
-        await _writeLock.WaitAsync(ct).ConfigureAwait(false);
-        try
+        lock (_writeLock)
         {
-            var writer = _pipeWriter ?? throw new InvalidOperationException("Not connected.");
+            if (_writeError != null) throw new IOException("Write pipe failed.", _writeError);
+            var writer = _pipe?.Writer ?? throw new InvalidOperationException("Not connected.");
             var span = writer.GetSpan(combinedLength);
             header.Write(span);
             payload.Span.CopyTo(span[FrameHeader.Size..]);
             writer.Advance(combinedLength);
             
-            if (_options.FlushMode == FlushMode.Immediate)
-                await writer.FlushAsync(ct).ConfigureAwait(false);
-            else if (_options.FlushMode == FlushMode.Batched)
-                _pendingFlush = true;
-        }
-        finally
-        {
-            _writeLock.Release();
+            _pendingFlush = true;
+            if (_options.FlushMode == FlushMode.Immediate || forceFlush)
+                SignalFlush();
         }
         
         Stats.AddBytesSent(FrameHeader.Size + payload.Length);
@@ -1224,36 +1205,63 @@ public sealed class StreamMultiplexer : IStreamMultiplexer
                 // Wait for signal or timer — whichever comes first
                 await _flushSignal.WaitAsync(_options.FlushInterval, ct).ConfigureAwait(false);
                 
-                var hasPendingGrants = HasPendingCreditGrants();
+                var profiling = HotPathProfiler.IsEnabled;
+                long cycleStart = profiling ? HotPathProfiler.Timestamp() : 0;
+                long t0;
+                
+                t0 = profiling ? HotPathProfiler.Timestamp() : 0;
+                var hasPendingGrants = !_pendingCreditChannels.IsEmpty;
+                if (profiling) HotPathProfiler.RecordHasPendingGrantsScan(HotPathProfiler.Timestamp() - t0);
                 
                 if (_pendingFlush || hasPendingGrants)
                 {
-                    await _writeLock.WaitAsync(ct).ConfigureAwait(false);
-                    try
+                    // Phase 1: Commit writes to Pipe under sync lock (~35-65ns)
+                    lock (_writeLock)
                     {
-                        var writer = _pipeWriter ?? throw new InvalidOperationException("Not connected.");
+                        var writer = _pipe?.Writer ?? throw new InvalidOperationException("Not connected.");
                         
-                        // Drain all pending credit grants under this single lock hold
                         if (hasPendingGrants)
+                        {
+                            t0 = profiling ? HotPathProfiler.Timestamp() : 0;
                             WritePendingCreditGrants(writer);
+                            if (profiling) HotPathProfiler.RecordWritePendingGrants(HotPathProfiler.Timestamp() - t0);
+                        }
                         
                         _pendingFlush = false;
-                        await writer.FlushAsync(ct).ConfigureAwait(false);
+                        t0 = profiling ? HotPathProfiler.Timestamp() : 0;
+                        CommitPipeWriter(writer);
+                        if (profiling) HotPathProfiler.RecordCommitPipeWriter(HotPathProfiler.Timestamp() - t0);
                     }
-                    finally
-                    {
-                        _writeLock.Release();
-                    }
+                    // Writers unblocked — can GetSpan/Advance concurrently now
+                    
+                    // Phase 2: Drain pipe to stream under stream lock (I/O, ~100us-1ms)
+                    t0 = profiling ? HotPathProfiler.Timestamp() : 0;
+                    await DrainPipeToStreamAsync(ct).ConfigureAwait(false);
+                    if (profiling) HotPathProfiler.RecordDrainPipe(HotPathProfiler.Timestamp() - t0);
+                    
+                    if (profiling) HotPathProfiler.RecordFlushCycle(HotPathProfiler.Timestamp() - cycleStart);
                 }
             }
             catch (OperationCanceledException) when (ct.IsCancellationRequested)
             {
                 break;
             }
-            catch
+            catch (Exception ex)
             {
-                // Ignore flush errors - write loop will catch stream issues
+                // Propagate stream errors to writers for fast-fail
+                _writeError = ex;
             }
+        }
+        
+        // Final drain: flush any remaining buffered data before shutdown
+        // Stream is still open at this point (disposed after FlushLoop completes)
+        try
+        {
+            await ForceFlushPipeToStreamAsync(CancellationToken.None).ConfigureAwait(false);
+        }
+        catch
+        {
+            // Best-effort — stream may already be broken
         }
     }
     
@@ -1263,22 +1271,102 @@ public sealed class StreamMultiplexer : IStreamMultiplexer
         catch (SemaphoreFullException) { }
     }
     
+    internal void EnqueuePendingCredit(ReadChannel channel)
+    {
+        _pendingCreditChannels.Enqueue(channel);
+    }
+    
+    /// <summary>
+    /// Flushes PipeWriter data synchronously under write lock, then calls CommitPipeWriter.
+    /// With pauseWriterThreshold: 0, FlushAsync always completes synchronously.
+    /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static void CommitPipeWriter(PipeWriter writer)
+    {
+        var flushTask = writer.FlushAsync(CancellationToken.None);
+        flushTask.GetAwaiter().GetResult();
+    }
+    
+    /// <summary>
+    /// Drains committed Pipe data to the underlying stream.
+    /// Serialized by _streamLock — only one drain at a time (FlushLoop vs ForceFlush).
+    /// </summary>
+    private async ValueTask DrainPipeToStreamAsync(CancellationToken ct)
+    {
+        await _streamLock.WaitAsync(ct).ConfigureAwait(false);
+        try
+        {
+            var pipeReader = _pipe?.Reader;
+            if (pipeReader != null && pipeReader.TryRead(out var readResult))
+            {
+                if (readResult.Buffer.Length > 0)
+                {
+                    var writeStream = _writeStream!;
+                    await WriteBufferToStreamAsync(readResult.Buffer, writeStream, ct).ConfigureAwait(false);
+                }
+                pipeReader.AdvanceTo(readResult.Buffer.End);
+            }
+        }
+        finally
+        {
+            _streamLock.Release();
+        }
+    }
+    
+    /// <summary>
+    /// Commits buffered Pipe.Writer data and drains it to the underlying stream in one shot.
+    /// Used by FIN/GoAway to guarantee delivery before dispose.
+    /// </summary>
+    private async ValueTask ForceFlushPipeToStreamAsync(CancellationToken ct)
+    {
+        lock (_writeLock)
+        {
+            var writer = _pipe?.Writer;
+            if (writer == null) return;
+            _pendingFlush = false;
+            CommitPipeWriter(writer);
+        }
+        
+        await DrainPipeToStreamAsync(ct).ConfigureAwait(false);
+    }
+    
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static async ValueTask WriteBufferToStreamAsync(ReadOnlySequence<byte> buffer, Stream writeStream, CancellationToken ct)
+    {
+        var profiling = HotPathProfiler.IsEnabled;
+        if (profiling) HotPathProfiler.RecordDrainSegment(buffer.IsSingleSegment, buffer.Length);
+        
+        long t0 = profiling ? HotPathProfiler.Timestamp() : 0;
+        if (buffer.IsSingleSegment)
+        {
+            await writeStream.WriteAsync(buffer.First, ct).ConfigureAwait(false);
+        }
+        else
+        {
+            // Write each segment directly — avoids renting+copying into contiguous array
+            foreach (var segment in buffer)
+            {
+                await writeStream.WriteAsync(segment, ct).ConfigureAwait(false);
+            }
+        }
+        if (profiling) HotPathProfiler.RecordStreamWrite(HotPathProfiler.Timestamp() - t0);
+        
+        t0 = profiling ? HotPathProfiler.Timestamp() : 0;
+        await writeStream.FlushAsync(ct).ConfigureAwait(false);
+        if (profiling) HotPathProfiler.RecordStreamFlush(HotPathProfiler.Timestamp() - t0);
+    }
+    
     private bool HasPendingCreditGrants()
     {
-        foreach (var kvp in _readChannelsByIndex)
-        {
-            if (kvp.Value.PendingGrantCredits > 0)
-                return true;
-        }
-        return false;
+        return !_pendingCreditChannels.IsEmpty;
     }
     
     private void WritePendingCreditGrants(PipeWriter writer)
     {
-        // Already under _writeLock — write directly into PipeWriter buffer
-        foreach (var kvp in _readChannelsByIndex)
+        // Already under _writeLock — drain the pending credit queue
+        while (_pendingCreditChannels.TryDequeue(out var channel))
         {
-            var credits = kvp.Value.DrainPendingCredits();
+            var credits = channel.DrainPendingCredits();
             if (credits == 0) continue;
             
             const int frameLen = FrameHeader.Size + 9;
@@ -1286,7 +1374,7 @@ public sealed class StreamMultiplexer : IStreamMultiplexer
             var header = new FrameHeader(ChannelIndexLimits.ControlChannel, FrameFlags.Data, 9);
             header.Write(span);
             span[FrameHeader.Size] = (byte)ControlSubtype.CreditGrant;
-            BinaryPrimitives.WriteUInt32BigEndian(span[(FrameHeader.Size + 1)..], kvp.Key);
+            BinaryPrimitives.WriteUInt32BigEndian(span[(FrameHeader.Size + 1)..], channel.ChannelIndex);
             BinaryPrimitives.WriteUInt32BigEndian(span[(FrameHeader.Size + 5)..], credits);
             writer.Advance(frameLen);
             
@@ -1294,35 +1382,23 @@ public sealed class StreamMultiplexer : IStreamMultiplexer
         }
     }
 
-    private async ValueTask SendFrameDirectAsync(FrameHeader header, ReadOnlyMemory<byte> payload, CancellationToken ct)
+    private void SendFrameDirect(FrameHeader header, ReadOnlyMemory<byte> payload, CancellationToken ct)
     {
+        ct.ThrowIfCancellationRequested();
         var combinedLength = FrameHeader.Size + payload.Length;
         
-        await _writeLock.WaitAsync(ct).ConfigureAwait(false);
-        try
+        lock (_writeLock)
         {
-            var writer = _pipeWriter ?? throw new InvalidOperationException("Not connected.");
+            var writer = _pipe?.Writer ?? throw new InvalidOperationException("Not connected.");
             var span = writer.GetSpan(combinedLength);
             header.Write(span);
             if (!payload.IsEmpty)
                 payload.Span.CopyTo(span[FrameHeader.Size..]);
             writer.Advance(combinedLength);
             
-            switch (_options.FlushMode)
-            {
-                case FlushMode.Immediate:
-                    await writer.FlushAsync(ct).ConfigureAwait(false);
-                    break;
-                case FlushMode.Batched:
-                    _pendingFlush = true;
-                    break;
-                case FlushMode.Manual:
-                    break;
-            }
-        }
-        finally
-        {
-            _writeLock.Release();
+            _pendingFlush = true;
+            if (_options.FlushMode == FlushMode.Immediate)
+                SignalFlush();
         }
         
         Stats.AddBytesSent(FrameHeader.Size + payload.Length);
@@ -1330,7 +1406,7 @@ public sealed class StreamMultiplexer : IStreamMultiplexer
 
     private async ValueTask SendHandshakeAsync(CancellationToken ct)
     {
-        // Handshake payload: [subtype: 1B][session_id: 16B (GUID)][nonce: 8B]
+        // Handshake is sent before FlushLoop starts — write directly to stream
         var payload = new byte[25];
         payload[0] = (byte)ControlSubtype.Handshake;
         _sessionId.TryWriteBytes(payload.AsSpan(1));
@@ -1340,22 +1416,18 @@ public sealed class StreamMultiplexer : IStreamMultiplexer
         BinaryPrimitives.WriteInt64BigEndian(payload.AsSpan(17), _localNonce);
         
         var header = new FrameHeader(ChannelIndexLimits.ControlChannel, FrameFlags.Data, (uint)payload.Length);
-        await SendFrameDirectAsync(header, payload, ct).ConfigureAwait(false);
+        var frameLen = FrameHeader.Size + payload.Length;
+        var buffer = new byte[frameLen];
+        header.Write(buffer);
+        payload.CopyTo(buffer.AsSpan(FrameHeader.Size));
         
-        // Force flush after handshake - the flush task isn't running yet during handshake
-        await _writeLock.WaitAsync(ct).ConfigureAwait(false);
-        try
-        {
-            var writer = _pipeWriter ?? throw new InvalidOperationException("Not connected.");
-            await writer.FlushAsync(ct).ConfigureAwait(false);
-        }
-        finally
-        {
-            _writeLock.Release();
-        }
+        var writeStream = _writeStream ?? throw new InvalidOperationException("Not connected.");
+        await writeStream.WriteAsync(buffer, ct).ConfigureAwait(false);
+        await writeStream.FlushAsync(ct).ConfigureAwait(false);
+        Stats.AddBytesSent(frameLen);
     }
 
-    private async ValueTask SendInitAsync(uint channelIndex, string channelId, ChannelPriority priority, CancellationToken ct)
+    private void SendInit(uint channelIndex, string channelId, ChannelPriority priority, CancellationToken ct)
     {
         // INIT payload format: [priority: u8][id_length: u16 BE][channel_id: 0-1024B UTF8]
         var channelIdBytes = System.Text.Encoding.UTF8.GetBytes(channelId);
@@ -1365,66 +1437,45 @@ public sealed class StreamMultiplexer : IStreamMultiplexer
         channelIdBytes.CopyTo(payload.AsSpan(3));
         
         var header = new FrameHeader(channelIndex, FrameFlags.Init, (uint)payload.Length);
-        await SendFrameDirectAsync(header, payload, ct).ConfigureAwait(false);
+        SendFrameDirect(header, payload, ct);
     }
 
-    internal async ValueTask SendFinAsync(uint channelIndex, CancellationToken ct)
+    internal void SendFin(uint channelIndex, CancellationToken ct)
     {
         var header = new FrameHeader(channelIndex, FrameFlags.Fin, 0);
-        await SendFrameDirectAsync(header, ReadOnlyMemory<byte>.Empty, ct).ConfigureAwait(false);
-        
-        // Force flush after FIN to ensure peer receives it immediately
-        await _writeLock.WaitAsync(ct).ConfigureAwait(false);
-        try
-        {
-            var writer = _pipeWriter ?? throw new InvalidOperationException("Not connected.");
-            await writer.FlushAsync(ct).ConfigureAwait(false);
-        }
-        finally
-        {
-            _writeLock.Release();
-        }
+        SendFrameDirect(header, ReadOnlyMemory<byte>.Empty, ct);
+        SignalFlush();
     }
 
-    private async ValueTask SendAckAsync(uint channelIndex, uint credits, CancellationToken ct)
+    private void SendAck(uint channelIndex, uint credits, CancellationToken ct)
     {
         const int frameLen = FrameHeader.Size + 4;
+        ct.ThrowIfCancellationRequested();
         
-        await _writeLock.WaitAsync(ct).ConfigureAwait(false);
-        try
+        lock (_writeLock)
         {
-            var writer = _pipeWriter ?? throw new InvalidOperationException("Not connected.");
+            var writer = _pipe?.Writer ?? throw new InvalidOperationException("Not connected.");
             var span = writer.GetSpan(frameLen);
             var header = new FrameHeader(channelIndex, FrameFlags.Ack, 4);
             header.Write(span);
             BinaryPrimitives.WriteUInt32BigEndian(span[FrameHeader.Size..], credits);
             writer.Advance(frameLen);
             
-            switch (_options.FlushMode)
-            {
-                case FlushMode.Immediate:
-                    await writer.FlushAsync(ct).ConfigureAwait(false);
-                    break;
-                case FlushMode.Batched:
-                    _pendingFlush = true;
-                    break;
-            }
-        }
-        finally
-        {
-            _writeLock.Release();
+            _pendingFlush = true;
+            if (_options.FlushMode == FlushMode.Immediate)
+                SignalFlush();
         }
         Stats.AddBytesSent(frameLen);
     }
 
-    internal async ValueTask SendCreditGrantAsync(uint channelIndex, uint credits, CancellationToken ct)
+    internal void SendCreditGrant(uint channelIndex, uint credits, CancellationToken ct)
     {
         const int frameLen = FrameHeader.Size + 9;
+        ct.ThrowIfCancellationRequested();
         
-        await _writeLock.WaitAsync(ct).ConfigureAwait(false);
-        try
+        lock (_writeLock)
         {
-            var writer = _pipeWriter ?? throw new InvalidOperationException("Not connected.");
+            var writer = _pipe?.Writer ?? throw new InvalidOperationException("Not connected.");
             var span = writer.GetSpan(frameLen);
             var header = new FrameHeader(ChannelIndexLimits.ControlChannel, FrameFlags.Data, 9);
             header.Write(span);
@@ -1433,31 +1484,21 @@ public sealed class StreamMultiplexer : IStreamMultiplexer
             BinaryPrimitives.WriteUInt32BigEndian(span[(FrameHeader.Size + 5)..], credits);
             writer.Advance(frameLen);
             
-            switch (_options.FlushMode)
-            {
-                case FlushMode.Immediate:
-                    await writer.FlushAsync(ct).ConfigureAwait(false);
-                    break;
-                case FlushMode.Batched:
-                    _pendingFlush = true;
-                    break;
-            }
-        }
-        finally
-        {
-            _writeLock.Release();
+            _pendingFlush = true;
+            if (_options.FlushMode == FlushMode.Immediate)
+                SignalFlush();
         }
         Stats.AddBytesSent(frameLen);
     }
 
-    private async ValueTask SendPingAsync(CancellationToken ct)
+    private void SendPing(CancellationToken ct)
     {
         const int frameLen = FrameHeader.Size + 9;
+        ct.ThrowIfCancellationRequested();
         
-        await _writeLock.WaitAsync(ct).ConfigureAwait(false);
-        try
+        lock (_writeLock)
         {
-            var writer = _pipeWriter ?? throw new InvalidOperationException("Not connected.");
+            var writer = _pipe?.Writer ?? throw new InvalidOperationException("Not connected.");
             var span = writer.GetSpan(frameLen);
             var header = new FrameHeader(ChannelIndexLimits.ControlChannel, FrameFlags.Data, 9);
             header.Write(span);
@@ -1466,31 +1507,21 @@ public sealed class StreamMultiplexer : IStreamMultiplexer
             BinaryPrimitives.WriteInt64BigEndian(span[(FrameHeader.Size + 1)..], _lastPingTimestamp);
             writer.Advance(frameLen);
             
-            switch (_options.FlushMode)
-            {
-                case FlushMode.Immediate:
-                    await writer.FlushAsync(ct).ConfigureAwait(false);
-                    break;
-                case FlushMode.Batched:
-                    _pendingFlush = true;
-                    break;
-            }
-        }
-        finally
-        {
-            _writeLock.Release();
+            _pendingFlush = true;
+            if (_options.FlushMode == FlushMode.Immediate)
+                SignalFlush();
         }
         Stats.AddBytesSent(frameLen);
     }
 
-    private async ValueTask SendPongAsync(long timestamp, CancellationToken ct)
+    private void SendPong(long timestamp, CancellationToken ct)
     {
         const int frameLen = FrameHeader.Size + 9;
+        ct.ThrowIfCancellationRequested();
         
-        await _writeLock.WaitAsync(ct).ConfigureAwait(false);
-        try
+        lock (_writeLock)
         {
-            var writer = _pipeWriter ?? throw new InvalidOperationException("Not connected.");
+            var writer = _pipe?.Writer ?? throw new InvalidOperationException("Not connected.");
             var span = writer.GetSpan(frameLen);
             var header = new FrameHeader(ChannelIndexLimits.ControlChannel, FrameFlags.Data, 9);
             header.Write(span);
@@ -1498,19 +1529,9 @@ public sealed class StreamMultiplexer : IStreamMultiplexer
             BinaryPrimitives.WriteInt64BigEndian(span[(FrameHeader.Size + 1)..], timestamp);
             writer.Advance(frameLen);
             
-            switch (_options.FlushMode)
-            {
-                case FlushMode.Immediate:
-                    await writer.FlushAsync(ct).ConfigureAwait(false);
-                    break;
-                case FlushMode.Batched:
-                    _pendingFlush = true;
-                    break;
-            }
-        }
-        finally
-        {
-            _writeLock.Release();
+            _pendingFlush = true;
+            if (_options.FlushMode == FlushMode.Immediate)
+                SignalFlush();
         }
         Stats.AddBytesSent(frameLen);
     }
@@ -1527,22 +1548,13 @@ public sealed class StreamMultiplexer : IStreamMultiplexer
         BinaryPrimitives.WriteUInt32BigEndian(payload.AsSpan(3), lastChannelIndex);
         
         var header = new FrameHeader(ChannelIndexLimits.ControlChannel, FrameFlags.Data, (uint)payload.Length);
-        await SendFrameDirectAsync(header, payload, ct).ConfigureAwait(false);
+        SendFrameDirect(header, payload, ct);
         
-        // Force flush after GoAway to ensure peer receives it before stream is disposed
-        await _writeLock.WaitAsync(ct).ConfigureAwait(false);
-        try
-        {
-            var writer = _pipeWriter ?? throw new InvalidOperationException("Not connected.");
-            await writer.FlushAsync(ct).ConfigureAwait(false);
-        }
-        finally
-        {
-            _writeLock.Release();
-        }
+        // Force drain Pipe to stream so peer receives GoAway before stream is disposed
+        await ForceFlushPipeToStreamAsync(ct).ConfigureAwait(false);
     }
 
-    private async ValueTask SendErrorAsync(uint channelIndex, ErrorCode code, string message, CancellationToken ct)
+    private void SendError(uint channelIndex, ErrorCode code, string message, CancellationToken ct)
     {
         var messageBytes = System.Text.Encoding.UTF8.GetBytes(message);
         var payload = new byte[2 + messageBytes.Length];
@@ -1550,7 +1562,7 @@ public sealed class StreamMultiplexer : IStreamMultiplexer
         messageBytes.CopyTo(payload.AsSpan(2));
         
         var header = new FrameHeader(channelIndex, FrameFlags.Err, (uint)payload.Length);
-        await SendFrameDirectAsync(header, payload, ct).ConfigureAwait(false);
+        SendFrameDirect(header, payload, ct);
     }
 
     #endregion
@@ -1559,78 +1571,24 @@ public sealed class StreamMultiplexer : IStreamMultiplexer
 
     private async Task ReadLoopAsync(CancellationToken ct)
     {
-        var readStream = ReadStream; // Capture non-null stream
-        var headerBuffer = new byte[FrameHeader.Size];
+        var pipeReader = _readPipeReader ?? throw new InvalidOperationException("Not connected.");
         
         while (!ct.IsCancellationRequested)
         {
             try
             {
-                // Read header
-                await ReadExactlyAsync(readStream, headerBuffer, ct).ConfigureAwait(false);
-                var header = FrameHeader.Read(headerBuffer);
+                var readResult = await pipeReader.ReadAsync(ct).ConfigureAwait(false);
+                var buffer = readResult.Buffer;
                 
-                Stats.AddBytesReceived(FrameHeader.Size);
-
-                // Validate frame size
-                if (header.Length > _options.MaxFrameSize)
+                // Parse as many complete frames as possible from the buffer
+                while (TryParseFrame(ref buffer, ct))
                 {
-                    throw new MultiplexerException(ErrorCode.ProtocolError, 
-                        $"Frame size {header.Length} exceeds maximum {_options.MaxFrameSize}");
-                }
-
-                int payloadLength = (int)header.Length;
-
-                // Fast path for data frames: read directly into OwnedMemory, skip double copy
-                if (header.ChannelId != ChannelIndexLimits.ControlChannel
-                    && header.Flags == FrameFlags.Data
-                    && payloadLength > 0)
-                {
-                    if (_readChannelsByIndex.TryGetValue(header.ChannelId, out var channel))
-                    {
-                        var owned = OwnedMemory.Rent(payloadLength);
-                        await ReadExactlyAsync(readStream, owned.Memory, ct).ConfigureAwait(false);
-                        Stats.AddBytesReceived(header.Length);
-                        channel.EnqueueData(owned);
-                    }
-                    else
-                    {
-                        var discard = ArrayPool<byte>.Shared.Rent(payloadLength);
-                        try
-                        {
-                            await ReadExactlyAsync(readStream, discard.AsMemory(0, payloadLength), ct).ConfigureAwait(false);
-                        }
-                        finally
-                        {
-                            ArrayPool<byte>.Shared.Return(discard);
-                        }
-                        Stats.AddBytesReceived(header.Length);
-                    }
-                    continue;
-                }
-
-                // All other frames: read into ArrayPool buffer
-                byte[] payload;
-                if (payloadLength > 0)
-                {
-                    payload = ArrayPool<byte>.Shared.Rent(payloadLength);
-                    await ReadExactlyAsync(readStream, payload.AsMemory(0, payloadLength), ct).ConfigureAwait(false);
-                    Stats.AddBytesReceived(header.Length);
-                }
-                else
-                {
-                    payload = Array.Empty<byte>();
                 }
                 
-                try
-                {
-                    await ProcessFrameAsync(header, payload.AsMemory(0, payloadLength), ct).ConfigureAwait(false);
-                }
-                finally
-                {
-                    if (payloadLength > 0)
-                        ArrayPool<byte>.Shared.Return(payload);
-                }
+                pipeReader.AdvanceTo(buffer.Start, buffer.End);
+                
+                if (readResult.IsCompleted)
+                    throw new EndOfStreamException("Connection closed.");
             }
             catch (OperationCanceledException) when (ct.IsCancellationRequested)
             {
@@ -1650,6 +1608,99 @@ public sealed class StreamMultiplexer : IStreamMultiplexer
         
         // Close accept channel
         _acceptChannel.Writer.TryComplete();
+    }
+    
+    /// <summary>
+    /// Tries to parse one complete frame from the buffer. Returns true if a frame was parsed.
+    /// Advances buffer past the consumed frame.
+    /// </summary>
+    private bool TryParseFrame(ref ReadOnlySequence<byte> buffer, CancellationToken ct)
+    {
+        if (buffer.Length < FrameHeader.Size)
+            return false;
+        
+        var profiling = HotPathProfiler.IsEnabled;
+        long frameStart = profiling ? HotPathProfiler.Timestamp() : 0;
+        long t0;
+        
+        // Parse header — fast path reads directly from contiguous FirstSpan
+        t0 = profiling ? HotPathProfiler.Timestamp() : 0;
+        FrameHeader header;
+        if (buffer.FirstSpan.Length >= FrameHeader.Size)
+        {
+            header = FrameHeader.Read(buffer.FirstSpan);
+        }
+        else
+        {
+            Span<byte> headerBytes = stackalloc byte[FrameHeader.Size];
+            buffer.Slice(0, FrameHeader.Size).CopyTo(headerBytes);
+            header = FrameHeader.Read(headerBytes);
+        }
+        if (profiling) HotPathProfiler.RecordHeaderParse(HotPathProfiler.Timestamp() - t0);
+        
+        if (header.Length > _options.MaxFrameSize)
+        {
+            throw new MultiplexerException(ErrorCode.ProtocolError,
+                $"Frame size {header.Length} exceeds maximum {_options.MaxFrameSize}");
+        }
+        
+        var totalFrameSize = FrameHeader.Size + (long)header.Length;
+        if (buffer.Length < totalFrameSize)
+            return false;
+        
+        Stats.AddBytesReceived(FrameHeader.Size + header.Length);
+        
+        int payloadLength = (int)header.Length;
+        
+        // Data frame fast path: copy into OwnedMemory, transfer to channel
+        if (header.ChannelId != ChannelIndexLimits.ControlChannel
+            && header.Flags == FrameFlags.Data
+            && payloadLength > 0)
+        {
+            t0 = profiling ? HotPathProfiler.Timestamp() : 0;
+            if (_readChannelsByIndex.TryGetValue(header.ChannelId, out var channel))
+            {
+                if (profiling) HotPathProfiler.RecordChannelLookup(HotPathProfiler.Timestamp() - t0);
+                
+                // Pass raw payload slice directly — channel PipeWriter handles buffering
+                var payloadSlice = buffer.Slice(FrameHeader.Size, payloadLength);
+                
+                t0 = profiling ? HotPathProfiler.Timestamp() : 0;
+                channel.EnqueueData(payloadSlice);
+                if (profiling) HotPathProfiler.RecordEnqueueData(HotPathProfiler.Timestamp() - t0);
+            }
+            else if (profiling)
+            {
+                HotPathProfiler.RecordChannelLookup(HotPathProfiler.Timestamp() - t0);
+            }
+            // else: discard unknown channel data
+            
+            if (profiling) HotPathProfiler.RecordParseFrame(frameStart);
+            buffer = buffer.Slice(totalFrameSize);
+            return true;
+        }
+        
+        // Control/other frames
+        if (payloadLength > 0)
+        {
+            var payload = ArrayPool<byte>.Shared.Rent(payloadLength);
+            try
+            {
+                buffer.Slice(FrameHeader.Size, payloadLength).CopyTo(payload);
+                ProcessFrame(header, payload.AsMemory(0, payloadLength), ct);
+            }
+            finally
+            {
+                ArrayPool<byte>.Shared.Return(payload);
+            }
+        }
+        else
+        {
+            ProcessFrame(header, ReadOnlyMemory<byte>.Empty, ct);
+        }
+        
+        buffer = buffer.Slice(totalFrameSize);
+        return true;
     }
     
     /// <summary>
@@ -1817,23 +1868,11 @@ public sealed class StreamMultiplexer : IStreamMultiplexer
         }
     }
 
-    private static async ValueTask ReadExactlyAsync(Stream stream, Memory<byte> buffer, CancellationToken ct)
-    {
-        var totalRead = 0;
-        while (totalRead < buffer.Length)
-        {
-            var read = await stream.ReadAsync(buffer[totalRead..], ct).ConfigureAwait(false);
-            if (read == 0)
-                throw new EndOfStreamException("Connection closed.");
-            totalRead += read;
-        }
-    }
-
-    private async ValueTask ProcessFrameAsync(FrameHeader header, ReadOnlyMemory<byte> payload, CancellationToken ct)
+    private void ProcessFrame(FrameHeader header, ReadOnlyMemory<byte> payload, CancellationToken ct)
     {
         if (header.ChannelId == ChannelIndexLimits.ControlChannel)
         {
-            await ProcessControlFrameAsync(header, payload, ct).ConfigureAwait(false);
+            ProcessControlFrame(header, payload, ct);
             return;
         }
 
@@ -1846,7 +1885,7 @@ public sealed class StreamMultiplexer : IStreamMultiplexer
                 break;
                 
             case FrameFlags.Init:
-                await ProcessInitFrameAsync(channelIndex, payload, ct).ConfigureAwait(false);
+                ProcessInitFrame(channelIndex, payload, ct);
                 break;
                 
             case FrameFlags.Fin:
@@ -1866,7 +1905,7 @@ public sealed class StreamMultiplexer : IStreamMultiplexer
         }
     }
 
-    private async ValueTask ProcessControlFrameAsync(FrameHeader header, ReadOnlyMemory<byte> payload, CancellationToken ct)
+    private void ProcessControlFrame(FrameHeader header, ReadOnlyMemory<byte> payload, CancellationToken ct)
     {
         if (payload.Length < 1)
             return;
@@ -1895,7 +1934,7 @@ public sealed class StreamMultiplexer : IStreamMultiplexer
                 if (data.Length >= 8)
                 {
                     var timestamp = BinaryPrimitives.ReadInt64BigEndian(data.Span);
-                    await SendPongAsync(timestamp, ct).ConfigureAwait(false);
+                    SendPong(timestamp, ct);
                 }
                 break;
                 
@@ -1967,7 +2006,7 @@ public sealed class StreamMultiplexer : IStreamMultiplexer
                 break;
 
             case ControlSubtype.Reconnect:
-                await ProcessReconnectFrameAsync(data, ct).ConfigureAwait(false);
+                ProcessReconnectFrame(data, ct);
                 break;
 
             case ControlSubtype.ReconnectAck:
@@ -1976,17 +2015,17 @@ public sealed class StreamMultiplexer : IStreamMultiplexer
         }
     }
 
-    private async ValueTask ProcessReconnectFrameAsync(ReadOnlyMemory<byte> data, CancellationToken ct)
+    private void ProcessReconnectFrame(ReadOnlyMemory<byte> data, CancellationToken ct)
     {
         if (!_options.EnableReconnection)
         {
-            await SendErrorAsync(0, ErrorCode.ProtocolError, "Reconnection not enabled", ct).ConfigureAwait(false);
+            SendError(0, ErrorCode.ProtocolError, "Reconnection not enabled", ct);
             return;
         }
 
         if (data.Length < 20) // 16B session_id + 4B channel_count
         {
-            await SendErrorAsync(0, ErrorCode.ProtocolError, "Invalid RECONNECT payload", ct).ConfigureAwait(false);
+            SendError(0, ErrorCode.ProtocolError, "Invalid RECONNECT payload", ct);
             return;
         }
 
@@ -1996,7 +2035,7 @@ public sealed class StreamMultiplexer : IStreamMultiplexer
         // Verify this is a valid reconnection for this session
         if (incomingSessionId != _remoteSessionId && _remoteSessionId != Guid.Empty)
         {
-            await SendErrorAsync(0, ErrorCode.SessionMismatch, "Session ID mismatch", ct).ConfigureAwait(false);
+            SendError(0, ErrorCode.SessionMismatch, "Session ID mismatch", ct);
             return;
         }
 
@@ -2036,32 +2075,30 @@ public sealed class StreamMultiplexer : IStreamMultiplexer
         }
 
         var header = new FrameHeader(ChannelIndexLimits.ControlChannel, FrameFlags.Data, (uint)payload.Length);
-        await SendFrameDirectAsync(header, payload, ct).ConfigureAwait(false);
+        SendFrameDirect(header, payload, ct);
     }
 
     private void ProcessDataFrame(uint channelIndex, ReadOnlyMemory<byte> payload)
     {
         if (_readChannelsByIndex.TryGetValue(channelIndex, out var channel))
         {
-            // Zero-copy path: rent buffer from pool, copy payload, transfer ownership to channel
-            var ownedMemory = OwnedMemory.Rent(payload.Length);
-            payload.CopyTo(ownedMemory.Memory);
-            channel.EnqueueData(ownedMemory);
+            var seq = new ReadOnlySequence<byte>(payload);
+            channel.EnqueueData(seq);
         }
     }
 
-    private async ValueTask ProcessInitFrameAsync(uint channelIndex, ReadOnlyMemory<byte> payload, CancellationToken ct)
+    private void ProcessInitFrame(uint channelIndex, ReadOnlyMemory<byte> payload, CancellationToken ct)
     {
         if (_goAwayReceived || _goAwaySent)
         {
-            await SendErrorAsync(channelIndex, ErrorCode.Refused, "GOAWAY received", ct).ConfigureAwait(false);
+            SendError(channelIndex, ErrorCode.Refused, "GOAWAY received", ct);
             return;
         }
 
         // Parse INIT payload: [priority: u8][id_length: u16 BE][channel_id: 0-1024B UTF8]
         if (payload.Length < 3)
         {
-            await SendErrorAsync(channelIndex, ErrorCode.ProtocolError, "Invalid INIT payload", ct).ConfigureAwait(false);
+            SendError(channelIndex, ErrorCode.ProtocolError, "Invalid INIT payload", ct);
             return;
         }
 
@@ -2070,7 +2107,7 @@ public sealed class StreamMultiplexer : IStreamMultiplexer
         
         if (payload.Length < 3 + idLength)
         {
-            await SendErrorAsync(channelIndex, ErrorCode.ProtocolError, "Invalid INIT payload length", ct).ConfigureAwait(false);
+            SendError(channelIndex, ErrorCode.ProtocolError, "Invalid INIT payload length", ct);
             return;
         }
 
@@ -2079,7 +2116,7 @@ public sealed class StreamMultiplexer : IStreamMultiplexer
         // Check for duplicate ChannelId
         if (_readChannelsById.ContainsKey(channelId))
         {
-            await SendErrorAsync(channelIndex, ErrorCode.ChannelExists, $"Channel '{channelId}' already exists", ct).ConfigureAwait(false);
+            SendError(channelIndex, ErrorCode.ChannelExists, $"Channel '{channelId}' already exists", ct);
             return;
         }
 
@@ -2096,14 +2133,14 @@ public sealed class StreamMultiplexer : IStreamMultiplexer
         
         if (!_readChannelsByIndex.TryAdd(channelIndex, channel))
         {
-            await SendErrorAsync(channelIndex, ErrorCode.ChannelExists, "Channel index already exists", ct).ConfigureAwait(false);
+            SendError(channelIndex, ErrorCode.ChannelExists, "Channel index already exists", ct);
             return;
         }
 
         if (!_readChannelsById.TryAdd(channelId, channel))
         {
             _readChannelsByIndex.TryRemove(channelIndex, out _);
-            await SendErrorAsync(channelIndex, ErrorCode.ChannelExists, $"Channel '{channelId}' already exists", ct).ConfigureAwait(false);
+            SendError(channelIndex, ErrorCode.ChannelExists, $"Channel '{channelId}' already exists", ct);
             return;
         }
 
@@ -2111,7 +2148,7 @@ public sealed class StreamMultiplexer : IStreamMultiplexer
         Stats.IncrementOpenChannels();
 
         // Send ACK with initial credits from adaptive flow control
-        await SendAckAsync(channelIndex, channel.GetInitialCredits(), ct).ConfigureAwait(false);
+        SendAck(channelIndex, channel.GetInitialCredits(), ct);
         
         // Check if someone is waiting for this specific channel
         if (_pendingAccepts.TryRemove(channelId, out var tcs))
@@ -2120,8 +2157,8 @@ public sealed class StreamMultiplexer : IStreamMultiplexer
         }
         else
         {
-            // Add to accept queue
-            await _acceptChannel.Writer.WriteAsync(channel, ct).ConfigureAwait(false);
+            // Add to accept queue (unbounded channel, always succeeds)
+            _acceptChannel.Writer.TryWrite(channel);
         }
         
         OnChannelOpened?.Invoke(channelId);
@@ -2182,7 +2219,7 @@ public sealed class StreamMultiplexer : IStreamMultiplexer
             {
                 await Task.Delay(_options.PingInterval, ct).ConfigureAwait(false);
                 
-                await SendPingAsync(ct).ConfigureAwait(false);
+                SendPing(ct);
                 
                 // Wait for pong
                 await Task.Delay(_options.PingTimeout, ct).ConfigureAwait(false);
@@ -2354,7 +2391,7 @@ public sealed class StreamMultiplexer : IStreamMultiplexer
             _readStream = null;
             _writeStream = null;
             
-            try { _writeLock.Dispose(); } catch { }
+            try { _streamLock.Dispose(); } catch { }
             try { _shutdownCts.Dispose(); } catch { }
             try { _reconnectLock.Dispose(); } catch { }
             try { _autoReconnectCts?.Dispose(); } catch { }

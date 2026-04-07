@@ -5,6 +5,8 @@ namespace NetConduit.Internal;
 /// <summary>
 /// Tracks byte positions and buffers data for reconnection support.
 /// Ensures no data is lost or duplicated during reconnection.
+/// Uses a ring buffer to avoid per-frame heap allocations.
+/// Recording is lazy: no buffer allocated until StartRecording is called.
 /// </summary>
 internal sealed class ChannelSyncState
 {
@@ -14,8 +16,13 @@ internal sealed class ChannelSyncState
     // For write channels: track what we've sent and buffer for replay
     private long _bytesSent;      // Total bytes sent (next byte position to send)
     private long _bytesAcked;     // Bytes acknowledged by receiver
-    private readonly List<BufferedSegment> _sendBuffer = new();
-    private long _bufferedBytes;
+    
+    // Ring buffer for reconnection replay (lazy-allocated)
+    private byte[]? _ringBuffer;
+    private int _ringWritePos;    // Next write position in ring
+    private long _ringStartOffset; // Byte offset of the oldest byte in the ring
+    private int _ringUsed;        // Bytes currently stored in ring
+    private bool _recording;      // Whether recording is active
     
     // For read channels: track what we've received
     private long _bytesReceived;  // Total bytes received
@@ -35,35 +42,70 @@ internal sealed class ChannelSyncState
     public long BytesReceived => Volatile.Read(ref _bytesReceived);
 
     /// <summary>
+    /// Starts recording sent data for replay. Allocates the ring buffer.
+    /// Call this when reconnection support is needed.
+    /// </summary>
+    public void StartRecording()
+    {
+        lock (_lock)
+        {
+            if (_recording || _maxBufferSize <= 0) return;
+            _recording = true;
+        }
+    }
+
+    /// <summary>
     /// Records data being sent and buffers it for potential replay.
     /// Returns the byte offset where this data starts.
+    /// No-op if recording is not active.
     /// </summary>
     public long RecordSend(ReadOnlySpan<byte> data)
     {
+        if (!_recording)
+        {
+            return Interlocked.Add(ref _bytesSent, data.Length) - data.Length;
+        }
+        
         lock (_lock)
         {
             var startOffset = _bytesSent;
             _bytesSent += data.Length;
             
-            // Only buffer if reconnection is possible
-            if (_maxBufferSize > 0)
+            // Lazy-allocate ring buffer on first write
+            if (_ringBuffer is null)
             {
-                // Trim old segments if we exceed buffer size
-                while (_bufferedBytes + data.Length > _maxBufferSize && _sendBuffer.Count > 0)
-                {
-                    var old = _sendBuffer[0];
-                    _sendBuffer.RemoveAt(0);
-                    _bufferedBytes -= old.Data.Length;
-                    // Update ack to reflect trimmed data (can't replay it anymore)
-                    _bytesAcked = Math.Max(_bytesAcked, old.StartOffset + old.Data.Length);
-                }
-                
-                // Copy data into owned buffer (single allocation, no caller .ToArray() needed)
-                var owned = new byte[data.Length];
-                data.CopyTo(owned);
-                _sendBuffer.Add(new BufferedSegment(startOffset, owned));
-                _bufferedBytes += data.Length;
+                _ringBuffer = new byte[_maxBufferSize];
+                _ringStartOffset = startOffset;
             }
+            
+            var ring = _ringBuffer;
+            var ringLen = ring.Length;
+            var dataLen = data.Length;
+            
+            // If data exceeds ring capacity, only keep the tail
+            if (dataLen >= ringLen)
+            {
+                data[^ringLen..].CopyTo(ring);
+                _ringWritePos = 0;
+                _ringUsed = ringLen;
+                _ringStartOffset = _bytesSent - ringLen;
+                _bytesAcked = Math.Max(_bytesAcked, _ringStartOffset);
+                return startOffset;
+            }
+            
+            // Write into ring, wrapping if needed
+            var firstChunk = Math.Min(dataLen, ringLen - _ringWritePos);
+            data[..firstChunk].CopyTo(ring.AsSpan(_ringWritePos));
+            if (firstChunk < dataLen)
+                data[firstChunk..].CopyTo(ring.AsSpan(0));
+            
+            _ringWritePos = (_ringWritePos + dataLen) % ringLen;
+            _ringUsed = Math.Min(_ringUsed + dataLen, ringLen);
+            _ringStartOffset = _bytesSent - _ringUsed;
+            
+            // If ring wrapped, update ack to reflect lost data
+            if (_bytesAcked < _ringStartOffset)
+                _bytesAcked = _ringStartOffset;
             
             return startOffset;
         }
@@ -71,7 +113,6 @@ internal sealed class ChannelSyncState
 
     /// <summary>
     /// Acknowledges receipt of data up to the given byte position.
-    /// Removes acknowledged data from the buffer.
     /// </summary>
     public void Acknowledge(long bytePosition)
     {
@@ -82,18 +123,15 @@ internal sealed class ChannelSyncState
                 
             _bytesAcked = bytePosition;
             
-            // Remove fully acknowledged segments
-            while (_sendBuffer.Count > 0)
+            if (_recording && _ringUsed > 0)
             {
-                var segment = _sendBuffer[0];
-                if (segment.StartOffset + segment.Data.Length <= _bytesAcked)
+                // Trim acknowledged data from the ring
+                var ackedInRing = bytePosition - _ringStartOffset;
+                if (ackedInRing > 0)
                 {
-                    _sendBuffer.RemoveAt(0);
-                    _bufferedBytes -= segment.Data.Length;
-                }
-                else
-                {
-                    break;
+                    var trimBytes = (int)Math.Min(ackedInRing, _ringUsed);
+                    _ringUsed -= trimBytes;
+                    _ringStartOffset += trimBytes;
                 }
             }
         }
@@ -114,32 +152,29 @@ internal sealed class ChannelSyncState
     {
         lock (_lock)
         {
-            if (fromBytePosition >= _bytesSent)
+            if (!_recording || _ringUsed == 0 || fromBytePosition >= _bytesSent)
                 return Array.Empty<byte>();
 
-            using var ms = new MemoryStream();
+            // Clamp to what we actually have in the ring
+            var effectiveFrom = Math.Max(fromBytePosition, _ringStartOffset);
+            var available = (int)(_bytesSent - effectiveFrom);
+            if (available <= 0)
+                return Array.Empty<byte>();
             
-            foreach (var segment in _sendBuffer)
-            {
-                var segmentEnd = segment.StartOffset + segment.Data.Length;
-                
-                if (segmentEnd <= fromBytePosition)
-                    continue; // This segment is before our start position
-                    
-                if (segment.StartOffset >= fromBytePosition)
-                {
-                    // Entire segment is after start position
-                    ms.Write(segment.Data);
-                }
-                else
-                {
-                    // Partial segment - start is before our position
-                    var skip = (int)(fromBytePosition - segment.StartOffset);
-                    ms.Write(segment.Data, skip, segment.Data.Length - skip);
-                }
-            }
+            var result = new byte[available];
+            var ringLen = _ringBuffer!.Length;
             
-            return ms.ToArray();
+            // Calculate read position in ring
+            var offsetInRing = (int)(effectiveFrom - _ringStartOffset);
+            var readPos = (_ringWritePos - _ringUsed + offsetInRing + ringLen) % ringLen;
+            
+            // Copy from ring, handling wrap
+            var firstChunk = Math.Min(available, ringLen - readPos);
+            _ringBuffer.AsSpan(readPos, firstChunk).CopyTo(result);
+            if (firstChunk < available)
+                _ringBuffer.AsSpan(0, available - firstChunk).CopyTo(result.AsSpan(firstChunk));
+            
+            return result;
         }
     }
 
@@ -157,17 +192,5 @@ internal sealed class ChannelSyncState
     public void SetBytesAcked(long position)
     {
         Acknowledge(position);
-    }
-
-    private sealed class BufferedSegment
-    {
-        public long StartOffset { get; }
-        public byte[] Data { get; }
-
-        public BufferedSegment(long startOffset, byte[] data)
-        {
-            StartOffset = startOffset;
-            Data = data;
-        }
     }
 }

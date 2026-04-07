@@ -11,6 +11,24 @@ if (args.Length > 0 && args[0] == "diag")
     return;
 }
 
+if (args.Length > 0 && args[0] == "profile")
+{
+    await Profile.RunAsync(args);
+    return;
+}
+
+if (args.Length > 0 && args[0] == "bottleneck")
+{
+    await BottleneckAnalysis.RunAsync(args);
+    return;
+}
+
+if (args.Length > 0 && args[0] == "deep-profile")
+{
+    await DeepProfile.RunAsync(args);
+    return;
+}
+
 const int Runs = 5;
 var results = new List<object>();
 
@@ -366,7 +384,6 @@ static async Task<double> RunGameTickMuxAsync(int channelCount, int msgSize, int
         var port = ((IPEndPoint)listener.LocalEndpoint).Port;
 
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(60));
-        using var benchCts = new CancellationTokenSource(TimeSpan.FromSeconds(durationSec));
 
         var serverOptions = TcpMultiplexer.CreateServerOptions(listener);
         var server = StreamMultiplexer.Create(serverOptions);
@@ -390,6 +407,9 @@ static async Task<double> RunGameTickMuxAsync(int channelCount, int msgSize, int
             writeChannels[i] = await client.OpenChannelAsync(new ChannelOptions { ChannelId = $"ch-{i}" }, cts.Token);
         await acceptTask;
         await Task.Delay(20, cts.Token);
+
+        // Start benchmark timer AFTER setup completes
+        using var benchCts = new CancellationTokenSource(TimeSpan.FromSeconds(durationSec));
 
         long totalMessages = 0;
         var sw = Stopwatch.StartNew();

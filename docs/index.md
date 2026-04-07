@@ -11,6 +11,7 @@
 | [Transits](transits/index.md) | MessageTransit, DeltaTransit, DuplexStream, Stream |
 | [Concepts](concepts/index.md) | Channels, backpressure, priority, reconnection |
 | [API Reference](api/index.md) | Options, statistics, events |
+| [Benchmarks](benchmarks.md) | Performance comparisons vs Yamux and Smux |
 | [Samples](samples/index.md) | Complete example applications |
 
 ## Quick Example
