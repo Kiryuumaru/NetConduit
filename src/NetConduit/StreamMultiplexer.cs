@@ -80,6 +80,7 @@ public sealed class StreamMultiplexer : IStreamMultiplexer
     private long _lastPingTimestamp;
     private Guid _remoteSessionId;
     private volatile bool _pendingFlush;
+    internal long _unflushedDataBytes;
 
     /// <summary>
     /// Creates a new stream multiplexer (no I/O). Use <see cref="Create"/> to create an instance.
@@ -439,7 +440,7 @@ public sealed class StreamMultiplexer : IStreamMultiplexer
                     _readStream = streamPair.ReadStream;
                     _writeStream = streamPair.WriteStream;
                     _pipe = new Pipe(new PipeOptions(pauseWriterThreshold: 0, resumeWriterThreshold: 0));
-                    _readPipeReader = PipeReader.Create(_readStream, new StreamPipeReaderOptions(bufferSize: 16384));
+                    _readPipeReader = PipeReader.Create(_readStream, new StreamPipeReaderOptions(bufferSize: 1048576));
                     _writeError = null;
                     
                     // Step 2: Perform handshake (with optional timeout)
@@ -1187,6 +1188,7 @@ public sealed class StreamMultiplexer : IStreamMultiplexer
             header.Write(span);
             payload.Span.CopyTo(span[FrameHeader.Size..]);
             writer.Advance(combinedLength);
+            _unflushedDataBytes += combinedLength;
             
             _pendingFlush = true;
             if (_options.FlushMode == FlushMode.Immediate || forceFlush)
@@ -1228,6 +1230,7 @@ public sealed class StreamMultiplexer : IStreamMultiplexer
                         }
                         
                         _pendingFlush = false;
+                        _unflushedDataBytes = 0;
                         t0 = profiling ? HotPathProfiler.Timestamp() : 0;
                         CommitPipeWriter(writer);
                         if (profiling) HotPathProfiler.RecordCommitPipeWriter(HotPathProfiler.Timestamp() - t0);
@@ -1325,13 +1328,12 @@ public sealed class StreamMultiplexer : IStreamMultiplexer
             var writer = _pipe?.Writer;
             if (writer == null) return;
             _pendingFlush = false;
+            _unflushedDataBytes = 0;
             CommitPipeWriter(writer);
         }
         
         await DrainPipeToStreamAsync(ct).ConfigureAwait(false);
     }
-    
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private static async ValueTask WriteBufferToStreamAsync(ReadOnlySequence<byte> buffer, Stream writeStream, CancellationToken ct)
     {
         var profiling = HotPathProfiler.IsEnabled;

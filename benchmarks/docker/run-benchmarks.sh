@@ -26,10 +26,11 @@ echo "Fairness controls:"
 echo "  CPU affinity:  taskset $CPU_MASK (2 cores)"
 echo "  GOMAXPROCS:    $GOMAXPROCS"
 echo "  Runs per test: 5 (median reported)"
+echo "  Strategy:      interleaved by category (Go+.NET run together)"
 echo ""
 
 # --- Build Go benchmark ---
-echo "[1/4] Building Go benchmark..."
+echo "[1/6] Building Go benchmark..."
 GO_BIN="$HOME/go-install/go/bin"
 if [ ! -f "$GO_BIN/go" ]; then
     echo "ERROR: Go not found at $GO_BIN. Install Go 1.23+ first."
@@ -42,30 +43,44 @@ echo "  Built: results/go-bench"
 
 # --- Build .NET benchmark ---
 echo ""
-echo "[2/4] Building .NET benchmark..."
+echo "[2/6] Building .NET benchmark..."
 cd "$REPO_ROOT"
 dotnet build benchmarks/docker/netconduit-comparison -c Release --nologo -v q -p:UseLocalNetConduit=true
 echo "  Built: Release mode"
 
-# --- Run Go benchmarks ---
+# --- Run game-tick: Go then .NET back-to-back ---
 echo ""
-echo "[3/4] Running Go benchmarks (Raw TCP, Yamux, Smux)..."
-echo "  CPU affinity: cores 0,1"
+echo "[3/6] Running Go GAME-TICK benchmarks..."
 echo "----------------------------------------------"
-taskset "$CPU_MASK" "$RESULTS_DIR/go-bench" \
-    > "$RESULTS_DIR/go-results.json"
-echo "  Go benchmarks complete."
+taskset "$CPU_MASK" "$RESULTS_DIR/go-bench" game-tick \
+    > "$RESULTS_DIR/go-gametick.json"
+echo "  Go game-tick complete."
 
-# --- Run .NET benchmarks ---
 echo ""
-echo "[4/4] Running .NET benchmarks (Raw TCP, NetConduit Mux)..."
-echo "  CPU affinity: cores 0,1"
+echo "[4/6] Running .NET GAME-TICK benchmarks..."
 echo "----------------------------------------------"
 taskset "$CPU_MASK" dotnet run \
     --project benchmarks/docker/netconduit-comparison \
-    -c Release --no-build \
-    > "$RESULTS_DIR/dotnet-results.json"
-echo "  .NET benchmarks complete."
+    -c Release --no-build -- game-tick \
+    > "$RESULTS_DIR/dotnet-gametick.json"
+echo "  .NET game-tick complete."
+
+# --- Run throughput: Go then .NET back-to-back ---
+echo ""
+echo "[5/6] Running Go THROUGHPUT benchmarks..."
+echo "----------------------------------------------"
+taskset "$CPU_MASK" "$RESULTS_DIR/go-bench" throughput \
+    > "$RESULTS_DIR/go-throughput.json"
+echo "  Go throughput complete."
+
+echo ""
+echo "[6/6] Running .NET THROUGHPUT benchmarks..."
+echo "----------------------------------------------"
+taskset "$CPU_MASK" dotnet run \
+    --project benchmarks/docker/netconduit-comparison \
+    -c Release --no-build -- throughput \
+    > "$RESULTS_DIR/dotnet-throughput.json"
+echo "  .NET throughput complete."
 
 # --- Generate report ---
 echo ""
@@ -74,14 +89,18 @@ echo " Generating combined report..."
 echo "============================================"
 
 python3 "$SCRIPT_DIR/report.py" \
-    "$RESULTS_DIR/go-results.json" \
-    "$RESULTS_DIR/dotnet-results.json" \
+    "$RESULTS_DIR/go-gametick.json" \
+    "$RESULTS_DIR/dotnet-gametick.json" \
+    "$RESULTS_DIR/go-throughput.json" \
+    "$RESULTS_DIR/dotnet-throughput.json" \
     > "$RESULTS_DIR/comparison-report.md"
 
 echo ""
 echo "Results saved to:"
-echo "  $RESULTS_DIR/go-results.json"
-echo "  $RESULTS_DIR/dotnet-results.json"
+echo "  $RESULTS_DIR/go-gametick.json"
+echo "  $RESULTS_DIR/dotnet-gametick.json"
+echo "  $RESULTS_DIR/go-throughput.json"
+echo "  $RESULTS_DIR/dotnet-throughput.json"
 echo "  $RESULTS_DIR/comparison-report.md"
 echo ""
 cat "$RESULTS_DIR/comparison-report.md"

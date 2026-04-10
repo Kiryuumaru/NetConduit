@@ -30,8 +30,14 @@ type Result struct {
 }
 
 func main() {
+	filter := ""
+	if len(os.Args) > 1 {
+		filter = os.Args[1]
+	}
+
 	var results []Result
 
+	if filter == "" || filter == "throughput" {
 	// Throughput scenarios
 	channelCounts := []int{1, 10, 100}
 	dataSizes := []int{1024, 102400, 1048576}
@@ -56,7 +62,9 @@ func main() {
 			}
 		}
 	}
+	}
 
+	if filter == "" || filter == "game-tick" {
 	// Game-tick scenarios
 	gtChannels := []int{1, 10, 50, 1000}
 	msgSizes := []int{64, 256}
@@ -77,6 +85,7 @@ func main() {
 				fmt.Fprintf(os.Stderr, "  game-tick  %-18s ch=%4d msg=%4d  %8.0f msg/s\n", impl, ch, ms, mps)
 			}
 		}
+	}
 	}
 
 	enc := json.NewEncoder(os.Stdout)

@@ -1,0 +1,123 @@
+[
+  {
+    "implementation": "Raw TCP (.NET)",
+    "scenario": "game-tick",
+    "channels": 1,
+    "dataSizeBytes": 64,
+    "totalBytes": 0,
+    "durationMs": 0,
+    "throughputMBps": 0,
+    "messagesPerSec": 1569168.7634365256,
+    "allocMB": 0
+  },
+  {
+    "implementation": "NetConduit Mux TCP",
+    "scenario": "game-tick",
+    "channels": 1,
+    "dataSizeBytes": 64,
+    "totalBytes": 0,
+    "durationMs": 0,
+    "throughputMBps": 0,
+    "messagesPerSec": 1595093.5325459547,
+    "allocMB": 0
+  },
+  {
+    "implementation": "Raw TCP (.NET)",
+    "scenario": "game-tick",
+    "channels": 1,
+    "dataSizeBytes": 256,
+    "totalBytes": 0,
+    "durationMs": 0,
+    "throughputMBps": 0,
+    "messagesPerSec": 1280807.3247148627,
+    "allocMB": 0
+  },
+  {
+    "implementation": "NetConduit Mux TCP",
+    "scenario": "game-tick",
+    "channels": 1,
+    "dataSizeBytes": 256,
+    "totalBytes": 0,
+    "durationMs": 0,
+    "throughputMBps": 0,
+    "messagesPerSec": 906600.1234665636,
+    "allocMB": 0
+  },
+  {
+    "implementation": "NetConduit Mux TCP",
+    "scenario": "game-tick",
+    "channels": 10,
+    "dataSizeBytes": 64,
+    "totalBytes": 0,
+    "durationMs": 0,
+    "throughputMBps": 0,
+    "messagesPerSec": 1009571.8663290776,
+    "allocMB": 0
+  },
+  {
+    "implementation": "NetConduit Mux TCP",
+    "scenario": "game-tick",
+    "channels": 10,
+    "dataSizeBytes": 256,
+    "totalBytes": 0,
+    "durationMs": 0,
+    "throughputMBps": 0,
+    "messagesPerSec": 599130.4796813233,
+    "allocMB": 0
+  },
+  {
+    "implementation": "NetConduit Mux TCP",
+    "scenario": "game-tick",
+    "channels": 50,
+    "dataSizeBytes": 64,
+    "totalBytes": 0,
+    "durationMs": 0,
+    "throughputMBps": 0,
+    "messagesPerSec": 1023906.1119879652,
+    "allocMB": 0
+  },
+  {
+    "implementation": "NetConduit Mux TCP",
+    "scenario": "game-tick",
+    "channels": 50,
+    "dataSizeBytes": 256,
+    "totalBytes": 0,
+    "durationMs": 0,
+    "throughputMBps": 0,
+    "messagesPerSec": 695455.4489428273,
+    "allocMB": 0
+  },
+  {
+    "implementation": "NetConduit Mux TCP",
+    "scenario": "game-tick",
+    "channels": 1000,
+    "dataSizeBytes": 64,
+    "totalBytes": 0,
+    "durationMs": 0,
+    "throughputMBps": 0,
+    "messagesPerSec": 1015726.4548482192,
+    "allocMB": 0
+  },
+  {
+    "implementation": "Raw TCP (.NET)",
+    "scenario": "game-tick",
+    "channels": 1000,
+    "dataSizeBytes": 256,
+    "totalBytes": 0,
+    "durationMs": 0,
+    "throughputMBps": 0,
+    "messagesPerSec": 2010850.8911868352,
+    "allocMB": 0
+  },
+  {
+    "implementation": "NetConduit Mux TCP",
+    "scenario": "game-tick",
+    "channels": 1000,
+    "dataSizeBytes": 256,
+    "totalBytes": 0,
+    "durationMs": 0,
+    "throughputMBps": 0,
+    "messagesPerSec": 621375.996057206,
+    "allocMB": 0
+  }
+]

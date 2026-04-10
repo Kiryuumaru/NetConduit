@@ -31,7 +31,10 @@ if (args.Length > 0 && args[0] == "deep-profile")
 
 const int Runs = 5;
 var results = new List<object>();
+var filter = args.Length > 0 ? args[0] : "";
 
+if (filter is "" or "throughput")
+{
 // Throughput scenarios — same matrix as Go
 int[] channelCounts = [1, 10, 100];
 int[] dataSizes = [1024, 102_400, 1_048_576];
@@ -51,7 +54,10 @@ foreach (var channels in channelCounts)
         Console.Error.WriteLine($"  throughput NetConduit Mux TCP   ch={channels,4} data={dataSize,8}  {muxMbps,8:F1} MB/s");
     }
 }
+}
 
+if (filter is "" or "game-tick")
+{
 // Game-tick scenarios — same matrix as Go
 int[] gtChannels = [1, 10, 50, 1000];
 int[] msgSizes = [64, 256];
@@ -85,6 +91,7 @@ foreach (var channels in gtChannels)
             Console.Error.WriteLine($"  game-tick  NetConduit Mux TCP   ch={channels,4} msg={msgSize,4}  FAILED: {ex.GetType().Name}");
         }
     }
+}
 }
 
 Console.WriteLine(JsonSerializer.Serialize(results, new JsonSerializerOptions { WriteIndented = true }));

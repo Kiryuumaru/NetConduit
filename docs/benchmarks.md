@@ -2,6 +2,7 @@
 
 All benchmarks: loopback TCP, `taskset 0x3` (2 CPU cores), GOMAXPROCS=2, 5 runs with median reported.
 Competitors: [Yamux](https://github.com/hashicorp/yamux) (FRP), [Smux](https://github.com/xtaci/smux).
+Game-tick and bulk categories run interleaved (Go+.NET back-to-back per category) to minimize environmental variance.
 
 ## Game-Tick Throughput (msg/s)
 
@@ -9,17 +10,16 @@ Small, frequent messages — typical of games, real-time sync, and RPC.
 
 | Channels | Msg Size | NetConduit | Yamux | Smux | vs Yamux | vs Smux |
 |----------|----------|----------:|------:|-----:|---------:|--------:|
-| 1 | 64B | 1,465,101 | 76,966 | 103,518 | **19.0x** | **14.2x** |
-| 1 | 256B | 825,129 | 77,432 | 105,194 | **10.7x** | **7.8x** |
-| 10 | 64B | 927,570 | 94,132 | 115,042 | **9.9x** | **8.1x** |
-| 10 | 256B | 628,590 | 92,192 | 113,068 | **6.8x** | **5.6x** |
-| 50 | 64B | 1,013,510 | 97,592 | 108,187 | **10.4x** | **9.4x** |
-| 50 | 256B | 681,576 | 93,234 | 105,194 | **7.3x** | **6.5x** |
-| 1000 | 256B | 665,284 | 106,667 | 88,604 | **6.2x** | **7.5x** |
+| 1 | 64B | 1,595,094 | 88,800 | 120,804 | **18.0x** | **13.2x** |
+| 1 | 256B | 906,600 | 89,682 | 122,971 | **10.1x** | **7.4x** |
+| 10 | 64B | 1,009,572 | 106,987 | 137,678 | **9.4x** | **7.3x** |
+| 10 | 256B | 599,130 | 112,572 | 139,886 | **5.3x** | **4.3x** |
+| 50 | 64B | 1,023,906 | 113,431 | 131,212 | **9.0x** | **7.8x** |
+| 50 | 256B | 695,455 | 108,838 | 128,929 | **6.4x** | **5.4x** |
+| 1000 | 64B | 1,015,726 | 108,097 | 107,790 | **9.4x** | **9.4x** |
+| 1000 | 256B | 621,376 | 120,829 | 106,086 | **5.1x** | **5.9x** |
 
-**Win rate: 7/7 vs Yamux, 7/7 vs Smux.**
-
-1000ch×64B excluded — harness frequently hits TimeoutException from socket TIME_WAIT accumulation across runs.
+**Win rate: 8/8 vs Yamux, 8/8 vs Smux.**
 
 ## Bulk Throughput (MB/s)
 
@@ -27,15 +27,15 @@ Large sequential transfers — file copy, streaming, replication.
 
 | Channels | Size | NetConduit | Yamux | Smux | vs Yamux | vs Smux |
 |----------|------|----------:|------:|-----:|---------:|--------:|
-| 1 | 1KB | 3.8 | 8.7 | 8.7 | 0.43x | 0.43x |
-| 1 | 100KB | 101.1 | 357.6 | 451.1 | 0.28x | 0.22x |
-| 1 | 1MB | 674.6 | 931.6 | 1,249.8 | 0.72x | 0.54x |
-| 10 | 1KB | 9.9 | 18.1 | 18.0 | 0.55x | 0.55x |
-| 10 | 100KB | 317.2 | 447.4 | 765.7 | 0.71x | 0.41x |
-| 10 | 1MB | 596.9 | 888.9 | 1,364.8 | 0.67x | 0.44x |
-| 100 | 1KB | 5.8 | 21.0 | 15.2 | 0.27x | 0.38x |
-| 100 | 100KB | 225.6 | 564.6 | 838.3 | 0.40x | 0.27x |
-| 100 | 1MB | 898.3 | 1,059.5 | 1,472.6 | 0.85x | 0.61x |
+| 1 | 1KB | 1.4 | 6.5 | 9.1 | 0.22x | 0.16x |
+| 1 | 100KB | 104.1 | 345.6 | 552.5 | 0.30x | 0.19x |
+| 1 | 1MB | 470.5 | 1,103.1 | 1,137.5 | 0.43x | 0.41x |
+| 10 | 1KB | 11.1 | 16.9 | 19.9 | 0.66x | 0.56x |
+| 10 | 100KB | 172.6 | 625.9 | 723.0 | 0.28x | 0.24x |
+| 10 | 1MB | 521.6 | 974.7 | 1,505.3 | 0.54x | 0.35x |
+| 100 | 1KB | 3.3 | 24.0 | 20.2 | 0.14x | 0.16x |
+| 100 | 100KB | 315.0 | 620.0 | 1,014.3 | 0.51x | 0.31x |
+| 100 | 1MB | 794.1 | 1,210.4 | 1,525.2 | 0.66x | 0.52x |
 
 **Win rate: 0/9 vs Yamux, 0/9 vs Smux.**
 
@@ -48,5 +48,5 @@ The 1KB scenarios are dominated by per-transfer setup latency rather than sustai
 - **Transport:** Loopback TCP
 - **CPU pinning:** `taskset 0x3` (2 cores)
 - **Go muxes:** GOMAXPROCS=2
-- **Method:** 5 runs, median reported
+- **Method:** 5 runs, median reported; categories interleaved (Go+.NET back-to-back)
 - **Warmup:** Full channel setup completes before measurement starts
