@@ -44,7 +44,7 @@ echo "  Built: results/go-bench"
 echo ""
 echo "[2/4] Building .NET benchmark..."
 cd "$REPO_ROOT"
-dotnet build benchmarks/docker/netconduit-comparison -c Release --nologo -v q
+dotnet build benchmarks/docker/netconduit-comparison -c Release --nologo -v q -p:UseLocalNetConduit=true
 echo "  Built: Release mode"
 
 # --- Run Go benchmarks ---

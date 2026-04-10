@@ -9,7 +9,8 @@
 	</PropertyGroup>
 
 	<ItemGroup>
-		<ProjectReference Include="..\..\..\src\NetConduit.Tcp\NetConduit.Tcp.csproj" AdditionalProperties="UseLocalNetConduit=true" />
+		<ProjectReference Include="..\..\..\src\NetConduit\NetConduit.csproj" />
+		<ProjectReference Include="..\..\..\src\NetConduit.Tcp\NetConduit.Tcp.csproj" />
 	</ItemGroup>
 
 </Project>

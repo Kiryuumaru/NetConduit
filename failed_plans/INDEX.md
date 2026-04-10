@@ -12,3 +12,5 @@
 | 008 | Grant-on-receive + SignalFlush (BP check) | Structural | BP check negated change; game-tick -9% |
 | 009 | Grant-on-receive (no BP check) | Structural | App reads fast — grant timing irrelevant |
 | 010 | Idle-triggered flush | Structural | Not the bottleneck; game-tick -8% |
+| 011 | Larger read buffer + adaptive flush + coalesce | Structural | Small-payload throughput regressed 3x; game-tick 50ch -12%; 1000ch failures |
+| 012 | Pending-bytes flush + 32KB per-frame threshold | Parameter | Bulk throughput flat/neutral; 32KB threshold too conservative to matter |

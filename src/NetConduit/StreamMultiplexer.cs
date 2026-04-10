@@ -1315,9 +1315,10 @@ public sealed class StreamMultiplexer : IStreamMultiplexer
     
     /// <summary>
     /// Commits buffered Pipe.Writer data and drains it to the underlying stream in one shot.
-    /// Used by FIN/GoAway to guarantee delivery before dispose.
+    /// Used by FIN/GoAway to guarantee delivery before dispose,
+    /// and by WriteChannel for large frames to bypass FlushLoop latency.
     /// </summary>
-    private async ValueTask ForceFlushPipeToStreamAsync(CancellationToken ct)
+    internal async ValueTask ForceFlushPipeToStreamAsync(CancellationToken ct)
     {
         lock (_writeLock)
         {
