@@ -16,7 +16,7 @@ Run full benchmark suite including all competitors:
 bash benchmarks/docker/run-benchmarks.sh
 ```
 
-Record results as the baseline. Every iteration re-runs this same command — no frozen numbers.
+Record the **NC vs FRP** and **NC vs Smux** ratios from the report as the baseline. Absolute numbers vary 15-25% between runs; ratios within the same run are stable because all implementations share identical conditions.
 
 ### 2. Create Plan
 
@@ -32,15 +32,18 @@ Create `PLAN_IMPROVEMENT_NNN.md` with a single focused change:
 2. `dotnet build` — 0 warnings, 0 errors
 3. `dotnet test` — 100% pass
 4. `bash benchmarks/docker/run-benchmarks.sh` — full suite with all competitors
-5. Compare against baseline
+5. Compare **ratios** (NC vs FRP, NC vs Smux) against baseline ratios
 
 ### 4. Evaluate
 
+Compare the **NC vs FRP** and **NC vs Smux** ratio columns from the new run against the baseline run. Absolute MB/s or msg/s numbers are not comparable across runs.
+
 **PASS** if:
 - All tests pass
-- Bulk throughput improved toward 2x baseline (or near Yamux/Smux)
-- Game-tick 1ch×64B stays above 1,200,000 msg/s
-- Game-tick 50ch×64B does not regress more than 5%
+- Bulk throughput ratios improved (NC vs FRP or NC vs Smux closer to 1.0x or above)
+- Game-tick ratios did not regress (NC vs FRP and NC vs Smux stay at or above baseline ratios)
+- Game-tick 1ch×64B NC vs FRP ratio stays above 10x
+- Game-tick 50ch×64B NC vs FRP ratio does not drop more than 5% from baseline
 
 **FAIL** if any condition is not met.
 
@@ -53,18 +56,22 @@ Create `PLAN_IMPROVEMENT_NNN.md` with a single focused change:
 
 ### 6. On Pass
 
-Come back to user with the results.
+1. Move `PLAN_IMPROVEMENT_NNN.md` to `succeeded_plans/PLAN_IMPROVEMENT_NNN.md`
+2. Come back to user with the results.
 
 ---
 
 ## File Structure
 
 ```
-PLAN_IMPROVEMENT_NNN.md          # Active plan (deleted after pass/fail)
+PLAN_IMPROVEMENT_NNN.md          # Active plan (moved after pass/fail)
 failed_plans/
   INDEX.md                       # Table of all failed plans
   PLAN_IMPROVEMENT_001.md        # First failed plan
   PLAN_IMPROVEMENT_002.md        # Second failed plan
+  ...
+succeeded_plans/
+  PLAN_IMPROVEMENT_013.md        # First succeeded plan
   ...
 ```
 
