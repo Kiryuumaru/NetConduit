@@ -19,3 +19,7 @@
 | 016 | Increase read PipeReader buffer (16KB→1MB) | Parameter | Re-evaluated: PASS — moved to succeeded_plans |
 | 017 | Accumulation-based flush threshold (no SignalFlush fallback) | Structural | Re-evaluated: PASS — moved to succeeded_plans |
 | 018 | Contention-adaptive flush (skip when _streamLock busy) | Structural | FlushLoop background contention makes CurrentCount unreliable; regression across all scenarios |
+| 019 | Aggressive credit grant threshold (1/16 window) | Parameter | More credit frames add CPU overhead without reducing stall time; widespread regressions except 100ch×100KB |
+| 020 | Direct-to-stream write for large frames | Structural | _streamLock contention with FlushLoop + two WriteAsync calls add more overhead than memcpy saves; single-channel -44% |
+| 021 | Revert Plan 017 (keep 016 only) | Parameter | Per-frame ForceFlush adds more lock contention than accumulation delay; 1ch×100KB -58%, 10ch×100KB -45% |
+| 022 | Increase accumulation threshold (256KB→1MB) | Parameter | Mixed results: 10ch×100KB +36% & 100ch×1MB +14% improved, but 10ch×1MB -9% & 100ch×100KB -15% regressed; no consistent gain |

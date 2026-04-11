@@ -27,6 +27,10 @@ public sealed class ReadChannel : Stream
     private ChannelCloseReason? _closeReason;
     private Exception? _closeException;
     private long _pendingGrantCredits;
+    
+    // Direct delivery: bypass per-channel Pipe when user is already waiting
+    private TaskCompletionSource<int>? _directDeliveryTcs;
+    private Memory<byte> _directDeliveryBuffer;
 
     internal ReadChannel(
         StreamMultiplexer multiplexer,
@@ -160,41 +164,93 @@ public sealed class ReadChannel : Stream
         }
 
         if (HotPathProfiler.IsEnabled) HotPathProfiler.RecordReadAsyncSlowPath();
-        // Wait for more data
-        using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, _closeCts.Token);
         
+        // Register for direct delivery under _disposeLock (same lock EnqueueData uses)
+        TaskCompletionSource<int> tcs;
+        lock (_disposeLock)
+        {
+            if (_disposed || _isDisposing)
+                throw new ObjectDisposedException(nameof(ReadChannel));
+            
+            // Double-check: data may have arrived between TryRead and lock acquisition
+            if (_dataPipeReader.TryRead(out var result2))
+            {
+                if (result2.Buffer.Length > 0)
+                {
+                    _bufferedData = result2.Buffer;
+                    _hasBufferedData = true;
+                    Stats.IncrementFramesReceived();
+                    return ConsumeBuffer(buffer);
+                }
+                _dataPipeReader.AdvanceTo(result2.Buffer.Start);
+                if (result2.IsCompleted)
+                    return 0;
+            }
+            
+            if (_state == ChannelState.Closed)
+                return 0;
+            
+            tcs = new TaskCompletionSource<int>(TaskCreationOptions.RunContinuationsAsynchronously);
+            _directDeliveryTcs = tcs;
+            _directDeliveryBuffer = buffer;
+        }
+        
+        // Wait for direct delivery or cancellation
+        using var reg = cancellationToken.Register(static state =>
+        {
+            var s = (TaskCompletionSource<int>)state!;
+            s.TrySetCanceled();
+        }, tcs);
+        
+        using var closeReg = _closeCts.Token.Register(static state =>
+        {
+            var s = (TaskCompletionSource<int>)state!;
+            s.TrySetResult(0);
+        }, tcs);
+        
+        int bytesRead;
         try
         {
-            var result = await _dataPipeReader.ReadAsync(linkedCts.Token).ConfigureAwait(false);
-            
-            if (result.Buffer.Length > 0)
-            {
-                _bufferedData = result.Buffer;
-                _hasBufferedData = true;
-                Stats.IncrementFramesReceived();
-                return ConsumeBuffer(buffer);
-            }
-            
-            _dataPipeReader.AdvanceTo(result.Buffer.Start);
-            if (result.IsCompleted)
-                return 0;
+            bytesRead = await tcs.Task.ConfigureAwait(false);
         }
-        catch (OperationCanceledException) when (_closeCts.IsCancellationRequested)
+        finally
         {
-            // Channel closed - try to drain any remaining data
-            if (_dataPipeReader.TryRead(out var finalResult) && finalResult.Buffer.Length > 0)
+            // Clean up stale registration if TCS was completed by cancellation/close
+            // rather than by EnqueueData (which clears these fields itself)
+            lock (_disposeLock)
             {
-                _bufferedData = finalResult.Buffer;
-                _hasBufferedData = true;
-                Stats.IncrementFramesReceived();
-                return ConsumeBuffer(buffer);
+                if (_directDeliveryTcs == tcs)
+                {
+                    _directDeliveryTcs = null;
+                    _directDeliveryBuffer = default;
+                }
             }
-            if (finalResult.Buffer.Length == 0)
-                _dataPipeReader.AdvanceTo(finalResult.Buffer.Start);
-            return 0;
         }
-
-        return 0;
+        
+        if (bytesRead > 0)
+        {
+            Stats.IncrementFramesReceived();
+            Stats.AddBytesReceived(bytesRead);
+            
+            var toGrant = _flowControl.RecordConsumptionAndGetGrant(bytesRead);
+            if (toGrant > 0)
+            {
+                Stats.AddCreditsGranted(toGrant);
+                
+                if (_multiplexer.Options.FlushMode == FlushMode.Batched)
+                {
+                    Interlocked.Add(ref _pendingGrantCredits, toGrant);
+                    _multiplexer.EnqueuePendingCredit(this);
+                    _multiplexer.SignalFlush();
+                }
+                else
+                {
+                    _multiplexer.SendCreditGrant(ChannelIndex, toGrant, CancellationToken.None);
+                }
+            }
+        }
+        
+        return bytesRead;
     }
 
     private void SetCurrentBuffer(ReadOnlySequence<byte> data)
@@ -298,7 +354,7 @@ public sealed class ReadChannel : Stream
     {
         var profiling = HotPathProfiler.IsEnabled;
         long t0 = profiling ? HotPathProfiler.Timestamp() : 0;
-        // Use lock to synchronize with Dispose
+        // Use lock to synchronize with Dispose and direct delivery registration
         lock (_disposeLock)
         {
             if (profiling) HotPathProfiler.RecordEnqueueDataLock(HotPathProfiler.Timestamp() - t0);
@@ -310,9 +366,36 @@ public sealed class ReadChannel : Stream
             // Track bytes received for reconnection sync
             _syncState.RecordReceive((int)payload.Length);
             
-            // Copy payload into per-channel PipeWriter
-            var span = _dataPipeWriter.GetSpan((int)payload.Length);
-            payload.CopyTo(span);
+            // Direct delivery: if user is waiting, copy directly to their buffer
+            if (_directDeliveryTcs != null)
+            {
+                var tcs = _directDeliveryTcs;
+                var userBuffer = _directDeliveryBuffer;
+                _directDeliveryTcs = null;
+                _directDeliveryBuffer = default;
+                
+                var toCopy = (int)Math.Min(userBuffer.Length, payload.Length);
+                payload.Slice(0, toCopy).CopyTo(userBuffer.Span);
+                
+                if (tcs.TrySetResult(toCopy))
+                {
+                    // Direct delivery succeeded — only store remainder in Pipe
+                    if (toCopy < (int)payload.Length)
+                    {
+                        var remaining = payload.Slice(toCopy);
+                        var span = _dataPipeWriter.GetSpan((int)remaining.Length);
+                        remaining.CopyTo(span);
+                        _dataPipeWriter.Advance((int)remaining.Length);
+                        _dataPipeWriter.FlushAsync().GetAwaiter().GetResult();
+                    }
+                    return;
+                }
+                // TCS was already canceled/completed — fall through to Pipe path for ALL data
+            }
+            
+            // Normal path: copy payload into per-channel PipeWriter
+            var pipeSpan = _dataPipeWriter.GetSpan((int)payload.Length);
+            payload.CopyTo(pipeSpan);
             _dataPipeWriter.Advance((int)payload.Length);
             _dataPipeWriter.FlushAsync().GetAwaiter().GetResult();
         }
@@ -333,6 +416,18 @@ public sealed class ReadChannel : Stream
         _state = ChannelState.Closed;
         _dataPipeWriter.Complete();
         _closeCts.Cancel();
+        
+        // Cancel any pending direct delivery
+        lock (_disposeLock)
+        {
+            if (_directDeliveryTcs != null)
+            {
+                var tcs = _directDeliveryTcs;
+                _directDeliveryTcs = null;
+                _directDeliveryBuffer = default;
+                tcs.TrySetResult(0);
+            }
+        }
         
         try
         {
@@ -361,6 +456,18 @@ public sealed class ReadChannel : Stream
         _dataPipeWriter.Complete(exception);
         _closeCts.Cancel();
         
+        // Cancel any pending direct delivery
+        lock (_disposeLock)
+        {
+            if (_directDeliveryTcs != null)
+            {
+                var tcs = _directDeliveryTcs;
+                _directDeliveryTcs = null;
+                _directDeliveryBuffer = default;
+                tcs.TrySetResult(0);
+            }
+        }
+        
         try
         {
             OnClosed?.Invoke(ChannelCloseReason.RemoteError, exception);
@@ -384,6 +491,15 @@ public sealed class ReadChannel : Stream
 
             if (disposing)
             {
+                // Cancel any pending direct delivery
+                if (_directDeliveryTcs != null)
+                {
+                    var tcs = _directDeliveryTcs;
+                    _directDeliveryTcs = null;
+                    _directDeliveryBuffer = default;
+                    tcs.TrySetResult(0);
+                }
+                
                 _closeCts.Cancel();
                 _dataPipeWriter.Complete();
                 _dataPipeReader.Complete();
