@@ -52,6 +52,7 @@ internal sealed class OwnedMemoryTracker
 /// Represents owned memory with transfer semantics for zero-copy data paths.
 /// The owner is responsible for calling Dispose() when done.
 /// This is a struct for performance - avoid boxing!
+/// Uses ArrayPool directly to avoid the IMemoryOwner heap allocation from MemoryPool.
 /// </summary>
 internal struct OwnedMemory : IDisposable
 {
@@ -65,7 +66,7 @@ internal struct OwnedMemory : IDisposable
     private OwnedMemoryTracker? _tracker;
 #endif
 
-    private IMemoryOwner<byte>? _owner;
+    private byte[]? _array;
     private readonly int _length;
     private bool _disposed;
 
@@ -76,19 +77,19 @@ internal struct OwnedMemory : IDisposable
     /// <returns>An OwnedMemory that must be disposed by the caller.</returns>
     public static OwnedMemory Rent(int minimumLength)
     {
-        var owner = MemoryPool<byte>.Shared.Rent(minimumLength);
-        return new OwnedMemory(owner, minimumLength);
+        var array = ArrayPool<byte>.Shared.Rent(minimumLength);
+        return new OwnedMemory(array, minimumLength);
     }
 
     /// <summary>
-    /// Creates a new OwnedMemory wrapping an existing IMemoryOwner.
-    /// Ownership is transferred - do not dispose the passed owner directly.
+    /// Creates a new OwnedMemory wrapping a rented byte array.
+    /// Ownership is transferred - do not return the array to the pool directly.
     /// </summary>
-    /// <param name="owner">The memory owner to wrap.</param>
-    /// <param name="length">The actual used length (may be less than buffer capacity).</param>
-    public OwnedMemory(IMemoryOwner<byte> owner, int length)
+    /// <param name="array">The rented byte array to wrap.</param>
+    /// <param name="length">The actual used length (may be less than array capacity).</param>
+    public OwnedMemory(byte[] array, int length)
     {
-        _owner = owner ?? throw new ArgumentNullException(nameof(owner));
+        _array = array ?? throw new ArgumentNullException(nameof(array));
         _length = length;
         _disposed = false;
 
@@ -106,10 +107,10 @@ internal struct OwnedMemory : IDisposable
         {
             if (_disposed)
                 throw new ObjectDisposedException(nameof(OwnedMemory));
-            if (_owner == null)
+            if (_array == null)
                 throw new InvalidOperationException("OwnedMemory was not properly initialized.");
             
-            return _owner.Memory[.._length];
+            return _array.AsMemory(0, _length);
         }
     }
 
@@ -149,9 +150,10 @@ internal struct OwnedMemory : IDisposable
 
         _disposed = true;
         
-        var owner = _owner;
-        _owner = null;
-        owner?.Dispose();
+        var array = _array;
+        _array = null;
+        if (array != null)
+            ArrayPool<byte>.Shared.Return(array);
 
 #if DEBUG
         _tracker?.MarkDisposed();

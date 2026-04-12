@@ -301,6 +301,7 @@ public class ReconnectionTests
     {
         // Arrange
         var syncState = new NetConduit.Internal.ChannelSyncState(1024 * 1024);
+        syncState.StartRecording();
 
         // Send some data
         var data1 = new byte[100];
@@ -335,6 +336,7 @@ public class ReconnectionTests
     {
         // Arrange
         var syncState = new NetConduit.Internal.ChannelSyncState(1024 * 1024);
+        syncState.StartRecording();
 
         var data = new byte[100];
         for (int i = 0; i < 100; i++) data[i] = (byte)i;
@@ -355,6 +357,7 @@ public class ReconnectionTests
     {
         // Arrange - small buffer of 100 bytes
         var syncState = new NetConduit.Internal.ChannelSyncState(100);
+        syncState.StartRecording();
 
         // Send 60 bytes
         var data1 = new byte[60];
@@ -366,12 +369,13 @@ public class ReconnectionTests
         for (int i = 0; i < 60; i++) data2[i] = (byte)(i + 100);
         syncState.RecordSend(data2);
 
-        // BytesAcked should have been advanced due to eviction
-        Assert.True(syncState.BytesAcked >= 60, "First segment should be evicted and acked");
+        // Ring buffer (100 bytes) keeps as much data as possible.
+        // 120 total sent, ring holds 100, oldest 20 bytes evicted.
+        Assert.True(syncState.BytesAcked >= 20, "Oldest bytes should be evicted and acked");
         
-        // Get unacknowledged should only return data2
+        // Replay from ack position should return remaining ring contents
         var replay = syncState.GetUnacknowledgedDataFrom(syncState.BytesAcked);
-        Assert.True(replay.Length <= 60, "Should only have second segment");
+        Assert.True(replay.Length <= 100, "Should not exceed ring capacity");
     }
 
     [Fact(Timeout = 120000)]
@@ -456,6 +460,7 @@ public class ReconnectionTests
         // After reconnect, the remaining 400 bytes should be replayed correctly
         
         var syncState = new NetConduit.Internal.ChannelSyncState(1024 * 1024);
+        syncState.StartRecording();
         
         // Create test data with recognizable pattern
         var totalBytes = 1000;
@@ -504,6 +509,7 @@ public class ReconnectionTests
     {
         // Test replay when ack happens mid-chunk
         var syncState = new NetConduit.Internal.ChannelSyncState(1024 * 1024);
+        syncState.StartRecording();
         
         // Send 3 chunks of 100 bytes each
         var chunk1 = Enumerable.Range(0, 100).Select(i => (byte)i).ToArray();
@@ -540,6 +546,7 @@ public class ReconnectionTests
     {
         // Edge case: remote received nothing (immediate disconnect)
         var syncState = new NetConduit.Internal.ChannelSyncState(1024 * 1024);
+        syncState.StartRecording();
         
         var data = new byte[500];
         for (int i = 0; i < 500; i++) data[i] = (byte)(i % 256);
@@ -556,6 +563,7 @@ public class ReconnectionTests
     {
         // Edge case: remote received everything (no replay needed)
         var syncState = new NetConduit.Internal.ChannelSyncState(1024 * 1024);
+        syncState.StartRecording();
         
         var data = new byte[500];
         syncState.RecordSend(data);
@@ -570,6 +578,7 @@ public class ReconnectionTests
     {
         // Stress test: 5MB of data with complex pattern
         var syncState = new NetConduit.Internal.ChannelSyncState(10 * 1024 * 1024); // 10MB buffer
+        syncState.StartRecording();
         
         var totalSize = 5 * 1024 * 1024; // 5MB
         var allData = new byte[totalSize];

@@ -31,6 +31,10 @@
 	</ItemGroup>
 
 	<ItemGroup>
+		<PackageReference Include="System.IO.Pipelines" Version="9.0.4" />
+	</ItemGroup>
+
+	<ItemGroup>
 		<InternalsVisibleTo Include="NetConduit.Tcp" />
 		<InternalsVisibleTo Include="NetConduit.WebSocket" />
 		<InternalsVisibleTo Include="NetConduit.UnitTests" />
@@ -38,6 +42,7 @@
 		<InternalsVisibleTo Include="NetConduit.Quic" />
 		<InternalsVisibleTo Include="NetConduit.Ipc" />
 		<InternalsVisibleTo Include="NetConduit.Benchmarks" />
+		<InternalsVisibleTo Include="NetConduit.ComparisonBench" />
 	</ItemGroup>
 
 </Project>
