@@ -23,3 +23,6 @@
 | 020 | Direct-to-stream write for large frames | Structural | _streamLock contention with FlushLoop + two WriteAsync calls add more overhead than memcpy saves; single-channel -44% |
 | 021 | Revert Plan 017 (keep 016 only) | Parameter | Per-frame ForceFlush adds more lock contention than accumulation delay; 1ch×100KB -58%, 10ch×100KB -45% |
 | 022 | Increase accumulation threshold (256KB→1MB) | Parameter | Mixed results: 10ch×100KB +36% & 100ch×1MB +14% improved, but 10ch×1MB -9% & 100ch×100KB -15% regressed; no consistent gain |
+| 024 | Signal FlushLoop for payload >= 1024 bytes | Parameter | 1ch×100KB +135% but 100ch×1KB -86% (per-frame signal threshold too low — overwhelms FlushLoop with many small-frame channels) |
+| 025 | Signal FlushLoop on accumulated >= 65536 bytes | Parameter | 50ch×64B game-tick collapsed -85% (1.82x vs baseline 12.15x); signaling FlushLoop during active writes steals CPU and causes scheduling interference on 2-core pinning |
+| 026 | Tiered ForceFlush with non-blocking try-drain at 65KB | Structural | Benchmark hung on 100ch tests; TryForceFlush holding _streamLock while acquiring _writeLock creates contention spiral; two concurrent lock orderings (_writeLock→_streamLock vs _streamLock→_writeLock) cause severe scheduling overhead |
