@@ -80,6 +80,7 @@ class Build : BaseNukeBuildHelpers
                     .SetConfiguration("Release"));
                 DotNetTasks.DotNetTest(_ => _
                     .SetProcessAdditionalArguments(
+                        "--no-build " +
                         "--logger \"GitHubActions;summary.includePassedTests=true;summary.includeSkippedTests=true\" " +
                         "-- " +
                         "RunConfiguration.CollectSourceInformation=true ")

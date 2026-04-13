@@ -7,6 +7,8 @@
 		<Nullable>enable</Nullable>
 		<IsPackable>false</IsPackable>
 		<IsTestProject>true</IsTestProject>
+		<ServerGarbageCollection>false</ServerGarbageCollection>
+		<GarbageCollectionAdaptationMode>0</GarbageCollectionAdaptationMode>
 	</PropertyGroup>
 
 	<ItemGroup>
