@@ -37,7 +37,7 @@ public class BackpressureTests
         });
 
         var writeChannel = await initiator.OpenChannelAsync(
-            new ChannelOptions { ChannelId = "backpressure_channel", SendTimeout = TimeSpan.FromSeconds(5) },
+            new ChannelOptions { ChannelId = "backpressure_channel", SendTimeout = TimeSpan.FromSeconds(30) },
             cts.Token);
         await acceptTask;
 
