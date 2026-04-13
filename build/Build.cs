@@ -80,10 +80,11 @@ class Build : BaseNukeBuildHelpers
                     .SetConfiguration("Release"));
                 DotNetTasks.DotNetTest(_ => _
                     .SetProcessAdditionalArguments(
+                        "--blame-hang --blame-hang-timeout 120s " +
                         "--logger \"GitHubActions;summary.includePassedTests=true;summary.includeSkippedTests=true\" " +
                         "-- " +
                         "RunConfiguration.CollectSourceInformation=true " +
-                        "DataCollectionRunSettings.DataCollectors.DataCollector.Configuration.Format=opencovere ")
+                        "RunConfiguration.TestSessionTimeout=600000 ")
                     .SetProjectFile(RootDirectory / "tests" / spec.ProjectTestName / $"{spec.ProjectTestName}.csproj")
                     .SetConfiguration("Release"));
             }));
