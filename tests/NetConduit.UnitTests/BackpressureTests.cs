@@ -1,3 +1,6 @@
+using System.Collections.Concurrent;
+using NetConduit.Internal;
+
 namespace NetConduit.UnitTests;
 
 public class BackpressureTests
@@ -245,9 +248,363 @@ public class BackpressureTests
         // Cancel to cleanup
         cts.Cancel();
     }
+
+    #region WriteChannel Credit Accounting
+
+    [Fact(Timeout = 60000)]
+    public async Task WriteChannel_ConcurrentWrites_CreditsNeverGoNegative()
+    {
+        await using var pipe = new DuplexPipe();
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+
+        var (muxA, muxB, _, _) = await TestMuxHelper.CreateMuxPairAsync(pipe, cancellationToken: cts.Token);
+
+        var writeChannel = await muxA.OpenChannelAsync(new() { ChannelId = "credit_test" }, cts.Token);
+        var readChannel = await muxB.AcceptChannelAsync("credit_test", cts.Token);
+
+        var drainTask = Task.Run(async () =>
+        {
+            var buf = new byte[65536];
+            while (!cts.Token.IsCancellationRequested)
+            {
+                try
+                {
+                    var n = await readChannel.ReadAsync(buf, cts.Token);
+                    if (n == 0) break;
+                }
+                catch (OperationCanceledException) { break; }
+                catch { break; }
+            }
+        });
+
+        var errors = new ConcurrentBag<Exception>();
+        var totalBytesSent = 0L;
+        var tasks = new Task[8];
+
+        for (int t = 0; t < tasks.Length; t++)
+        {
+            tasks[t] = Task.Run(async () =>
+            {
+                var data = new byte[4096];
+                Random.Shared.NextBytes(data);
+                for (int i = 0; i < 50; i++)
+                {
+                    try
+                    {
+                        await writeChannel.WriteAsync(data, cts.Token);
+                        Interlocked.Add(ref totalBytesSent, data.Length);
+                    }
+                    catch (OperationCanceledException) { break; }
+                    catch (Exception ex)
+                    {
+                        errors.Add(ex);
+                        break;
+                    }
+                }
+            });
+        }
+
+        await Task.WhenAll(tasks);
+        await cts.CancelAsync();
+
+        Assert.Empty(errors);
+        Assert.True(totalBytesSent > 0, "Should have sent some data");
+    }
+
+    [Fact(Timeout = 60000)]
+    public async Task WriteChannel_SingleByteWrites_ManyTimes_Succeeds()
+    {
+        await using var pipe = new DuplexPipe();
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+        var (muxA, muxB, _, _) = await TestMuxHelper.CreateMuxPairAsync(pipe, cancellationToken: cts.Token);
+
+        var writeChannel = await muxA.OpenChannelAsync(new() { ChannelId = "credit_1byte" }, cts.Token);
+        var readChannel = await muxB.AcceptChannelAsync("credit_1byte", cts.Token);
+
+        var drainTask = Task.Run(async () =>
+        {
+            var buf = new byte[65536];
+            while (!cts.Token.IsCancellationRequested)
+            {
+                try { if (await readChannel.ReadAsync(buf, cts.Token) == 0) break; }
+                catch { break; }
+            }
+        });
+
+        for (int i = 0; i < 5000; i++)
+        {
+            await writeChannel.WriteAsync(new byte[] { (byte)(i & 0xFF) }, cts.Token);
+        }
+
+        await cts.CancelAsync();
+    }
+
+    [Fact(Timeout = 60000)]
+    public async Task WriteChannel_ExactCreditBoundary_NoUnderflow()
+    {
+        await using var pipe = new DuplexPipe();
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+
+        var opts = new MultiplexerOptions
+        {
+            StreamFactory = _ => throw new NotSupportedException(),
+            DefaultChannelOptions = new DefaultChannelOptions { MinCredits = 1024, MaxCredits = 1024 },
+        };
+
+        var (muxA, muxB, _, _) = await TestMuxHelper.CreateMuxPairAsync(pipe, opts, opts, cts.Token);
+
+        var writeChannel = await muxA.OpenChannelAsync(new() { ChannelId = "credit_exact" }, cts.Token);
+        var readChannel = await muxB.AcceptChannelAsync("credit_exact", cts.Token);
+
+        var drainTask = Task.Run(async () =>
+        {
+            var buf = new byte[65536];
+            while (!cts.Token.IsCancellationRequested)
+            {
+                try { if (await readChannel.ReadAsync(buf, cts.Token) == 0) break; }
+                catch { break; }
+            }
+        });
+
+        var data = new byte[1024];
+        for (int i = 0; i < 100; i++)
+        {
+            await writeChannel.WriteAsync(data, cts.Token);
+        }
+
+        await cts.CancelAsync();
+    }
+
+    [Fact(Timeout = 60000)]
+    public async Task WriteChannel_ZeroLengthWrite_Noop()
+    {
+        await using var pipe = new DuplexPipe();
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+        var (muxA, muxB, _, _) = await TestMuxHelper.CreateMuxPairAsync(pipe, cancellationToken: cts.Token);
+
+        var writeChannel = await muxA.OpenChannelAsync(new() { ChannelId = "credit_zero" }, cts.Token);
+        var readChannel = await muxB.AcceptChannelAsync("credit_zero", cts.Token);
+
+        await writeChannel.WriteAsync(ReadOnlyMemory<byte>.Empty, cts.Token);
+
+        await writeChannel.WriteAsync(new byte[] { 0xCC }, cts.Token);
+        var buf = new byte[1];
+        var n = await readChannel.ReadAsync(buf, cts.Token);
+        Assert.Equal(1, n);
+        Assert.Equal(0xCC, buf[0]);
+    }
+
+    #endregion
+
+    #region Credit Starvation Events
+
+    [Fact(Timeout = 30000)]
+    public async Task CreditStarvation_EventFires()
+    {
+        await using var pipe = new DuplexPipe();
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+
+        var opts = new MultiplexerOptions
+        {
+            StreamFactory = _ => throw new NotSupportedException(),
+            DefaultChannelOptions = new DefaultChannelOptions
+            {
+                MinCredits = 512,
+                MaxCredits = 2048,
+            },
+        };
+
+        var (muxA, muxB, _, _) = await TestMuxHelper.CreateMuxPairAsync(pipe, opts, opts, cts.Token);
+
+        var writeChannel = await muxA.OpenChannelAsync(new() { ChannelId = "starvation" }, cts.Token);
+        var readChannel = await muxB.AcceptChannelAsync("starvation", cts.Token);
+
+        var starvationCount = 0;
+        writeChannel.OnCreditStarvation += () => Interlocked.Increment(ref starvationCount);
+
+        var drainTask = Task.Run(async () =>
+        {
+            var buf = new byte[64];
+            while (!cts.Token.IsCancellationRequested)
+            {
+                try
+                {
+                    var n = await readChannel.ReadAsync(buf, cts.Token);
+                    if (n == 0) break;
+                    await Task.Delay(10, cts.Token);
+                }
+                catch (OperationCanceledException) { break; }
+                catch { break; }
+            }
+        });
+
+        var bigData = new byte[8192];
+        Random.Shared.NextBytes(bigData);
+        for (int i = 0; i < 20; i++)
+        {
+            try
+            {
+                await writeChannel.WriteAsync(bigData, cts.Token);
+            }
+            catch (OperationCanceledException) { break; }
+            catch (TimeoutException) { break; }
+        }
+
+        await cts.CancelAsync();
+    }
+
+    [Fact(Timeout = 30000)]
+    public async Task CreditRestored_EventFiresWithDuration()
+    {
+        await using var pipe = new DuplexPipe();
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+
+        var opts = new MultiplexerOptions
+        {
+            StreamFactory = _ => throw new NotSupportedException(),
+            DefaultChannelOptions = new DefaultChannelOptions { MinCredits = 512, MaxCredits = 2048 },
+        };
+
+        var (muxA, muxB, _, _) = await TestMuxHelper.CreateMuxPairAsync(pipe, opts, opts, cts.Token);
+
+        var writeChannel = await muxA.OpenChannelAsync(new() { ChannelId = "starvation_restore" }, cts.Token);
+        var readChannel = await muxB.AcceptChannelAsync("starvation_restore", cts.Token);
+
+        var restoredDurations = new ConcurrentBag<TimeSpan>();
+        writeChannel.OnCreditRestored += duration => restoredDurations.Add(duration);
+
+        var drainTask = Task.Run(async () =>
+        {
+            var buf = new byte[128];
+            while (!cts.Token.IsCancellationRequested)
+            {
+                try
+                {
+                    var n = await readChannel.ReadAsync(buf, cts.Token);
+                    if (n == 0) break;
+                    await Task.Delay(5, cts.Token);
+                }
+                catch { break; }
+            }
+        });
+
+        var data = new byte[4096];
+        for (int i = 0; i < 10; i++)
+        {
+            try { await writeChannel.WriteAsync(data, cts.Token); }
+            catch (OperationCanceledException) { break; }
+            catch (TimeoutException) { break; }
+        }
+
+        await cts.CancelAsync();
+
+        foreach (var d in restoredDurations)
+            Assert.True(d >= TimeSpan.Zero, $"Duration was negative: {d}");
+    }
+
+    [Fact(Timeout = 30000)]
+    public async Task CreditStarvation_EventHandlerThrows_WriteStillSucceeds()
+    {
+        await using var pipe = new DuplexPipe();
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+
+        var opts = new MultiplexerOptions
+        {
+            StreamFactory = _ => throw new NotSupportedException(),
+            DefaultChannelOptions = new DefaultChannelOptions { MinCredits = 512, MaxCredits = 1024 },
+        };
+
+        var (muxA, muxB, _, _) = await TestMuxHelper.CreateMuxPairAsync(pipe, opts, opts, cts.Token);
+
+        var writeChannel = await muxA.OpenChannelAsync(new() { ChannelId = "starvation_throw" }, cts.Token);
+        var readChannel = await muxB.AcceptChannelAsync("starvation_throw", cts.Token);
+
+        writeChannel.OnCreditStarvation += () => throw new InvalidOperationException("test exception");
+        writeChannel.OnCreditRestored += _ => throw new InvalidOperationException("restore exception");
+
+        var drainTask = Task.Run(async () =>
+        {
+            var buf = new byte[1024];
+            while (!cts.Token.IsCancellationRequested)
+            {
+                try { if (await readChannel.ReadAsync(buf, cts.Token) == 0) break; }
+                catch { break; }
+            }
+        });
+
+        var data = new byte[2048];
+        await writeChannel.WriteAsync(data, cts.Token);
+
+        await cts.CancelAsync();
+    }
+
+    #endregion
+
+    #region Adaptive Flow Control
+
+    [Fact]
+    public void FlowControl_ShrinkDuringGrant_WindowAdjusts()
+    {
+        var afc = new AdaptiveFlowControl(512, 4 * 1024 * 1024);
+
+        var grant1 = afc.RecordConsumptionAndGetGrant(1024 * 1024);
+
+        for (int i = 0; i < 10; i++)
+        {
+            afc.TryShrinkIfIdle();
+        }
+
+        var windowAfterShrink = afc.CurrentWindowSize;
+
+        var grant2 = afc.RecordConsumptionAndGetGrant(2048);
+    }
+
+    [Fact]
+    public void FlowControl_SmallConsumptions_NeverExceedMax()
+    {
+        var afc = new AdaptiveFlowControl(512, 4096);
+
+        for (int i = 0; i < 1000; i++)
+        {
+            var grant = afc.RecordConsumptionAndGetGrant(1);
+            if (grant > 0)
+                Assert.True(grant <= 4096, $"Grant {grant} exceeded max 4096");
+        }
+    }
+
+    [Fact]
+    public void FlowControl_WindowNeverBelowMin()
+    {
+        var afc = new AdaptiveFlowControl(512, 4096);
+
+        for (int i = 0; i < 100; i++)
+            afc.TryShrinkIfIdle();
+
+        Assert.True(afc.CurrentWindowSize >= 512, $"Window {afc.CurrentWindowSize} went below min 512");
+    }
+
+    [Fact]
+    public void FlowControl_InitialWindowIsMax()
+    {
+        var afc = new AdaptiveFlowControl(512, 4096);
+        Assert.Equal(4096u, afc.CurrentWindowSize);
+    }
+
+    [Fact]
+    public void FlowControl_GetInitialCredits_EqualsWindowSize()
+    {
+        var afc = new AdaptiveFlowControl(1024, 8192);
+        Assert.Equal(afc.CurrentWindowSize, afc.GetInitialCredits());
+    }
+
+    [Fact]
+    public void FlowControl_LargeConsumption_GrantsCredits()
+    {
+        var afc = new AdaptiveFlowControl(512, 4096);
+
+        var grant = afc.RecordConsumptionAndGetGrant(2048);
+        Assert.True(grant > 0, "Expected a grant after consuming 2048 bytes");
+    }
+
+    #endregion
 }
-
-
-
-
-

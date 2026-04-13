@@ -925,6 +925,18 @@ public sealed class StreamMultiplexer : IStreamMultiplexer
     }
 
     /// <summary>
+    /// Triggers an immediate flush of buffered data when using <see cref="FlushMode.Manual"/>.
+    /// </summary>
+    /// <exception cref="InvalidOperationException">Thrown if the multiplexer is not configured for Manual flush mode.</exception>
+    public void Flush()
+    {
+        if (_options.FlushMode != FlushMode.Manual)
+            throw new InvalidOperationException("Flush() can only be called when FlushMode is Manual.");
+
+        SignalFlush();
+    }
+
+    /// <summary>
     /// Reconnects the multiplexer with new streams after a disconnection.
     /// </summary>
     /// <param name="newReadStream">The new stream for reading data.</param>
@@ -1157,7 +1169,7 @@ public sealed class StreamMultiplexer : IStreamMultiplexer
     {
         if (!_indexSpaceDetermined)
             throw new InvalidOperationException("Cannot allocate channel index before handshake completes.");
-            
+
         // Increment by 2 to maintain odd/even separation
         var id = Interlocked.Add(ref _nextChannelIndex, 2) - 2;
         
@@ -1441,6 +1453,8 @@ public sealed class StreamMultiplexer : IStreamMultiplexer
         
         var header = new FrameHeader(channelIndex, FrameFlags.Init, (uint)payload.Length);
         SendFrameDirect(header, payload, ct);
+        // INIT frames start channel open — flush immediately so remote can ACK
+        SignalFlush();
     }
 
     internal void SendFin(uint channelIndex, CancellationToken ct)
@@ -1465,8 +1479,8 @@ public sealed class StreamMultiplexer : IStreamMultiplexer
             writer.Advance(frameLen);
             
             _pendingFlush = true;
-            if (_options.FlushMode == FlushMode.Immediate)
-                SignalFlush();
+            // ACK frames unblock waiting OpenChannelAsync callers — always flush immediately
+            SignalFlush();
         }
         Stats.AddBytesSent(frameLen);
     }

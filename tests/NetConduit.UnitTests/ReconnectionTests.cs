@@ -679,10 +679,117 @@ public class ReconnectionTests
         cts.Cancel();
         await Task.WhenAll(run1.ContinueWith(_ => { }), run2.ContinueWith(_ => { }));
     }
+
+    #region SyncState Ring Buffer Behavior
+
+    [Fact]
+    public void SyncState_BufferOverflow_DropsOldData()
+    {
+        var smallBuffer = new NetConduit.Internal.ChannelSyncState(1024);
+        smallBuffer.StartRecording();
+
+        var data1 = new byte[512];
+        data1.AsSpan().Fill(0xAA);
+        smallBuffer.RecordSend(data1);
+
+        var data2 = new byte[512];
+        data2.AsSpan().Fill(0xBB);
+        smallBuffer.RecordSend(data2);
+
+        var data3 = new byte[512];
+        data3.AsSpan().Fill(0xCC);
+        smallBuffer.RecordSend(data3);
+
+        Assert.Equal(1536, smallBuffer.BytesSent);
+    }
+
+    [Fact]
+    public void SyncState_ExactBufferFit_NoDataLoss()
+    {
+        var state = new NetConduit.Internal.ChannelSyncState(1024);
+        state.StartRecording();
+
+        var data = new byte[1024];
+        for (int i = 0; i < 1024; i++) data[i] = (byte)(i & 0xFF);
+        state.RecordSend(data);
+
+        Assert.Equal(1024, state.BytesSent);
+
+        var unacked = state.GetUnacknowledgedDataFrom(0);
+        Assert.Equal(1024, unacked.Length);
+    }
+
+    [Fact]
+    public void SyncState_JustOverBuffer_DropsOldest()
+    {
+        var state = new NetConduit.Internal.ChannelSyncState(1024);
+        state.StartRecording();
+
+        var data1 = new byte[512];
+        data1.AsSpan().Fill(0xAA);
+        state.RecordSend(data1);
+
+        var data2 = new byte[512];
+        data2.AsSpan().Fill(0xBB);
+        state.RecordSend(data2);
+
+        var data3 = new byte[1];
+        data3[0] = 0xCC;
+        state.RecordSend(data3);
+
+        Assert.Equal(1025, state.BytesSent);
+
+        var unacked = state.GetUnacknowledgedDataFrom(0);
+    }
+
+    [Fact]
+    public void SyncState_MultipleOverflows_OnlyTailKept()
+    {
+        var state = new NetConduit.Internal.ChannelSyncState(256);
+        state.StartRecording();
+
+        for (int i = 0; i < 4; i++)
+        {
+            var data = new byte[256];
+            data.AsSpan().Fill((byte)(i + 1));
+            state.RecordSend(data);
+        }
+
+        Assert.Equal(1024, state.BytesSent);
+
+        var unacked = state.GetUnacknowledgedDataFrom(768);
+        Assert.Equal(256, unacked.Length);
+        Assert.All(unacked, b => Assert.Equal(4, b));
+    }
+
+    [Fact]
+    public void SyncState_AcknowledgeThenRecord_FreesPreviousData()
+    {
+        var state = new NetConduit.Internal.ChannelSyncState(1024);
+        state.StartRecording();
+
+        var data = new byte[512];
+        state.RecordSend(data);
+        Assert.Equal(512, state.BytesSent);
+
+        state.Acknowledge(512);
+        Assert.Equal(512, state.BytesAcked);
+
+        var moreData = new byte[1024];
+        state.RecordSend(moreData);
+        Assert.Equal(1536, state.BytesSent);
+    }
+
+    [Fact]
+    public void SyncState_NotRecording_NoBuffer()
+    {
+        var state = new NetConduit.Internal.ChannelSyncState(1024);
+
+        var data = new byte[100];
+        state.RecordSend(data);
+        Assert.Equal(100, state.BytesSent);
+    }
+
+    #endregion
 }
-
-
-
-
-
 

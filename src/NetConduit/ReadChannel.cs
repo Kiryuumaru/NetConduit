@@ -237,7 +237,8 @@ public sealed class ReadChannel : Stream
             {
                 Stats.AddCreditsGranted(toGrant);
                 
-                if (_multiplexer.Options.FlushMode == FlushMode.Batched)
+                if (_multiplexer.Options.FlushMode == FlushMode.Batched ||
+                    _multiplexer.Options.FlushMode == FlushMode.Manual)
                 {
                     Interlocked.Add(ref _pendingGrantCredits, toGrant);
                     _multiplexer.EnqueuePendingCredit(this);
@@ -302,7 +303,8 @@ public sealed class ReadChannel : Stream
             if (profiling) HotPathProfiler.RecordCreditGrant(HotPathProfiler.Timestamp() - t0);
             Stats.AddCreditsGranted(toGrant);
             
-            if (_multiplexer.Options.FlushMode == FlushMode.Batched)
+            if (_multiplexer.Options.FlushMode == FlushMode.Batched ||
+                _multiplexer.Options.FlushMode == FlushMode.Manual)
             {
                 // Accumulate — FlushLoopAsync drains pending queue under one lock
                 Interlocked.Add(ref _pendingGrantCredits, toGrant);
@@ -408,14 +410,15 @@ public sealed class ReadChannel : Stream
 
     internal void SetClosed(ChannelCloseReason reason, Exception? exception)
     {
-        if (_state == ChannelState.Closed)
+        if (_state == ChannelState.Closed || _disposed)
             return;
             
         _closeReason = reason;
         _closeException = exception;
         _state = ChannelState.Closed;
-        _dataPipeWriter.Complete();
-        _closeCts.Cancel();
+        
+        try { _dataPipeWriter.Complete(); } catch (InvalidOperationException) { }
+        try { _closeCts.Cancel(); } catch (ObjectDisposedException) { }
         
         // Cancel any pending direct delivery
         lock (_disposeLock)
@@ -449,12 +452,14 @@ public sealed class ReadChannel : Stream
 
     internal void SetError(ErrorCode code, string message)
     {
+        if (_disposed) return;
+        
         var exception = new MultiplexerException(code, message);
         _closeReason = ChannelCloseReason.RemoteError;
         _closeException = exception;
         _state = ChannelState.Closed;
-        _dataPipeWriter.Complete(exception);
-        _closeCts.Cancel();
+        try { _dataPipeWriter.Complete(exception); } catch (InvalidOperationException) { }
+        try { _closeCts.Cancel(); } catch (ObjectDisposedException) { }
         
         // Cancel any pending direct delivery
         lock (_disposeLock)

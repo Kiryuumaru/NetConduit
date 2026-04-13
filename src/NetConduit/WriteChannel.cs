@@ -309,13 +309,13 @@ public sealed class WriteChannel : Stream
 
     internal void SetClosed(ChannelCloseReason reason, Exception? exception)
     {
-        if (_state == ChannelState.Closed)
+        if (_state == ChannelState.Closed || _disposed)
             return;
             
         _closeReason = reason;
         _closeException = exception;
         _state = ChannelState.Closed;
-        _closeCts.Cancel();
+        try { _closeCts.Cancel(); } catch (ObjectDisposedException) { }
         _openTcs.TrySetCanceled();
         
         try
@@ -338,11 +338,13 @@ public sealed class WriteChannel : Stream
 
     internal void SetError(ErrorCode code, string message)
     {
+        if (_disposed) return;
+        
         var exception = new MultiplexerException(code, message);
         _closeReason = ChannelCloseReason.RemoteError;
         _closeException = exception;
         _state = ChannelState.Closed;
-        _closeCts.Cancel();
+        try { _closeCts.Cancel(); } catch (ObjectDisposedException) { }
         _openTcs.TrySetException(exception);
         
         try

@@ -138,8 +138,14 @@ public sealed class DeltaTransit<T> : IAsyncDisposable
         {
             var ops = DeltaDiff.ComputeDelta(_lastSentState, currentState);
             if (ops.Count == 0)
-                return;
-            await SendDeltaAsync(ops, cancellationToken).ConfigureAwait(false);
+            {
+                // Identical state — resend as full so the receiver still gets it
+                await SendFullAsync(currentState, cancellationToken).ConfigureAwait(false);
+            }
+            else
+            {
+                await SendDeltaAsync(ops, cancellationToken).ConfigureAwait(false);
+            }
         }
 
         _lastSentState = currentState.DeepClone();
@@ -171,6 +177,17 @@ public sealed class DeltaTransit<T> : IAsyncDisposable
                     // Apply to tracking state and collect ops
                     DeltaApply.ApplyDelta(_lastSentState, ops);
                     combinedOps.AddRange(ops);
+                }
+                else
+                {
+                    // Identical state — send any accumulated ops first, then resend full
+                    if (combinedOps.Count > 0)
+                    {
+                        await SendDeltaAsync(combinedOps, cancellationToken).ConfigureAwait(false);
+                        combinedOps.Clear();
+                    }
+                    await SendFullAsync(currentState, cancellationToken).ConfigureAwait(false);
+                    _lastSentState = currentState.DeepClone();
                 }
             }
         }
@@ -415,13 +432,19 @@ public sealed class DeltaTransit<T> : IAsyncDisposable
     {
         var ops = new List<DeltaOperation>();
         var array = JsonNode.Parse(json);
-        if (array is not JsonArray opsArray) return ops;
+        if (array is not JsonArray opsArray)
+            throw new JsonException("Delta payload must be a JSON array.");
 
         foreach (var item in opsArray)
         {
-            if (item is not JsonArray opArray || opArray.Count < 2) continue;
+            if (item is not JsonArray opArray || opArray.Count < 2)
+                throw new JsonException("Each delta operation must be an array with at least 2 elements.");
 
-            var opCode = (DeltaOp)opArray[0]!.GetValue<int>();
+            var rawOpCode = opArray[0]!.GetValue<int>();
+            if (!Enum.IsDefined((DeltaOp)rawOpCode))
+                throw new JsonException($"Unknown delta operation code: {rawOpCode}");
+
+            var opCode = (DeltaOp)rawOpCode;
             var path = JsonArrayToPath(opArray[1]!.AsArray());
 
             JsonNode? value = null;
