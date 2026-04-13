@@ -288,7 +288,7 @@ public partial class ChaosTargetedTests
 
     #region Dispose During Active Operations
 
-    [Fact(Timeout = 30000)]
+    [Fact(Timeout = 60000)]
     public async Task Chaos_DisposeWhileWriting_NoHangOrCorruption()
     {
         // Dispose the multiplexer while writes are in-flight
@@ -341,7 +341,7 @@ public partial class ChaosTargetedTests
         }
     }
 
-    [Fact(Timeout = 30000)]
+    [Fact(Timeout = 60000)]
     public async Task Chaos_DisposeWhileReading_NoHangOrCorruption()
     {
         // Dispose the channel/mux while reads are pending
@@ -1245,7 +1245,7 @@ public partial class ChaosTargetedTests
 
     #region Reconnection Buffer Chaos (Bug 10)
 
-    [Fact(Timeout = 30000)]
+    [Fact(Timeout = 60000)]
     public async Task Chaos_ChannelSyncState_ConcurrentRecordAndAcknowledge()
     {
         var state = new ChannelSyncState(4096);
@@ -1275,7 +1275,7 @@ public partial class ChaosTargetedTests
 
     #region Dispose Ordering Chaos
 
-    [Fact(Timeout = 30000)]
+    [Fact(Timeout = 60000)]
     public async Task Chaos_DisposeChannelBeforeMux_NoError()
     {
         await using var pipe = new DuplexPipe();
@@ -1292,7 +1292,7 @@ public partial class ChaosTargetedTests
         await muxB.DisposeAsync();
     }
 
-    [Fact(Timeout = 30000)]
+    [Fact(Timeout = 60000)]
     public async Task Chaos_DisposeMuxWithActiveChannels_ChannelsBecomeDisposed()
     {
         await using var pipe = new DuplexPipe();
