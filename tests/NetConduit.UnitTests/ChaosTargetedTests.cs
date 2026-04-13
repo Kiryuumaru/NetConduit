@@ -14,6 +14,7 @@ namespace NetConduit.UnitTests;
 /// Deliberate chaos tests designed to surface concurrency bugs, race conditions,
 /// resource exhaustion, and edge cases that normal happy-path tests miss.
 /// </summary>
+[Collection("HighMemory")]
 public partial class ChaosTargetedTests
 {
     public record ChaosMessage(string Id, int Seq, byte[] Payload);

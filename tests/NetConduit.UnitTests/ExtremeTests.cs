@@ -9,7 +9,7 @@ namespace NetConduit.UnitTests;
 /// Extreme stress tests for the multiplexer.
 /// These tests are run in a separate collection to avoid resource contention.
 /// </summary>
-[Collection("ExtremeTests")]
+[Collection("HighMemory")]
 public class ExtremeTests
 {
     #region Nested Multiplexer Tests (Mux inside Mux)

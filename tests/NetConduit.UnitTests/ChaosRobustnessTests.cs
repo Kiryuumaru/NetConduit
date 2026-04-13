@@ -8,6 +8,7 @@ namespace NetConduit.UnitTests;
 /// These tests verify the multiplexer handles edge cases, race conditions,
 /// and unexpected usage patterns without corruption or deadlock.
 /// </summary>
+[Collection("HighMemory")]
 public class ChaosRobustnessTests
 {
     private static readonly TimeSpan TestTimeout = TimeSpan.FromMinutes(5);

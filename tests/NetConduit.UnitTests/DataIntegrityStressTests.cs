@@ -9,6 +9,7 @@ namespace NetConduit.UnitTests;
 /// Run with: dotnet test --filter "Category=Stress"
 /// </summary>
 [Trait("Category", "Stress")]
+[Collection("HighMemory")]
 public class DataIntegrityStressTests
 {
     #region Large Scale Stress Tests
