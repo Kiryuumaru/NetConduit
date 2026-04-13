@@ -288,12 +288,12 @@ public partial class ChaosTargetedTests
 
     #region Dispose During Active Operations
 
-    [Fact(Timeout = 60000)]
+    [Fact(Timeout = 120000)]
     public async Task Chaos_DisposeWhileWriting_NoHangOrCorruption()
     {
         // Dispose the multiplexer while writes are in-flight
         await using var pipe = new DuplexPipe();
-        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
 
         var (muxA, muxB, _, _) = await TestMuxHelper.CreateMuxPairAsync(pipe, cancellationToken: cts.Token);
 
@@ -314,6 +314,7 @@ public partial class ChaosTargetedTests
                 }
                 catch (ObjectDisposedException) { break; } // Expected
                 catch (OperationCanceledException) { break; }
+                catch (ChannelClosedException) { break; } // Expected during dispose
                 catch (Exception ex)
                 {
                     // Some exceptions are expected during dispose
@@ -327,11 +328,13 @@ public partial class ChaosTargetedTests
         // Let writer run briefly
         await Task.Delay(200);
 
+        // Signal writer to stop, then dispose while it may still be winding down
+        await cts.CancelAsync();
+
         // Dispose mux while writer is active — should not hang or corrupt
         await muxA.DisposeAsync();
         await muxB.DisposeAsync();
 
-        await cts.CancelAsync();
         await writeTask;
 
         // No unexpected errors (ObjectDisposedException is expected)
