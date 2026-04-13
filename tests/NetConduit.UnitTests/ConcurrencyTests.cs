@@ -3,6 +3,7 @@ using System.Diagnostics;
 
 namespace NetConduit.UnitTests;
 
+[Collection("HighMemory")]
 public class ConcurrencyTests
 {
     [Fact(Timeout = 300000)]

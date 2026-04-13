@@ -15,6 +15,7 @@ namespace NetConduit.UnitTests;
 /// Real-world use-case tests that simulate actual application patterns.
 /// These target the exact patterns where the reported bugs manifest.
 /// </summary>
+[Collection("HighMemory")]
 public partial class UseCaseTests
 {
     #region Shared Types

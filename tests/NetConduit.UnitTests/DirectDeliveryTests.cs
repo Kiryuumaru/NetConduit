@@ -5,6 +5,7 @@ namespace NetConduit.UnitTests;
 /// When ReadAsync is waiting and EnqueueData fires, data should be copied
 /// directly to the user buffer bypassing the per-channel Pipe.
 /// </summary>
+[Collection("HighMemory")]
 public class DirectDeliveryTests
 {
     [Fact(Timeout = 30000)]
