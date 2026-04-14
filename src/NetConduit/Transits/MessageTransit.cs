@@ -154,8 +154,7 @@ public sealed class MessageTransit<TSend, TReceive> : IMessageTransit<TSend, TRe
 
                 if (messageLength == 0)
                 {
-                    // Empty message - return default for reference types, or handle appropriately
-                    return default;
+                    throw new InvalidOperationException("Received a message with zero-length payload.");
                 }
 
                 // Read message payload

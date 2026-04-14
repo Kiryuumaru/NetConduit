@@ -80,10 +80,10 @@ class Build : BaseNukeBuildHelpers
                     .SetConfiguration("Release"));
                 DotNetTasks.DotNetTest(_ => _
                     .SetProcessAdditionalArguments(
+                        "--no-build " +
                         "--logger \"GitHubActions;summary.includePassedTests=true;summary.includeSkippedTests=true\" " +
                         "-- " +
-                        "RunConfiguration.CollectSourceInformation=true " +
-                        "DataCollectionRunSettings.DataCollectors.DataCollector.Configuration.Format=opencovere ")
+                        "RunConfiguration.CollectSourceInformation=true ")
                     .SetProjectFile(RootDirectory / "tests" / spec.ProjectTestName / $"{spec.ProjectTestName}.csproj")
                     .SetConfiguration("Release"));
             }));

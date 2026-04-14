@@ -3,6 +3,7 @@ namespace NetConduit.UnitTests;
 /// <summary>
 /// Tests for memory pressure scenarios and buffer limits.
 /// </summary>
+[Collection("HighMemory")]
 public class MemoryPressureTests
 {
     [Fact(Timeout = 120000)]

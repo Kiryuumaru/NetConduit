@@ -1080,8 +1080,104 @@ public class DisconnectionTests
     }
 
     #endregion
+
+    #region ReadChannel Dispose and Read Coordination
+
+    [Fact(Timeout = 30000)]
+    public async Task ReadChannel_DisposeDuringPendingRead_CompletesCleanly()
+    {
+        await using var pipe = new DuplexPipe();
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+        var (muxA, muxB, _, _) = await TestMuxHelper.CreateMuxPairAsync(pipe, cancellationToken: cts.Token);
+
+        var writeChannel = await muxA.OpenChannelAsync(new() { ChannelId = "read_dispose" }, cts.Token);
+        var readChannel = await muxB.AcceptChannelAsync("read_dispose", cts.Token);
+
+        var readTask = Task.Run(async () =>
+        {
+            var buf = new byte[1024];
+            try
+            {
+                return await readChannel.ReadAsync(buf, cts.Token);
+            }
+            catch (ObjectDisposedException) { return -1; }
+            catch (OperationCanceledException) { return -2; }
+        });
+
+        await Task.Delay(200);
+
+        await readChannel.DisposeAsync();
+
+        var result = await readTask;
+        Assert.True(result <= 0, "Should complete with 0 (EOF) or exception, not data");
+    }
+
+    [Fact(Timeout = 30000)]
+    public async Task ReadChannel_WriterCloseThenRead_ReturnsZero()
+    {
+        await using var pipe = new DuplexPipe();
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+        var (muxA, muxB, _, _) = await TestMuxHelper.CreateMuxPairAsync(pipe, cancellationToken: cts.Token);
+
+        var writeChannel = await muxA.OpenChannelAsync(new() { ChannelId = "read_close" }, cts.Token);
+        var readChannel = await muxB.AcceptChannelAsync("read_close", cts.Token);
+
+        await writeChannel.WriteAsync(new byte[] { 1, 2, 3 }, cts.Token);
+        await writeChannel.DisposeAsync();
+
+        var buf = new byte[10];
+        var n = await readChannel.ReadAsync(buf, cts.Token);
+        Assert.Equal(3, n);
+
+        n = await readChannel.ReadAsync(buf, cts.Token);
+        Assert.Equal(0, n);
+    }
+
+    [Fact(Timeout = 30000)]
+    public async Task ReadChannel_MultipleSequentialReads_BufferedDataCorrect()
+    {
+        await using var pipe = new DuplexPipe();
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+        var (muxA, muxB, _, _) = await TestMuxHelper.CreateMuxPairAsync(pipe, cancellationToken: cts.Token);
+
+        var writeChannel = await muxA.OpenChannelAsync(new() { ChannelId = "read_seq" }, cts.Token);
+        var readChannel = await muxB.AcceptChannelAsync("read_seq", cts.Token);
+
+        var data = new byte[8192];
+        for (int i = 0; i < data.Length; i++) data[i] = (byte)(i & 0xFF);
+        await writeChannel.WriteAsync(data, cts.Token);
+
+        var received = new byte[8192];
+        var totalRead = 0;
+        while (totalRead < 8192)
+        {
+            var n = await readChannel.ReadAsync(received.AsMemory(totalRead, Math.Min(256, 8192 - totalRead)), cts.Token);
+            Assert.True(n > 0);
+            totalRead += n;
+        }
+
+        for (int i = 0; i < 8192; i++)
+            Assert.Equal((byte)(i & 0xFF), received[i]);
+    }
+
+    [Fact(Timeout = 30000)]
+    public async Task WriteChannel_CloseReason_AvailableOnReadSide()
+    {
+        await using var pipe = new DuplexPipe();
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+        var (muxA, muxB, _, _) = await TestMuxHelper.CreateMuxPairAsync(pipe, cancellationToken: cts.Token);
+
+        var writeChannel = await muxA.OpenChannelAsync(new() { ChannelId = "close_reason" }, cts.Token);
+        var readChannel = await muxB.AcceptChannelAsync("close_reason", cts.Token);
+
+        await writeChannel.CloseAsync(cts.Token);
+
+        var buf = new byte[1];
+        var n = await readChannel.ReadAsync(buf, cts.Token);
+        Assert.Equal(0, n);
+
+        Assert.NotNull(readChannel.CloseReason);
+    }
+
+    #endregion
 }
-
-
-
-

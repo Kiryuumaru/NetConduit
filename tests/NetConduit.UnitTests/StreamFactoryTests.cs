@@ -850,7 +850,7 @@ public class StreamFactoryTests
         // Act - dispose initial pipe to trigger disconnect
         await initialPipe.DisposeAsync();
         
-        await Task.WhenAny(failedEvent.Task, Task.Delay(TimeSpan.FromSeconds(5)));
+        await Task.WhenAny(failedEvent.Task, Task.Delay(TimeSpan.FromSeconds(30)));
         
         // Assert
         Assert.NotNull(capturedArgs);

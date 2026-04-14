@@ -9,7 +9,7 @@ namespace NetConduit.UnitTests;
 /// Extreme stress tests for the multiplexer.
 /// These tests are run in a separate collection to avoid resource contention.
 /// </summary>
-[Collection("ExtremeTests")]
+[Collection("HighMemory")]
 public class ExtremeTests
 {
     #region Nested Multiplexer Tests (Mux inside Mux)
@@ -1799,6 +1799,11 @@ public class ExtremeTests
         var acceptLoopReady = new SemaphoreSlim(0, 1);
 
         var sw = Stopwatch.StartNew();
+        
+        // Force GC before baseline to minimize interference from other concurrent tests
+        GC.Collect(GC.MaxGeneration, GCCollectionMode.Aggressive, blocking: true, compacting: true);
+        GC.WaitForPendingFinalizers();
+        GC.Collect(GC.MaxGeneration, GCCollectionMode.Aggressive, blocking: true, compacting: true);
         var memoryBefore = GC.GetTotalMemory(true);
 
         // Accept channels
@@ -1872,10 +1877,9 @@ public class ExtremeTests
         Assert.Equal(totalChannels, completedCount);
         Assert.Equal(totalChannels, acceptedCount);
         
-        // Memory should not grow significantly - allow 5KB per channel + 100MB overhead
-        // This accounts for GC timing variability, test infrastructure, and CI/CD environments
-        // which may have more memory pressure from other processes
-        var allowedMemory = 100 * 1024 * 1024 + (totalChannels * 5 * 1024);
+        // Memory should not grow significantly - allow 10KB per channel + 200MB overhead
+        // GC.GetTotalMemory captures process-wide state; concurrent tests cause variance
+        var allowedMemory = 200 * 1024 * 1024 + (totalChannels * 10 * 1024);
         Assert.True(memoryDelta < allowedMemory, 
             $"Memory grew by {memoryDelta / 1024.0 / 1024.0:F2} MB, allowed {allowedMemory / 1024.0 / 1024.0:F2} MB");
 

@@ -7,6 +7,7 @@ namespace NetConduit.UnitTests;
 /// Tests for data integrity verification under heavy load.
 /// Verifies that data is transmitted correctly regardless of load.
 /// </summary>
+[Collection("HighMemory")]
 public class DataIntegrityTests
 {
     #region Checksum Verification Tests
