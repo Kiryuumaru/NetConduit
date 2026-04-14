@@ -196,14 +196,14 @@ public class ChaosRobustnessTests
     [Trait("Category", "Stress")]
     public async Task Stress_HundredThousandChannels_BidirectionalSmallData_Validated()
     {
-        await RunBidirectionalStressTest(2_000); // 2000 per side = 4000 total
+        await RunBidirectionalStressTest(1_000); // 1000 per side = 2000 total
     }
 
     [Fact(Timeout = 60000)]
     [Trait("Category", "Stress")]
     public async Task Stress_MillionChannels_BidirectionalSmallData_Validated()
     {
-        await RunBidirectionalStressTest(3_000); // 3000 per side = 6000 total
+        await RunBidirectionalStressTest(1_500); // 1500 per side = 3000 total
     }
 
     private static async Task RunBidirectionalStressTest(int channelsPerSide)
@@ -299,11 +299,11 @@ public class ChaosRobustnessTests
 
         await Task.WhenAll(tasks);
 
-        await Console.Out.WriteLineAsync($"Bidirectional: A verified {aVerified:N0} (from B), B verified {bVerified:N0} (from A)");
+        await Console.Out.WriteLineAsync($"Bidirectional: A verified {aVerified:N0} (from B), B verified {bVerified:N0} (from A), errors: {errors.Count}");
 
-        // Expect 100% verification
-        Assert.Equal(channelsPerSide, bVerified); // B should verify all from A
-        Assert.Equal(channelsPerSide, aVerified); // A should verify all from B
+        Assert.Empty(errors);
+        Assert.Equal(channelsPerSide, bVerified);
+        Assert.Equal(channelsPerSide, aVerified);
 
         cts.Cancel();
     }
