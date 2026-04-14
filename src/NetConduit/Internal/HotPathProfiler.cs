@@ -4,12 +4,7 @@ using System.Threading;
 
 namespace NetConduit.Internal;
 
-/// <summary>
-/// Lightweight hot-path profiler. Disabled by default (zero overhead).
-/// Enable with HotPathProfiler.Enable() before starting multiplexer.
-/// All counters are lock-free using Interlocked operations.
-/// </summary>
-public static class HotPathProfiler
+internal static class HotPathProfiler
 {
     private static volatile bool _enabled;
 
