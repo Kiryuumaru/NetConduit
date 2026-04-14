@@ -84,8 +84,6 @@ class Build : BaseNukeBuildHelpers
                         "--logger \"GitHubActions;summary.includePassedTests=true;summary.includeSkippedTests=true\" " +
                         "-- " +
                         "RunConfiguration.CollectSourceInformation=true ")
-                    .SetProcessEnvironmentVariable("DOTNET_GCConserveMemory", "9")
-                    .SetProcessEnvironmentVariable("DOTNET_GCHeapHardLimit", "0xC0000000")
                     .SetProjectFile(RootDirectory / "tests" / spec.ProjectTestName / $"{spec.ProjectTestName}.csproj")
                     .SetConfiguration("Release"));
             }));
