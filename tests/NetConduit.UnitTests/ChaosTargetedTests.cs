@@ -15,6 +15,7 @@ namespace NetConduit.UnitTests;
 /// resource exhaustion, and edge cases that normal happy-path tests miss.
 /// </summary>
 [Collection("HighMemory")]
+[Trait("Category", "HighMemory")]
 public partial class ChaosTargetedTests
 {
     public record ChaosMessage(string Id, int Seq, byte[] Payload);

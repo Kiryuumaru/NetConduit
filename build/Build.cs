@@ -75,20 +75,40 @@ class Build : BaseNukeBuildHelpers
             .ExecuteBeforeBuild(true)
             .Execute(() =>
             {
+                var projectFile = RootDirectory / "tests" / spec.ProjectTestName / $"{spec.ProjectTestName}.csproj";
                 DotNetTasks.DotNetBuild(_ => _
-                    .SetProjectFile(RootDirectory / "tests" / spec.ProjectTestName / $"{spec.ProjectTestName}.csproj")
+                    .SetProjectFile(projectFile)
                     .SetConfiguration("Release"));
                 var runsettingsPath = RootDirectory / "tests" / spec.ProjectTestName / "ci.runsettings";
                 var settingsArg = runsettingsPath.FileExists() ? $"--settings {runsettingsPath} " : "";
-                DotNetTasks.DotNetTest(_ => _
-                    .SetProcessAdditionalArguments(
-                        "--no-build " +
-                        "--logger \"GitHubActions;summary.includePassedTests=true;summary.includeSkippedTests=true\" " +
-                        settingsArg +
-                        "-- " +
-                        "RunConfiguration.CollectSourceInformation=true ")
-                    .SetProjectFile(RootDirectory / "tests" / spec.ProjectTestName / $"{spec.ProjectTestName}.csproj")
-                    .SetConfiguration("Release"));
+                var baseArgs =
+                    "--no-build " +
+                    "--logger \"GitHubActions;summary.includePassedTests=true;summary.includeSkippedTests=true\" " +
+                    settingsArg +
+                    "-- " +
+                    "RunConfiguration.CollectSourceInformation=true ";
+                if (spec.ProjectTestName == "NetConduit.UnitTests")
+                {
+                    // Split into two batches to prevent OOM on CI runners (~7GB RAM).
+                    // Each batch runs in a fresh testhost process with clean memory.
+                    DotNetTasks.DotNetTest(_ => _
+                        .SetProcessAdditionalArguments(
+                            "--filter \"Category!=HighMemory\" " + baseArgs)
+                        .SetProjectFile(projectFile)
+                        .SetConfiguration("Release"));
+                    DotNetTasks.DotNetTest(_ => _
+                        .SetProcessAdditionalArguments(
+                            "--filter \"Category=HighMemory\" " + baseArgs)
+                        .SetProjectFile(projectFile)
+                        .SetConfiguration("Release"));
+                }
+                else
+                {
+                    DotNetTasks.DotNetTest(_ => _
+                        .SetProcessAdditionalArguments(baseArgs)
+                        .SetProjectFile(projectFile)
+                        .SetConfiguration("Release"));
+                }
             }));
 
     BuildEntry BuildEntry => _ => _

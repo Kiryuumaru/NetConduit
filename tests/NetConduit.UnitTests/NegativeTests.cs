@@ -7,6 +7,7 @@ namespace NetConduit.UnitTests;
 /// Negative tests for error handling, disconnections, and edge cases.
 /// </summary>
 [Collection("HighMemory")]
+[Trait("Category", "HighMemory")]
 public class NegativeTests
 {
     #region Connection/Disconnection Tests

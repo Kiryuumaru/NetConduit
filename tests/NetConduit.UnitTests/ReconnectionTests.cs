@@ -6,6 +6,7 @@ namespace NetConduit.UnitTests;
 /// Tests for auto-reconnection functionality.
 /// </summary>
 [Collection("HighMemory")]
+[Trait("Category", "HighMemory")]
 public class ReconnectionTests
 {
     [Fact(Timeout = 120000)]

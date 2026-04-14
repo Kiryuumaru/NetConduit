@@ -6,6 +6,7 @@ namespace NetConduit.UnitTests;
 /// directly to the user buffer bypassing the per-channel Pipe.
 /// </summary>
 [Collection("HighMemory")]
+[Trait("Category", "HighMemory")]
 public class DirectDeliveryTests
 {
     [Fact(Timeout = 30000)]

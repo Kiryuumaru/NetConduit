@@ -10,6 +10,7 @@ namespace NetConduit.UnitTests;
 /// These tests are run in a separate collection to avoid resource contention.
 /// </summary>
 [Collection("HighMemory")]
+[Trait("Category", "HighMemory")]
 public class ExtremeTests
 {
     #region Nested Multiplexer Tests (Mux inside Mux)

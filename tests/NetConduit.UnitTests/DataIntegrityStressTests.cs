@@ -10,6 +10,7 @@ namespace NetConduit.UnitTests;
 /// </summary>
 [Trait("Category", "Stress")]
 [Collection("HighMemory")]
+[Trait("Category", "HighMemory")]
 public class DataIntegrityStressTests
 {
     #region Large Scale Stress Tests

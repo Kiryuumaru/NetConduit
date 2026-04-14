@@ -16,6 +16,7 @@ namespace NetConduit.UnitTests;
 /// These target the exact patterns where the reported bugs manifest.
 /// </summary>
 [Collection("HighMemory")]
+[Trait("Category", "HighMemory")]
 public partial class UseCaseTests
 {
     #region Shared Types

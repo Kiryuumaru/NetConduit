@@ -8,6 +8,7 @@ namespace NetConduit.UnitTests;
 /// Benchmarks for measuring latency and throughput.
 /// </summary>
 [Collection("HighMemory")]
+[Trait("Category", "HighMemory")]
 public class BenchmarkTests
 {
     private readonly ITestOutputHelper _output;

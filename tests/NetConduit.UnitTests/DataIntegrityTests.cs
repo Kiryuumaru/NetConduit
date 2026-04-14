@@ -8,6 +8,7 @@ namespace NetConduit.UnitTests;
 /// Verifies that data is transmitted correctly regardless of load.
 /// </summary>
 [Collection("HighMemory")]
+[Trait("Category", "HighMemory")]
 public class DataIntegrityTests
 {
     #region Checksum Verification Tests

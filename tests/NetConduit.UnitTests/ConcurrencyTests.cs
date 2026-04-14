@@ -4,6 +4,7 @@ using System.Diagnostics;
 namespace NetConduit.UnitTests;
 
 [Collection("HighMemory")]
+[Trait("Category", "HighMemory")]
 public class ConcurrencyTests
 {
     [Fact(Timeout = 300000)]

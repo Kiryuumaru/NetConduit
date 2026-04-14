@@ -3,7 +3,7 @@
   <RunConfiguration>
     <EnvironmentVariables>
       <DOTNET_GCConserveMemory>9</DOTNET_GCConserveMemory>
-      <DOTNET_GCHighMemPercent>50</DOTNET_GCHighMemPercent>
+      <DOTNET_GCHighMemPercent>32</DOTNET_GCHighMemPercent>
     </EnvironmentVariables>
   </RunConfiguration>
 </RunSettings>

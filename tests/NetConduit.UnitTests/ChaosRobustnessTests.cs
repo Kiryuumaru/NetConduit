@@ -9,6 +9,7 @@ namespace NetConduit.UnitTests;
 /// and unexpected usage patterns without corruption or deadlock.
 /// </summary>
 [Collection("HighMemory")]
+[Trait("Category", "HighMemory")]
 public class ChaosRobustnessTests
 {
     private static readonly TimeSpan TestTimeout = TimeSpan.FromMinutes(5);

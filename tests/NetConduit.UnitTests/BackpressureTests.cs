@@ -4,6 +4,7 @@ using NetConduit.Internal;
 namespace NetConduit.UnitTests;
 
 [Collection("HighMemory")]
+[Trait("Category", "HighMemory")]
 public class BackpressureTests
 {
     [Fact(Timeout = 120000)]
