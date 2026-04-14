@@ -83,7 +83,8 @@ class Build : BaseNukeBuildHelpers
                         "--no-build " +
                         "--logger \"GitHubActions;summary.includePassedTests=true;summary.includeSkippedTests=true\" " +
                         "-- " +
-                        "RunConfiguration.CollectSourceInformation=true ")
+                        "RunConfiguration.CollectSourceInformation=true " +
+                        "xUnit.MaxParallelThreads=1 ")
                     .SetProjectFile(RootDirectory / "tests" / spec.ProjectTestName / $"{spec.ProjectTestName}.csproj")
                     .SetConfiguration("Release"));
             }));
