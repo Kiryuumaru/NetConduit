@@ -78,10 +78,13 @@ class Build : BaseNukeBuildHelpers
                 DotNetTasks.DotNetBuild(_ => _
                     .SetProjectFile(RootDirectory / "tests" / spec.ProjectTestName / $"{spec.ProjectTestName}.csproj")
                     .SetConfiguration("Release"));
+                var runsettingsPath = RootDirectory / "tests" / spec.ProjectTestName / "ci.runsettings";
+                var settingsArg = runsettingsPath.FileExists() ? $"--settings {runsettingsPath} " : "";
                 DotNetTasks.DotNetTest(_ => _
                     .SetProcessAdditionalArguments(
                         "--no-build " +
                         "--logger \"GitHubActions;summary.includePassedTests=true;summary.includeSkippedTests=true\" " +
+                        settingsArg +
                         "-- " +
                         "RunConfiguration.CollectSourceInformation=true ")
                     .SetProjectFile(RootDirectory / "tests" / spec.ProjectTestName / $"{spec.ProjectTestName}.csproj")

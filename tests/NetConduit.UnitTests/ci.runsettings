@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<RunSettings>
+  <RunConfiguration>
+    <EnvironmentVariables>
+      <DOTNET_GCConserveMemory>9</DOTNET_GCConserveMemory>
+      <DOTNET_GCHighMemPercent>50</DOTNET_GCHighMemPercent>
+    </EnvironmentVariables>
+  </RunConfiguration>
+</RunSettings>

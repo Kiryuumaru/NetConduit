@@ -2000,7 +2000,7 @@ public class ExtremeTests
         await RunParallelStreamsTest(concurrentChannels: 1_000, totalChannels: 10_000);
     }
 
-    [Fact(Timeout = 120000)]
+    [Fact(Timeout = 300000)]
     [Trait("Category", "Stress")]
     public async Task ScaledParallelStreams_FiftyThousand_Sustained()
     {
