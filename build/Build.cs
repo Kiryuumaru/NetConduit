@@ -89,7 +89,7 @@ class Build : BaseNukeBuildHelpers
                     "RunConfiguration.CollectSourceInformation=true ";
                 if (spec.ProjectTestName == "NetConduit.UnitTests")
                 {
-                    // Split into three batches to prevent OOM on CI runners (~7GB RAM).
+                    // Split into four batches to prevent OOM on CI runners (~7GB RAM).
                     // Each batch runs in a fresh testhost process with clean memory.
                     // Batch 1: Non-HighMemory tests (~291)
                     DotNetTasks.DotNetTest(_ => _
@@ -97,16 +97,22 @@ class Build : BaseNukeBuildHelpers
                             "--filter \"Category!=HighMemory\" " + baseArgs)
                         .SetProjectFile(projectFile)
                         .SetConfiguration("Release"));
-                    // Batch 2: HighMemory tests except Batch 2 (~93)
+                    // Batch 2: Light HighMemory tests (~93)
                     DotNetTasks.DotNetTest(_ => _
                         .SetProcessAdditionalArguments(
-                            "--filter \"Category=HighMemory&Batch!=2\" " + baseArgs)
+                            "--filter \"Category=HighMemory&Batch!=2&Batch!=3\" " + baseArgs)
                         .SetProjectFile(projectFile)
                         .SetConfiguration("Release"));
-                    // Batch 3: Heavy HighMemory tests (Batch 2) (~119)
+                    // Batch 3: Medium HighMemory tests (~56)
                     DotNetTasks.DotNetTest(_ => _
                         .SetProcessAdditionalArguments(
                             "--filter \"Batch=2\" " + baseArgs)
+                        .SetProjectFile(projectFile)
+                        .SetConfiguration("Release"));
+                    // Batch 4: Heavy HighMemory tests (~63)
+                    DotNetTasks.DotNetTest(_ => _
+                        .SetProcessAdditionalArguments(
+                            "--filter \"Batch=3\" " + baseArgs)
                         .SetProjectFile(projectFile)
                         .SetConfiguration("Release"));
                 }

@@ -11,7 +11,7 @@ namespace NetConduit.UnitTests;
 /// </summary>
 [Collection("HighMemory")]
 [Trait("Category", "HighMemory")]
-[Trait("Batch", "2")]
+[Trait("Batch", "3")]
 public class ExtremeTests
 {
     #region Nested Multiplexer Tests (Mux inside Mux)
