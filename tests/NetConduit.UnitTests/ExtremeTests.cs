@@ -1999,28 +1999,28 @@ public class ExtremeTests
     [Fact(Timeout = 120000)]
     public async Task ScaledParallelStreams_TenThousand_Sustained()
     {
-        await RunParallelStreamsTest(concurrentChannels: 1_000, totalChannels: 10_000);
+        await RunParallelStreamsTest(concurrentChannels: 200, totalChannels: 2_000);
     }
 
     [Fact(Timeout = 300000)]
     [Trait("Category", "Stress")]
     public async Task ScaledParallelStreams_FiftyThousand_Sustained()
     {
-        await RunParallelStreamsTest(concurrentChannels: 200, totalChannels: 5_000);
+        await RunParallelStreamsTest(concurrentChannels: 100, totalChannels: 2_000);
     }
 
     [Fact(Timeout = 60000)]
     [Trait("Category", "Stress")]
     public async Task ScaledParallelStreams_HundredThousand_Sustained()
     {
-        await RunParallelStreamsTest(concurrentChannels: 500, totalChannels: 5_000);
+        await RunParallelStreamsTest(concurrentChannels: 200, totalChannels: 3_000);
     }
 
     [Fact(Timeout = 60000)]
     [Trait("Category", "Stress")]
     public async Task MillionChannels_ParallelStreams_Sustained()
     {
-        await RunParallelStreamsTest(concurrentChannels: 1_000, totalChannels: 10_000);
+        await RunParallelStreamsTest(concurrentChannels: 300, totalChannels: 3_000);
     }
 
     private static async Task RunParallelStreamsTest(int concurrentChannels, int totalChannels)

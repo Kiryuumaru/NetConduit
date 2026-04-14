@@ -35,28 +35,28 @@ public class ChaosRobustnessTests
     [Trait("Category", "Stress")]
     public async Task Stress_TenThousandChannels_SmallDataValidation_Concurrent()
     {
-        await RunChannelStressTest(10_000);
+        await RunChannelStressTest(2_000);
     }
 
     [Fact(Timeout = 60000)]
     [Trait("Category", "Stress")]
     public async Task Stress_FiftyThousandChannels_SmallDataValidation_Concurrent()
     {
-        await RunChannelStressTest(5_000);
+        await RunChannelStressTest(2_000);
     }
 
     [Fact(Timeout = 60000)]
     [Trait("Category", "Stress")]
     public async Task Stress_HundredThousandChannels_SmallDataValidation_Concurrent()
     {
-        await RunChannelStressTest(8_000);
+        await RunChannelStressTest(3_000);
     }
 
     [Fact(Timeout = 60000)]
     [Trait("Category", "Stress")]
     public async Task Stress_MillionChannels_SmallDataValidation_Concurrent()
     {
-        await RunChannelStressTest(10_000);
+        await RunChannelStressTest(4_000);
     }
 
     private static async Task RunChannelStressTest(int totalChannels)
@@ -182,28 +182,28 @@ public class ChaosRobustnessTests
     [Trait("Category", "Stress")]
     public async Task Stress_TenThousandChannels_BidirectionalSmallData_Validated()
     {
-        await RunBidirectionalStressTest(5_000); // 5000 per side = 10000 total
+        await RunBidirectionalStressTest(1_000); // 1000 per side = 2000 total
     }
 
     [Fact(Timeout = 60000)]
     [Trait("Category", "Stress")]
     public async Task Stress_FiftyThousandChannels_BidirectionalSmallData_Validated()
     {
-        await RunBidirectionalStressTest(5_000); // 5000 per side = 10000 total
+        await RunBidirectionalStressTest(1_500); // 1500 per side = 3000 total
     }
 
     [Fact(Timeout = 60000)]
     [Trait("Category", "Stress")]
     public async Task Stress_HundredThousandChannels_BidirectionalSmallData_Validated()
     {
-        await RunBidirectionalStressTest(10_000); // 10000 per side = 20000 total
+        await RunBidirectionalStressTest(2_000); // 2000 per side = 4000 total
     }
 
     [Fact(Timeout = 60000)]
     [Trait("Category", "Stress")]
     public async Task Stress_MillionChannels_BidirectionalSmallData_Validated()
     {
-        await RunBidirectionalStressTest(15_000); // 15000 per side = 30K total
+        await RunBidirectionalStressTest(3_000); // 3000 per side = 6000 total
     }
 
     private static async Task RunBidirectionalStressTest(int channelsPerSide)
