@@ -4,6 +4,7 @@
     <EnvironmentVariables>
       <DOTNET_GCConserveMemory>9</DOTNET_GCConserveMemory>
       <DOTNET_GCHighMemPercent>32</DOTNET_GCHighMemPercent>
+      <DOTNET_GCHeapHardLimitPercent>3C</DOTNET_GCHeapHardLimitPercent>
     </EnvironmentVariables>
   </RunConfiguration>
 </RunSettings>
