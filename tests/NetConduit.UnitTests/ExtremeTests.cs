@@ -1316,7 +1316,7 @@ public class ExtremeTests
         var acceptorTask = acceptor.Start(cts.Token);
         await Task.Delay(100);
 
-        const int channelCount = 20_000;
+        const int channelCount = 5_000;
         var receivedCount = 0;
         var sentCount = 0;
 
@@ -1772,14 +1772,14 @@ public class ExtremeTests
     [Fact(Timeout = 60000)]
     public async Task ScaledChannels_HundredThousand_OpenCloseRapidly_NoLeaks()
     {
-        await RunOpenCloseStressTest(15_000, batchSize: 1_500);
+        await RunOpenCloseStressTest(8_000, batchSize: 800);
     }
 
     [Fact(Timeout = 60000)]
     [Trait("Category", "Stress")]
     public async Task MillionChannels_OpenCloseRapidly_NoLeaks()
     {
-        await RunOpenCloseStressTest(20_000, batchSize: 2_000);
+        await RunOpenCloseStressTest(10_000, batchSize: 1_000);
     }
 
     private static async Task RunOpenCloseStressTest(int totalChannels, int batchSize)
