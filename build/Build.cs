@@ -89,32 +89,29 @@ class Build : BaseNukeBuildHelpers
                     "RunConfiguration.CollectSourceInformation=true ";
                 if (spec.ProjectTestName == "NetConduit.UnitTests")
                 {
-                    // Split into four batches to prevent OOM on CI runners (~7GB RAM).
-                    // Each batch runs in a fresh testhost process with clean memory.
-                    // Batch 1: Non-HighMemory tests (~291)
+                    // Run non-HighMemory tests in one batch
                     DotNetTasks.DotNetTest(_ => _
                         .SetProcessAdditionalArguments(
                             "--filter \"Category!=HighMemory\" " + baseArgs)
                         .SetProjectFile(projectFile)
                         .SetConfiguration("Release"));
-                    // Batch 2: Light HighMemory tests (~93)
-                    DotNetTasks.DotNetTest(_ => _
-                        .SetProcessAdditionalArguments(
-                            "--filter \"Category=HighMemory&Batch!=2&Batch!=3\" " + baseArgs)
-                        .SetProjectFile(projectFile)
-                        .SetConfiguration("Release"));
-                    // Batch 3: Medium HighMemory tests (~56)
-                    DotNetTasks.DotNetTest(_ => _
-                        .SetProcessAdditionalArguments(
-                            "--filter \"Batch=2\" " + baseArgs)
-                        .SetProjectFile(projectFile)
-                        .SetConfiguration("Release"));
-                    // Batch 4: Heavy HighMemory tests (~63)
-                    DotNetTasks.DotNetTest(_ => _
-                        .SetProcessAdditionalArguments(
-                            "--filter \"Batch=3\" " + baseArgs)
-                        .SetProjectFile(projectFile)
-                        .SetConfiguration("Release"));
+                    // Run each HighMemory class in its own process to prevent OOM on CI (~7GB RAM).
+                    // Each invocation creates a fresh testhost with clean memory.
+                    string[] highMemoryClasses = [
+                        "BackpressureTests", "BenchmarkTests", "ChaosRobustnessTests",
+                        "ChaosTargetedTests", "ConcurrencyTests", "DataIntegrityStressTests",
+                        "DataIntegrityTests", "DirectDeliveryTests", "ExtremeTests",
+                        "MemoryPressureTests", "NegativeTests", "PerformanceTests",
+                        "ReconnectionTests", "UseCaseTests"
+                    ];
+                    foreach (var className in highMemoryClasses)
+                    {
+                        DotNetTasks.DotNetTest(_ => _
+                            .SetProcessAdditionalArguments(
+                                $"--filter \"FullyQualifiedName~{className}\" " + baseArgs)
+                            .SetProjectFile(projectFile)
+                            .SetConfiguration("Release"));
+                    }
                 }
                 else
                 {
