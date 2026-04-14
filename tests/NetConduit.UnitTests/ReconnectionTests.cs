@@ -7,6 +7,7 @@ namespace NetConduit.UnitTests;
 /// </summary>
 [Collection("HighMemory")]
 [Trait("Category", "HighMemory")]
+[Trait("Batch", "2")]
 public class ReconnectionTests
 {
     [Fact(Timeout = 120000)]

@@ -5,6 +5,7 @@ namespace NetConduit.UnitTests;
 /// </summary>
 [Collection("HighMemory")]
 [Trait("Category", "HighMemory")]
+[Trait("Batch", "2")]
 public class MemoryPressureTests
 {
     [Fact(Timeout = 120000)]

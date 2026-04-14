@@ -16,6 +16,7 @@ namespace NetConduit.UnitTests;
 /// </summary>
 [Collection("HighMemory")]
 [Trait("Category", "HighMemory")]
+[Trait("Batch", "2")]
 public partial class ChaosTargetedTests
 {
     public record ChaosMessage(string Id, int Seq, byte[] Payload);

@@ -89,16 +89,24 @@ class Build : BaseNukeBuildHelpers
                     "RunConfiguration.CollectSourceInformation=true ";
                 if (spec.ProjectTestName == "NetConduit.UnitTests")
                 {
-                    // Split into two batches to prevent OOM on CI runners (~7GB RAM).
+                    // Split into three batches to prevent OOM on CI runners (~7GB RAM).
                     // Each batch runs in a fresh testhost process with clean memory.
+                    // Batch 1: Non-HighMemory tests (~291)
                     DotNetTasks.DotNetTest(_ => _
                         .SetProcessAdditionalArguments(
                             "--filter \"Category!=HighMemory\" " + baseArgs)
                         .SetProjectFile(projectFile)
                         .SetConfiguration("Release"));
+                    // Batch 2: HighMemory tests except Batch 2 (~93)
                     DotNetTasks.DotNetTest(_ => _
                         .SetProcessAdditionalArguments(
-                            "--filter \"Category=HighMemory\" " + baseArgs)
+                            "--filter \"Category=HighMemory&Batch!=2\" " + baseArgs)
+                        .SetProjectFile(projectFile)
+                        .SetConfiguration("Release"));
+                    // Batch 3: Heavy HighMemory tests (Batch 2) (~119)
+                    DotNetTasks.DotNetTest(_ => _
+                        .SetProcessAdditionalArguments(
+                            "--filter \"Batch=2\" " + baseArgs)
                         .SetProjectFile(projectFile)
                         .SetConfiguration("Release"));
                 }

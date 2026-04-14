@@ -10,6 +10,7 @@ namespace NetConduit.UnitTests;
 /// </summary>
 [Collection("HighMemory")]
 [Trait("Category", "HighMemory")]
+[Trait("Batch", "2")]
 public class ChaosRobustnessTests
 {
     private static readonly TimeSpan TestTimeout = TimeSpan.FromMinutes(5);
