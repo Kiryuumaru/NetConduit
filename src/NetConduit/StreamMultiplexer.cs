@@ -1328,6 +1328,42 @@ public sealed class StreamMultiplexer : IStreamMultiplexer
         }
     }
     
+    internal async ValueTask TryCommitAndDrainAsync(CancellationToken ct)
+    {
+        if (!Monitor.TryEnter(_writeLock))
+            return;
+        try
+        {
+            var writer = _pipe?.Writer;
+            if (writer == null) return;
+            CommitPipeWriter(writer);
+        }
+        finally
+        {
+            Monitor.Exit(_writeLock);
+        }
+
+        if (!_streamLock.Wait(0))
+            return;
+        try
+        {
+            var pipeReader = _pipe?.Reader;
+            if (pipeReader != null && pipeReader.TryRead(out var readResult))
+            {
+                if (readResult.Buffer.Length > 0)
+                {
+                    var writeStream = _writeStream!;
+                    await WriteBufferToStreamAsync(readResult.Buffer, writeStream, ct).ConfigureAwait(false);
+                }
+                pipeReader.AdvanceTo(readResult.Buffer.End);
+            }
+        }
+        finally
+        {
+            _streamLock.Release();
+        }
+    }
+
     /// <summary>
     /// Commits buffered Pipe.Writer data and drains it to the underlying stream in one shot.
     /// Used by FIN/GoAway to guarantee delivery before dispose,
