@@ -439,7 +439,7 @@ public sealed class StreamMultiplexer : IStreamMultiplexer
                     _streamPair = streamPair;
                     _readStream = streamPair.ReadStream;
                     _writeStream = streamPair.WriteStream;
-                    _pipe = new Pipe(new PipeOptions(pauseWriterThreshold: 0, resumeWriterThreshold: 0));
+                    _pipe = new Pipe(new PipeOptions(pauseWriterThreshold: 0, resumeWriterThreshold: 0, minimumSegmentSize: 65536));
                     _readPipeReader = PipeReader.Create(_readStream, new StreamPipeReaderOptions(bufferSize: 1048576));
                     _writeError = null;
                     

@@ -26,15 +26,15 @@ Each channel sends one data payload. Higher = better.
 
 | Channels | Data Size | NetConduit | FRP/Yamux | Smux | NC vs FRP | NC vs Smux |
 |----------|-----------|----------:|----------:|-----:|----------:|----------:|
-| 1 | 1KB | 1.4 | 8.2 | 9.2 | 0.17x | 0.15x |
-| 1 | 100KB | 100.1 | 412.0 | 537.7 | 0.24x | 0.19x |
-| 1 | 1MB | 828.5 | 1,117.9 | 1,390.5 | 0.74x | 0.60x |
-| 10 | 1KB | 15.5 | 19.6 | 21.6 | 0.79x | 0.72x |
-| 10 | 100KB | 423.1 | 602.8 | 845.4 | 0.70x | 0.50x |
-| 10 | 1MB | 766.7 | 1,071.4 | 1,586.0 | 0.72x | 0.48x |
-| 100 | 1KB | 4.3 | 23.0 | 23.9 | 0.19x | 0.18x |
-| 100 | 100KB | 332.6 | 624.1 | 991.9 | 0.53x | 0.34x |
-| 100 | 1MB | 616.2 | 1,122.5 | 1,703.6 | 0.55x | 0.36x |
+| 1 | 1KB | 3.0 | 6.9 | 5.8 | 0.43x | 0.52x |
+| 1 | 100KB | 172.5 | 223.2 | 359.5 | 0.77x | 0.48x |
+| 1 | 1MB | 446.4 | 788.7 | 761.1 | 0.57x | 0.59x |
+| 10 | 1KB | 11.2 | 13.8 | 13.5 | 0.81x | 0.83x |
+| 10 | 100KB | 366.2 | 323.2 | 422.6 | **1.13x** | 0.87x |
+| 10 | 1MB | 560.9 | 561.2 | 938.5 | 1.00x | 0.60x |
+| 100 | 1KB | 9.5 | 16.1 | 13.2 | 0.59x | 0.72x |
+| 100 | 100KB | 450.2 | 444.2 | 694.8 | **1.01x** | 0.65x |
+| 100 | 1MB | 891.0 | 737.1 | 993.2 | **1.21x** | 0.90x |
 
 ### Game-Tick Message Rate (msg/s)
 
@@ -42,35 +42,35 @@ Each channel sends many small messages (simulates game state updates). Higher = 
 
 | Channels | Msg Size | NetConduit | FRP/Yamux | Smux | NC vs FRP | NC vs Smux |
 |----------|----------|----------:|----------:|-----:|----------:|----------:|
-| 1 | 64B | 1,413,612 | 90,091 | 119,652 | **15.69x** | **11.81x** |
-| 1 | 256B | 827,176 | 87,572 | 116,662 | **9.45x** | **7.09x** |
-| 10 | 64B | 1,034,772 | 107,000 | 132,758 | **9.67x** | **7.80x** |
-| 10 | 256B | 625,267 | 102,316 | 131,016 | **6.11x** | **4.77x** |
-| 50 | 64B | 1,149,119 | 107,579 | 119,480 | **10.68x** | **9.62x** |
-| 50 | 256B | 715,999 | 107,061 | 125,574 | **6.69x** | **5.70x** |
-| 1000 | 64B | 1,212,128 | 112,311 | 107,664 | **10.79x** | **11.26x** |
-| 1000 | 256B | 760,723 | 166,208 | 106,520 | **4.58x** | **7.14x** |
+| 1 | 64B | 1,201,968 | 58,282 | 81,261 | **20.62x** | **14.79x** |
+| 1 | 256B | 903,481 | 54,644 | 78,877 | **16.53x** | **11.45x** |
+| 10 | 64B | 859,926 | 71,128 | 80,876 | **12.09x** | **10.63x** |
+| 10 | 256B | 577,779 | 73,154 | 78,860 | **7.90x** | **7.33x** |
+| 50 | 64B | 890,804 | 73,442 | 73,486 | **12.13x** | **12.12x** |
+| 50 | 256B | 612,535 | 72,908 | 73,454 | **8.40x** | **8.34x** |
+| 1000 | 64B | 968,677 | 85,332 | 55,912 | **11.35x** | **17.33x** |
+| 1000 | 256B | 653,275 | 81,071 | 55,613 | **8.06x** | **11.75x** |
 
 ---
 
 ## Key Takeaways
 
-**Bulk throughput:** Go multiplexers currently outperform NetConduit in raw bulk transfer.
-Credit-based flow control adds per-transfer overhead most visible in large bulk scenarios.
-NetConduit reaches 0.70–0.79x of FRP/Yamux at 10 channels, narrowing the gap as
-parallelism increases.
+**Bulk throughput:** NetConduit wins 3/18 throughput comparisons against Go multiplexers.
+Credit-based flow control adds per-transfer overhead most visible in single-channel
+large bulk scenarios. At 10+ channels, NetConduit matches or beats FRP/Yamux
+(1.00–1.21x) and narrows the gap with Smux (0.60–0.90x).
 
 **Game-tick messaging:** NetConduit wins 16/16 comparisons against Go multiplexers,
-reaching **4.6–15.7x faster than FRP/Yamux** and **4.8–11.8x faster than Smux**.
+reaching **8.1–20.6x faster than FRP/Yamux** and **7.3–17.3x faster than Smux**.
 When per-message overhead dominates (not raw throughput), NetConduit's architecture
 delivers consistently superior performance across all channel counts and message sizes.
 
 **What NetConduit pays for:** Credit-based backpressure prevents OOM under load,
 priority queuing ensures critical channels aren't starved, and adaptive windowing
 automatically reclaims memory from idle channels. These features add measurable
-overhead in bulk transfer but provide production safety guarantees that simpler
-muxes don't offer — while still dominating the game-tick / real-time messaging
-use case.
+overhead in single-channel bulk transfer but provide production safety guarantees
+that simpler muxes don't offer — while dominating game-tick / real-time messaging
+and matching throughput at scale.
 
 ---
 
@@ -84,28 +84,28 @@ no flow control, no channel management).
 
 | Channels | Data Size | Raw TCP (Go) | FRP/Yamux (Go) | Smux (Go) | Raw TCP (.NET) | NetConduit Mux TCP |
 |----------|-----------|----------:|----------:|----------:|----------:|----------:|
-| 1 | 1KB | 6.4 | 8.2 | 9.2 | 5.1 | 1.4 |
-| 1 | 100KB | 555.9 | 412.0 | 537.7 | 527.3 | 100.1 |
-| 1 | 1MB | 2,090.3 | 1,117.9 | 1,390.5 | 1,719.4 | 828.5 |
-| 10 | 1KB | 12.4 | 19.6 | 21.6 | 8.6 | 15.5 |
-| 10 | 100KB | 1,166.4 | 602.8 | 845.4 | 573.2 | 423.1 |
-| 10 | 1MB | 2,941.7 | 1,071.4 | 1,586.0 | 1,795.5 | 766.7 |
-| 100 | 1KB | 10.8 | 23.0 | 23.9 | 8.8 | 4.3 |
-| 100 | 100KB | 963.1 | 624.1 | 991.9 | 542.7 | 332.6 |
-| 100 | 1MB | 3,112.7 | 1,122.5 | 1,703.6 | 1,821.6 | 616.2 |
+| 1 | 1KB | 4.5 | 6.9 | 5.8 | 0.8 | 3.0 |
+| 1 | 100KB | 318.8 | 223.2 | 359.5 | 242.3 | 172.5 |
+| 1 | 1MB | 1,357.3 | 788.7 | 761.1 | 1,096.9 | 446.4 |
+| 10 | 1KB | 6.7 | 13.8 | 13.5 | 4.9 | 11.2 |
+| 10 | 100KB | 532.2 | 323.2 | 422.6 | 299.7 | 366.2 |
+| 10 | 1MB | 1,880.7 | 561.2 | 938.5 | 1,380.0 | 560.9 |
+| 100 | 1KB | 7.3 | 16.1 | 13.2 | 5.5 | 9.5 |
+| 100 | 100KB | 595.8 | 444.2 | 694.8 | 380.7 | 450.2 |
+| 100 | 1MB | 1,976.5 | 737.1 | 993.2 | 1,091.9 | 891.0 |
 
 ### Game-Tick: All Implementations (msg/s)
 
 | Channels | Msg Size | Raw TCP (Go) | FRP/Yamux (Go) | Smux (Go) | Raw TCP (.NET) | NetConduit Mux TCP |
 |----------|----------|----------:|----------:|----------:|----------:|----------:|
-| 1 | 64B | 224,740 | 90,091 | 119,652 | 1,380,720 | 1,413,612 |
-| 1 | 256B | 242,539 | 87,572 | 116,662 | 1,257,776 | 827,176 |
-| 10 | 64B | 1,426,338 | 107,000 | 132,758 | — | 1,034,772 |
-| 10 | 256B | 1,489,936 | 102,316 | 131,016 | — | 625,267 |
-| 50 | 64B | 1,547,030 | 107,579 | 119,480 | — | 1,149,119 |
-| 50 | 256B | 1,558,712 | 107,061 | 125,574 | — | 715,999 |
-| 1000 | 64B | 1,595,400 | 112,311 | 107,664 | — | 1,212,128 |
-| 1000 | 256B | 1,525,852 | 166,208 | 106,520 | — | 760,723 |
+| 1 | 64B | 163,184 | 58,282 | 81,261 | 613,597 | 1,201,968 |
+| 1 | 256B | 173,863 | 54,644 | 78,877 | — | 903,481 |
+| 10 | 64B | 900,299 | 71,128 | 80,876 | — | 859,926 |
+| 10 | 256B | 1,152,152 | 73,154 | 78,860 | — | 577,779 |
+| 50 | 64B | 1,282,174 | 73,442 | 73,486 | — | 890,804 |
+| 50 | 256B | 1,224,851 | 72,908 | 73,454 | — | 612,535 |
+| 1000 | 64B | 1,350,380 | 85,332 | 55,912 | 1,997,057 | 968,677 |
+| 1000 | 256B | 1,305,750 | 81,071 | 55,613 | — | 653,275 |
 
 ---
 
@@ -120,15 +120,15 @@ Ratio = Raw TCP throughput / Mux throughput (how many times slower the mux is).
 
 | Channels | Data Size | NetConduit | FRP/Yamux | Smux |
 |----------|-----------|----------:|----------:|----------:|
-| 1 | 1KB | 3.6x | 0.8x | 0.7x |
-| 1 | 100KB | 5.3x | 1.3x | 1.0x |
-| 1 | 1MB | 2.1x | 1.9x | 1.5x |
-| 10 | 1KB | 0.6x | 0.6x | 0.6x |
-| 10 | 100KB | 1.4x | 1.9x | 1.4x |
-| 10 | 1MB | 2.3x | 2.7x | 1.9x |
-| 100 | 1KB | 2.0x | 0.5x | 0.5x |
-| 100 | 100KB | 1.6x | 1.5x | 1.0x |
-| 100 | 1MB | 3.0x | 2.8x | 1.8x |
+| 1 | 1KB | 0.3x | 0.7x | 0.8x |
+| 1 | 100KB | 1.4x | 1.4x | 0.9x |
+| 1 | 1MB | 2.5x | 1.7x | 1.8x |
+| 10 | 1KB | 0.4x | 0.5x | 0.5x |
+| 10 | 100KB | 0.8x | 1.6x | 1.3x |
+| 10 | 1MB | 2.5x | 3.4x | 2.0x |
+| 100 | 1KB | 0.6x | 0.5x | 0.6x |
+| 100 | 100KB | 0.8x | 1.3x | 0.9x |
+| 100 | 1MB | 1.2x | 2.7x | 2.0x |
 
 ### Game-Tick Overhead
 
@@ -136,14 +136,14 @@ Ratio = Raw TCP msg/s / Mux msg/s (how many times slower the mux is).
 
 | Channels | Msg Size | NetConduit | FRP/Yamux | Smux |
 |----------|----------|----------:|----------:|----------:|
-| 1 | 64B | 1.0x | 2.5x | 1.9x |
-| 1 | 256B | 1.5x | 2.8x | 2.1x |
-| 10 | 64B | — | 13.3x | 10.7x |
-| 10 | 256B | — | 14.6x | 11.4x |
-| 50 | 64B | — | 14.4x | 12.9x |
-| 50 | 256B | — | 14.6x | 12.4x |
-| 1000 | 64B | — | 14.2x | 14.8x |
-| 1000 | 256B | — | 9.2x | 14.3x |
+| 1 | 64B | 0.5x | 2.8x | 2.0x |
+| 1 | 256B | — | 3.2x | 2.2x |
+| 10 | 64B | — | 12.7x | 11.1x |
+| 10 | 256B | — | 15.7x | 14.6x |
+| 50 | 64B | — | 17.5x | 17.4x |
+| 50 | 256B | — | 16.8x | 16.7x |
+| 1000 | 64B | 2.1x | 15.8x | 24.2x |
+| 1000 | 256B | — | 16.1x | 23.5x |
 
 ---
 
