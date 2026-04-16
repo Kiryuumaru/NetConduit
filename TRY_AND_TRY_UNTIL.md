@@ -12,13 +12,15 @@ Improve bulk throughput to 2x current (or near competitor speeds) while retainin
 
 #### Research
 
-Before proposing a change, gather evidence:
+Before proposing a change, gather evidence using tools. NEVER imagine a solution — find one.
 
 1. **Profile the hot path** — Read the current write/flush/drain code in `src/NetConduit/`. Trace the exact sequence from `WriteAsync` to socket write. Identify where time is spent (locks, allocations, syscalls, waiting)
 2. **Search the codebase** — Use search tools to find all callers, all related constants/thresholds, and any existing comments explaining design choices
-3. **Search the internet** — Look for techniques used by high-performance multiplexers (yamux, smux, quic-go, h2, kestrel). Search for: buffer pooling strategies, write coalescing, Nagle-like batching, zero-copy patterns, `System.IO.Pipelines` usage, `ValueTask` patterns, lock-free queues
+3. **Search the internet** — MUST use web search/fetch tools to find real implementations and techniques. Look at actual source code of high-performance multiplexers (yamux, smux, quic-go, h2, kestrel). Search for: buffer pooling strategies, write coalescing, Nagle-like batching, zero-copy patterns, `System.IO.Pipelines` usage, `ValueTask` patterns, lock-free queues. Trust the internet — it is a billion brains. Do NOT skip this step
 4. **Review failed plans** — Read `failed_plans/INDEX.md` to avoid repeating approaches that already failed
 5. **Review succeeded plans** — Read `succeeded_plans/INDEX.md` to understand what has already been applied
+
+**Rule:** Every plan MUST cite at least one external source (GitHub repo, blog post, RFC, or documentation) that validates the approach. No plan based purely on intuition.
 
 #### Write Plan
 

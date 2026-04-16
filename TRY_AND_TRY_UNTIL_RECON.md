@@ -36,13 +36,15 @@ When `_recording = false`, `RecordSend()` is just `Interlocked.Add` — lock-fre
 
 #### Research
 
-Before proposing a change, gather evidence:
+Before proposing a change, gather evidence using tools. NEVER imagine a solution — find one.
 
 1. **Profile the hot path** — Read the current write/flush/drain code in `src/NetConduit/`. Trace the exact sequence from `WriteAsync` to socket write. Focus on `ChannelSyncState.RecordSend()` and its callers
 2. **Search the codebase** — Use search tools to find all callers of `RecordSend`, `StartRecording`, `GetUnacknowledgedDataFrom`, `Acknowledge`, `EnableReconnection`, and reconnection-related code
-3. **Search the internet** — Look for zero-copy ring buffer techniques, lock-free circular buffers, `System.IO.Pipelines` for replay buffering, deferred recording patterns, copy-on-disconnect strategies
+3. **Search the internet** — MUST use web search/fetch tools to find real implementations and techniques. Look at actual source code of high-performance multiplexers (yamux, smux, quic-go, h2, kestrel). Search for: zero-copy ring buffer techniques, lock-free circular buffers, `System.IO.Pipelines` for replay buffering, deferred recording patterns, copy-on-disconnect strategies. Trust the internet — it is a billion brains. Do NOT skip this step
 4. **Review failed plans** — Read `failed_plans/INDEX.md` to avoid repeating approaches that already failed
 5. **Review succeeded plans** — Read `succeeded_plans/INDEX.md` to understand what has already been applied
+
+**Rule:** Every plan MUST cite at least one external source (GitHub repo, blog post, RFC, or documentation) that validates the approach. No plan based purely on intuition.
 
 #### Write Plan
 
