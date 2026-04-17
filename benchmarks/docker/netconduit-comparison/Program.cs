@@ -227,7 +227,7 @@ static async Task<double> RunThroughputMuxAsync(int channelCount, int dataSize, 
         var server = StreamMultiplexer.Create(serverOptions);
         _ = server.Start(cts.Token);
 
-        var clientOptions = TcpMultiplexer.CreateOptions("127.0.0.1", port);
+        var clientOptions = CreateClientOptions("127.0.0.1", port);
         var client = StreamMultiplexer.Create(clientOptions);
         _ = client.Start(cts.Token);
 
@@ -385,6 +385,9 @@ static async Task<double> RunGameTickMuxAsync(int channelCount, int msgSize, int
 
     for (int run = 0; run < runs; run++)
     {
+        const int maxAttempts = 3;
+        for (int attempt = 0; attempt < maxAttempts; attempt++)
+        {
         var listener = new TcpListener(IPAddress.Loopback, 0);
         listener.Server.SetSocketOption(SocketOptionLevel.Socket, SocketOptionName.ReuseAddress, true);
         listener.Start();
@@ -396,10 +399,12 @@ static async Task<double> RunGameTickMuxAsync(int channelCount, int msgSize, int
         var server = StreamMultiplexer.Create(serverOptions);
         _ = server.Start(cts.Token);
 
-        var clientOptions = TcpMultiplexer.CreateOptions("127.0.0.1", port);
+        var clientOptions = CreateClientOptions("127.0.0.1", port);
         var client = StreamMultiplexer.Create(clientOptions);
         _ = client.Start(cts.Token);
 
+        try
+        {
         await Task.WhenAll(server.WaitForReadyAsync(cts.Token), client.WaitForReadyAsync(cts.Token));
 
         var readChannels = new ReadChannel[channelCount];
@@ -470,8 +475,34 @@ static async Task<double> RunGameTickMuxAsync(int channelCount, int msgSize, int
         await server.DisposeAsync();
         await client.DisposeAsync();
         listener.Stop();
+        break; // success — move to next run
+        }
+        catch when (attempt < maxAttempts - 1)
+        {
+            // Transient failure — cleanup and retry with fresh connection
+            try { await server.DisposeAsync(); } catch { }
+            try { await client.DisposeAsync(); } catch { }
+            listener.Stop();
+            await Task.Delay(500);
+        }
+        } // end retry loop
     }
 
     measurements.Sort();
     return measurements[measurements.Count / 2];
+}
+
+static MultiplexerOptions CreateClientOptions(string host, int port)
+{
+    return new MultiplexerOptions
+    {
+        EnableReconnection = false,
+        StreamFactory = async ct =>
+        {
+            var client = new TcpClient { NoDelay = true };
+            await client.ConnectAsync(host, port, ct).ConfigureAwait(false);
+            var stream = client.GetStream();
+            return new StreamPair(stream, client);
+        }
+    };
 }
