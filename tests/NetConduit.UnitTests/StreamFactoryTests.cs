@@ -17,7 +17,6 @@ public class StreamFactoryTests
         
         var options = new MultiplexerOptions
         {
-            EnableReconnection = true,
             StreamFactory = async ct =>
             {
                 var count = Interlocked.Increment(ref callCount);
@@ -81,7 +80,6 @@ public class StreamFactoryTests
         
         var options = new MultiplexerOptions
         {
-            EnableReconnection = true,
             StreamFactory = async ct =>
             {
                 var count = Interlocked.Increment(ref callCount);
@@ -139,7 +137,6 @@ public class StreamFactoryTests
         
         var options = new MultiplexerOptions
         {
-            EnableReconnection = true,
             StreamFactory = async ct =>
             {
                 var count = Interlocked.Increment(ref callCount);
@@ -199,7 +196,6 @@ public class StreamFactoryTests
         
         var options = new MultiplexerOptions
         {
-            EnableReconnection = true,
             StreamFactory = async ct =>
             {
                 var count = Interlocked.Increment(ref callCount);
@@ -278,7 +274,6 @@ public class StreamFactoryTests
         
         var options = new MultiplexerOptions
         {
-            EnableReconnection = true,
             StreamFactory = async ct =>
             {
                 var count = Interlocked.Increment(ref callCount);
@@ -346,7 +341,6 @@ public class StreamFactoryTests
         
         var options = new MultiplexerOptions
         {
-            EnableReconnection = true,
             StreamFactory = async ct =>
             {
                 var count = Interlocked.Increment(ref callCount);
@@ -434,7 +428,6 @@ public class StreamFactoryTests
         
         var options = new MultiplexerOptions
         {
-            EnableReconnection = true,
             StreamFactory = async ct =>
             {
                 var count = Interlocked.Increment(ref callCount);
@@ -494,60 +487,6 @@ public class StreamFactoryTests
     }
 
     [Fact(Timeout = 120000)]
-    public async Task StreamFactory_NotCalledWhenDisabled()
-    {
-        // Arrange
-        var factoryCalled = false;
-        var callCount = 0;
-        var initialPipe = new DuplexPipe();
-        
-        var options = new MultiplexerOptions
-        {
-            EnableReconnection = false, // Disabled
-            StreamFactory = async ct =>
-            {
-                var count = Interlocked.Increment(ref callCount);
-                if (count == 1)
-                {
-                    // First call - return initial connection
-                    return new StreamPair(initialPipe.Stream1);
-                }
-                // Subsequent calls - this shouldn't happen
-                factoryCalled = true;
-                return new StreamPair(Stream.Null);
-            }
-        };
-        
-        // Create peer for initial connection
-        await using var peer = StreamMultiplexer.Create(new MultiplexerOptions
-        {
-            StreamFactory = _ => Task.FromResult<IStreamPair>(new StreamPair(initialPipe.Stream2))
-        });
-        var peerTask = peer.Start();
-        
-        await using var mux = StreamMultiplexer.Create(options);
-        
-        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
-        var runTask = mux.Start();
-        
-        await Task.WhenAll(
-            mux.WaitForReadyAsync(cts.Token),
-            peer.WaitForReadyAsync(cts.Token)
-        );
-        
-        // Act - dispose the pipe to trigger a transport error
-        // Since reconnection is disabled, the factory should NOT be called again
-        await initialPipe.DisposeAsync();
-        
-        await Task.Delay(200);
-        
-        // Assert
-        Assert.False(factoryCalled);
-        
-        cts.Cancel();
-    }
-
-    [Fact(Timeout = 120000)]
     public async Task StreamFactory_IsReconnectingStateCorrect()
     {
         // Arrange
@@ -559,7 +498,6 @@ public class StreamFactoryTests
         
         var options = new MultiplexerOptions
         {
-            EnableReconnection = true,
             StreamFactory = async ct =>
             {
                 var count = Interlocked.Increment(ref callCount);
@@ -630,7 +568,6 @@ public class StreamFactoryTests
         
         var options = new MultiplexerOptions
         {
-            EnableReconnection = true,
             StreamFactory = async ct =>
             {
                 var count = Interlocked.Increment(ref callCount);
@@ -704,8 +641,6 @@ public class StreamFactoryTests
         
         var options = new MultiplexerOptions
         {
-            EnableReconnection = true,
-            ReconnectBufferSize = 1024 * 1024,
             StreamFactory = async ct =>
             {
                 var count = Interlocked.Increment(ref callCount);
@@ -727,8 +662,7 @@ public class StreamFactoryTests
         await using var mux1 = StreamMultiplexer.Create(options);
         await using var mux2 = StreamMultiplexer.Create(new MultiplexerOptions
         {
-            StreamFactory = _ => Task.FromResult<IStreamPair>(new StreamPair(initialPipe.Stream2)),
-            EnableReconnection = true
+            StreamFactory = _ => Task.FromResult<IStreamPair>(new StreamPair(initialPipe.Stream2))
         });
         
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
@@ -777,11 +711,8 @@ public class StreamFactoryTests
         var result = await Task.WhenAny(factoryCalled.Task, Task.Delay(TimeSpan.FromSeconds(5)));
         Assert.Equal(factoryCalled.Task, result);
         
-        // Verify SyncState still has the data (for replay on successful reconnect)
+        // Verify SyncState still tracks byte count after disconnect
         Assert.Equal(100, writeChannel.SyncState.BytesSent);
-        var unackedData = writeChannel.SyncState.GetUnacknowledgedDataFrom(0);
-        Assert.Equal(100, unackedData.Length);
-        Assert.Equal(data1, unackedData);
         
         cts.Cancel();
     }
@@ -797,7 +728,6 @@ public class StreamFactoryTests
         
         var options = new MultiplexerOptions
         {
-            EnableReconnection = true,
             StreamFactory = async ct =>
             {
                 var count = Interlocked.Increment(ref callCount);
@@ -864,73 +794,6 @@ public class StreamFactoryTests
         cts.Cancel();
     }
 
-    [Fact(Timeout = 120000)]
-    public async Task StreamFactory_DisabledReconnection_NoAutoReconnect()
-    {
-        // Arrange - reconnection disabled
-        var factoryCalled = false;
-        var callCount = 0;
-        var initialPipe = new DuplexPipe();
-        
-        var options = new MultiplexerOptions
-        {
-            StreamFactory = async ct =>
-            {
-                var count = Interlocked.Increment(ref callCount);
-                if (count == 1)
-                {
-                    // First call - return initial connection
-                    return new StreamPair(initialPipe.Stream1);
-                }
-                // Subsequent calls - this shouldn't happen
-                factoryCalled = true;
-                throw new InvalidOperationException("Factory should not be called");
-            },
-            EnableReconnection = false // Reconnection disabled
-        };
-        
-        // Create peer for initial connection
-        await using var peer = StreamMultiplexer.Create(new MultiplexerOptions
-        {
-            StreamFactory = _ => Task.FromResult<IStreamPair>(new StreamPair(initialPipe.Stream2))
-        });
-        var peerTask = peer.Start();
-        
-        await using var mux = StreamMultiplexer.Create(options);
-        
-        var disconnectedEvent = new TaskCompletionSource();
-        mux.OnDisconnected += (reason, ex) => disconnectedEvent.TrySetResult();
-        
-        var autoReconnectingCalled = false;
-        mux.OnAutoReconnecting += args =>
-        {
-            // Only track actual reconnection attempts, not initial connection
-            if (args.IsReconnecting) autoReconnectingCalled = true;
-        };
-        
-        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
-        var runTask = mux.Start();
-        
-        await Task.WhenAll(
-            mux.WaitForReadyAsync(cts.Token),
-            peer.WaitForReadyAsync(cts.Token)
-        );
-        
-        // Act - dispose initial pipe to trigger disconnect
-        await initialPipe.DisposeAsync();
-        
-        await Task.WhenAny(disconnectedEvent.Task, Task.Delay(TimeSpan.FromSeconds(1)));
-        
-        await Task.Delay(200);
-        
-        // Assert - auto-reconnect should not be triggered when disabled
-        Assert.False(autoReconnectingCalled);
-        Assert.False(mux.IsReconnecting);
-        Assert.False(factoryCalled);
-        
-        cts.Cancel();
-    }
-
     [Fact(Timeout = 10000)]
     public async Task CreateAsync_WithOptionsHavingFactory_CreatesMultiplexerUsingFactory()
     {
@@ -940,7 +803,6 @@ public class StreamFactoryTests
         
         var options = new MultiplexerOptions
         {
-            EnableReconnection = true,
             StreamFactory = async ct =>
             {
                 factoryCalled = true;

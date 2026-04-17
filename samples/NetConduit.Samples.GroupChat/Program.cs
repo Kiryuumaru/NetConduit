@@ -191,7 +191,6 @@ async Task HandleNewTcpClientAsync(TcpClient tcpClient, ChatServer server, Cance
         var accepted = false;
         var options = new MultiplexerOptions
         {
-            EnableReconnection = false,
             StreamFactory = _ =>
             {
                 if (accepted)

@@ -70,7 +70,6 @@ public static class WebSocketMultiplexer
         var accepted = false;
         var options = new MultiplexerOptions
         {
-            EnableReconnection = false,
             StreamFactory = ct =>
             {
                 if (accepted)

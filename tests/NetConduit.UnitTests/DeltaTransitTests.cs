@@ -1474,7 +1474,6 @@ public partial class DeltaTransitTests
 
         var optionsA = new MultiplexerOptions
         {
-            EnableReconnection = true,
             StreamFactory = async ct =>
             {
                 var count = Interlocked.Increment(ref callCountA);
@@ -1484,12 +1483,10 @@ public partial class DeltaTransitTests
             },
             MaxAutoReconnectAttempts = 5,
             AutoReconnectDelay = TimeSpan.FromMilliseconds(50),
-            ReconnectTimeout = TimeSpan.FromSeconds(30)
         };
 
         var optionsB = new MultiplexerOptions
         {
-            EnableReconnection = true,
             StreamFactory = async ct =>
             {
                 var count = Interlocked.Increment(ref callCountB);
@@ -1499,13 +1496,11 @@ public partial class DeltaTransitTests
             },
             MaxAutoReconnectAttempts = 5,
             AutoReconnectDelay = TimeSpan.FromMilliseconds(50),
-            ReconnectTimeout = TimeSpan.FromSeconds(30)
         };
 
         // Create peer muxes that will connect via the pipes
         await using var muxAPeer = StreamMultiplexer.Create(new MultiplexerOptions
         {
-            EnableReconnection = true,
             StreamFactory = async ct =>
             {
                 if (callCountA == 1)
@@ -1518,7 +1513,6 @@ public partial class DeltaTransitTests
 
         await using var muxBPeer = StreamMultiplexer.Create(new MultiplexerOptions
         {
-            EnableReconnection = true,
             StreamFactory = async ct =>
             {
                 if (callCountB == 1)

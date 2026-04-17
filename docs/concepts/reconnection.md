@@ -4,6 +4,8 @@ Automatic recovery from network disconnects with [channel](channels.md) state re
 
 ## How It Works
 
+Reconnection is always enabled. When the transport connection drops, the multiplexer automatically uses `StreamFactory` to create a new connection and reattach existing channels via session ID matching.
+
 ```
 ┌─────────────────────────────────────────────────────────────┐
 │                                                             │
@@ -15,19 +17,18 @@ Automatic recovery from network disconnects with [channel](channels.md) state re
 │  Disconnect                                                 │
 │  ┌────────┐    BROKEN    ┌────────┐                         │
 │  │ Client │    ╳╳╳╳╳╳    │ Server │                         │
-│  │ Buffer │              │ Buffer │  ◀─ Pending data held   │
 │  └────────┘              └────────┘                         │
 │                                                             │
 │  Reconnect (via StreamFactory)                              │
 │  ┌────────┐  New Stream  ┌────────┐                         │
 │  │ Client │◄────────────▶│ Server │                         │
-│  │ Flush  │─────────────▶│ Apply  │  ◀─ Buffered data sent  │
+│  │ Resume │              │ Resume │  ◀─ Channels reattached │
 │  └────────┘              └────────┘                         │
 │                                                             │
 └─────────────────────────────────────────────────────────────┘
 ```
 
-## Enabling Reconnection
+## Reconnection Setup
 
 Reconnection requires `StreamFactory`. Transport helpers set this automatically:
 
@@ -36,33 +37,13 @@ using NetConduit;
 using NetConduit.Tcp;
 
 // StreamFactory is set by the transport helper — reconnection works automatically
-var options = TcpMultiplexer.CreateOptions("localhost", 5000, configure: o =>
-{
-    o.EnableReconnection = true;
-    o.ReconnectTimeout = TimeSpan.FromSeconds(60);
-    o.ReconnectBufferSize = 1024 * 1024;  // 1MB buffer
-});
+var options = TcpMultiplexer.CreateOptions("localhost", 5000);
 
 var mux = StreamMultiplexer.Create(options);
 var runTask = mux.Start();
 await mux.WaitForReadyAsync();
 
 // On disconnect, multiplexer automatically reconnects
-```
-
-## Server Setup
-
-Server must also support reconnection:
-
-```csharp
-var options = TcpMultiplexer.CreateServerOptions(listener, configure: o =>
-{
-    o.EnableReconnection = true;
-    o.ReconnectTimeout = TimeSpan.FromSeconds(60);
-});
-
-var mux = StreamMultiplexer.Create(options);
-// Server accepts reconnecting clients transparently
 ```
 
 ## Reconnection Events
@@ -94,7 +75,7 @@ mux.OnAutoReconnecting += (args) =>
 mux.OnAutoReconnectFailed += (exception) =>
 {
     Console.WriteLine($"Reconnection failed: {exception.Message}");
-    // Maximum attempts exceeded or timeout reached
+    // Maximum attempts exceeded
 };
 ```
 
@@ -104,9 +85,6 @@ See [MultiplexerOptions](../api/multiplexer-options.md) for full configuration.
 
 | Option | Default | Description |
 |--------|---------|-------------|
-| `EnableReconnection` | true | Enable automatic reconnection |
-| `ReconnectTimeout` | 60s | Maximum time to hold state during disconnect |
-| `ReconnectBufferSize` | 1MB | Buffer for pending data during disconnect |
 | `MaxAutoReconnectAttempts` | 0 (unlimited) | Max reconnection attempts before giving up |
 | `AutoReconnectDelay` | 1s | Initial delay between reconnect attempts |
 | `MaxAutoReconnectDelay` | 30s | Maximum delay (exponential backoff cap) |
@@ -115,9 +93,6 @@ See [MultiplexerOptions](../api/multiplexer-options.md) for full configuration.
 ```csharp
 var options = TcpMultiplexer.CreateOptions("localhost", 5000, configure: o =>
 {
-    o.EnableReconnection = true;
-    o.ReconnectTimeout = TimeSpan.FromMinutes(2);
-    o.ReconnectBufferSize = 4 * 1024 * 1024;  // 4MB
     o.MaxAutoReconnectAttempts = 10;
     o.AutoReconnectDelay = TimeSpan.FromSeconds(2);
     o.MaxAutoReconnectDelay = TimeSpan.FromSeconds(30);
@@ -129,11 +104,8 @@ var options = TcpMultiplexer.CreateOptions("localhost", 5000, configure: o =>
 ### Write Operations
 
 ```csharp
-// During disconnect, writes are buffered (up to ReconnectBufferSize)
-await channel.WriteAsync(data);  // May block until reconnected or timeout
-
-// If buffer fills, oldest data may be dropped (for unreliable channels)
-// or write blocks until space available
+// Writes may fail during disconnect — data in-flight at disconnect time is lost
+await channel.WriteAsync(data);
 ```
 
 ### Read Operations
@@ -166,7 +138,6 @@ Console.WriteLine($"Running: {mux.IsRunning}");
 ```csharp
 var options = TcpMultiplexer.CreateOptions("localhost", 5000, configure: o =>
 {
-    o.ReconnectTimeout = TimeSpan.FromSeconds(30);
     o.AutoReconnectDelay = TimeSpan.FromSeconds(1);
 });
 // Fast reconnection for transient network issues
@@ -177,23 +148,20 @@ var options = TcpMultiplexer.CreateOptions("localhost", 5000, configure: o =>
 ```csharp
 var options = TcpMultiplexer.CreateOptions("localhost", 5000, configure: o =>
 {
-    o.ReconnectTimeout = TimeSpan.FromMinutes(10);
     o.AutoReconnectDelay = TimeSpan.FromSeconds(5);
     o.MaxAutoReconnectDelay = TimeSpan.FromMinutes(1);
-    o.ReconnectBufferSize = 10 * 1024 * 1024;  // 10MB
 });
 // Long reconnection window for mobile/unstable networks
 ```
 
-### No Reconnection
+### Limited Attempts
 
 ```csharp
 var options = TcpMultiplexer.CreateOptions("localhost", 5000, configure: o =>
 {
-    o.EnableReconnection = false;
+    o.MaxAutoReconnectAttempts = 3;
 });
-// Disconnect = game over
-// Application handles reconnection manually
+// Give up after 3 reconnection attempts
 ```
 
 ## Handling Reconnection Failure
@@ -216,27 +184,15 @@ mux.OnAutoReconnectFailed += async (exception) =>
 
 ## Session Resumption
 
-For full session restoration:
-
 ```csharp
 // Multiplexer assigns session ID (Guid)
 var sessionId = mux.SessionId;
 
 // On reconnect, server validates session
-// Channels are restored with pending data
+// Channels are restored via session matching
 ```
 
 ## Tips
-
-**Size buffer appropriately:**
-```csharp
-// Buffer should hold pending data during typical disconnect
-// Too small = data loss during long disconnects
-// Too large = memory pressure
-
-// For interactive: 256KB - 1MB
-// For bulk transfer: 4MB - 16MB
-```
 
 **Handle both events:**
 ```csharp

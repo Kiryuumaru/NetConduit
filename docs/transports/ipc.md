@@ -86,7 +86,7 @@ IPC transport uses the standard `configure` callback for multiplexer options:
 var options = IpcMultiplexer.CreateOptions("my-app-ipc", configure: o =>
 {
     o.FlushMode = FlushMode.Immediate;
-    o.EnableReconnection = false;
+    o.MaxAutoReconnectAttempts = 1;
 });
 ```
 

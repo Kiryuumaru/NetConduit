@@ -15,9 +15,6 @@ Configuration for creating a StreamMultiplexer. See [Getting Started](../getting
 | `GoAwayTimeout` | `TimeSpan` | 30s | Timeout for graceful shutdown after GOAWAY |
 | `GracefulShutdownTimeout` | `TimeSpan` | 5s | Timeout for DisposeAsync pending operations |
 | `DefaultChannelOptions` | `DefaultChannelOptions` | (see below) | Defaults for new channels |
-| `EnableReconnection` | `bool` | true | Enable automatic reconnection |
-| `ReconnectTimeout` | `TimeSpan` | 60s | Max time to hold state during disconnect |
-| `ReconnectBufferSize` | `int` | 1MB | Buffer for pending data during disconnect |
 | `MaxAutoReconnectAttempts` | `int` | 0 (unlimited) | Max reconnection attempts before giving up |
 | `AutoReconnectDelay` | `TimeSpan` | 1s | Initial delay between reconnection attempts |
 | `MaxAutoReconnectDelay` | `TimeSpan` | 30s | Maximum delay (exponential backoff cap) |
@@ -83,9 +80,6 @@ See [Reconnection](../concepts/reconnection.md) for full behavior details.
 ```csharp
 var options = TcpMultiplexer.CreateOptions("localhost", 5000, configure: o =>
 {
-    o.EnableReconnection = true;
-    o.ReconnectTimeout = TimeSpan.FromMinutes(2);
-    o.ReconnectBufferSize = 4 * 1024 * 1024;  // 4MB buffer
     o.MaxAutoReconnectAttempts = 10;
     o.AutoReconnectDelay = TimeSpan.FromSeconds(2);
     o.MaxAutoReconnectDelay = TimeSpan.FromSeconds(30);
@@ -154,9 +148,6 @@ var options = TcpMultiplexer.CreateOptions("localhost", 5000, configure: o =>
 ```csharp
 var options = TcpMultiplexer.CreateOptions("localhost", 5000, configure: o =>
 {
-    o.EnableReconnection = true;
-    o.ReconnectTimeout = TimeSpan.FromMinutes(5);
-    o.ReconnectBufferSize = 8 * 1024 * 1024;  // 8MB
     o.MaxAutoReconnectAttempts = 20;
     o.AutoReconnectDelay = TimeSpan.FromSeconds(1);
     o.MaxAutoReconnectDelay = TimeSpan.FromMinutes(1);
@@ -171,7 +162,7 @@ var options = TcpMultiplexer.CreateOptions("localhost", 5000, configure: o =>
 var options = TcpMultiplexer.CreateOptions("localhost", 5000, configure: o =>
 {
     o.FlushMode = FlushMode.Immediate;
-    o.EnableReconnection = false;  // Fast fail
+    o.MaxAutoReconnectAttempts = 1;  // Fast fail
     o.PingInterval = TimeSpan.FromMinutes(5);  // Rare pings
 });
 ```

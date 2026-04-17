@@ -64,7 +64,6 @@ public static class UdpMultiplexer
         var accepted = false;
         var options = new MultiplexerOptions
         {
-            EnableReconnection = false,
             StreamFactory = async ct =>
             {
                 if (accepted)
