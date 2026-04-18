@@ -307,16 +307,16 @@ public class DisconnectionTests
     [Fact(Timeout = 120000)]
     public async Task TransportError_AbortsAllChannels_WithTransportFailedReason()
     {
-        // Arrange - disable reconnection so channels are aborted immediately on transport error
+        // Arrange - limit reconnect attempts so channels are aborted quickly on transport error
         await using var pipe = new DuplexPipe();
         var noReconnectOptions1 = new MultiplexerOptions 
         { 
-            EnableReconnection = false,
+            MaxAutoReconnectAttempts = 1,
             StreamFactory = _ => Task.FromResult<IStreamPair>(new StreamPair(pipe.Stream1))
         };
         var noReconnectOptions2 = new MultiplexerOptions 
         { 
-            EnableReconnection = false,
+            MaxAutoReconnectAttempts = 1,
             StreamFactory = _ => Task.FromResult<IStreamPair>(new StreamPair(pipe.Stream2))
         };
         await using var mux1 = StreamMultiplexer.Create(noReconnectOptions1);
@@ -777,18 +777,18 @@ public class DisconnectionTests
     }
 
     [Fact(Timeout = 120000)]
-    public async Task TransportError_ChannelOnClosedFiresBeforeMuxOnDisconnected()
+    public async Task TransportError_MuxDisconnectedFiresBeforeChannelClosed()
     {
-        // Arrange - disable reconnection so channels are aborted immediately on transport error
+        // Arrange - limit reconnect attempts so channels are aborted after failed reconnect
         await using var pipe = new DuplexPipe();
         var noReconnectOptions1 = new MultiplexerOptions 
         { 
-            EnableReconnection = false,
+            MaxAutoReconnectAttempts = 1,
             StreamFactory = _ => Task.FromResult<IStreamPair>(new StreamPair(pipe.Stream1))
         };
         var noReconnectOptions2 = new MultiplexerOptions 
         { 
-            EnableReconnection = false,
+            MaxAutoReconnectAttempts = 1,
             StreamFactory = _ => Task.FromResult<IStreamPair>(new StreamPair(pipe.Stream2))
         };
         
@@ -806,21 +806,22 @@ public class DisconnectionTests
 
         var events = new List<string>();
         var eventLock = new object();
-        writeChannel.OnClosed += (reason, ex) => { lock (eventLock) events.Add("ChannelClosed"); };
-        mux1.OnDisconnected += (reason, ex) => { lock (eventLock) events.Add("MuxDisconnected"); };
+        var allEventsDone = new TaskCompletionSource();
+        writeChannel.OnClosed += (reason, ex) => { lock (eventLock) { events.Add("ChannelClosed"); if (events.Count >= 2) allEventsDone.TrySetResult(); } };
+        mux1.OnDisconnected += (reason, ex) => { lock (eventLock) { events.Add("MuxDisconnected"); if (events.Count >= 2) allEventsDone.TrySetResult(); } };
 
         // Act - force transport error
         await pipe.DisposeAsync();
 
-        // Wait for events
-        await Task.Delay(500);
+        // Wait for both events
+        await Task.WhenAny(allEventsDone.Task, Task.Delay(5000));
 
-        // Assert - channel should close before mux disconnects
+        // Assert - with always-on reconnection, disconnect fires first, then channels abort after reconnect fails
         lock (eventLock)
         {
             Assert.Equal(2, events.Count);
-            Assert.Equal("ChannelClosed", events[0]);
-            Assert.Equal("MuxDisconnected", events[1]);
+            Assert.Equal("MuxDisconnected", events[0]);
+            Assert.Equal("ChannelClosed", events[1]);
         }
 
         // Cleanup

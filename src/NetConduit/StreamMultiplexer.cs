@@ -664,8 +664,8 @@ public sealed class StreamMultiplexer : IStreamMultiplexer
             }
             catch (Exception ex)
             {
-                // Transport error - attempt reconnection if enabled
-                if (_options.EnableReconnection && !_disposed && !_goAwayReceived)
+                // Transport error - attempt reconnection
+                if (!_disposed && !_goAwayReceived)
                 {
                     _isConnected = false;
                     _disconnectReason = NetConduit.DisconnectReason.TransportError;
@@ -942,12 +942,9 @@ public sealed class StreamMultiplexer : IStreamMultiplexer
     /// <param name="newReadStream">The new stream for reading data.</param>
     /// <param name="newWriteStream">The new stream for writing data.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
-    /// <exception cref="InvalidOperationException">Thrown if reconnection is not enabled or the multiplexer wasn't previously running.</exception>
+    /// <exception cref="ObjectDisposedException">Thrown if the multiplexer has been disposed.</exception>
     public async Task ReconnectAsync(Stream newReadStream, Stream newWriteStream, CancellationToken cancellationToken = default)
     {
-        if (!_options.EnableReconnection)
-            throw new InvalidOperationException("Reconnection is not enabled for this multiplexer.");
-
         if (_disposed)
             throw new ObjectDisposedException(nameof(StreamMultiplexer));
 
@@ -956,21 +953,16 @@ public sealed class StreamMultiplexer : IStreamMultiplexer
         {
             _isReconnecting = true;
 
-            // Reconnection protocol:
+            // Reconnection protocol (Layers 1-3 only, no byte replay):
             // 1. Send RECONNECT with session ID and our read channel byte positions
-            //    (telling remote how much we received on each channel they write to)
             // 2. Receive RECONNECT_ACK with their read channel byte positions
-            //    (telling us how much they received on each channel we write to)
-            // 3. Replay any unacknowledged data on our write channels
+            // Channel reattachment happens via session ID matching
 
             // Send reconnect request with our receive positions
             await SendReconnectAsync(newWriteStream, cancellationToken).ConfigureAwait(false);
 
             // Wait for reconnect acknowledgment with their receive positions
-            var remoteReceivePositions = await ReceiveReconnectAckAsync(newReadStream, cancellationToken).ConfigureAwait(false);
-
-            // Replay unacknowledged data on write channels
-            await ReplayUnacknowledgedDataAsync(newWriteStream, remoteReceivePositions, cancellationToken).ConfigureAwait(false);
+            await ReceiveReconnectAckAsync(newReadStream, cancellationToken).ConfigureAwait(false);
 
             _isConnected = true;
             _isReconnecting = false;
@@ -1054,46 +1046,14 @@ public sealed class StreamMultiplexer : IStreamMultiplexer
         return receivePositions;
     }
 
-    private async Task ReplayUnacknowledgedDataAsync(Stream writeStream, Dictionary<uint, long> remoteReceivePositions, CancellationToken ct)
-    {
-        var headerBytes = new byte[FrameHeader.Size];
-        
-        foreach (var kvp in _writeChannelsByIndex)
-        {
-            var channelIndex = kvp.Key;
-            var channel = kvp.Value;
-            
-            // Get how much the remote received
-            var remoteReceived = remoteReceivePositions.GetValueOrDefault(channelIndex, 0);
-            
-            // Update our ack tracking
-            channel.SyncState.SetBytesAcked(remoteReceived);
-            
-            // Get unacknowledged data to replay
-            var replayData = channel.SyncState.GetUnacknowledgedDataFrom(remoteReceived);
-            
-            if (replayData.Length > 0)
-            {
-                // Send the replayed data as a regular data frame
-                var header = new FrameHeader(channelIndex, FrameFlags.Data, (uint)replayData.Length);
-                header.Write(headerBytes);
-                
-                await writeStream.WriteAsync(headerBytes, ct).ConfigureAwait(false);
-                await writeStream.WriteAsync(replayData, ct).ConfigureAwait(false);
-            }
-        }
-        
-        await writeStream.FlushAsync(ct).ConfigureAwait(false);
-    }
-
     /// <summary>
     /// Signals that the connection has been lost. Call this when the underlying transport fails.
     /// If StreamFactory is configured, auto-reconnection will be attempted.
-    /// Otherwise, if reconnection is enabled, the multiplexer will wait for ReconnectAsync to be called.
+    /// Otherwise, the multiplexer will wait for ReconnectAsync to be called.
     /// </summary>
     public void NotifyDisconnected()
     {
-        if (!_options.EnableReconnection || _disposed)
+        if (_disposed)
             return;
 
         _isConnected = false;
@@ -1769,7 +1729,7 @@ public sealed class StreamMultiplexer : IStreamMultiplexer
         _isConnected = false;
         
         // If StreamFactory is configured, attempt auto-reconnect (don't abort channels yet)
-        if (_options.StreamFactory != null && _options.EnableReconnection && !_disposed)
+        if (_options.StreamFactory != null && !_disposed)
         {
             // Fire disconnect event first for auto-reconnect case
             try
@@ -2070,12 +2030,6 @@ public sealed class StreamMultiplexer : IStreamMultiplexer
 
     private void ProcessReconnectFrame(ReadOnlyMemory<byte> data, CancellationToken ct)
     {
-        if (!_options.EnableReconnection)
-        {
-            SendError(0, ErrorCode.ProtocolError, "Reconnection not enabled", ct);
-            return;
-        }
-
         if (data.Length < 20) // 16B session_id + 4B channel_count
         {
             SendError(0, ErrorCode.ProtocolError, "Invalid RECONNECT payload", ct);

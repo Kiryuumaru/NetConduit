@@ -119,8 +119,7 @@ var options = WebSocketMultiplexer.CreateOptions(
 ```csharp
 var options = WebSocketMultiplexer.CreateOptions("ws://localhost:5000/ws", configure: o =>
 {
-    o.EnableReconnection = true;
-    o.ReconnectTimeout = TimeSpan.FromSeconds(60);
+    o.MaxAutoReconnectAttempts = 10;
 });
 
 var mux = StreamMultiplexer.Create(options);

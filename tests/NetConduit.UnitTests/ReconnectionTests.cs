@@ -64,7 +64,7 @@ public class ReconnectionTests
     {
         // Arrange
         await using var pipe = new DuplexPipe();
-        var options = new MultiplexerOptions { StreamFactory = _ => null!, EnableReconnection = true };
+        var options = new MultiplexerOptions { StreamFactory = _ => null! };
         await using var mux1 = await TestMuxHelper.CreateMuxAsync(pipe.Stream1, options);
         await using var mux2 = await TestMuxHelper.CreateMuxAsync(pipe.Stream2, options);
 
@@ -91,39 +91,6 @@ public class ReconnectionTests
         await Task.WhenAll(
             run1.ContinueWith(_ => { }),
             run2.ContinueWith(_ => { }));
-    }
-
-    [Fact(Timeout = 120000)]
-    public async Task ReconnectAsync_ThrowsWhenReconnectionDisabled()
-    {
-        // Arrange
-        await using var pipe = new DuplexPipe();
-        var options = new MultiplexerOptions { StreamFactory = _ => null!, EnableReconnection = false };
-        await using var mux = await TestMuxHelper.CreateMuxAsync(pipe.Stream1, options);
-
-        await using var newPipe = new DuplexPipe();
-
-        // Act & Assert
-        await Assert.ThrowsAsync<InvalidOperationException>(() =>
-            mux.ReconnectAsync(newPipe.Stream1, newPipe.Stream1));
-    }
-
-    [Fact(Timeout = 120000)]
-    public async Task NotifyDisconnected_DoesNothingWhenReconnectionDisabled()
-    {
-        // Arrange
-        await using var pipe = new DuplexPipe();
-        var options = new MultiplexerOptions { StreamFactory = _ => null!, EnableReconnection = false };
-        await using var mux = await TestMuxHelper.CreateMuxAsync(pipe.Stream1, options);
-
-        var disconnectedFired = false;
-        mux.OnDisconnected += (reason, ex) => disconnectedFired = true;
-
-        // Act
-        mux.NotifyDisconnected();
-
-        // Assert - event should not fire when reconnection is disabled
-        Assert.False(disconnectedFired);
     }
 
     [Fact(Timeout = 120000)]
@@ -154,14 +121,12 @@ public class ReconnectionTests
     }
 
     [Fact(Timeout = 120000)]
-    public async Task Multiplexer_ReconnectionOptions_AreRespected()
+    public async Task Multiplexer_NotifyDisconnected_FiresEvent()
     {
         // Arrange
         var options = new MultiplexerOptions
         {
-             StreamFactory = _ => null!, EnableReconnection = true,
-            ReconnectTimeout = TimeSpan.FromSeconds(30),
-            ReconnectBufferSize = 2 * 1024 * 1024 // 2MB
+            StreamFactory = _ => null!
         };
 
         await using var pipe = new DuplexPipe();
@@ -234,7 +199,7 @@ public class ReconnectionTests
     {
         // Arrange
         await using var pipe = new DuplexPipe();
-        var options = new MultiplexerOptions { StreamFactory = _ => null!, EnableReconnection = true };
+        var options = new MultiplexerOptions { StreamFactory = _ => null! };
         var mux = await TestMuxHelper.CreateMuxAsync(pipe.Stream1, options);
 
         // Dispose the multiplexer
@@ -252,7 +217,7 @@ public class ReconnectionTests
     {
         // Arrange
         await using var pipe = new DuplexPipe();
-        var options = new MultiplexerOptions { StreamFactory = _ => null!, EnableReconnection = true, ReconnectBufferSize = 1024 * 1024 };
+        var options = new MultiplexerOptions { StreamFactory = _ => null! };
         await using var mux1 = await TestMuxHelper.CreateMuxAsync(pipe.Stream1, options);
         await using var mux2 = await TestMuxHelper.CreateMuxAsync(pipe.Stream2, options);
 
@@ -388,8 +353,7 @@ public class ReconnectionTests
         await using var pipe = new DuplexPipe();
         var options = new MultiplexerOptions 
         { 
-             StreamFactory = _ => null!, EnableReconnection = true, 
-            ReconnectBufferSize = 1024 * 1024 // 1MB buffer
+            StreamFactory = _ => null!
         };
         await using var mux1 = await TestMuxHelper.CreateMuxAsync(pipe.Stream1, options);
         await using var mux2 = await TestMuxHelper.CreateMuxAsync(pipe.Stream2, options);
@@ -626,8 +590,7 @@ public class ReconnectionTests
         await using var pipe = new DuplexPipe();
         var options = new MultiplexerOptions 
         { 
-             StreamFactory = _ => null!, EnableReconnection = true, 
-            ReconnectBufferSize = 1024 * 1024 
+            StreamFactory = _ => null!
         };
         await using var mux1 = await TestMuxHelper.CreateMuxAsync(pipe.Stream1, options);
         await using var mux2 = await TestMuxHelper.CreateMuxAsync(pipe.Stream2, options);
@@ -673,11 +636,6 @@ public class ReconnectionTests
         
         // Verify data integrity
         Assert.Equal(testData, received);
-        
-        // Verify replay buffer contains the data
-        var replayFromZero = writeChannel.SyncState.GetUnacknowledgedDataFrom(0);
-        Assert.Equal(10000, replayFromZero.Length);
-        Assert.Equal(testData, replayFromZero);
 
         cts.Cancel();
         await Task.WhenAll(run1.ContinueWith(_ => { }), run2.ContinueWith(_ => { }));

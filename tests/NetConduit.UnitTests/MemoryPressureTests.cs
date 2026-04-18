@@ -17,8 +17,7 @@ public class MemoryPressureTests
         // Very small reconnect buffer to trigger trimming
         var options = new MultiplexerOptions
         {
-             StreamFactory = _ => null!, EnableReconnection = true,
-            ReconnectBufferSize = 1024 // Only 1KB buffer
+            StreamFactory = _ => null!
         };
         
         await using var initiator = await TestMuxHelper.CreateMuxAsync(pipe.Stream1, options);
@@ -75,7 +74,7 @@ public class MemoryPressureTests
         
         var options = new MultiplexerOptions
         {
-             StreamFactory = _ => null!, EnableReconnection = false, // Disable reconnection to reduce memory overhead
+            StreamFactory = _ => null!,
             DefaultChannelOptions = new DefaultChannelOptions 
             { 
                 MinCredits = 1024, // Small credits
@@ -406,7 +405,7 @@ public class MemoryPressureTests
         
         var options = new MultiplexerOptions
         {
-             StreamFactory = _ => null!, EnableReconnection = false
+            StreamFactory = _ => null!
         };
         
         await using var initiator = await TestMuxHelper.CreateMuxAsync(pipe.Stream1, options);
@@ -530,8 +529,7 @@ public class MemoryPressureTests
         
         var options = new MultiplexerOptions
         {
-             StreamFactory = _ => null!, EnableReconnection = true,
-            ReconnectBufferSize = 0  // No buffering even with reconnection enabled
+            StreamFactory = _ => null!
         };
         
         await using var initiator = await TestMuxHelper.CreateMuxAsync(pipe.Stream1, options);
@@ -585,7 +583,7 @@ public class MemoryPressureTests
         
         var options = new MultiplexerOptions
         {
-             StreamFactory = _ => null!, EnableReconnection = false // Reduce memory overhead
+            StreamFactory = _ => null!
         };
         
         await using var initiator = await TestMuxHelper.CreateMuxAsync(pipe.Stream1, options);

@@ -92,21 +92,6 @@ public sealed class MultiplexerOptions
     public DefaultChannelOptions DefaultChannelOptions { get; init; } = new();
     
     /// <summary>
-    /// Whether to enable reconnection support. Default: true.
-    /// </summary>
-    public bool EnableReconnection { get; init; } = true;
-    
-    /// <summary>
-    /// Maximum time to wait for reconnection before discarding state. Default: 60 seconds.
-    /// </summary>
-    public TimeSpan ReconnectTimeout { get; init; } = TimeSpan.FromSeconds(60);
-    
-    /// <summary>
-    /// Buffer size for pending data during disconnection. Default: 1MB.
-    /// </summary>
-    public int ReconnectBufferSize { get; init; } = 1024 * 1024;
-    
-    /// <summary>
     /// Flush mode for write operations. Default: Batched.
     /// </summary>
     public FlushMode FlushMode { get; init; } = FlushMode.Batched;

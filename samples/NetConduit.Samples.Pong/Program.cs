@@ -166,7 +166,6 @@ void RunServer(int port)
                             var accepted = false;
                             var options = new MultiplexerOptions
                             {
-                                EnableReconnection = false,
                                 StreamFactory = _ =>
                                 {
                                     if (accepted)

@@ -38,7 +38,7 @@ public sealed class WriteChannel : Stream
         _availableCredits = 0;
         _creditSemaphore = new SemaphoreSlim(0, int.MaxValue);
         _closeCts = new CancellationTokenSource();
-        _syncState = new ChannelSyncState(multiplexer.Options.ReconnectBufferSize);
+        _syncState = new ChannelSyncState(0);
         _openTcs = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         Stats = new ChannelStats();
     }
@@ -286,8 +286,6 @@ public sealed class WriteChannel : Stream
     internal void SetOpen(uint initialCredits)
     {
         _state = ChannelState.Open;
-        if (_multiplexer.Options.EnableReconnection)
-            _syncState.StartRecording();
         GrantCredits(initialCredits);
         _openTcs.TrySetResult();
     }

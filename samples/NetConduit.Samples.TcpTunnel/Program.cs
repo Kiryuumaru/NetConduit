@@ -221,7 +221,6 @@ static async Task HandleRelayConnectionAsync(
     {
         var options = new MultiplexerOptions
         {
-            EnableReconnection = false,
             StreamFactory = _ => streamFactory()
         };
 
@@ -382,7 +381,7 @@ static async Task<int> RunAgentAsync(string[] args, CancellationToken ct)
     Console.WriteLine($"╚══════════════════════════════════════════════════════════════╝");
     Console.WriteLine();
 
-    // EnableReconnection defaults to true, MaxAutoReconnectAttempts defaults to 0 (unlimited)
+    // MaxAutoReconnectAttempts defaults to 0 (unlimited)
     await using var mux = StreamMultiplexer.Create(options);
 
     mux.OnAutoReconnecting += e =>
@@ -532,7 +531,7 @@ static async Task<int> RunForwardAsync(string[] args, CancellationToken ct)
 
     var pendingTunnels = new ConcurrentDictionary<string, TaskCompletionSource<DuplexStreamTransit>>();
 
-    // EnableReconnection defaults to true, MaxAutoReconnectAttempts defaults to 0 (unlimited)
+    // MaxAutoReconnectAttempts defaults to 0 (unlimited)
     await using var mux = StreamMultiplexer.Create(options);
 
     mux.OnAutoReconnecting += e =>
@@ -719,7 +718,7 @@ static async Task<int> RunListAsync(string[] args, CancellationToken ct)
     var host = args[1];
     var portPath = args[2];
 
-    var (options, isWs) = CreateClientOptions(host, portPath, enableReconnection: false);
+    var (options, isWs) = CreateClientOptions(host, portPath);
     var transport = isWs ? "WebSocket" : "TCP";
 
     Console.WriteLine($"Connecting to relay at {host}:{portPath} via {transport}...");
@@ -798,7 +797,7 @@ static (int port, string path) ParseWsPortPath(string portPath)
     return (port, path);
 }
 
-static (MultiplexerOptions options, bool isWebSocket) CreateClientOptions(string host, string portPath, bool enableReconnection = true)
+static (MultiplexerOptions options, bool isWebSocket) CreateClientOptions(string host, string portPath)
 {
     if (portPath.Contains('/'))
     {
@@ -806,7 +805,6 @@ static (MultiplexerOptions options, bool isWebSocket) CreateClientOptions(string
         var uri = $"ws://{host}:{port}{path}";
         var options = new MultiplexerOptions
         {
-            EnableReconnection = enableReconnection,
             StreamFactory = async ct =>
             {
                 var ws = new System.Net.WebSockets.ClientWebSocket();
@@ -821,7 +819,6 @@ static (MultiplexerOptions options, bool isWebSocket) CreateClientOptions(string
         var port = int.Parse(portPath);
         var options = new MultiplexerOptions
         {
-            EnableReconnection = enableReconnection,
             StreamFactory = async ct =>
             {
                 var client = new TcpClient();

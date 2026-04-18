@@ -496,7 +496,6 @@ static MultiplexerOptions CreateClientOptions(string host, int port)
 {
     return new MultiplexerOptions
     {
-        EnableReconnection = false,
         StreamFactory = async ct =>
         {
             var client = new TcpClient { NoDelay = true };

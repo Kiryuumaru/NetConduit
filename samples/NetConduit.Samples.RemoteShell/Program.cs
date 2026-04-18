@@ -119,7 +119,6 @@ async Task HandleClientAsync(TcpClient tcp, string endpoint, CancellationToken s
         var accepted = false;
         var options = new MultiplexerOptions
         {
-            EnableReconnection = false,
             StreamFactory = _ =>
             {
                 if (accepted) throw new InvalidOperationException();
