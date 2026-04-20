@@ -37,9 +37,12 @@ ReadChannel? GetReadChannel(string channelId);
 bool IsConnected { get; }
 bool IsRunning { get; }
 bool IsShuttingDown { get; }
+bool IsReconnecting { get; }
+int CurrentConnectionAttempt { get; }
 Guid SessionId { get; }
 Guid RemoteSessionId { get; }
 DisconnectReason? DisconnectReason { get; }
+Exception? DisconnectException { get; }
 MultiplexerStats Stats { get; }
 MultiplexerOptions Options { get; }
 IReadOnlyCollection<string> ActiveChannelIds { get; }
@@ -48,10 +51,12 @@ IReadOnlyCollection<string> AcceptedChannelIds { get; }
 int ActiveChannelCount { get; }
 
 // Events
+event Action? OnReady;
 event Action<string>? OnChannelOpened;
 event Action<string, Exception?>? OnChannelClosed;
 event Action<Exception>? OnError;
 event Action<DisconnectReason, Exception?>? OnDisconnected;
+event Action? OnReconnected;
 event Action<AutoReconnectEventArgs>? OnAutoReconnecting;
 event Action<Exception>? OnAutoReconnectFailed;
 ```

@@ -439,7 +439,7 @@ public sealed class StreamMultiplexer : IStreamMultiplexer
                     _streamPair = streamPair;
                     _readStream = streamPair.ReadStream;
                     _writeStream = streamPair.WriteStream;
-                    _pipe = new Pipe(new PipeOptions(pauseWriterThreshold: 0, resumeWriterThreshold: 0, minimumSegmentSize: 65536));
+                    _pipe ??= new Pipe(new PipeOptions(pauseWriterThreshold: 0, resumeWriterThreshold: 0, minimumSegmentSize: 65536));
                     _readPipeReader = PipeReader.Create(_readStream, new StreamPipeReaderOptions(bufferSize: 1048576));
                     _writeError = null;
                     
@@ -577,16 +577,9 @@ public sealed class StreamMultiplexer : IStreamMultiplexer
         }
         catch { }
         
-        try
-        {
-            if (_pipe != null)
-            {
-                await _pipe.Writer.CompleteAsync().ConfigureAwait(false);
-                await _pipe.Reader.CompleteAsync().ConfigureAwait(false);
-                _pipe = null;
-            }
-        }
-        catch { }
+        // Pipe is NOT completed here — it persists across reconnections
+        // to buffer writes during the disconnect window.
+        // Pipe cleanup happens in DisposeAsync (final disposal only).
         
         try
         {
@@ -668,16 +661,20 @@ public sealed class StreamMultiplexer : IStreamMultiplexer
                 if (!_disposed && !_goAwayReceived)
                 {
                     _isConnected = false;
+                    _writeError = null;
                     _disconnectReason = NetConduit.DisconnectReason.TransportError;
                     _disconnectException = ex;
                     
                     try { OnDisconnected?.Invoke(NetConduit.DisconnectReason.TransportError, ex); } catch { }
                     
-                    // Clean up old stream pair
+                    // Clean up old stream pair (Pipe is preserved to buffer writes)
                     await DisposeStreamsAsync().ConfigureAwait(false);
                     
                     // Reconnect with same retry logic
                     await ConnectWithRetryAsync(isReconnecting: true, ct).ConfigureAwait(false);
+                    
+                    // Ensure buffered data from disconnect window is drained
+                    _pendingFlush = true;
                     
                     // Successfully reconnected - continue loop to restart processing tasks
                     continue;
@@ -1272,14 +1269,27 @@ public sealed class StreamMultiplexer : IStreamMultiplexer
         try
         {
             var pipeReader = _pipe?.Reader;
-            if (pipeReader != null && pipeReader.TryRead(out var readResult))
+            var writeStream = _writeStream;
+            if (pipeReader != null && writeStream != null && pipeReader.TryRead(out var readResult))
             {
-                if (readResult.Buffer.Length > 0)
+                bool consumed = false;
+                try
                 {
-                    var writeStream = _writeStream!;
-                    await WriteBufferToStreamAsync(readResult.Buffer, writeStream, ct).ConfigureAwait(false);
+                    if (readResult.Buffer.Length > 0)
+                    {
+                        await WriteBufferToStreamAsync(readResult.Buffer, writeStream, ct).ConfigureAwait(false);
+                    }
+                    consumed = true;
                 }
-                pipeReader.AdvanceTo(readResult.Buffer.End);
+                finally
+                {
+                    // Always call AdvanceTo to avoid leaving PipeReader in AlreadyReading state.
+                    // On failure, preserve data by not advancing consumed or examined.
+                    if (consumed)
+                        pipeReader.AdvanceTo(readResult.Buffer.End);
+                    else
+                        pipeReader.AdvanceTo(readResult.Buffer.Start);
+                }
             }
         }
         finally
@@ -1308,14 +1318,25 @@ public sealed class StreamMultiplexer : IStreamMultiplexer
         try
         {
             var pipeReader = _pipe?.Reader;
-            if (pipeReader != null && pipeReader.TryRead(out var readResult))
+            var writeStream = _writeStream;
+            if (pipeReader != null && writeStream != null && pipeReader.TryRead(out var readResult))
             {
-                if (readResult.Buffer.Length > 0)
+                bool consumed = false;
+                try
                 {
-                    var writeStream = _writeStream!;
-                    await WriteBufferToStreamAsync(readResult.Buffer, writeStream, ct).ConfigureAwait(false);
+                    if (readResult.Buffer.Length > 0)
+                    {
+                        await WriteBufferToStreamAsync(readResult.Buffer, writeStream, ct).ConfigureAwait(false);
+                    }
+                    consumed = true;
                 }
-                pipeReader.AdvanceTo(readResult.Buffer.End);
+                finally
+                {
+                    if (consumed)
+                        pipeReader.AdvanceTo(readResult.Buffer.End);
+                    else
+                        pipeReader.AdvanceTo(readResult.Buffer.Start);
+                }
             }
         }
         finally
@@ -2385,6 +2406,17 @@ public sealed class StreamMultiplexer : IStreamMultiplexer
         finally
         {
             // Always clean up resources
+            try
+            {
+                if (_pipe != null)
+                {
+                    await _pipe.Writer.CompleteAsync().ConfigureAwait(false);
+                    await _pipe.Reader.CompleteAsync().ConfigureAwait(false);
+                    _pipe = null;
+                }
+            }
+            catch { }
+            
             try
             {
                 if (_streamPair != null)

@@ -77,6 +77,11 @@ mux.OnAutoReconnectFailed += (exception) =>
     Console.WriteLine($"Reconnection failed: {exception.Message}");
     // Maximum attempts exceeded
 };
+
+mux.OnReconnected += () =>
+{
+    Console.WriteLine("Reconnected — channels restored, buffered data delivered");
+};
 ```
 
 ## Configuration Options
@@ -99,12 +104,30 @@ var options = TcpMultiplexer.CreateOptions("localhost", 5000, configure: o =>
 });
 ```
 
+## Data Preservation
+
+The multiplexer's internal write buffer (Pipe) persists across reconnections. Data written during the disconnect window is buffered in memory and drained to the new stream after reconnect completes.
+
+```
+Write("A") → Write("B") → [disconnect] → Write("C") → [reconnect] → A, B, C all delivered
+```
+
+**What is preserved:**
+- Data written to channels before disconnect (already in the Pipe)
+- Data written to channels during the disconnect window (buffered in the Pipe)
+- Channel state (channels remain open across reconnects)
+
+**What is lost:**
+- Data that was in-flight through the transport at disconnect time (already handed to the OS/network, not yet received by the remote)
+
+This is analogous to real network behavior: data inside your application is safe, data on the wire may be lost.
+
 ## Channel Behavior During Reconnection
 
 ### Write Operations
 
 ```csharp
-// Writes may fail during disconnect — data in-flight at disconnect time is lost
+// Writes succeed during disconnect — data is buffered and delivered after reconnect
 await channel.WriteAsync(data);
 ```
 
@@ -128,6 +151,7 @@ Console.WriteLine(channel.State);  // Still "Open" during reconnection
 
 // Check multiplexer connection status
 Console.WriteLine($"Connected: {mux.IsConnected}");
+Console.WriteLine($"Reconnecting: {mux.IsReconnecting}");
 Console.WriteLine($"Running: {mux.IsRunning}");
 ```
 

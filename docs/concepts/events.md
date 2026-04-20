@@ -65,6 +65,29 @@ mux.OnAutoReconnectFailed += (exception) =>
 };
 ```
 
+### OnReconnected
+
+Fired when the connection is restored after a disconnection:
+
+```csharp
+mux.OnReconnected += () =>
+{
+    Console.WriteLine("Reconnected — channels restored");
+    // UI: Update status to "Connected"
+};
+```
+
+### OnReady
+
+Fired when the first successful connection and handshake completes:
+
+```csharp
+mux.OnReady += () =>
+{
+    Console.WriteLine("Multiplexer ready");
+};
+```
+
 ### OnChannelOpened
 
 Fired when a channel is opened:
@@ -157,10 +180,14 @@ channel.OnCreditRestored += (waitTime) =>
 if (mux.DisconnectReason.HasValue)
 {
     Console.WriteLine($"Was disconnected due to: {mux.DisconnectReason}");
+    if (mux.DisconnectException != null)
+        Console.WriteLine($"Exception: {mux.DisconnectException.Message}");
 }
 
 // Check connection status via boolean properties
 Console.WriteLine($"Connected: {mux.IsConnected}");
+Console.WriteLine($"Reconnecting: {mux.IsReconnecting}");
+Console.WriteLine($"Connection attempt: {mux.CurrentConnectionAttempt}");
 Console.WriteLine($"Running: {mux.IsRunning}");
 Console.WriteLine($"Shutting down: {mux.IsShuttingDown}");
 ```
@@ -275,6 +302,12 @@ mux.OnAutoReconnectFailed += (ex) =>
     logger.Error($"Reconnection failed: {ex.Message}");
     UpdateStatus("Connection Failed");
     ShowReconnectButton();
+};
+
+mux.OnReconnected += () =>
+{
+    logger.Info("Reconnected — channels restored");
+    UpdateStatus("Connected");
 };
 
 var runTask = mux.Start();
