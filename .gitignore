@@ -365,3 +365,4 @@ FodyWeavers.xsd
 /.nuke/temp
 
 benchmarks/traces/
+investigate/
