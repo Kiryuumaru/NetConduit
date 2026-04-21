@@ -7,16 +7,31 @@ namespace NetConduit.Transits;
 
 /// <summary>
 /// Extension methods for creating transits from multiplexers.
+/// <para>
+/// Duplex transits use a naming convention where two simplex channels form a bidirectional pair.
+/// Given a base <c>channelId</c>, the outbound (write) channel is named <c>"{channelId}&gt;&gt;"</c>
+/// and the inbound (read) channel is named <c>"{channelId}&lt;&lt;"</c>.
+/// The counterpart (<see cref="AcceptDuplexStreamAsync(IStreamMultiplexer, string, CancellationToken)"/>)
+/// reverses the roles: it reads from <c>"{channelId}&gt;&gt;"</c> and writes to <c>"{channelId}&lt;&lt;"</c>.
+/// </para>
+/// <para>
+/// The base <c>channelId</c> must not itself contain the suffix sequences <c>"&gt;&gt;"</c> or <c>"&lt;&lt;"</c>,
+/// as this would produce ambiguous composite channel names. For example, a base ID of <c>"data&gt;&gt;"</c>
+/// would yield write channel <c>"data&gt;&gt;&gt;&gt;"</c>, which is indistinguishable from a nested suffix.
+/// Callers are responsible for choosing base channel IDs that do not contain these reserved sequences.
+/// </para>
 /// </summary>
 public static class TransitExtensions
 {
     /// <summary>
     /// Suffix appended to channel ID for outbound (write) channels in duplex transits.
+    /// Base channel IDs must not contain this sequence to avoid naming ambiguity.
     /// </summary>
     public const string OutboundSuffix = ">>";
 
     /// <summary>
     /// Suffix appended to channel ID for inbound (read) channels in duplex transits.
+    /// Base channel IDs must not contain this sequence to avoid naming ambiguity.
     /// </summary>
     public const string InboundSuffix = "<<";
 

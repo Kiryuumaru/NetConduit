@@ -16,8 +16,12 @@ public sealed record MultiplexerOptions
     
     /// <summary>
     /// Maximum frame payload size in bytes. Default: 16MB.
+    /// Valid range: 1KB to 128MB.
     /// </summary>
     public int MaxFrameSize { get; init; } = 16 * 1024 * 1024;
+    
+    internal const int MinAllowedFrameSize = 1024;
+    internal const int MaxAllowedFrameSize = 128 * 1024 * 1024;
     
     /// <summary>
     /// Interval between heartbeat pings. Default: 30 seconds.
@@ -96,4 +100,10 @@ public sealed record MultiplexerOptions
     /// Timeout for handshake completion after connection. Default: Infinite (relies on user's CancellationToken).
     /// </summary>
     public TimeSpan HandshakeTimeout { get; init; } = Timeout.InfiniteTimeSpan;
+    
+    internal void Validate()
+    {
+        ArgumentOutOfRangeException.ThrowIfLessThan(MaxFrameSize, MinAllowedFrameSize);
+        ArgumentOutOfRangeException.ThrowIfGreaterThan(MaxFrameSize, MaxAllowedFrameSize);
+    }
 }

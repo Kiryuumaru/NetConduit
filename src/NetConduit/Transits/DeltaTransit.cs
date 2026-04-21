@@ -344,12 +344,20 @@ public sealed class DeltaTransit<T> : IAsyncDisposable
     {
         if (_writeChannel is null) return;
 
-        // Length-prefixed framing (4-byte big-endian) - use stack allocation for small buffer
-        Span<byte> lengthPrefix = stackalloc byte[4];
-        System.Buffers.Binary.BinaryPrimitives.WriteInt32BigEndian(lengthPrefix, data.Length);
-
-        await _writeChannel.WriteAsync(lengthPrefix.ToArray(), cancellationToken).ConfigureAwait(false);
-        await _writeChannel.WriteAsync(data, cancellationToken).ConfigureAwait(false);
+        // Atomic write: combine length prefix + body into single WriteAsync call
+        // to prevent partial framing on transport failure (see investigate/001)
+        var totalLength = 4 + data.Length;
+        var buffer = ArrayPool<byte>.Shared.Rent(totalLength);
+        try
+        {
+            System.Buffers.Binary.BinaryPrimitives.WriteInt32BigEndian(buffer, data.Length);
+            data.CopyTo(buffer.AsMemory(4));
+            await _writeChannel.WriteAsync(buffer.AsMemory(0, totalLength), cancellationToken).ConfigureAwait(false);
+        }
+        finally
+        {
+            ArrayPool<byte>.Shared.Return(buffer);
+        }
     }
 
     private async ValueTask<(byte[]? buffer, int length)> ReadMessageAsync(CancellationToken cancellationToken)

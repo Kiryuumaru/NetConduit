@@ -797,10 +797,11 @@ public class BenchmarkTests
         {
             await using var pipe = new DuplexPipe();
             
+            var minCredits = (uint)Math.Min(credits, 4 * 1024);
             await using var initiator = await TestMuxHelper.CreateMuxAsync(pipe.Stream1,
-                new MultiplexerOptions { StreamFactory = _ => null!, DefaultChannelOptions = new DefaultChannelOptions { MaxCredits = (uint)credits } });
+                new MultiplexerOptions { StreamFactory = _ => null!, DefaultChannelOptions = new DefaultChannelOptions { MinCredits = minCredits, MaxCredits = (uint)credits } });
             await using var acceptor = await TestMuxHelper.CreateMuxAsync(pipe.Stream2,
-                new MultiplexerOptions { StreamFactory = _ => null!, DefaultChannelOptions = new DefaultChannelOptions { MaxCredits = (uint)credits } });
+                new MultiplexerOptions { StreamFactory = _ => null!, DefaultChannelOptions = new DefaultChannelOptions { MinCredits = minCredits, MaxCredits = (uint)credits } });
 
             using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(60));
             

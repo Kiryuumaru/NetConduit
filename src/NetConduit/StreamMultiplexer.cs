@@ -138,6 +138,7 @@ public sealed class StreamMultiplexer : IStreamMultiplexer
     public static StreamMultiplexer Create(MultiplexerOptions options)
     {
         ArgumentNullException.ThrowIfNull(options);
+        options.Validate();
         return new StreamMultiplexer(options);
     }
 
@@ -1449,8 +1450,10 @@ public sealed class StreamMultiplexer : IStreamMultiplexer
         payload[0] = (byte)ControlSubtype.Handshake;
         _sessionId.TryWriteBytes(payload.AsSpan(1));
         
-        // Generate random nonce for index space negotiation
-        _localNonce = Random.Shared.NextInt64();
+        // Generate cryptographic nonce for index space negotiation
+        Span<byte> nonceBytes = stackalloc byte[8];
+        System.Security.Cryptography.RandomNumberGenerator.Fill(nonceBytes);
+        _localNonce = BinaryPrimitives.ReadInt64BigEndian(nonceBytes);
         BinaryPrimitives.WriteInt64BigEndian(payload.AsSpan(17), _localNonce);
         
         var header = new FrameHeader(ChannelIndexLimits.ControlChannel, FrameFlags.Data, (uint)payload.Length);
