@@ -142,7 +142,8 @@ IPC is the fastest transport option:
 - Direct kernel-mediated communication
 - Ideal for high-frequency local RPC
 
-Typical throughput: 1-10 GB/s depending on system.
+Typical throughput exceeds TCP loopback performance due to bypassing the network stack.
+TCP mux benchmarks show 966 MB/s at 1 channel / 1MB — IPC will be faster.
 
 ## When to Use IPC
 

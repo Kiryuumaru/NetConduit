@@ -9,8 +9,12 @@ from collections import defaultdict
 def load_results(*files):
     all_results = []
     for f in files:
-        with open(f) as fp:
-            all_results.extend(json.load(fp))
+        try:
+            with open(f) as fp:
+                data = json.load(fp)
+                all_results.extend(data)
+        except (json.JSONDecodeError, FileNotFoundError):
+            print(f"WARNING: Skipping {f} (empty or invalid)", file=sys.stderr)
     return all_results
 
 

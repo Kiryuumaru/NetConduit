@@ -53,7 +53,7 @@ echo ""
 echo "[3/6] Running Go GAME-TICK benchmarks..."
 echo "----------------------------------------------"
 taskset "$CPU_MASK" "$RESULTS_DIR/go-bench" game-tick \
-    > "$RESULTS_DIR/go-gametick.json"
+    > "$RESULTS_DIR/go-gametick.json" || echo "  WARNING: Go game-tick exited with error"
 echo "  Go game-tick complete."
 
 echo ""
@@ -62,7 +62,7 @@ echo "----------------------------------------------"
 taskset "$CPU_MASK" dotnet run \
     --project benchmarks/docker/netconduit-comparison \
     -c Release --no-build -- game-tick \
-    > "$RESULTS_DIR/dotnet-gametick.json"
+    > "$RESULTS_DIR/dotnet-gametick.json" || echo "  WARNING: .NET game-tick exited with error (partial results may exist)"
 echo "  .NET game-tick complete."
 
 # --- Run throughput: Go then .NET back-to-back ---
@@ -70,7 +70,7 @@ echo ""
 echo "[5/6] Running Go THROUGHPUT benchmarks..."
 echo "----------------------------------------------"
 taskset "$CPU_MASK" "$RESULTS_DIR/go-bench" throughput \
-    > "$RESULTS_DIR/go-throughput.json"
+    > "$RESULTS_DIR/go-throughput.json" || echo "  WARNING: Go throughput exited with error"
 echo "  Go throughput complete."
 
 echo ""
@@ -79,7 +79,7 @@ echo "----------------------------------------------"
 taskset "$CPU_MASK" dotnet run \
     --project benchmarks/docker/netconduit-comparison \
     -c Release --no-build -- throughput \
-    > "$RESULTS_DIR/dotnet-throughput.json"
+    > "$RESULTS_DIR/dotnet-throughput.json" || echo "  WARNING: .NET throughput exited with error (partial results may exist)"
 echo "  .NET throughput complete."
 
 # --- Generate report ---
@@ -93,7 +93,7 @@ python3 "$SCRIPT_DIR/report.py" \
     "$RESULTS_DIR/dotnet-gametick.json" \
     "$RESULTS_DIR/go-throughput.json" \
     "$RESULTS_DIR/dotnet-throughput.json" \
-    > "$RESULTS_DIR/comparison-report.md"
+    > "$RESULTS_DIR/comparison-report.md" || echo "  WARNING: Report generation had errors"
 
 echo ""
 echo "Results saved to:"

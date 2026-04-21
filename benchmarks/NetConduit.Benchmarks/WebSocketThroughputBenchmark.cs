@@ -4,6 +4,7 @@ using BenchmarkDotNet.Attributes;
 using BenchmarkDotNet.Columns;
 using BenchmarkDotNet.Configs;
 using BenchmarkDotNet.Jobs;
+using BenchmarkDotNet.Toolchains.InProcess.Emit;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Http;
@@ -25,6 +26,7 @@ public class WebSocketThroughputBenchmark
         public Config()
         {
             AddJob(Job.ShortRun
+                .WithToolchain(InProcessEmitToolchain.Instance)
                 .WithLaunchCount(1)
                 .WithWarmupCount(1)
                 .WithIterationCount(3)

@@ -3,6 +3,7 @@ using BenchmarkDotNet.Attributes;
 using BenchmarkDotNet.Columns;
 using BenchmarkDotNet.Configs;
 using BenchmarkDotNet.Jobs;
+using BenchmarkDotNet.Toolchains.InProcess.Emit;
 using NetConduit.Enums;
 using NetConduit.Internal;
 using NetConduit.Models;
@@ -23,6 +24,7 @@ public class DeltaEncodingBenchmark
         public Config()
         {
             AddJob(Job.ShortRun
+                .WithToolchain(InProcessEmitToolchain.Instance)
                 .WithLaunchCount(1)
                 .WithWarmupCount(2)
                 .WithIterationCount(5));
