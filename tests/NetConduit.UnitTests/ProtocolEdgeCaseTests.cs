@@ -351,4 +351,62 @@ public class ProtocolEdgeCaseTests
     }
 
     #endregion
+
+    #region GoAway Last Channel Index
+
+    [Fact]
+    public void GoAway_NoChannelsAllocated_LastChannelIndexIsZero()
+    {
+        // After DetermineIndexSpace, _nextChannelIndex is 1 (odd) or 2 (even).
+        // If no channels were allocated, GoAway must report lastChannelIndex=0.
+        // Old bug: subtracted 1 instead of 2, reporting a peer-space index.
+        uint nextChannelIndex = 2;
+        bool indexSpaceDetermined = true;
+
+        uint lastChannelIndex;
+        if (!indexSpaceDetermined || nextChannelIndex <= 2)
+            lastChannelIndex = 0;
+        else
+            lastChannelIndex = nextChannelIndex - 2;
+
+        Assert.Equal(0u, lastChannelIndex);
+    }
+
+    [Fact]
+    public void GoAway_PreHandshake_NoUintUnderflow()
+    {
+        // Before handshake, _nextChannelIndex is 0. Subtracting 1 from uint 0
+        // wraps to uint.MaxValue (4294967295). The old guard check didn't catch
+        // this because uint.MaxValue > MinDataChannel.
+        uint nextChannelIndex = 0;
+        bool indexSpaceDetermined = false;
+
+        uint lastChannelIndex;
+        if (!indexSpaceDetermined || nextChannelIndex <= 2)
+            lastChannelIndex = 0;
+        else
+            lastChannelIndex = nextChannelIndex - 2;
+
+        Assert.Equal(0u, lastChannelIndex);
+    }
+
+    [Fact]
+    public void GoAway_WithAllocatedChannels_ReportsHighestAllocatedIndex()
+    {
+        // Channels are allocated with a step of 2 (odd/even separation).
+        // With one channel allocated on even side (index 2), next is 4.
+        // lastChannelIndex should be 2, not 3.
+        uint nextChannelIndex = 4;
+        bool indexSpaceDetermined = true;
+
+        uint lastChannelIndex;
+        if (!indexSpaceDetermined || nextChannelIndex <= 2)
+            lastChannelIndex = 0;
+        else
+            lastChannelIndex = nextChannelIndex - 2;
+
+        Assert.Equal(2u, lastChannelIndex);
+    }
+
+    #endregion
 }

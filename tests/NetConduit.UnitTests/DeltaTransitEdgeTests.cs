@@ -449,4 +449,63 @@ public class DeltaTransitEdgeTests
     }
 
     #endregion
+
+    #region Large Array Diff Bounds
+
+    [Fact]
+    public void Diff_LargePrimitiveArrays_DifferentLength_FallsBackToReplace()
+    {
+        // DiffPrimitiveArrays routes to ComputeLCS which allocates an O(n*m) dp table.
+        // For large arrays this is a DoS vector (e.g. n=5000 → ~100MB allocation).
+        // Fix: cap the product at 1M and fall back to ArrayReplace.
+        var oldArr = new JsonArray();
+        var newArr = new JsonArray();
+        for (var i = 0; i < 2000; i++)
+            oldArr.Add(JsonValue.Create(i));
+        for (var i = 0; i < 2001; i++)
+            newArr.Add(JsonValue.Create(i * 2));
+
+        var ops = DeltaDiff.ComputeDelta(oldArr, newArr);
+
+        Assert.NotNull(ops);
+        Assert.True(ops.Count <= 10,
+            $"Expected ArrayReplace fallback (1 op), got {ops.Count} ops");
+    }
+
+    [Fact]
+    public void Diff_LargePrimitiveArrays_MemoryBounded()
+    {
+        // Verify that diffing large different-length arrays doesn't allocate
+        // hundreds of MB for the LCS dp table.
+        var oldArr = new JsonArray();
+        var newArr = new JsonArray();
+        for (var i = 0; i < 5000; i++)
+            oldArr.Add(JsonValue.Create(i));
+        for (var i = 0; i < 5001; i++)
+            newArr.Add(JsonValue.Create(i + 1));
+
+        var before = GC.GetTotalMemory(true);
+        DeltaDiff.ComputeDelta(oldArr, newArr);
+        var after = GC.GetTotalMemory(false);
+
+        Assert.True(after - before < 50_000_000,
+            $"Allocated {(after - before) / 1_000_000}MB — should be bounded by LCS cap");
+    }
+
+    [Fact]
+    public void Diff_SmallPrimitiveArrays_DifferentLength_UsesLCS()
+    {
+        // Small arrays below the cap should still use LCS for optimal diffs.
+        var oldArr = new JsonArray { JsonValue.Create(1), JsonValue.Create(2), JsonValue.Create(3) };
+        var newArr = new JsonArray { JsonValue.Create(1), JsonValue.Create(3), JsonValue.Create(4), JsonValue.Create(5) };
+
+        var ops = DeltaDiff.ComputeDelta(oldArr, newArr);
+
+        // With LCS, the diff should detect that 1 and 3 are common.
+        // Remaining changes: remove 2, insert 4, insert 5 → fine-grained ops.
+        Assert.NotNull(ops);
+        Assert.True(ops.Count > 1, "Small arrays should use LCS, not ArrayReplace");
+    }
+
+    #endregion
 }

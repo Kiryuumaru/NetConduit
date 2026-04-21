@@ -966,7 +966,14 @@ public sealed class StreamMultiplexer : IStreamMultiplexer
             await SendReconnectAsync(newWriteStream, cancellationToken).ConfigureAwait(false);
 
             // Wait for reconnect acknowledgment with their receive positions
-            await ReceiveReconnectAckAsync(newReadStream, cancellationToken).ConfigureAwait(false);
+            var positions = await ReceiveReconnectAckAsync(newReadStream, cancellationToken).ConfigureAwait(false);
+
+            // Apply peer's receive positions to our write channels
+            foreach (var (channelIndex, bytesReceived) in positions)
+            {
+                if (_writeChannelsByIndex.TryGetValue(channelIndex, out var channel))
+                    channel.SyncState.SetBytesAcked(bytesReceived);
+            }
 
             _isConnected = true;
             _isReconnecting = false;
@@ -1581,9 +1588,18 @@ public sealed class StreamMultiplexer : IStreamMultiplexer
 
     private async ValueTask SendGoAwayAsync(ErrorCode code, CancellationToken ct)
     {
-        var lastChannelIndex = Volatile.Read(ref _nextChannelIndex) - 1;
-        if (lastChannelIndex < ChannelIndexLimits.MinDataChannel)
+        var nextIdx = Volatile.Read(ref _nextChannelIndex);
+        
+        // Determine the highest channel index we actually allocated.
+        // After DetermineIndexSpace, _nextChannelIndex is 1 (odd) or 2 (even).
+        // AllocateChannelIndex increments by 2. So if _nextChannelIndex hasn't
+        // moved past the initial value, no channels were allocated → report 0.
+        // Pre-handshake (_nextChannelIndex == 0) also means no channels → report 0.
+        uint lastChannelIndex;
+        if (!_indexSpaceDetermined || nextIdx <= 2)
             lastChannelIndex = 0;
+        else
+            lastChannelIndex = nextIdx - 2;
             
         var payload = new byte[7];
         payload[0] = (byte)ControlSubtype.GoAway;

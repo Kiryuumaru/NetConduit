@@ -1,7 +1,9 @@
+using System.Buffers.Binary;
 using NetConduit;
 using NetConduit.Models;
 using NetConduit.Enums;
 using NetConduit.Exceptions;
+using NetConduit.Internal;
 
 namespace NetConduit.UnitTests;
 
@@ -752,6 +754,83 @@ public class ReconnectionTests
         var data = new byte[100];
         state.RecordSend(data);
         Assert.Equal(100, state.BytesSent);
+    }
+
+    #endregion
+
+    #region Reconnect ACK Position Sync
+
+    [Fact(Timeout = 30000)]
+    public async Task ReconnectAsync_AppliesPeerReceivePositions_ToWriteChannelSyncState()
+    {
+        // ReconnectAsync sends RECONNECT with our read positions and receives
+        // RECONNECT_ACK with the peer's read positions. Those positions must be
+        // applied to our write channels so we know where to resume sending.
+        // Old bug: ReceiveReconnectAckAsync return value was discarded.
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(25));
+
+        await using var pipe = new DuplexPipe();
+        var (muxA, muxB, _, _) = await TestMuxHelper.CreateMuxPairAsync(pipe, cancellationToken: cts.Token);
+
+        var writeChannel = await muxA.OpenChannelAsync(new ChannelOptions { ChannelId = "ack_sync" }, cts.Token);
+        var readChannel = await muxB.AcceptChannelAsync("ack_sync", cts.Token);
+
+        // Send data and read it on the other side so read position advances
+        var payload = new byte[4096];
+        Random.Shared.NextBytes(payload);
+        await writeChannel.WriteAsync(payload, cts.Token);
+        await writeChannel.FlushAsync(cts.Token);
+
+        var buf = new byte[4096];
+        var totalRead = 0;
+        while (totalRead < payload.Length)
+        {
+            var read = await readChannel.ReadAsync(buf.AsMemory(totalRead), cts.Token);
+            if (read == 0) break;
+            totalRead += read;
+        }
+        Assert.Equal(payload.Length, totalRead);
+        Assert.Equal(4096L, readChannel.SyncState.BytesReceived);
+        Assert.Equal(0L, writeChannel.SyncState.BytesAcked);
+
+        // Simulate reconnect protocol: craft a RECONNECT_ACK with the peer's positions
+        await using var reconnectPipe = new DuplexPipe();
+        var clientStream = reconnectPipe.Stream1;
+        var serverStream = reconnectPipe.Stream2;
+
+        var reconnectTask = muxA.ReconnectAsync(clientStream, clientStream, cts.Token);
+
+        // Read the RECONNECT frame muxA sends
+        var headerBuf = new byte[FrameHeader.Size];
+        await serverStream.ReadExactlyAsync(headerBuf, cts.Token);
+        var header = FrameHeader.Read(headerBuf);
+        var reconnectPayload = new byte[header.Length];
+        await serverStream.ReadExactlyAsync(reconnectPayload, cts.Token);
+        Assert.Equal((byte)ControlSubtype.Reconnect, reconnectPayload[0]);
+
+        // Build RECONNECT_ACK reporting that peer received 4096 bytes
+        var channelIndex = writeChannel.ChannelIndex;
+        var ackPayloadSize = 1 + 16 + 4 + 12;
+        var ackPayload = new byte[ackPayloadSize];
+        ackPayload[0] = (byte)ControlSubtype.ReconnectAck;
+        muxB.SessionId.TryWriteBytes(ackPayload.AsSpan(1, 16));
+        BinaryPrimitives.WriteUInt32BigEndian(ackPayload.AsSpan(17), 1);
+        BinaryPrimitives.WriteUInt32BigEndian(ackPayload.AsSpan(21), channelIndex);
+        BinaryPrimitives.WriteInt64BigEndian(ackPayload.AsSpan(25), 4096L);
+
+        var ackHeader = new FrameHeader(0, FrameFlags.Data, (uint)ackPayload.Length);
+        var ackHeaderBuf = new byte[FrameHeader.Size];
+        ackHeader.Write(ackHeaderBuf);
+        await serverStream.WriteAsync(ackHeaderBuf, cts.Token);
+        await serverStream.WriteAsync(ackPayload, cts.Token);
+        await serverStream.FlushAsync(cts.Token);
+
+        await reconnectTask;
+
+        Assert.Equal(4096L, writeChannel.SyncState.BytesAcked);
+
+        await muxA.DisposeAsync();
+        await muxB.DisposeAsync();
     }
 
     #endregion
