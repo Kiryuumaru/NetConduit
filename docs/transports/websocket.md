@@ -117,10 +117,10 @@ var options = WebSocketMultiplexer.CreateOptions(
 ### [Reconnection](../concepts/reconnection.md)
 
 ```csharp
-var options = WebSocketMultiplexer.CreateOptions("ws://localhost:5000/ws", configure: o =>
+var options = WebSocketMultiplexer.CreateOptions("ws://localhost:5000/ws") with
 {
-    o.MaxAutoReconnectAttempts = 10;
-});
+    MaxAutoReconnectAttempts = 10
+};
 
 var mux = StreamMultiplexer.Create(options);
 
@@ -149,6 +149,46 @@ var webSocket = await context.WebSockets.AcceptWebSocketAsync("netconduit");
 ```
 
 ## Tips
+
+**Server-side reconnection with WebSocketMuxListener:**
+
+The basic `CreateServerOptions` does not support reconnection. For server-side reconnection,
+use `WebSocketMuxListener` which manages session routing and reconnectable `StreamFactory`:
+
+```csharp
+using NetConduit.WebSocket;
+
+var listener = new WebSocketMuxListener(opts => opts with
+{
+    MaxAutoReconnectAttempts = 0,
+    ConnectionTimeout = TimeSpan.FromSeconds(30)
+});
+
+app.UseWebSockets();
+app.MapGet("/ws", async (HttpContext context) =>
+{
+    var ws = await context.WebSockets.AcceptWebSocketAsync();
+    Guid.TryParse(context.Request.Query["session"], out var sessionId);
+    await listener.HandleAsync(ws, sessionId == Guid.Empty ? null : sessionId, context.RequestAborted);
+});
+
+await foreach (var mux in listener.AcceptMuxesAsync(ct))
+{
+    var runTask = mux.Start(ct);
+    await mux.WaitForReadyAsync(ct);
+    _ = HandleSessionAsync(mux);
+}
+```
+
+Client-side, use `CreateReconnectableClientOptions` to include the session ID on reconnection:
+
+```csharp
+var (options, bind) = WebSocketMuxListener.CreateReconnectableClientOptions("ws://host/ws");
+var customized = options with { MaxAutoReconnectAttempts = 0, ConnectionTimeout = TimeSpan.FromSeconds(10) };
+var mux = StreamMultiplexer.Create(customized);
+bind(mux);
+var runTask = mux.Start(ct);
+```
 
 **CORS for browser clients:**
 ```csharp

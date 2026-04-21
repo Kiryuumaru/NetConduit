@@ -1,5 +1,6 @@
-namespace NetConduit.Transits;
+using NetConduit.Enums;
 
+namespace NetConduit.Transits;
 /// <summary>
 /// A transit that wraps a channel pair (WriteChannel + ReadChannel) as a bidirectional Stream.
 /// This allows using a pair of simplex channels as a single duplex stream.

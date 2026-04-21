@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using NetConduit.Models;
 
 namespace NetConduit.UnitTests;
 

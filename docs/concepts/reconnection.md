@@ -96,12 +96,12 @@ See [MultiplexerOptions](../api/multiplexer-options.md) for full configuration.
 | `AutoReconnectBackoffMultiplier` | 2.0 | Multiplier for exponential backoff |
 
 ```csharp
-var options = TcpMultiplexer.CreateOptions("localhost", 5000, configure: o =>
+var options = TcpMultiplexer.CreateOptions("localhost", 5000) with
 {
-    o.MaxAutoReconnectAttempts = 10;
-    o.AutoReconnectDelay = TimeSpan.FromSeconds(2);
-    o.MaxAutoReconnectDelay = TimeSpan.FromSeconds(30);
-});
+    MaxAutoReconnectAttempts = 10,
+    AutoReconnectDelay = TimeSpan.FromSeconds(2),
+    MaxAutoReconnectDelay = TimeSpan.FromSeconds(30)
+};
 ```
 
 ## Data Preservation
@@ -160,31 +160,31 @@ Console.WriteLine($"Running: {mux.IsRunning}");
 ### Quick Reconnect (Default)
 
 ```csharp
-var options = TcpMultiplexer.CreateOptions("localhost", 5000, configure: o =>
+var options = TcpMultiplexer.CreateOptions("localhost", 5000) with
 {
-    o.AutoReconnectDelay = TimeSpan.FromSeconds(1);
-});
+    AutoReconnectDelay = TimeSpan.FromSeconds(1)
+};
 // Fast reconnection for transient network issues
 ```
 
 ### Persistent Connection
 
 ```csharp
-var options = TcpMultiplexer.CreateOptions("localhost", 5000, configure: o =>
+var options = TcpMultiplexer.CreateOptions("localhost", 5000) with
 {
-    o.AutoReconnectDelay = TimeSpan.FromSeconds(5);
-    o.MaxAutoReconnectDelay = TimeSpan.FromMinutes(1);
-});
+    AutoReconnectDelay = TimeSpan.FromSeconds(5),
+    MaxAutoReconnectDelay = TimeSpan.FromMinutes(1)
+};
 // Long reconnection window for mobile/unstable networks
 ```
 
 ### Limited Attempts
 
 ```csharp
-var options = TcpMultiplexer.CreateOptions("localhost", 5000, configure: o =>
+var options = TcpMultiplexer.CreateOptions("localhost", 5000) with
 {
-    o.MaxAutoReconnectAttempts = 3;
-});
+    MaxAutoReconnectAttempts = 3
+};
 // Give up after 3 reconnection attempts
 ```
 
@@ -215,6 +215,28 @@ var sessionId = mux.SessionId;
 // On reconnect, server validates session
 // Channels are restored via session matching
 ```
+
+## Server-Side Reconnection
+
+Transport factory `CreateServerOptions` methods do not support reconnection (they throw on second call).
+
+For TCP servers, use a custom `StreamFactory` that re-accepts from the listener:
+
+```csharp
+var options = new MultiplexerOptions
+{
+    StreamFactory = async ct =>
+    {
+        var client = await listener.AcceptTcpClientAsync(ct);
+        client.NoDelay = true;
+        return new StreamPair(client.GetStream(), client);
+    },
+    ConnectionTimeout = TimeSpan.FromSeconds(10),
+    MaxAutoReconnectAttempts = 5
+};
+```
+
+For WebSocket servers, use `WebSocketMuxListener` which manages session routing automatically. See [WebSocket Transport](../transports/websocket.md) for details.
 
 ## Tips
 

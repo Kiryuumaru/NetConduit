@@ -1,5 +1,10 @@
 using System.Threading.Channels;
+using NetConduit.Enums;
+using NetConduit.Exceptions;
 using NetConduit.Internal;
+using NetConduit.Models;
+using ChannelClosedException = NetConduit.Exceptions.ChannelClosedException;
+using ChannelOptions = NetConduit.Models.ChannelOptions;
 
 namespace NetConduit;
 

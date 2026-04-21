@@ -7,6 +7,7 @@ using System.Net.Sockets;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using NetConduit;
+using NetConduit.Models;
 using NetConduit.Tcp;
 using NetConduit.Transits;
 

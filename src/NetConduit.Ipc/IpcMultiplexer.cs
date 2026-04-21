@@ -2,6 +2,7 @@ using System.Net;
 using System.Net.Sockets;
 using System.Security.Cryptography;
 using NetConduit;
+using NetConduit.Models;
 
 namespace NetConduit.Ipc;
 
@@ -15,15 +16,13 @@ public static class IpcMultiplexer
     /// Supports reconnection - each call to StreamFactory creates a new IPC connection.
     /// </summary>
     /// <param name="endpoint">The IPC endpoint name.</param>
-    /// <param name="configure">Optional action to configure additional multiplexer options.</param>
-    /// <returns>MultiplexerOptions configured for IPC client connection.</returns>
+    /// <returns>MultiplexerOptions configured for IPC client connection. Use <c>with</c> to customize.</returns>
     public static MultiplexerOptions CreateOptions(
-        string endpoint,
-        Action<MultiplexerOptions>? configure = null)
+        string endpoint)
     {
         ArgumentNullException.ThrowIfNull(endpoint);
 
-        var options = new MultiplexerOptions
+        return new MultiplexerOptions
         {
             StreamFactory = async ct =>
             {
@@ -45,9 +44,6 @@ public static class IpcMultiplexer
                 }
             }
         };
-
-        configure?.Invoke(options);
-        return options;
     }
 
     /// <summary>
@@ -55,16 +51,14 @@ public static class IpcMultiplexer
     /// Reconnection is disabled by default for server-side connections.
     /// </summary>
     /// <param name="endpoint">The IPC endpoint name.</param>
-    /// <param name="configure">Optional action to configure additional multiplexer options.</param>
-    /// <returns>MultiplexerOptions configured for IPC server acceptance.</returns>
+    /// <returns>MultiplexerOptions configured for IPC server acceptance. Use <c>with</c> to customize.</returns>
     public static MultiplexerOptions CreateServerOptions(
-        string endpoint,
-        Action<MultiplexerOptions>? configure = null)
+        string endpoint)
     {
         ArgumentNullException.ThrowIfNull(endpoint);
 
         var accepted = false;
-        var options = new MultiplexerOptions
+        return new MultiplexerOptions
         {
             StreamFactory = async ct =>
             {
@@ -113,9 +107,6 @@ public static class IpcMultiplexer
                 }
             }
         };
-
-        configure?.Invoke(options);
-        return options;
     }
 
     private static int GetDeterministicPort(string endpoint)

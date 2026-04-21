@@ -1,4 +1,4 @@
-namespace NetConduit;
+namespace NetConduit.Enums;
 
 /// <summary>
 /// Frame type flags. Not combinable - each frame has exactly one type.

@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using NetConduit.Models;
 using Xunit;
 using Xunit.Abstractions;
 

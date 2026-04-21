@@ -4,7 +4,13 @@ using System.Collections.Concurrent;
 using System.IO.Pipelines;
 using System.Runtime.CompilerServices;
 using System.Threading.Channels;
+using NetConduit.Constants;
+using NetConduit.Enums;
+using NetConduit.Exceptions;
 using NetConduit.Internal;
+using NetConduit.Models;
+using ChannelClosedException = NetConduit.Exceptions.ChannelClosedException;
+using ChannelOptions = NetConduit.Models.ChannelOptions;
 
 namespace NetConduit;
 
@@ -662,10 +668,10 @@ public sealed class StreamMultiplexer : IStreamMultiplexer
                 {
                     _isConnected = false;
                     _writeError = null;
-                    _disconnectReason = NetConduit.DisconnectReason.TransportError;
+                    _disconnectReason = Enums.DisconnectReason.TransportError;
                     _disconnectException = ex;
                     
-                    try { OnDisconnected?.Invoke(NetConduit.DisconnectReason.TransportError, ex); } catch { }
+                    try { OnDisconnected?.Invoke(Enums.DisconnectReason.TransportError, ex); } catch { }
                     
                     // Clean up old stream pair (Pipe is preserved to buffer writes)
                     await DisposeStreamsAsync().ConfigureAwait(false);
@@ -1055,11 +1061,11 @@ public sealed class StreamMultiplexer : IStreamMultiplexer
 
         _isConnected = false;
         _disconnectedTcs = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        _disconnectReason = NetConduit.DisconnectReason.TransportError;
+        _disconnectReason = Enums.DisconnectReason.TransportError;
         
         try
         {
-            OnDisconnected?.Invoke(NetConduit.DisconnectReason.TransportError, null);
+            OnDisconnected?.Invoke(Enums.DisconnectReason.TransportError, null);
         }
         catch
         {
@@ -1745,7 +1751,7 @@ public sealed class StreamMultiplexer : IStreamMultiplexer
         if (_disconnectReason.HasValue)
             return; // Already handled
             
-        _disconnectReason = NetConduit.DisconnectReason.TransportError;
+        _disconnectReason = Enums.DisconnectReason.TransportError;
         _disconnectException = ex;
         _isConnected = false;
         
@@ -1755,7 +1761,7 @@ public sealed class StreamMultiplexer : IStreamMultiplexer
             // Fire disconnect event first for auto-reconnect case
             try
             {
-                OnDisconnected?.Invoke(NetConduit.DisconnectReason.TransportError, ex);
+                OnDisconnected?.Invoke(Enums.DisconnectReason.TransportError, ex);
             }
             catch
             {
@@ -1773,7 +1779,7 @@ public sealed class StreamMultiplexer : IStreamMultiplexer
         
         try
         {
-            OnDisconnected?.Invoke(NetConduit.DisconnectReason.TransportError, ex);
+            OnDisconnected?.Invoke(Enums.DisconnectReason.TransportError, ex);
         }
         catch
         {
@@ -2005,7 +2011,7 @@ public sealed class StreamMultiplexer : IStreamMultiplexer
                 // Fire OnDisconnected with GoAwayReceived reason
                 if (!_disconnectReason.HasValue)
                 {
-                    _disconnectReason = NetConduit.DisconnectReason.GoAwayReceived;
+                    _disconnectReason = Enums.DisconnectReason.GoAwayReceived;
                     
                     // Abort all channels with MuxDisposed reason
                     foreach (var channel in _writeChannelsByIndex.Values)
@@ -2019,7 +2025,7 @@ public sealed class StreamMultiplexer : IStreamMultiplexer
                     
                     try
                     {
-                        OnDisconnected?.Invoke(NetConduit.DisconnectReason.GoAwayReceived, null);
+                        OnDisconnected?.Invoke(Enums.DisconnectReason.GoAwayReceived, null);
                     }
                     catch
                     {
@@ -2346,11 +2352,11 @@ public sealed class StreamMultiplexer : IStreamMultiplexer
             // Step 4: Set disconnect reason and fire event
             if (!_disconnectReason.HasValue)
             {
-                _disconnectReason = NetConduit.DisconnectReason.LocalDispose;
+                _disconnectReason = Enums.DisconnectReason.LocalDispose;
                 
                 try
                 {
-                    OnDisconnected?.Invoke(NetConduit.DisconnectReason.LocalDispose, null);
+                    OnDisconnected?.Invoke(Enums.DisconnectReason.LocalDispose, null);
                 }
                 catch
                 {

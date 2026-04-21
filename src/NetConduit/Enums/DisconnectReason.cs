@@ -1,4 +1,4 @@
-namespace NetConduit;
+namespace NetConduit.Enums;
 
 /// <summary>
 /// Reason for multiplexer disconnection.

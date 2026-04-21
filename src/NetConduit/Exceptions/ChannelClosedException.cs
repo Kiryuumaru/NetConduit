@@ -1,4 +1,6 @@
-namespace NetConduit;
+using NetConduit.Enums;
+
+namespace NetConduit.Exceptions;
 
 /// <summary>
 /// Exception thrown when attempting to use a closed channel.

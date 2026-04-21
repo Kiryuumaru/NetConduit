@@ -1,9 +1,9 @@
+using NetConduit.Enums;
+using NetConduit.Models;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using System.Text.Json.Serialization;
-using NetConduit.Enums;
 using NetConduit.Internal;
-using NetConduit.Models;
 using NetConduit.Transits;
 
 namespace NetConduit.UnitTests;

@@ -1,6 +1,7 @@
 using System.Net;
 using System.Net.Sockets;
 using NetConduit;
+using NetConduit.Models;
 
 namespace NetConduit.Udp;
 
@@ -19,17 +20,15 @@ public static class UdpMultiplexer
     /// <param name="host">The host to connect to.</param>
     /// <param name="port">The port to connect to.</param>
     /// <param name="udpOptions">Optional reliable UDP stream options.</param>
-    /// <param name="configure">Optional action to configure additional multiplexer options.</param>
-    /// <returns>MultiplexerOptions configured for UDP client connection.</returns>
+    /// <returns>MultiplexerOptions configured for UDP client connection. Use <c>with</c> to customize.</returns>
     public static MultiplexerOptions CreateOptions(
         string host,
         int port,
-        ReliableUdpOptions? udpOptions = null,
-        Action<MultiplexerOptions>? configure = null)
+        ReliableUdpOptions? udpOptions = null)
     {
         ArgumentNullException.ThrowIfNull(host);
 
-        var options = new MultiplexerOptions
+        return new MultiplexerOptions
         {
             StreamFactory = async ct =>
             {
@@ -43,9 +42,6 @@ public static class UdpMultiplexer
                 return new StreamPair(reliable);
             }
         };
-
-        configure?.Invoke(options);
-        return options;
     }
 
     /// <summary>
@@ -54,15 +50,13 @@ public static class UdpMultiplexer
     /// </summary>
     /// <param name="listenPort">The port to listen on.</param>
     /// <param name="udpOptions">Optional reliable UDP stream options.</param>
-    /// <param name="configure">Optional action to configure additional multiplexer options.</param>
-    /// <returns>MultiplexerOptions configured for UDP server acceptance.</returns>
+    /// <returns>MultiplexerOptions configured for UDP server acceptance. Use <c>with</c> to customize.</returns>
     public static MultiplexerOptions CreateServerOptions(
         int listenPort,
-        ReliableUdpOptions? udpOptions = null,
-        Action<MultiplexerOptions>? configure = null)
+        ReliableUdpOptions? udpOptions = null)
     {
         var accepted = false;
-        var options = new MultiplexerOptions
+        return new MultiplexerOptions
         {
             StreamFactory = async ct =>
             {
@@ -92,9 +86,6 @@ public static class UdpMultiplexer
                 return new StreamPair(reliable);
             }
         };
-
-        configure?.Invoke(options);
-        return options;
     }
 
     private static async Task TryReceiveHelloAckAsync(UdpClient client, CancellationToken cancellationToken)

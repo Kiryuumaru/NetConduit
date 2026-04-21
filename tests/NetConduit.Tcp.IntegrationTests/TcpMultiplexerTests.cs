@@ -1,6 +1,7 @@
 using System.Net;
 using System.Net.Sockets;
 using System.Text;
+using NetConduit.Models;
 using NetConduit.Tcp;
 
 namespace NetConduit.Tcp.IntegrationTests;

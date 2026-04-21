@@ -9,6 +9,7 @@ using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Http;
 using NetConduit;
+using NetConduit.Models;
 using NetConduit.WebSocket;
 
 namespace NetConduit.Benchmarks;

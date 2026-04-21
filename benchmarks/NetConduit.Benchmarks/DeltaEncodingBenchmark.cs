@@ -4,7 +4,6 @@ using BenchmarkDotNet.Columns;
 using BenchmarkDotNet.Configs;
 using BenchmarkDotNet.Jobs;
 using BenchmarkDotNet.Toolchains.InProcess.Emit;
-using NetConduit.Enums;
 using NetConduit.Internal;
 using NetConduit.Models;
 using NetConduit.Transits;

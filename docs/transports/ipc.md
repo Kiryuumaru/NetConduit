@@ -80,14 +80,14 @@ The IPC transport automatically uses the correct mechanism for the current OS.
 
 ## Configuration
 
-IPC transport uses the standard `configure` callback for multiplexer options:
+Customize multiplexer options using the record `with` expression:
 
 ```csharp
-var options = IpcMultiplexer.CreateOptions("my-app-ipc", configure: o =>
+var options = IpcMultiplexer.CreateOptions("my-app-ipc") with
 {
-    o.FlushMode = FlushMode.Immediate;
-    o.MaxAutoReconnectAttempts = 1;
-});
+    FlushMode = FlushMode.Immediate,
+    MaxAutoReconnectAttempts = 1
+};
 ```
 
 ## Use Cases

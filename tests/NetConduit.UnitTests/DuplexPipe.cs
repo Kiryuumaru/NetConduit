@@ -1,5 +1,6 @@
 using System.Buffers;
 using System.IO.Pipelines;
+using NetConduit.Models;
 
 namespace NetConduit.UnitTests;
 
@@ -190,13 +191,12 @@ public static class TestMuxHelper
     /// <summary>
     /// Creates MultiplexerOptions with a StreamFactory that returns the provided streams.
     /// </summary>
-    public static MultiplexerOptions CreateOptionsFor(Stream readStream, Stream writeStream, Action<MultiplexerOptions>? configure = null)
+    public static MultiplexerOptions CreateOptionsFor(Stream readStream, Stream writeStream)
     {
-        var opts = new MultiplexerOptions
+        return new MultiplexerOptions
         {
             StreamFactory = _ => Task.FromResult<IStreamPair>(new StreamPair(readStream, writeStream))
         };
-        return opts;
     }
     
     /// <summary>
@@ -288,25 +288,6 @@ public static class TestMuxHelper
             return new MultiplexerOptions { StreamFactory = streamFactory };
         }
         
-        return new MultiplexerOptions
-        {
-            SessionId = baseOptions.SessionId,
-            MaxFrameSize = baseOptions.MaxFrameSize,
-            PingInterval = baseOptions.PingInterval,
-            PingTimeout = baseOptions.PingTimeout,
-            MaxMissedPings = baseOptions.MaxMissedPings,
-            GoAwayTimeout = baseOptions.GoAwayTimeout,
-            GracefulShutdownTimeout = baseOptions.GracefulShutdownTimeout,
-            DefaultChannelOptions = baseOptions.DefaultChannelOptions,
-            FlushMode = baseOptions.FlushMode,
-            FlushInterval = baseOptions.FlushInterval,
-            StreamFactory = streamFactory,
-            MaxAutoReconnectAttempts = baseOptions.MaxAutoReconnectAttempts,
-            AutoReconnectDelay = baseOptions.AutoReconnectDelay,
-            MaxAutoReconnectDelay = baseOptions.MaxAutoReconnectDelay,
-            AutoReconnectBackoffMultiplier = baseOptions.AutoReconnectBackoffMultiplier,
-            ConnectionTimeout = baseOptions.ConnectionTimeout,
-            HandshakeTimeout = baseOptions.HandshakeTimeout
-        };
+        return baseOptions with { StreamFactory = streamFactory };
     }
 }

@@ -1,4 +1,6 @@
 using System.Diagnostics;
+using NetConduit.Models;
+using NetConduit.Enums;
 using Xunit;
 
 namespace NetConduit.UnitTests;

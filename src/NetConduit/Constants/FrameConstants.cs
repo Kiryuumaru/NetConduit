@@ -1,4 +1,4 @@
-namespace NetConduit;
+namespace NetConduit.Constants;
 
 /// <summary>
 /// Constants for frame encoding.

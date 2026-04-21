@@ -15,10 +15,10 @@ using NetConduit;
 using NetConduit.Tcp;
 
 // Create client options (with optional configuration)
-var options = TcpMultiplexer.CreateOptions("localhost", 5000, configure: o =>
+var options = TcpMultiplexer.CreateOptions("localhost", 5000) with
 {
-    o.MaxAutoReconnectAttempts = 10;
-});
+    MaxAutoReconnectAttempts = 10
+};
 
 // Create and start multiplexer
 var mux = StreamMultiplexer.Create(options);
@@ -96,11 +96,11 @@ async Task HandleClientAsync(TcpClient tcpClient)
 ### [Reconnection](../concepts/reconnection.md)
 
 ```csharp
-var options = TcpMultiplexer.CreateOptions("localhost", 5000, configure: o =>
+var options = TcpMultiplexer.CreateOptions("localhost", 5000) with
 {
-    o.MaxAutoReconnectAttempts = 10;
-    o.AutoReconnectDelay = TimeSpan.FromSeconds(2);
-});
+    MaxAutoReconnectAttempts = 10,
+    AutoReconnectDelay = TimeSpan.FromSeconds(2)
+};
 
 var mux = StreamMultiplexer.Create(options);
 

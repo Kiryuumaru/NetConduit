@@ -5,6 +5,7 @@ using System.Security.Authentication;
 using System.Security.Cryptography.X509Certificates;
 using System.Runtime.Versioning;
 using NetConduit;
+using NetConduit.Models;
 
 namespace NetConduit.Quic;
 
@@ -26,21 +27,19 @@ public static class QuicMultiplexer
     /// <param name="port">The port to connect to.</param>
     /// <param name="alpn">Optional application protocol name.</param>
     /// <param name="allowInsecure">Whether to allow insecure certificates (for development).</param>
-    /// <param name="configure">Optional action to configure additional multiplexer options.</param>
     /// <returns>MultiplexerOptions configured for QUIC client connection.</returns>
     public static MultiplexerOptions CreateOptions(
         string host,
         int port,
         string? alpn = null,
-        bool allowInsecure = true,
-        Action<MultiplexerOptions>? configure = null)
+        bool allowInsecure = true)
     {
         if (!QuicListener.IsSupported)
             throw new PlatformNotSupportedException("QUIC is not supported on this platform.");
 
         ArgumentNullException.ThrowIfNull(host);
 
-        var options = new MultiplexerOptions
+        return new MultiplexerOptions
         {
             StreamFactory = async ct =>
             {
@@ -77,9 +76,6 @@ public static class QuicMultiplexer
                 return new StreamPair(stream, stream, connection);
             }
         };
-
-        configure?.Invoke(options);
-        return options;
     }
 
     /// <summary>
@@ -130,11 +126,9 @@ public static class QuicMultiplexer
     /// Reconnection is disabled by default for server-side connections.
     /// </summary>
     /// <param name="listener">The QUIC listener to accept from.</param>
-    /// <param name="configure">Optional action to configure additional multiplexer options.</param>
     /// <returns>MultiplexerOptions configured for QUIC server acceptance.</returns>
     public static MultiplexerOptions CreateServerOptions(
-        QuicListener listener,
-        Action<MultiplexerOptions>? configure = null)
+        QuicListener listener)
     {
         if (!QuicListener.IsSupported)
             throw new PlatformNotSupportedException("QUIC is not supported on this platform.");
@@ -142,7 +136,7 @@ public static class QuicMultiplexer
         ArgumentNullException.ThrowIfNull(listener);
 
         var accepted = false;
-        var options = new MultiplexerOptions
+        return new MultiplexerOptions
         {
             StreamFactory = async ct =>
             {
@@ -164,8 +158,5 @@ public static class QuicMultiplexer
                 return new StreamPair(stream, stream, connection);
             }
         };
-
-        configure?.Invoke(options);
-        return options;
     }
 }

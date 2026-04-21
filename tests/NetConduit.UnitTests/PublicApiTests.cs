@@ -1,4 +1,5 @@
 using NetConduit.Enums;
+using NetConduit.Models;
 
 namespace NetConduit.UnitTests;
 

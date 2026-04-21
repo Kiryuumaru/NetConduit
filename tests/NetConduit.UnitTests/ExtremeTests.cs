@@ -1,3 +1,5 @@
+using NetConduit.Enums;
+using NetConduit.Models;
 using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.Security.Cryptography;

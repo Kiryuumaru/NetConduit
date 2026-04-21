@@ -45,7 +45,7 @@ var myStream = GetMyCustomStream();
 // Create options with StreamFactory
 var options = new MultiplexerOptions
 {
-    StreamFactory = async (ct) => (myStream, myStream)
+    StreamFactory = async (ct) => new StreamPair(myStream)
 };
 
 var mux = StreamMultiplexer.Create(options);
@@ -56,6 +56,6 @@ For split read/write streams:
 ```csharp
 var options = new MultiplexerOptions
 {
-    StreamFactory = async (ct) => (readStream, writeStream)
+    StreamFactory = async (ct) => new StreamPair(readStream, writeStream)
 };
 ```

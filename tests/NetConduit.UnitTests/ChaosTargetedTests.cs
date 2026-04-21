@@ -1,3 +1,5 @@
+using NetConduit.Exceptions;
+using NetConduit.Models;
 using System.Buffers.Binary;
 using System.Collections.Concurrent;
 using System.Security.Cryptography;
@@ -5,7 +7,6 @@ using System.Text.Json;
 using System.Text.Json.Nodes;
 using System.Text.Json.Serialization;
 using NetConduit.Internal;
-using NetConduit.Models;
 using NetConduit.Transits;
 
 namespace NetConduit.UnitTests;

@@ -21,6 +21,7 @@ dotnet run -- --help
 | [RemoteShell](../../samples/NetConduit.Samples.RemoteShell) | Bidirectional [channels](../concepts/channels.md) | SSH-like remote command execution |
 | [RpcFramework](../../samples/NetConduit.Samples.RpcFramework) | [MessageTransit](../transits/message.md), request/response | Type-safe JSON-RPC pattern |
 | [TcpTunnel](../../samples/NetConduit.Samples.TcpTunnel) | [DuplexStream](../transits/duplex-stream.md), relay | Port forwarding like ngrok |
+| [Scoreboard](../../samples/NetConduit.Samples.Scoreboard) | [MessageTransit](../transits/message.md), [DeltaTransit](../transits/delta.md), [Reconnection](../concepts/reconnection.md) | Live leaderboard with reconnection |
 
 ## Feature Matrix
 
@@ -32,6 +33,7 @@ dotnet run -- --help
 | RemoteShell | [TCP](../transports/tcp.md) | [MessageTransit](../transits/message.md) | Multiple channel types |
 | RpcFramework | [TCP](../transports/tcp.md) | [MessageTransit](../transits/message.md) | Request/response pattern |
 | TcpTunnel | [TCP](../transports/tcp.md), [WebSocket](../transports/websocket.md) | [DuplexStream](../transits/duplex-stream.md), Message | Relay architecture |
+| Scoreboard | [TCP](../transports/tcp.md) | [MessageTransit](../transits/message.md), [DeltaTransit](../transits/delta.md) | Reconnection, custom StreamFactory |
 
 ## Running Samples
 
@@ -98,6 +100,17 @@ dotnet run --project samples/NetConduit.Samples.TcpTunnel -- agent localhost 600
 dotnet run --project samples/NetConduit.Samples.TcpTunnel -- forward localhost 6000 myservice 4000
 ```
 
+### Scoreboard
+
+```bash
+# Server
+dotnet run --project samples/NetConduit.Samples.Scoreboard -- server 5200
+
+# Player (run multiple for leaderboard)
+dotnet run --project samples/NetConduit.Samples.Scoreboard -- player 5200 localhost Alice
+dotnet run --project samples/NetConduit.Samples.Scoreboard -- player 5200 localhost Bob
+```
+
 ## Learning Path
 
 1. **Start with GroupChat** - Basic MessageTransit and multi-client handling
@@ -105,3 +118,4 @@ dotnet run --project samples/NetConduit.Samples.TcpTunnel -- forward localhost 6
 3. **Explore RpcFramework** - Request/response patterns
 4. **Study TcpTunnel** - DuplexStream and relay architecture
 5. **Examine Pong** - DeltaTransit for efficient real-time updates
+6. **Study Scoreboard** - Reconnection with custom StreamFactory and DeltaTransit

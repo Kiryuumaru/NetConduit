@@ -1,4 +1,4 @@
-namespace NetConduit;
+namespace NetConduit.Models;
 
 /// <summary>
 /// Statistics for the multiplexer.

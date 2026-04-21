@@ -1,5 +1,5 @@
-using System.Text.Json.Nodes;
 using NetConduit.Enums;
+using System.Text.Json.Nodes;
 using NetConduit.Internal;
 
 namespace NetConduit.UnitTests;

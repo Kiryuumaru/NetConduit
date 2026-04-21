@@ -6,6 +6,7 @@ using BenchmarkDotNet.Configs;
 using BenchmarkDotNet.Jobs;
 using BenchmarkDotNet.Toolchains.InProcess.Emit;
 using NetConduit;
+using NetConduit.Models;
 using NetConduit.Tcp;
 
 namespace NetConduit.Benchmarks;

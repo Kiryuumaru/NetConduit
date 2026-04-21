@@ -1,4 +1,6 @@
-namespace NetConduit;
+using NetConduit.Enums;
+
+namespace NetConduit.Models;
 
 /// <summary>
 /// Default configuration options for channels (without ChannelId).

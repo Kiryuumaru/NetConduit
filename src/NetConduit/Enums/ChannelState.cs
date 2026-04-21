@@ -1,4 +1,4 @@
-namespace NetConduit;
+namespace NetConduit.Enums;
 
 /// <summary>
 /// Channel state.
