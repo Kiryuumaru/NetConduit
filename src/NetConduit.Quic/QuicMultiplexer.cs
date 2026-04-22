@@ -32,7 +32,7 @@ public static class QuicMultiplexer
         string host,
         int port,
         string? alpn = null,
-        bool allowInsecure = true)
+        bool allowInsecure = false)
     {
         if (!QuicListener.IsSupported)
             throw new PlatformNotSupportedException("QUIC is not supported on this platform.");
