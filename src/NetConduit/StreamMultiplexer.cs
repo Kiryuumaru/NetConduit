@@ -1043,10 +1043,13 @@ public sealed class StreamMultiplexer : IStreamMultiplexer
 
         // Parse remote's receive positions for our write channels
         var receivePositions = new Dictionary<uint, long>();
+        if (payload.Length < 21)
+            throw new MultiplexerException(ErrorCode.ProtocolError, "RECONNECT_ACK payload too small.");
+
         var channelCount = BinaryPrimitives.ReadUInt32BigEndian(payload.AsSpan(17));
         var offset = 21;
         
-        for (int i = 0; i < channelCount; i++)
+        for (int i = 0; i < channelCount && offset + 12 <= payload.Length; i++)
         {
             var channelIndex = BinaryPrimitives.ReadUInt32BigEndian(payload.AsSpan(offset));
             var bytesReceived = BinaryPrimitives.ReadInt64BigEndian(payload.AsSpan(offset + 4));

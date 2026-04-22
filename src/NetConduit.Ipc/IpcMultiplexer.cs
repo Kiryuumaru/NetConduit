@@ -96,14 +96,21 @@ public static class IpcMultiplexer
                         File.Delete(endpoint);
 
                     var listenSocket = new Socket(AddressFamily.Unix, SocketType.Stream, ProtocolType.Unspecified);
-                    var endPoint = new UnixDomainSocketEndPoint(endpoint);
-                    listenSocket.Bind(endPoint);
-                    listenSocket.Listen(backlog: 1);
-                    var clientSocket = await listenSocket.AcceptAsync(ct).ConfigureAwait(false);
-                    listenSocket.Dispose();
+                    try
+                    {
+                        var endPoint = new UnixDomainSocketEndPoint(endpoint);
+                        listenSocket.Bind(endPoint);
+                        listenSocket.Listen(backlog: 1);
+                        var clientSocket = await listenSocket.AcceptAsync(ct).ConfigureAwait(false);
 
-                    var stream = new NetworkStream(clientSocket, ownsSocket: true);
-                    return new StreamPair(stream);
+                        var stream = new NetworkStream(clientSocket, ownsSocket: true);
+                        return new StreamPair(stream);
+                    }
+                    finally
+                    {
+                        listenSocket.Dispose();
+                        try { File.Delete(endpoint); } catch { }
+                    }
                 }
             }
         };
