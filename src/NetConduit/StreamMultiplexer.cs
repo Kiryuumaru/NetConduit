@@ -1029,6 +1029,10 @@ public sealed class StreamMultiplexer : IStreamMultiplexer
         if (header.ChannelId != ChannelIndexLimits.ControlChannel)
             throw new MultiplexerException(ErrorCode.ProtocolError, "Expected control frame for RECONNECT_ACK.");
 
+        if (header.Length > _options.MaxFrameSize)
+            throw new MultiplexerException(ErrorCode.ProtocolError,
+                $"Reconnect ACK frame length {header.Length} exceeds MaxFrameSize {_options.MaxFrameSize}.");
+
         // Read payload
         var payload = new byte[header.Length];
         await readStream.ReadExactlyAsync(payload, ct).ConfigureAwait(false);
@@ -2088,6 +2092,13 @@ public sealed class StreamMultiplexer : IStreamMultiplexer
         var incomingSessionId = new Guid(data.Span[..16]);
         var channelCount = BinaryPrimitives.ReadUInt32BigEndian(data.Span[16..]);
 
+        var expectedSize = 20 + (long)channelCount * 12;
+        if (expectedSize > data.Length)
+        {
+            SendError(0, ErrorCode.ProtocolError, "RECONNECT payload too short for declared channel count", ct);
+            return;
+        }
+
         // Verify this is a valid reconnection for this session
         if (incomingSessionId != _remoteSessionId && _remoteSessionId != Guid.Empty)
         {
@@ -2098,7 +2109,7 @@ public sealed class StreamMultiplexer : IStreamMultiplexer
         // Parse remote's receive positions (for channels we write to)
         // Remote is telling us how much they received on each of our write channels
         var offset = 20;
-        for (int i = 0; i < channelCount && offset + 12 <= data.Length; i++)
+        for (int i = 0; i < channelCount; i++)
         {
             var channelIndex = BinaryPrimitives.ReadUInt32BigEndian(data.Span[offset..]);
             var bytesReceived = BinaryPrimitives.ReadInt64BigEndian(data.Span[(offset + 4)..]);

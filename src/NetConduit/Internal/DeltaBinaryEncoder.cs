@@ -114,9 +114,13 @@ internal static class DeltaBinaryEncoder
             throw new InvalidOperationException($"Unsupported binary delta version: {version}");
 
         var opCount = ReadVarint(data, ref offset);
+        if (opCount < 0 || opCount > data.Length)
+            throw new InvalidOperationException($"Invalid operation count {opCount}: exceeds data length {data.Length}.");
 
         // Read string table
         var stringCount = ReadVarint(data, ref offset);
+        if (stringCount < 0 || stringCount > data.Length)
+            throw new InvalidOperationException($"Invalid string count {stringCount}: exceeds data length {data.Length}.");
         var stringTable = new string[stringCount];
         for (int i = 0; i < stringCount; i++)
         {
@@ -130,6 +134,8 @@ internal static class DeltaBinaryEncoder
 
             // Read path
             var pathLength = ReadVarint(data, ref offset);
+            if (pathLength < 0 || pathLength > data.Length - offset)
+                throw new InvalidOperationException($"Invalid path length {pathLength}: exceeds remaining data.");
             var path = new object[pathLength];
             for (int j = 0; j < pathLength; j++)
             {
@@ -223,6 +229,11 @@ internal static class DeltaBinaryEncoder
         byte b;
         do
         {
+            if (offset >= data.Length)
+                throw new InvalidOperationException("Truncated varint: unexpected end of data.");
+            if (shift > 28)
+                throw new InvalidOperationException("Malformed varint: exceeds 5-byte limit for 32-bit integer.");
+
             b = data[offset++];
             result |= (b & 0x7F) << shift;
             shift += 7;
@@ -240,6 +251,8 @@ internal static class DeltaBinaryEncoder
     private static string ReadString(ReadOnlySpan<byte> data, ref int offset)
     {
         var length = ReadVarint(data, ref offset);
+        if (length < 0 || offset + length > data.Length)
+            throw new InvalidOperationException($"Invalid string length {length}: exceeds available data ({data.Length - offset} bytes remaining).");
         var str = Encoding.UTF8.GetString(data.Slice(offset, length));
         offset += length;
         return str;
