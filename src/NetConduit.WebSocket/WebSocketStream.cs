@@ -56,7 +56,17 @@ internal sealed class WebSocketStream : Stream
 
             if (result.MessageType == WebSocketMessageType.Close)
             {
-                return 0; // End of stream
+                if (_webSocket.State == WebSocketState.CloseReceived)
+                {
+                    try
+                    {
+                        await _webSocket.CloseOutputAsync(
+                            WebSocketCloseStatus.NormalClosure, null, cancellationToken).ConfigureAwait(false);
+                    }
+                    catch (WebSocketException) { }
+                    catch (ObjectDisposedException) { }
+                }
+                return 0;
             }
 
             if (result.Count > 0)
@@ -87,12 +97,18 @@ internal sealed class WebSocketStream : Stream
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
 
-        if (_webSocket.State != WebSocketState.Open)
+        try
         {
-            throw new InvalidOperationException("WebSocket is not open.");
+            await _webSocket.SendAsync(buffer, WebSocketMessageType.Binary, endOfMessage: true, cancellationToken).ConfigureAwait(false);
         }
-
-        await _webSocket.SendAsync(buffer, WebSocketMessageType.Binary, endOfMessage: true, cancellationToken).ConfigureAwait(false);
+        catch (WebSocketException) when (_webSocket.State != WebSocketState.Open)
+        {
+            throw new IOException("WebSocket connection was closed.");
+        }
+        catch (InvalidOperationException) when (_webSocket.State != WebSocketState.Open)
+        {
+            throw new IOException("WebSocket connection was closed.");
+        }
     }
 
     public override void Flush() { }
@@ -117,7 +133,6 @@ internal sealed class WebSocketStream : Stream
         if (!_disposed)
         {
             _disposed = true;
-            // Don't dispose the WebSocket here - it's owned by WebSocketMultiplexerConnection
         }
         base.Dispose(disposing);
     }
