@@ -231,9 +231,17 @@ internal static class DeltaDiff
 
     /// <summary>
     /// Diffs arrays of primitives using LCS for optimal insert/remove detection.
+    /// Falls back to ArrayReplace for large arrays to prevent O(n²) memory allocation.
     /// </summary>
     private static List<DeltaOperation> DiffPrimitiveArrays(JsonArray oldArr, JsonArray newArr, object[] basePath)
     {
+        // Cap: if n*m exceeds threshold, LCS dp table would be too large → use ArrayReplace
+        const long maxLcsProduct = 1_000_000; // ~4MB for int[n+1, m+1]
+        if ((long)oldArr.Count * newArr.Count > maxLcsProduct)
+        {
+            return [new DeltaOperation(DeltaOp.ArrayReplace, basePath, newArr.DeepClone())];
+        }
+
         var ops = new List<DeltaOperation>();
         var lcs = ComputeLCS(oldArr, newArr);
 

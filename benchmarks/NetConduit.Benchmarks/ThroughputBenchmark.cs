@@ -4,7 +4,9 @@ using BenchmarkDotNet.Attributes;
 using BenchmarkDotNet.Columns;
 using BenchmarkDotNet.Configs;
 using BenchmarkDotNet.Jobs;
+using BenchmarkDotNet.Toolchains.InProcess.Emit;
 using NetConduit;
+using NetConduit.Models;
 using NetConduit.Tcp;
 
 namespace NetConduit.Benchmarks;
@@ -22,6 +24,7 @@ public class ThroughputBenchmark
         public Config()
         {
             AddJob(Job.ShortRun
+                .WithToolchain(InProcessEmitToolchain.Instance)
                 .WithLaunchCount(1)
                 .WithWarmupCount(1)
                 .WithIterationCount(3)

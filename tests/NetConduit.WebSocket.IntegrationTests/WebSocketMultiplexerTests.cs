@@ -6,7 +6,9 @@ using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
+using NetConduit.Models;
 using NetConduit.WebSocket;
+using ChannelOptions = NetConduit.Models.ChannelOptions;
 
 namespace NetConduit.WebSocket.IntegrationTests;
 

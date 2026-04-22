@@ -24,7 +24,14 @@ Configuration for creating a StreamMultiplexer. See [Getting Started](../getting
 | `FlushMode` | `FlushMode` | Batched | Frame flushing strategy |
 | `FlushInterval` | `TimeSpan` | 1ms | Interval for batched flushing |
 
-All properties are `init`-only. Use the `configure` callback on transport factory methods, or set them in object initializers.
+All properties are `init`-only. `MultiplexerOptions` is a `record`, so customize via `with`:
+
+```csharp
+var options = TcpMultiplexer.CreateOptions("localhost", 5000) with
+{
+    PingInterval = TimeSpan.FromSeconds(15)
+};
+```
 
 ## StreamFactory
 
@@ -40,12 +47,12 @@ Transport helpers set this automatically:
 // Transport helpers handle StreamFactory for you
 var options = TcpMultiplexer.CreateOptions("localhost", 5000);
 
-// Or configure additional properties
-var options = TcpMultiplexer.CreateOptions("localhost", 5000, configure: o =>
+// Customize additional properties with record 'with' expression
+var options = TcpMultiplexer.CreateOptions("localhost", 5000) with
 {
-    o.PingInterval = TimeSpan.FromSeconds(15);
-    o.MaxMissedPings = 2;
-});
+    PingInterval = TimeSpan.FromSeconds(15),
+    MaxMissedPings = 2
+};
 ```
 
 ## DefaultChannelOptions
@@ -64,12 +71,12 @@ Defaults applied to channels when not overridden in `ChannelOptions`:
 Heartbeats detect dead connections. See [Reconnection](../concepts/reconnection.md) for recovery behavior.
 
 ```csharp
-var options = TcpMultiplexer.CreateOptions("localhost", 5000, configure: o =>
+var options = TcpMultiplexer.CreateOptions("localhost", 5000) with
 {
-    o.PingInterval = TimeSpan.FromSeconds(15);
-    o.PingTimeout = TimeSpan.FromSeconds(5);
-    o.MaxMissedPings = 2;
-});
+    PingInterval = TimeSpan.FromSeconds(15),
+    PingTimeout = TimeSpan.FromSeconds(5),
+    MaxMissedPings = 2
+};
 // Disconnect after: 15s + 15s + 5s = 35 seconds of silence
 ```
 
@@ -78,13 +85,13 @@ var options = TcpMultiplexer.CreateOptions("localhost", 5000, configure: o =>
 See [Reconnection](../concepts/reconnection.md) for full behavior details.
 
 ```csharp
-var options = TcpMultiplexer.CreateOptions("localhost", 5000, configure: o =>
+var options = TcpMultiplexer.CreateOptions("localhost", 5000) with
 {
-    o.MaxAutoReconnectAttempts = 10;
-    o.AutoReconnectDelay = TimeSpan.FromSeconds(2);
-    o.MaxAutoReconnectDelay = TimeSpan.FromSeconds(30);
-    o.AutoReconnectBackoffMultiplier = 2.0;
-});
+    MaxAutoReconnectAttempts = 10,
+    AutoReconnectDelay = TimeSpan.FromSeconds(2),
+    MaxAutoReconnectDelay = TimeSpan.FromSeconds(30),
+    AutoReconnectBackoffMultiplier = 2.0
+};
 ```
 
 ## Flush Modes
@@ -100,23 +107,23 @@ public enum FlushMode
 
 ```csharp
 // Low latency - flush immediately
-var options = TcpMultiplexer.CreateOptions("localhost", 5000, configure: o =>
+var options = TcpMultiplexer.CreateOptions("localhost", 5000) with
 {
-    o.FlushMode = FlushMode.Immediate;
-});
+    FlushMode = FlushMode.Immediate
+};
 
 // High throughput - batch frames
-var options = TcpMultiplexer.CreateOptions("localhost", 5000, configure: o =>
+var options = TcpMultiplexer.CreateOptions("localhost", 5000) with
 {
-    o.FlushMode = FlushMode.Batched;
-    o.FlushInterval = TimeSpan.FromMilliseconds(5);
-});
+    FlushMode = FlushMode.Batched,
+    FlushInterval = TimeSpan.FromMilliseconds(5)
+};
 
 // Maximum throughput - manual flush
-var options = TcpMultiplexer.CreateOptions("localhost", 5000, configure: o =>
+var options = TcpMultiplexer.CreateOptions("localhost", 5000) with
 {
-    o.FlushMode = FlushMode.Manual;
-});
+    FlushMode = FlushMode.Manual
+};
 ```
 
 ## Example Configurations
@@ -124,45 +131,45 @@ var options = TcpMultiplexer.CreateOptions("localhost", 5000, configure: o =>
 ### Low Latency (Interactive)
 
 ```csharp
-var options = TcpMultiplexer.CreateOptions("localhost", 5000, configure: o =>
+var options = TcpMultiplexer.CreateOptions("localhost", 5000) with
 {
-    o.FlushMode = FlushMode.Immediate;
-    o.PingInterval = TimeSpan.FromSeconds(10);
-    o.PingTimeout = TimeSpan.FromSeconds(3);
-});
+    FlushMode = FlushMode.Immediate,
+    PingInterval = TimeSpan.FromSeconds(10),
+    PingTimeout = TimeSpan.FromSeconds(3)
+};
 ```
 
 ### High Throughput (Bulk Transfer)
 
 ```csharp
-var options = TcpMultiplexer.CreateOptions("localhost", 5000, configure: o =>
+var options = TcpMultiplexer.CreateOptions("localhost", 5000) with
 {
-    o.FlushMode = FlushMode.Batched;
-    o.FlushInterval = TimeSpan.FromMilliseconds(10);
-    o.MaxFrameSize = 64 * 1024 * 1024;  // 64MB frames
-});
+    FlushMode = FlushMode.Batched,
+    FlushInterval = TimeSpan.FromMilliseconds(10),
+    MaxFrameSize = 64 * 1024 * 1024  // 64MB frames
+};
 ```
 
 ### Mobile (Unstable Network)
 
 ```csharp
-var options = TcpMultiplexer.CreateOptions("localhost", 5000, configure: o =>
+var options = TcpMultiplexer.CreateOptions("localhost", 5000) with
 {
-    o.MaxAutoReconnectAttempts = 20;
-    o.AutoReconnectDelay = TimeSpan.FromSeconds(1);
-    o.MaxAutoReconnectDelay = TimeSpan.FromMinutes(1);
-    o.PingInterval = TimeSpan.FromSeconds(20);
-    o.MaxMissedPings = 5;
-});
+    MaxAutoReconnectAttempts = 20,
+    AutoReconnectDelay = TimeSpan.FromSeconds(1),
+    MaxAutoReconnectDelay = TimeSpan.FromMinutes(1),
+    PingInterval = TimeSpan.FromSeconds(20),
+    MaxMissedPings = 5
+};
 ```
 
 ### Localhost (IPC-style)
 
 ```csharp
-var options = TcpMultiplexer.CreateOptions("localhost", 5000, configure: o =>
+var options = TcpMultiplexer.CreateOptions("localhost", 5000) with
 {
-    o.FlushMode = FlushMode.Immediate;
-    o.MaxAutoReconnectAttempts = 1;  // Fast fail
-    o.PingInterval = TimeSpan.FromMinutes(5);  // Rare pings
-});
+    FlushMode = FlushMode.Immediate,
+    MaxAutoReconnectAttempts = 1,  // Fast fail
+    PingInterval = TimeSpan.FromMinutes(5)  // Rare pings
+};
 ```

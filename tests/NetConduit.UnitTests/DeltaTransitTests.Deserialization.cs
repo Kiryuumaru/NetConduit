@@ -1,6 +1,6 @@
+using NetConduit.Enums;
 using System.Text;
 using System.Text.Json;
-using NetConduit.Enums;
 using NetConduit.Internal;
 using NetConduit.Transits;
 

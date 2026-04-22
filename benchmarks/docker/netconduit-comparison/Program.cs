@@ -44,14 +44,28 @@ foreach (var channels in channelCounts)
     foreach (var dataSize in dataSizes)
     {
         // Raw TCP baseline
-        var rawMbps = await RunThroughputRawTcpAsync(channels, dataSize, Runs);
-        results.Add(MakeThroughputResult("Raw TCP (.NET)", channels, dataSize, rawMbps));
-        Console.Error.WriteLine($"  throughput Raw TCP (.NET)       ch={channels,4} data={dataSize,8}  {rawMbps,8:F1} MB/s");
+        try
+        {
+            var rawMbps = await RunThroughputRawTcpAsync(channels, dataSize, Runs);
+            results.Add(MakeThroughputResult("Raw TCP (.NET)", channels, dataSize, rawMbps));
+            Console.Error.WriteLine($"  throughput Raw TCP (.NET)       ch={channels,4} data={dataSize,8}  {rawMbps,8:F1} MB/s");
+        }
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine($"  throughput Raw TCP (.NET)       ch={channels,4} data={dataSize,8}  FAILED: {ex.GetType().Name}");
+        }
 
         // NetConduit Mux
-        var muxMbps = await RunThroughputMuxAsync(channels, dataSize, Runs);
-        results.Add(MakeThroughputResult("NetConduit Mux TCP", channels, dataSize, muxMbps));
-        Console.Error.WriteLine($"  throughput NetConduit Mux TCP   ch={channels,4} data={dataSize,8}  {muxMbps,8:F1} MB/s");
+        try
+        {
+            var muxMbps = await RunThroughputMuxAsync(channels, dataSize, Runs);
+            results.Add(MakeThroughputResult("NetConduit Mux TCP", channels, dataSize, muxMbps));
+            Console.Error.WriteLine($"  throughput NetConduit Mux TCP   ch={channels,4} data={dataSize,8}  {muxMbps,8:F1} MB/s");
+        }
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine($"  throughput NetConduit Mux TCP   ch={channels,4} data={dataSize,8}  FAILED: {ex.GetType().Name}");
+        }
     }
 }
 }

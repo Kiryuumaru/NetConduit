@@ -1,5 +1,6 @@
 using System.Collections.Concurrent;
 using NetConduit.Internal;
+using NetConduit.Models;
 
 namespace NetConduit.UnitTests;
 

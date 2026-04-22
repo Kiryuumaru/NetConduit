@@ -1,6 +1,7 @@
 using System.Collections.Concurrent;
 using System.Net;
 using System.Net.Sockets;
+using NetConduit.Models;
 using NetConduit.Streams;
 
 namespace NetConduit.UnitTests;

@@ -72,6 +72,7 @@ dotnet add package NetConduit.Quic       # QUIC (.NET 9+)
 | [RemoteShell](samples/NetConduit.Samples.RemoteShell) | SSH-like remote command execution |
 | [RpcFramework](samples/NetConduit.Samples.RpcFramework) | Request/response RPC pattern |
 | [TcpTunnel](samples/NetConduit.Samples.TcpTunnel) | Port forwarding via relay (like ngrok) |
+| [Scoreboard](samples/NetConduit.Samples.Scoreboard) | Live leaderboard with reconnection and DeltaTransit |
 
 ## License
 

@@ -1,5 +1,6 @@
 using System.Net;
 using System.Net.Sockets;
+using NetConduit.Models;
 
 namespace NetConduit.Tcp;
 
@@ -14,16 +15,14 @@ public static class TcpMultiplexer
     /// </summary>
     /// <param name="host">The host to connect to.</param>
     /// <param name="port">The port to connect to.</param>
-    /// <param name="configure">Optional action to configure additional options.</param>
-    /// <returns>MultiplexerOptions configured for TCP client connection.</returns>
+    /// <returns>MultiplexerOptions configured for TCP client connection. Use <c>with</c> to customize.</returns>
     public static MultiplexerOptions CreateOptions(
         string host,
-        int port,
-        Action<MultiplexerOptions>? configure = null)
+        int port)
     {
         ArgumentNullException.ThrowIfNull(host);
         
-        var options = new MultiplexerOptions
+        return new MultiplexerOptions
         {
             StreamFactory = async ct =>
             {
@@ -33,9 +32,6 @@ public static class TcpMultiplexer
                 return new StreamPair(stream, client);
             }
         };
-        
-        configure?.Invoke(options);
-        return options;
     }
     
     /// <summary>
@@ -43,15 +39,13 @@ public static class TcpMultiplexer
     /// Supports reconnection - each call to StreamFactory creates a new TCP connection.
     /// </summary>
     /// <param name="endpoint">The endpoint to connect to.</param>
-    /// <param name="configure">Optional action to configure additional options.</param>
-    /// <returns>MultiplexerOptions configured for TCP client connection.</returns>
+    /// <returns>MultiplexerOptions configured for TCP client connection. Use <c>with</c> to customize.</returns>
     public static MultiplexerOptions CreateOptions(
-        IPEndPoint endpoint,
-        Action<MultiplexerOptions>? configure = null)
+        IPEndPoint endpoint)
     {
         ArgumentNullException.ThrowIfNull(endpoint);
         
-        var options = new MultiplexerOptions
+        return new MultiplexerOptions
         {
             StreamFactory = async ct =>
             {
@@ -61,9 +55,6 @@ public static class TcpMultiplexer
                 return new StreamPair(stream, client);
             }
         };
-        
-        configure?.Invoke(options);
-        return options;
     }
 
     /// <summary>
@@ -71,16 +62,14 @@ public static class TcpMultiplexer
     /// Reconnection is disabled by default for server-side connections.
     /// </summary>
     /// <param name="listener">The TCP listener to accept from.</param>
-    /// <param name="configure">Optional action to configure additional options.</param>
-    /// <returns>MultiplexerOptions configured for TCP server acceptance.</returns>
+    /// <returns>MultiplexerOptions configured for TCP server acceptance. Use <c>with</c> to customize.</returns>
     public static MultiplexerOptions CreateServerOptions(
-        TcpListener listener,
-        Action<MultiplexerOptions>? configure = null)
+        TcpListener listener)
     {
         ArgumentNullException.ThrowIfNull(listener);
         
         var accepted = false;
-        var options = new MultiplexerOptions
+        return new MultiplexerOptions
         {
             StreamFactory = async ct =>
             {
@@ -98,8 +87,5 @@ public static class TcpMultiplexer
                 return new StreamPair(stream, client);
             }
         };
-        
-        configure?.Invoke(options);
-        return options;
     }
 }

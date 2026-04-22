@@ -2,6 +2,7 @@ using System.Net;
 using System.Net.Sockets;
 using System.Security.Cryptography;
 using NetConduit;
+using NetConduit.Models;
 
 namespace NetConduit.Ipc;
 
@@ -15,15 +16,13 @@ public static class IpcMultiplexer
     /// Supports reconnection - each call to StreamFactory creates a new IPC connection.
     /// </summary>
     /// <param name="endpoint">The IPC endpoint name.</param>
-    /// <param name="configure">Optional action to configure additional multiplexer options.</param>
-    /// <returns>MultiplexerOptions configured for IPC client connection.</returns>
+    /// <returns>MultiplexerOptions configured for IPC client connection. Use <c>with</c> to customize.</returns>
     public static MultiplexerOptions CreateOptions(
-        string endpoint,
-        Action<MultiplexerOptions>? configure = null)
+        string endpoint)
     {
         ArgumentNullException.ThrowIfNull(endpoint);
 
-        var options = new MultiplexerOptions
+        return new MultiplexerOptions
         {
             StreamFactory = async ct =>
             {
@@ -45,9 +44,6 @@ public static class IpcMultiplexer
                 }
             }
         };
-
-        configure?.Invoke(options);
-        return options;
     }
 
     /// <summary>
@@ -55,16 +51,14 @@ public static class IpcMultiplexer
     /// Reconnection is disabled by default for server-side connections.
     /// </summary>
     /// <param name="endpoint">The IPC endpoint name.</param>
-    /// <param name="configure">Optional action to configure additional multiplexer options.</param>
-    /// <returns>MultiplexerOptions configured for IPC server acceptance.</returns>
+    /// <returns>MultiplexerOptions configured for IPC server acceptance. Use <c>with</c> to customize.</returns>
     public static MultiplexerOptions CreateServerOptions(
-        string endpoint,
-        Action<MultiplexerOptions>? configure = null)
+        string endpoint)
     {
         ArgumentNullException.ThrowIfNull(endpoint);
 
         var accepted = false;
-        var options = new MultiplexerOptions
+        return new MultiplexerOptions
         {
             StreamFactory = async ct =>
             {
@@ -102,20 +96,24 @@ public static class IpcMultiplexer
                         File.Delete(endpoint);
 
                     var listenSocket = new Socket(AddressFamily.Unix, SocketType.Stream, ProtocolType.Unspecified);
-                    var endPoint = new UnixDomainSocketEndPoint(endpoint);
-                    listenSocket.Bind(endPoint);
-                    listenSocket.Listen(backlog: 1);
-                    var clientSocket = await listenSocket.AcceptAsync(ct).ConfigureAwait(false);
-                    listenSocket.Dispose();
+                    try
+                    {
+                        var endPoint = new UnixDomainSocketEndPoint(endpoint);
+                        listenSocket.Bind(endPoint);
+                        listenSocket.Listen(backlog: 1);
+                        var clientSocket = await listenSocket.AcceptAsync(ct).ConfigureAwait(false);
 
-                    var stream = new NetworkStream(clientSocket, ownsSocket: true);
-                    return new StreamPair(stream);
+                        var stream = new NetworkStream(clientSocket, ownsSocket: true);
+                        return new StreamPair(stream);
+                    }
+                    finally
+                    {
+                        listenSocket.Dispose();
+                        try { File.Delete(endpoint); } catch { }
+                    }
                 }
             }
         };
-
-        configure?.Invoke(options);
-        return options;
     }
 
     private static int GetDeterministicPort(string endpoint)

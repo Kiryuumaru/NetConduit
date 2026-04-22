@@ -1,53 +1,12 @@
-namespace NetConduit;
+using NetConduit.Enums;
 
-/// <summary>
-/// Delegate that creates a new stream pair for connection/reconnection.
-/// The returned <see cref="IStreamPair"/> will be disposed on reconnect or shutdown.
-/// </summary>
-/// <param name="cancellationToken">Cancellation token.</param>
-/// <returns>A stream pair containing read and write streams with proper disposal.</returns>
-public delegate Task<IStreamPair> StreamFactoryDelegate(CancellationToken cancellationToken);
-
-/// <summary>
-/// Event arguments for auto-reconnect attempts.
-/// </summary>
-public sealed class AutoReconnectEventArgs
-{
-    /// <summary>
-    /// The attempt number (1-based).
-    /// </summary>
-    public int AttemptNumber { get; init; }
-    
-    /// <summary>
-    /// Maximum configured attempts.
-    /// </summary>
-    public int MaxAttempts { get; init; }
-    
-    /// <summary>
-    /// The delay before the next attempt.
-    /// </summary>
-    public TimeSpan NextDelay { get; init; }
-    
-    /// <summary>
-    /// The exception from the last connection attempt, if any.
-    /// </summary>
-    public Exception? LastException { get; init; }
-    
-    /// <summary>
-    /// Whether this is a reconnection attempt (true) or initial connection (false).
-    /// </summary>
-    public bool IsReconnecting { get; init; }
-    
-    /// <summary>
-    /// Set to true to cancel the reconnection process.
-    /// </summary>
-    public bool Cancel { get; set; }
-}
+namespace NetConduit.Models;
 
 /// <summary>
 /// Configuration options for the multiplexer.
+/// Use record <c>with</c> expressions to customize options returned by transport factory methods.
 /// </summary>
-public sealed class MultiplexerOptions
+public sealed record MultiplexerOptions
 {
     /// <summary>
     /// Unique session identifier for reconnection support.
@@ -57,8 +16,12 @@ public sealed class MultiplexerOptions
     
     /// <summary>
     /// Maximum frame payload size in bytes. Default: 16MB.
+    /// Valid range: 1KB to 128MB.
     /// </summary>
     public int MaxFrameSize { get; init; } = 16 * 1024 * 1024;
+    
+    internal const int MinAllowedFrameSize = 1024;
+    internal const int MaxAllowedFrameSize = 128 * 1024 * 1024;
     
     /// <summary>
     /// Interval between heartbeat pings. Default: 30 seconds.
@@ -137,25 +100,10 @@ public sealed class MultiplexerOptions
     /// Timeout for handshake completion after connection. Default: Infinite (relies on user's CancellationToken).
     /// </summary>
     public TimeSpan HandshakeTimeout { get; init; } = Timeout.InfiniteTimeSpan;
-}
-
-/// <summary>
-/// Controls how frame writes are flushed to the underlying stream.
-/// </summary>
- public enum FlushMode
-{
-    /// <summary>
-    /// Flush after every frame (highest latency, lowest throughput).
-    /// </summary>
-    Immediate,
     
-    /// <summary>
-    /// Flush periodically based on FlushInterval (balanced).
-    /// </summary>
-    Batched,
-    
-    /// <summary>
-    /// Never explicitly flush, rely on stream buffering (lowest latency for small writes, highest throughput).
-    /// </summary>
-    Manual
+    internal void Validate()
+    {
+        ArgumentOutOfRangeException.ThrowIfLessThan(MaxFrameSize, MinAllowedFrameSize);
+        ArgumentOutOfRangeException.ThrowIfGreaterThan(MaxFrameSize, MaxAllowedFrameSize);
+    }
 }

@@ -2,6 +2,7 @@ using System.Net;
 using System.Net.Quic;
 using System.Security.Cryptography;
 using System.Security.Cryptography.X509Certificates;
+using NetConduit.Models;
 using NetConduit.Quic;
 
 namespace NetConduit.Quic.IntegrationTests;

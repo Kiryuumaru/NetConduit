@@ -1,5 +1,6 @@
-namespace NetConduit.Transits;
+using NetConduit.Enums;
 
+namespace NetConduit.Transits;
 /// <summary>
 /// A transit that wraps a single channel as a simplex (one-way) Stream.
 /// For write channels, this provides a write-only stream.

@@ -24,6 +24,10 @@ internal sealed class AdaptiveFlowControl
     
     public AdaptiveFlowControl(uint minCredits, uint maxCredits)
     {
+        ArgumentOutOfRangeException.ThrowIfZero(maxCredits);
+        if (minCredits > maxCredits)
+            throw new ArgumentException($"MinCredits ({minCredits}) must not exceed MaxCredits ({maxCredits}).");
+
         _minCredits = minCredits;
         _maxCredits = maxCredits;
         // Start at max for immediate high throughput - will shrink if idle

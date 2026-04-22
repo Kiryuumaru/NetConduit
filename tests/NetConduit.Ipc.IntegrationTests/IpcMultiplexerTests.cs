@@ -1,4 +1,5 @@
 using NetConduit.Ipc;
+using NetConduit.Models;
 
 namespace NetConduit.Ipc.IntegrationTests;
 

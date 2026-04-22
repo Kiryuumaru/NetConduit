@@ -1,4 +1,6 @@
-namespace NetConduit;
+using NetConduit.Enums;
+
+namespace NetConduit.Models;
 
 /// <summary>
 /// Configuration options for a channel.

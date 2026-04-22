@@ -5,10 +5,12 @@ using BenchmarkDotNet.Attributes;
 using BenchmarkDotNet.Columns;
 using BenchmarkDotNet.Configs;
 using BenchmarkDotNet.Jobs;
+using BenchmarkDotNet.Toolchains.InProcess.Emit;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
 using NetConduit;
 using NetConduit.Ipc;
+using NetConduit.Models;
 using NetConduit.Tcp;
 using NetConduit.Udp;
 using NetConduit.WebSocket;
@@ -28,6 +30,7 @@ public class TransportComparisonBenchmark
         public Config()
         {
             AddJob(Job.ShortRun
+                .WithToolchain(InProcessEmitToolchain.Instance)
                 .WithLaunchCount(1)
                 .WithWarmupCount(1)
                 .WithIterationCount(3)

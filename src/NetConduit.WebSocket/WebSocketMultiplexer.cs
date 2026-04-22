@@ -1,4 +1,5 @@
 using System.Net.WebSockets;
+using NetConduit.Models;
 
 namespace NetConduit.WebSocket;
 
@@ -13,16 +14,14 @@ public static class WebSocketMultiplexer
     /// </summary>
     /// <param name="uri">The WebSocket URI to connect to.</param>
     /// <param name="clientOptions">Optional action to configure WebSocket client options.</param>
-    /// <param name="configure">Optional action to configure additional multiplexer options.</param>
-    /// <returns>MultiplexerOptions configured for WebSocket client connection.</returns>
+    /// <returns>MultiplexerOptions configured for WebSocket client connection. Use <c>with</c> to customize.</returns>
     public static MultiplexerOptions CreateOptions(
         Uri uri,
-        Action<ClientWebSocketOptions>? clientOptions = null,
-        Action<MultiplexerOptions>? configure = null)
+        Action<ClientWebSocketOptions>? clientOptions = null)
     {
         ArgumentNullException.ThrowIfNull(uri);
 
-        var options = new MultiplexerOptions
+        return new MultiplexerOptions
         {
             StreamFactory = async ct =>
             {
@@ -33,9 +32,6 @@ public static class WebSocketMultiplexer
                 return new StreamPair(stream, webSocket);
             }
         };
-
-        configure?.Invoke(options);
-        return options;
     }
 
     /// <summary>
@@ -44,14 +40,12 @@ public static class WebSocketMultiplexer
     /// </summary>
     /// <param name="url">The WebSocket URL to connect to.</param>
     /// <param name="clientOptions">Optional action to configure WebSocket client options.</param>
-    /// <param name="configure">Optional action to configure additional multiplexer options.</param>
-    /// <returns>MultiplexerOptions configured for WebSocket client connection.</returns>
+    /// <returns>MultiplexerOptions configured for WebSocket client connection. Use <c>with</c> to customize.</returns>
     public static MultiplexerOptions CreateOptions(
         string url,
-        Action<ClientWebSocketOptions>? clientOptions = null,
-        Action<MultiplexerOptions>? configure = null)
+        Action<ClientWebSocketOptions>? clientOptions = null)
     {
-        return CreateOptions(new Uri(url), clientOptions, configure);
+        return CreateOptions(new Uri(url), clientOptions);
     }
 
     /// <summary>
@@ -59,16 +53,14 @@ public static class WebSocketMultiplexer
     /// Reconnection is disabled by default for server-side connections.
     /// </summary>
     /// <param name="webSocket">The accepted WebSocket connection.</param>
-    /// <param name="configure">Optional action to configure additional multiplexer options.</param>
-    /// <returns>MultiplexerOptions configured for the accepted WebSocket.</returns>
+    /// <returns>MultiplexerOptions configured for the accepted WebSocket. Use <c>with</c> to customize.</returns>
     public static MultiplexerOptions CreateServerOptions(
-        System.Net.WebSockets.WebSocket webSocket,
-        Action<MultiplexerOptions>? configure = null)
+        System.Net.WebSockets.WebSocket webSocket)
     {
         ArgumentNullException.ThrowIfNull(webSocket);
 
         var accepted = false;
-        var options = new MultiplexerOptions
+        return new MultiplexerOptions
         {
             StreamFactory = ct =>
             {
@@ -84,8 +76,5 @@ public static class WebSocketMultiplexer
                 return Task.FromResult<IStreamPair>(new StreamPair(stream, webSocket));
             }
         };
-
-        configure?.Invoke(options);
-        return options;
     }
 }

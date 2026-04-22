@@ -4,6 +4,7 @@ using System.Net.Sockets;
 using System.Text;
 using System.Text.Json.Serialization;
 using NetConduit;
+using NetConduit.Models;
 using NetConduit.Tcp;
 using NetConduit.Transits;
 using Terminal.Gui;

@@ -15,10 +15,10 @@ using NetConduit;
 using NetConduit.Tcp;
 
 // Create client options (with optional configuration)
-var options = TcpMultiplexer.CreateOptions("localhost", 5000, configure: o =>
+var options = TcpMultiplexer.CreateOptions("localhost", 5000) with
 {
-    o.MaxAutoReconnectAttempts = 10;
-});
+    MaxAutoReconnectAttempts = 10
+};
 
 // Create and start multiplexer
 var mux = StreamMultiplexer.Create(options);
@@ -96,11 +96,11 @@ async Task HandleClientAsync(TcpClient tcpClient)
 ### [Reconnection](../concepts/reconnection.md)
 
 ```csharp
-var options = TcpMultiplexer.CreateOptions("localhost", 5000, configure: o =>
+var options = TcpMultiplexer.CreateOptions("localhost", 5000) with
 {
-    o.MaxAutoReconnectAttempts = 10;
-    o.AutoReconnectDelay = TimeSpan.FromSeconds(2);
-});
+    MaxAutoReconnectAttempts = 10,
+    AutoReconnectDelay = TimeSpan.FromSeconds(2)
+};
 
 var mux = StreamMultiplexer.Create(options);
 
@@ -132,7 +132,8 @@ listener.Stop();
 
 TCP is highly optimized in NetConduit:
 - Single connection handles thousands of channels
-- At 1000+ channels, mux outperforms raw TCP by ~15%
+- At 100 channels, mux throughput reaches 980 MB/s (1.64x faster than FRP/Yamux)
+- Game-tick messaging: 1.5M msg/s at 1 channel, 1.1M msg/s at 1000 channels
 - No socket exhaustion issues at high channel counts
 
-See [benchmarks](../index.md) for detailed numbers.
+See [benchmarks](../benchmarks.md) for detailed numbers.

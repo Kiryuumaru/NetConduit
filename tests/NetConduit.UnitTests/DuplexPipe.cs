@@ -1,5 +1,6 @@
 using System.Buffers;
 using System.IO.Pipelines;
+using NetConduit.Models;
 
 namespace NetConduit.UnitTests;
 
@@ -16,8 +17,9 @@ public sealed class DuplexPipe : IAsyncDisposable
 
     public DuplexPipe()
     {
-        _pipe1 = new Pipe();
-        _pipe2 = new Pipe();
+        var options = new PipeOptions(pauseWriterThreshold: 0, resumeWriterThreshold: 0);
+        _pipe1 = new Pipe(options);
+        _pipe2 = new Pipe(options);
         
         Stream1 = new DuplexPipeStream(_pipe1.Reader, _pipe2.Writer);
         Stream2 = new DuplexPipeStream(_pipe2.Reader, _pipe1.Writer);
@@ -124,6 +126,64 @@ public sealed class DuplexPipe : IAsyncDisposable
 }
 
 /// <summary>
+/// A DuplexPipe that supports reconnection by creating fresh stream pairs on demand.
+/// Both sides share the same underlying pipe, so data flows between them.
+/// </summary>
+public sealed class ReconnectableDuplexPipe : IAsyncDisposable
+{
+    private readonly object _lock = new();
+    private DuplexPipe _current;
+    private bool _reconnectPending;
+
+    public ReconnectableDuplexPipe()
+    {
+        _current = new DuplexPipe();
+    }
+
+    public Task<IStreamPair> CreateStream1(CancellationToken ct)
+    {
+        lock (_lock)
+        {
+            if (_reconnectPending)
+            {
+                _current = new DuplexPipe();
+                _reconnectPending = false;
+            }
+            return Task.FromResult<IStreamPair>(new StreamPair(_current.Stream1));
+        }
+    }
+
+    public Task<IStreamPair> CreateStream2(CancellationToken ct)
+    {
+        lock (_lock)
+        {
+            if (_reconnectPending)
+            {
+                _current = new DuplexPipe();
+                _reconnectPending = false;
+            }
+            return Task.FromResult<IStreamPair>(new StreamPair(_current.Stream2));
+        }
+    }
+
+    public async Task DisconnectAsync()
+    {
+        DuplexPipe old;
+        lock (_lock)
+        {
+            old = _current;
+            _reconnectPending = true;
+        }
+        await old.DisposeAsync();
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        await _current.DisposeAsync();
+    }
+}
+
+/// <summary>
 /// Helper methods for creating StreamMultiplexer instances in tests.
 /// </summary>
 public static class TestMuxHelper
@@ -131,13 +191,12 @@ public static class TestMuxHelper
     /// <summary>
     /// Creates MultiplexerOptions with a StreamFactory that returns the provided streams.
     /// </summary>
-    public static MultiplexerOptions CreateOptionsFor(Stream readStream, Stream writeStream, Action<MultiplexerOptions>? configure = null)
+    public static MultiplexerOptions CreateOptionsFor(Stream readStream, Stream writeStream)
     {
-        var opts = new MultiplexerOptions
+        return new MultiplexerOptions
         {
             StreamFactory = _ => Task.FromResult<IStreamPair>(new StreamPair(readStream, writeStream))
         };
-        return opts;
     }
     
     /// <summary>
@@ -173,6 +232,30 @@ public static class TestMuxHelper
     }
     
     /// <summary>
+    /// Creates a pair of connected StreamMultiplexer instances with reconnectable transport.
+    /// After calling pipe.DisconnectAsync(), both muxes will auto-reconnect using fresh streams.
+    /// </summary>
+    public static async Task<(StreamMultiplexer Mux1, StreamMultiplexer Mux2, Task RunTask1, Task RunTask2, ReconnectableDuplexPipe Pipe)> CreateReconnectableMuxPairAsync(
+        MultiplexerOptions? options1 = null,
+        MultiplexerOptions? options2 = null,
+        CancellationToken cancellationToken = default)
+    {
+        var pipe = new ReconnectableDuplexPipe();
+        var opts1 = CopyOptionsWithStreamFactory(options1, pipe.CreateStream1);
+        var opts2 = CopyOptionsWithStreamFactory(options2, pipe.CreateStream2);
+        
+        var mux1 = StreamMultiplexer.Create(opts1);
+        var mux2 = StreamMultiplexer.Create(opts2);
+        
+        var runTask1 = mux1.Start(cancellationToken);
+        var runTask2 = mux2.Start(cancellationToken);
+        
+        await Task.WhenAll(mux1.WaitForReadyAsync(cancellationToken), mux2.WaitForReadyAsync(cancellationToken));
+        
+        return (mux1, mux2, runTask1, runTask2, pipe);
+    }
+    
+    /// <summary>
     /// Creates a StreamMultiplexer for the specified stream.
     /// Does NOT start the mux - caller must call Start().
     /// </summary>
@@ -205,25 +288,6 @@ public static class TestMuxHelper
             return new MultiplexerOptions { StreamFactory = streamFactory };
         }
         
-        return new MultiplexerOptions
-        {
-            SessionId = baseOptions.SessionId,
-            MaxFrameSize = baseOptions.MaxFrameSize,
-            PingInterval = baseOptions.PingInterval,
-            PingTimeout = baseOptions.PingTimeout,
-            MaxMissedPings = baseOptions.MaxMissedPings,
-            GoAwayTimeout = baseOptions.GoAwayTimeout,
-            GracefulShutdownTimeout = baseOptions.GracefulShutdownTimeout,
-            DefaultChannelOptions = baseOptions.DefaultChannelOptions,
-            FlushMode = baseOptions.FlushMode,
-            FlushInterval = baseOptions.FlushInterval,
-            StreamFactory = streamFactory,
-            MaxAutoReconnectAttempts = baseOptions.MaxAutoReconnectAttempts,
-            AutoReconnectDelay = baseOptions.AutoReconnectDelay,
-            MaxAutoReconnectDelay = baseOptions.MaxAutoReconnectDelay,
-            AutoReconnectBackoffMultiplier = baseOptions.AutoReconnectBackoffMultiplier,
-            ConnectionTimeout = baseOptions.ConnectionTimeout,
-            HandshakeTimeout = baseOptions.HandshakeTimeout
-        };
+        return baseOptions with { StreamFactory = streamFactory };
     }
 }

@@ -1,4 +1,6 @@
-namespace NetConduit;
+using NetConduit.Enums;
+
+namespace NetConduit.Exceptions;
 
 /// <summary>
 /// Exception thrown when a multiplexer protocol error occurs.

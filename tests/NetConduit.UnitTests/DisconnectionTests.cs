@@ -1,3 +1,7 @@
+using NetConduit.Enums;
+using NetConduit.Exceptions;
+using NetConduit.Models;
+
 namespace NetConduit.UnitTests;
 
 /// <summary>

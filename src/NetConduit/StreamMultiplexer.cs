@@ -4,7 +4,13 @@ using System.Collections.Concurrent;
 using System.IO.Pipelines;
 using System.Runtime.CompilerServices;
 using System.Threading.Channels;
+using NetConduit.Constants;
+using NetConduit.Enums;
+using NetConduit.Exceptions;
 using NetConduit.Internal;
+using NetConduit.Models;
+using ChannelClosedException = NetConduit.Exceptions.ChannelClosedException;
+using ChannelOptions = NetConduit.Models.ChannelOptions;
 
 namespace NetConduit;
 
@@ -132,6 +138,7 @@ public sealed class StreamMultiplexer : IStreamMultiplexer
     public static StreamMultiplexer Create(MultiplexerOptions options)
     {
         ArgumentNullException.ThrowIfNull(options);
+        options.Validate();
         return new StreamMultiplexer(options);
     }
 
@@ -439,7 +446,7 @@ public sealed class StreamMultiplexer : IStreamMultiplexer
                     _streamPair = streamPair;
                     _readStream = streamPair.ReadStream;
                     _writeStream = streamPair.WriteStream;
-                    _pipe = new Pipe(new PipeOptions(pauseWriterThreshold: 0, resumeWriterThreshold: 0, minimumSegmentSize: 65536));
+                    _pipe ??= new Pipe(new PipeOptions(pauseWriterThreshold: 0, resumeWriterThreshold: 0, minimumSegmentSize: 65536));
                     _readPipeReader = PipeReader.Create(_readStream, new StreamPipeReaderOptions(bufferSize: 1048576));
                     _writeError = null;
                     
@@ -577,16 +584,9 @@ public sealed class StreamMultiplexer : IStreamMultiplexer
         }
         catch { }
         
-        try
-        {
-            if (_pipe != null)
-            {
-                await _pipe.Writer.CompleteAsync().ConfigureAwait(false);
-                await _pipe.Reader.CompleteAsync().ConfigureAwait(false);
-                _pipe = null;
-            }
-        }
-        catch { }
+        // Pipe is NOT completed here — it persists across reconnections
+        // to buffer writes during the disconnect window.
+        // Pipe cleanup happens in DisposeAsync (final disposal only).
         
         try
         {
@@ -668,16 +668,20 @@ public sealed class StreamMultiplexer : IStreamMultiplexer
                 if (!_disposed && !_goAwayReceived)
                 {
                     _isConnected = false;
-                    _disconnectReason = NetConduit.DisconnectReason.TransportError;
+                    _writeError = null;
+                    _disconnectReason = Enums.DisconnectReason.TransportError;
                     _disconnectException = ex;
                     
-                    try { OnDisconnected?.Invoke(NetConduit.DisconnectReason.TransportError, ex); } catch { }
+                    try { OnDisconnected?.Invoke(Enums.DisconnectReason.TransportError, ex); } catch { }
                     
-                    // Clean up old stream pair
+                    // Clean up old stream pair (Pipe is preserved to buffer writes)
                     await DisposeStreamsAsync().ConfigureAwait(false);
                     
                     // Reconnect with same retry logic
                     await ConnectWithRetryAsync(isReconnecting: true, ct).ConfigureAwait(false);
+                    
+                    // Ensure buffered data from disconnect window is drained
+                    _pendingFlush = true;
                     
                     // Successfully reconnected - continue loop to restart processing tasks
                     continue;
@@ -962,7 +966,14 @@ public sealed class StreamMultiplexer : IStreamMultiplexer
             await SendReconnectAsync(newWriteStream, cancellationToken).ConfigureAwait(false);
 
             // Wait for reconnect acknowledgment with their receive positions
-            await ReceiveReconnectAckAsync(newReadStream, cancellationToken).ConfigureAwait(false);
+            var positions = await ReceiveReconnectAckAsync(newReadStream, cancellationToken).ConfigureAwait(false);
+
+            // Apply peer's receive positions to our write channels
+            foreach (var (channelIndex, bytesReceived) in positions)
+            {
+                if (_writeChannelsByIndex.TryGetValue(channelIndex, out var channel))
+                    channel.SyncState.SetBytesAcked(bytesReceived);
+            }
 
             _isConnected = true;
             _isReconnecting = false;
@@ -1018,6 +1029,10 @@ public sealed class StreamMultiplexer : IStreamMultiplexer
         if (header.ChannelId != ChannelIndexLimits.ControlChannel)
             throw new MultiplexerException(ErrorCode.ProtocolError, "Expected control frame for RECONNECT_ACK.");
 
+        if (header.Length > _options.MaxFrameSize)
+            throw new MultiplexerException(ErrorCode.ProtocolError,
+                $"Reconnect ACK frame length {header.Length} exceeds MaxFrameSize {_options.MaxFrameSize}.");
+
         // Read payload
         var payload = new byte[header.Length];
         await readStream.ReadExactlyAsync(payload, ct).ConfigureAwait(false);
@@ -1032,10 +1047,13 @@ public sealed class StreamMultiplexer : IStreamMultiplexer
 
         // Parse remote's receive positions for our write channels
         var receivePositions = new Dictionary<uint, long>();
+        if (payload.Length < 21)
+            throw new MultiplexerException(ErrorCode.ProtocolError, "RECONNECT_ACK payload too small.");
+
         var channelCount = BinaryPrimitives.ReadUInt32BigEndian(payload.AsSpan(17));
         var offset = 21;
         
-        for (int i = 0; i < channelCount; i++)
+        for (int i = 0; i < channelCount && offset + 12 <= payload.Length; i++)
         {
             var channelIndex = BinaryPrimitives.ReadUInt32BigEndian(payload.AsSpan(offset));
             var bytesReceived = BinaryPrimitives.ReadInt64BigEndian(payload.AsSpan(offset + 4));
@@ -1058,11 +1076,11 @@ public sealed class StreamMultiplexer : IStreamMultiplexer
 
         _isConnected = false;
         _disconnectedTcs = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        _disconnectReason = NetConduit.DisconnectReason.TransportError;
+        _disconnectReason = Enums.DisconnectReason.TransportError;
         
         try
         {
-            OnDisconnected?.Invoke(NetConduit.DisconnectReason.TransportError, null);
+            OnDisconnected?.Invoke(Enums.DisconnectReason.TransportError, null);
         }
         catch
         {
@@ -1272,14 +1290,27 @@ public sealed class StreamMultiplexer : IStreamMultiplexer
         try
         {
             var pipeReader = _pipe?.Reader;
-            if (pipeReader != null && pipeReader.TryRead(out var readResult))
+            var writeStream = _writeStream;
+            if (pipeReader != null && writeStream != null && pipeReader.TryRead(out var readResult))
             {
-                if (readResult.Buffer.Length > 0)
+                bool consumed = false;
+                try
                 {
-                    var writeStream = _writeStream!;
-                    await WriteBufferToStreamAsync(readResult.Buffer, writeStream, ct).ConfigureAwait(false);
+                    if (readResult.Buffer.Length > 0)
+                    {
+                        await WriteBufferToStreamAsync(readResult.Buffer, writeStream, ct).ConfigureAwait(false);
+                    }
+                    consumed = true;
                 }
-                pipeReader.AdvanceTo(readResult.Buffer.End);
+                finally
+                {
+                    // Always call AdvanceTo to avoid leaving PipeReader in AlreadyReading state.
+                    // On failure, preserve data by not advancing consumed or examined.
+                    if (consumed)
+                        pipeReader.AdvanceTo(readResult.Buffer.End);
+                    else
+                        pipeReader.AdvanceTo(readResult.Buffer.Start);
+                }
             }
         }
         finally
@@ -1308,14 +1339,25 @@ public sealed class StreamMultiplexer : IStreamMultiplexer
         try
         {
             var pipeReader = _pipe?.Reader;
-            if (pipeReader != null && pipeReader.TryRead(out var readResult))
+            var writeStream = _writeStream;
+            if (pipeReader != null && writeStream != null && pipeReader.TryRead(out var readResult))
             {
-                if (readResult.Buffer.Length > 0)
+                bool consumed = false;
+                try
                 {
-                    var writeStream = _writeStream!;
-                    await WriteBufferToStreamAsync(readResult.Buffer, writeStream, ct).ConfigureAwait(false);
+                    if (readResult.Buffer.Length > 0)
+                    {
+                        await WriteBufferToStreamAsync(readResult.Buffer, writeStream, ct).ConfigureAwait(false);
+                    }
+                    consumed = true;
                 }
-                pipeReader.AdvanceTo(readResult.Buffer.End);
+                finally
+                {
+                    if (consumed)
+                        pipeReader.AdvanceTo(readResult.Buffer.End);
+                    else
+                        pipeReader.AdvanceTo(readResult.Buffer.Start);
+                }
             }
         }
         finally
@@ -1422,8 +1464,10 @@ public sealed class StreamMultiplexer : IStreamMultiplexer
         payload[0] = (byte)ControlSubtype.Handshake;
         _sessionId.TryWriteBytes(payload.AsSpan(1));
         
-        // Generate random nonce for index space negotiation
-        _localNonce = Random.Shared.NextInt64();
+        // Generate cryptographic nonce for index space negotiation
+        Span<byte> nonceBytes = stackalloc byte[8];
+        System.Security.Cryptography.RandomNumberGenerator.Fill(nonceBytes);
+        _localNonce = BinaryPrimitives.ReadInt64BigEndian(nonceBytes);
         BinaryPrimitives.WriteInt64BigEndian(payload.AsSpan(17), _localNonce);
         
         var header = new FrameHeader(ChannelIndexLimits.ControlChannel, FrameFlags.Data, (uint)payload.Length);
@@ -1551,9 +1595,18 @@ public sealed class StreamMultiplexer : IStreamMultiplexer
 
     private async ValueTask SendGoAwayAsync(ErrorCode code, CancellationToken ct)
     {
-        var lastChannelIndex = Volatile.Read(ref _nextChannelIndex) - 1;
-        if (lastChannelIndex < ChannelIndexLimits.MinDataChannel)
+        var nextIdx = Volatile.Read(ref _nextChannelIndex);
+        
+        // Determine the highest channel index we actually allocated.
+        // After DetermineIndexSpace, _nextChannelIndex is 1 (odd) or 2 (even).
+        // AllocateChannelIndex increments by 2. So if _nextChannelIndex hasn't
+        // moved past the initial value, no channels were allocated → report 0.
+        // Pre-handshake (_nextChannelIndex == 0) also means no channels → report 0.
+        uint lastChannelIndex;
+        if (!_indexSpaceDetermined || nextIdx <= 2)
             lastChannelIndex = 0;
+        else
+            lastChannelIndex = nextIdx - 2;
             
         var payload = new byte[7];
         payload[0] = (byte)ControlSubtype.GoAway;
@@ -1724,7 +1777,7 @@ public sealed class StreamMultiplexer : IStreamMultiplexer
         if (_disconnectReason.HasValue)
             return; // Already handled
             
-        _disconnectReason = NetConduit.DisconnectReason.TransportError;
+        _disconnectReason = Enums.DisconnectReason.TransportError;
         _disconnectException = ex;
         _isConnected = false;
         
@@ -1734,7 +1787,7 @@ public sealed class StreamMultiplexer : IStreamMultiplexer
             // Fire disconnect event first for auto-reconnect case
             try
             {
-                OnDisconnected?.Invoke(NetConduit.DisconnectReason.TransportError, ex);
+                OnDisconnected?.Invoke(Enums.DisconnectReason.TransportError, ex);
             }
             catch
             {
@@ -1752,7 +1805,7 @@ public sealed class StreamMultiplexer : IStreamMultiplexer
         
         try
         {
-            OnDisconnected?.Invoke(NetConduit.DisconnectReason.TransportError, ex);
+            OnDisconnected?.Invoke(Enums.DisconnectReason.TransportError, ex);
         }
         catch
         {
@@ -1984,7 +2037,7 @@ public sealed class StreamMultiplexer : IStreamMultiplexer
                 // Fire OnDisconnected with GoAwayReceived reason
                 if (!_disconnectReason.HasValue)
                 {
-                    _disconnectReason = NetConduit.DisconnectReason.GoAwayReceived;
+                    _disconnectReason = Enums.DisconnectReason.GoAwayReceived;
                     
                     // Abort all channels with MuxDisposed reason
                     foreach (var channel in _writeChannelsByIndex.Values)
@@ -1998,7 +2051,7 @@ public sealed class StreamMultiplexer : IStreamMultiplexer
                     
                     try
                     {
-                        OnDisconnected?.Invoke(NetConduit.DisconnectReason.GoAwayReceived, null);
+                        OnDisconnected?.Invoke(Enums.DisconnectReason.GoAwayReceived, null);
                     }
                     catch
                     {
@@ -2039,6 +2092,13 @@ public sealed class StreamMultiplexer : IStreamMultiplexer
         var incomingSessionId = new Guid(data.Span[..16]);
         var channelCount = BinaryPrimitives.ReadUInt32BigEndian(data.Span[16..]);
 
+        var expectedSize = 20 + (long)channelCount * 12;
+        if (expectedSize > data.Length)
+        {
+            SendError(0, ErrorCode.ProtocolError, "RECONNECT payload too short for declared channel count", ct);
+            return;
+        }
+
         // Verify this is a valid reconnection for this session
         if (incomingSessionId != _remoteSessionId && _remoteSessionId != Guid.Empty)
         {
@@ -2049,7 +2109,7 @@ public sealed class StreamMultiplexer : IStreamMultiplexer
         // Parse remote's receive positions (for channels we write to)
         // Remote is telling us how much they received on each of our write channels
         var offset = 20;
-        for (int i = 0; i < channelCount && offset + 12 <= data.Length; i++)
+        for (int i = 0; i < channelCount; i++)
         {
             var channelIndex = BinaryPrimitives.ReadUInt32BigEndian(data.Span[offset..]);
             var bytesReceived = BinaryPrimitives.ReadInt64BigEndian(data.Span[(offset + 4)..]);
@@ -2325,11 +2385,11 @@ public sealed class StreamMultiplexer : IStreamMultiplexer
             // Step 4: Set disconnect reason and fire event
             if (!_disconnectReason.HasValue)
             {
-                _disconnectReason = NetConduit.DisconnectReason.LocalDispose;
+                _disconnectReason = Enums.DisconnectReason.LocalDispose;
                 
                 try
                 {
-                    OnDisconnected?.Invoke(NetConduit.DisconnectReason.LocalDispose, null);
+                    OnDisconnected?.Invoke(Enums.DisconnectReason.LocalDispose, null);
                 }
                 catch
                 {
@@ -2385,6 +2445,17 @@ public sealed class StreamMultiplexer : IStreamMultiplexer
         finally
         {
             // Always clean up resources
+            try
+            {
+                if (_pipe != null)
+                {
+                    await _pipe.Writer.CompleteAsync().ConfigureAwait(false);
+                    await _pipe.Reader.CompleteAsync().ConfigureAwait(false);
+                    _pipe = null;
+                }
+            }
+            catch { }
+            
             try
             {
                 if (_streamPair != null)

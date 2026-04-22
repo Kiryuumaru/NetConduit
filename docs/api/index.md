@@ -37,9 +37,12 @@ ReadChannel? GetReadChannel(string channelId);
 bool IsConnected { get; }
 bool IsRunning { get; }
 bool IsShuttingDown { get; }
+bool IsReconnecting { get; }
+int CurrentConnectionAttempt { get; }
 Guid SessionId { get; }
 Guid RemoteSessionId { get; }
 DisconnectReason? DisconnectReason { get; }
+Exception? DisconnectException { get; }
 MultiplexerStats Stats { get; }
 MultiplexerOptions Options { get; }
 IReadOnlyCollection<string> ActiveChannelIds { get; }
@@ -48,10 +51,12 @@ IReadOnlyCollection<string> AcceptedChannelIds { get; }
 int ActiveChannelCount { get; }
 
 // Events
+event Action? OnReady;
 event Action<string>? OnChannelOpened;
 event Action<string, Exception?>? OnChannelClosed;
 event Action<Exception>? OnError;
 event Action<DisconnectReason, Exception?>? OnDisconnected;
+event Action? OnReconnected;
 event Action<AutoReconnectEventArgs>? OnAutoReconnecting;
 event Action<Exception>? OnAutoReconnectFailed;
 ```
@@ -205,37 +210,47 @@ Task<StreamTransit> AcceptStreamAsync(channelId, ...)
 ### TcpMultiplexer
 
 ```csharp
-MultiplexerOptions CreateOptions(string host, int port, Action<MultiplexerOptions>? configure = null);
-MultiplexerOptions CreateOptions(IPEndPoint endpoint, Action<MultiplexerOptions>? configure = null);
-MultiplexerOptions CreateServerOptions(TcpListener listener, Action<MultiplexerOptions>? configure = null);
+MultiplexerOptions CreateOptions(string host, int port);
+MultiplexerOptions CreateOptions(IPEndPoint endpoint);
+MultiplexerOptions CreateServerOptions(TcpListener listener);
 ```
 
 ### WebSocketMultiplexer
 
 ```csharp
-MultiplexerOptions CreateOptions(Uri uri, Action<ClientWebSocketOptions>? clientOptions = null, Action<MultiplexerOptions>? configure = null);
-MultiplexerOptions CreateOptions(string url, Action<ClientWebSocketOptions>? clientOptions = null, Action<MultiplexerOptions>? configure = null);
-MultiplexerOptions CreateServerOptions(WebSocket webSocket, Action<MultiplexerOptions>? configure = null);
+MultiplexerOptions CreateOptions(Uri uri, Action<ClientWebSocketOptions>? clientOptions = null);
+MultiplexerOptions CreateOptions(string url, Action<ClientWebSocketOptions>? clientOptions = null);
+MultiplexerOptions CreateServerOptions(WebSocket webSocket);
+```
+
+### WebSocketMuxListener
+
+```csharp
+WebSocketMuxListener(Func<MultiplexerOptions, MultiplexerOptions>? customize = null);
+Task HandleAsync(WebSocket webSocket, Guid? sessionId = null, CancellationToken ct = default);
+IAsyncEnumerable<IStreamMultiplexer> AcceptMuxesAsync(CancellationToken ct = default);
+bool RemoveSession(Guid sessionId);
+static (MultiplexerOptions, Action<IStreamMultiplexer>) CreateReconnectableClientOptions(Uri baseUri, Action<ClientWebSocketOptions>? configureWebSocket = null);
 ```
 
 ### UdpMultiplexer
 
 ```csharp
-MultiplexerOptions CreateOptions(string host, int port, ReliableUdpOptions? udpOptions = null, Action<MultiplexerOptions>? configure = null);
-MultiplexerOptions CreateServerOptions(int listenPort, ReliableUdpOptions? udpOptions = null, Action<MultiplexerOptions>? configure = null);
+MultiplexerOptions CreateOptions(string host, int port, ReliableUdpOptions? udpOptions = null);
+MultiplexerOptions CreateServerOptions(int listenPort, ReliableUdpOptions? udpOptions = null);
 ```
 
 ### IpcMultiplexer
 
 ```csharp
-MultiplexerOptions CreateOptions(string endpoint, Action<MultiplexerOptions>? configure = null);
-MultiplexerOptions CreateServerOptions(string endpoint, Action<MultiplexerOptions>? configure = null);
+MultiplexerOptions CreateOptions(string endpoint);
+MultiplexerOptions CreateServerOptions(string endpoint);
 ```
 
 ### QuicMultiplexer
 
 ```csharp
-MultiplexerOptions CreateOptions(string host, int port, string? alpn = null, bool allowInsecure = true, Action<MultiplexerOptions>? configure = null);
-MultiplexerOptions CreateServerOptions(QuicListener listener, Action<MultiplexerOptions>? configure = null);
+MultiplexerOptions CreateOptions(string host, int port, string? alpn = null, bool allowInsecure = true);
+MultiplexerOptions CreateServerOptions(QuicListener listener);
 Task<QuicListener> ListenAsync(IPEndPoint endPoint, X509Certificate2 certificate, string? alpn = null, CancellationToken ct = default);
 ```

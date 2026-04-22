@@ -1,6 +1,7 @@
 using System.Buffers;
 using System.Text.Json.Nodes;
 using System.Text.Json.Serialization;
+using NetConduit.Models;
 using NetConduit.Transits;
 
 namespace NetConduit.UnitTests;
@@ -454,6 +455,107 @@ public partial class DeltaTransitTests
 
         await receiveTask;
         Assert.Equal(5, received.Count);
+    }
+
+    #endregion
+
+    #region Partial Read and Buffer Safety
+
+    [Fact(Timeout = 30000)]
+    public async Task DeltaTransit_RapidStateChanges_NoSilentMessageLoss()
+    {
+        // ReadMessageAsync must loop when reading the 4-byte length prefix.
+        // Stream.ReadAsync may return fewer bytes than requested on frame boundaries.
+        // Before fix: single ReadAsync treated partial read as EOF → silent message loss.
+        await using var pipe = new DuplexPipe();
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+
+        var (muxA, muxB, _, _) = await TestMuxHelper.CreateMuxPairAsync(pipe, cancellationToken: cts.Token);
+
+        var writeChannel = await muxA.OpenChannelAsync(new ChannelOptions { ChannelId = "partial_read" }, cts.Token);
+        var readChannel = await muxB.AcceptChannelAsync("partial_read", cts.Token);
+
+        await using var sender = new DeltaTransit<JsonObject>(writeChannel, null);
+        await using var receiver = new DeltaTransit<JsonObject>(null, readChannel);
+
+        for (var i = 0; i < 20; i++)
+        {
+            var state = new JsonObject { ["iteration"] = i, ["data"] = $"value_{i}" };
+            await sender.SendAsync(state, cts.Token);
+        }
+
+        for (var i = 0; i < 20; i++)
+        {
+            var received = await receiver.ReceiveAsync(cts.Token);
+            Assert.NotNull(received);
+            Assert.Equal(i, received["iteration"]?.GetValue<int>());
+        }
+    }
+
+    [Fact(Timeout = 30000)]
+    public async Task DeltaTransit_LargeState_FrameFragmentation_Delivered()
+    {
+        // Large states increase the chance of length prefix landing across frame boundaries.
+        // ReadMessageAsync must handle this via a read loop.
+        await using var pipe = new DuplexPipe();
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+
+        var (muxA, muxB, _, _) = await TestMuxHelper.CreateMuxPairAsync(pipe, cancellationToken: cts.Token);
+
+        var writeChannel = await muxA.OpenChannelAsync(new ChannelOptions { ChannelId = "frag_test" }, cts.Token);
+        var readChannel = await muxB.AcceptChannelAsync("frag_test", cts.Token);
+
+        await using var sender = new DeltaTransit<JsonObject>(writeChannel, null);
+        await using var receiver = new DeltaTransit<JsonObject>(null, readChannel);
+
+        var largeState = new JsonObject();
+        for (var i = 0; i < 100; i++)
+            largeState[$"field_{i}"] = $"value_{i}_padding_to_increase_size";
+
+        await sender.SendAsync(largeState, cts.Token);
+        var received = await receiver.ReceiveAsync(cts.Token);
+        Assert.NotNull(received);
+        Assert.Equal(100, received.Count);
+    }
+
+    [Fact(Timeout = 30000)]
+    public async Task DeltaTransit_RepeatedSendReceive_NoBufferLeak()
+    {
+        // ReadMessageAsync rents ArrayPool buffers for the body. If an exception is thrown
+        // during body read (e.g. cancellation), the buffer must still be returned.
+        // Verify that 100 send/receive cycles don't cause unbounded memory growth.
+        await using var pipe = new DuplexPipe();
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+
+        var (muxA, muxB, _, _) = await TestMuxHelper.CreateMuxPairAsync(pipe, cancellationToken: cts.Token);
+
+        var writeChannel = await muxA.OpenChannelAsync(new ChannelOptions { ChannelId = "no_leak" }, cts.Token);
+        var readChannel = await muxB.AcceptChannelAsync("no_leak", cts.Token);
+
+        await using var sender = new DeltaTransit<JsonObject>(writeChannel, null);
+        await using var receiver = new DeltaTransit<JsonObject>(null, readChannel);
+
+        GC.Collect();
+        GC.WaitForPendingFinalizers();
+        GC.Collect();
+        var memBefore = GC.GetTotalMemory(true);
+
+        for (var i = 0; i < 100; i++)
+        {
+            var state = new JsonObject { ["key"] = i, ["payload"] = new string('x', 1000) };
+            await sender.SendAsync(state, cts.Token);
+            var received = await receiver.ReceiveAsync(cts.Token);
+            Assert.NotNull(received);
+        }
+
+        GC.Collect();
+        GC.WaitForPendingFinalizers();
+        GC.Collect();
+        var memAfter = GC.GetTotalMemory(true);
+
+        var growth = memAfter - memBefore;
+        Assert.True(growth < 10_000_000,
+            $"Memory grew by {growth / 1024}KB over 100 cycles — possible buffer leak");
     }
 
     #endregion

@@ -344,24 +344,37 @@ public sealed class DeltaTransit<T> : IAsyncDisposable
     {
         if (_writeChannel is null) return;
 
-        // Length-prefixed framing (4-byte big-endian) - use stack allocation for small buffer
-        Span<byte> lengthPrefix = stackalloc byte[4];
-        System.Buffers.Binary.BinaryPrimitives.WriteInt32BigEndian(lengthPrefix, data.Length);
-
-        await _writeChannel.WriteAsync(lengthPrefix.ToArray(), cancellationToken).ConfigureAwait(false);
-        await _writeChannel.WriteAsync(data, cancellationToken).ConfigureAwait(false);
+        // Atomic write: combine length prefix + body into single WriteAsync call
+        // to prevent partial framing on transport failure (see investigate/001)
+        var totalLength = 4 + data.Length;
+        var buffer = ArrayPool<byte>.Shared.Rent(totalLength);
+        try
+        {
+            System.Buffers.Binary.BinaryPrimitives.WriteInt32BigEndian(buffer, data.Length);
+            data.CopyTo(buffer.AsMemory(4));
+            await _writeChannel.WriteAsync(buffer.AsMemory(0, totalLength), cancellationToken).ConfigureAwait(false);
+        }
+        finally
+        {
+            ArrayPool<byte>.Shared.Return(buffer);
+        }
     }
 
     private async ValueTask<(byte[]? buffer, int length)> ReadMessageAsync(CancellationToken cancellationToken)
     {
         if (_readChannel is null) return (null, 0);
 
-        // Read length prefix - use pooled buffer
+        // Read length prefix - use pooled buffer with read loop for partial reads
         var lengthPrefix = ArrayPool<byte>.Shared.Rent(4);
         try
         {
-            var bytesRead = await _readChannel.ReadAsync(lengthPrefix.AsMemory(0, 4), cancellationToken).ConfigureAwait(false);
-            if (bytesRead < 4) return (null, 0);
+            var prefixRead = 0;
+            while (prefixRead < 4)
+            {
+                var bytesRead = await _readChannel.ReadAsync(lengthPrefix.AsMemory(prefixRead, 4 - prefixRead), cancellationToken).ConfigureAwait(false);
+                if (bytesRead == 0) return (null, 0);
+                prefixRead += bytesRead;
+            }
 
             var length = System.Buffers.Binary.BinaryPrimitives.ReadInt32BigEndian(lengthPrefix.AsSpan(0, 4));
             if (length <= 0 || length > _maxMessageSize)
@@ -369,19 +382,27 @@ public sealed class DeltaTransit<T> : IAsyncDisposable
 
             // Rent buffer for message body - caller must return to pool
             var data = ArrayPool<byte>.Shared.Rent(length);
-            var totalRead = 0;
-            while (totalRead < length)
+            try
             {
-                var read = await _readChannel.ReadAsync(data.AsMemory(totalRead, length - totalRead), cancellationToken).ConfigureAwait(false);
-                if (read == 0)
+                var totalRead = 0;
+                while (totalRead < length)
                 {
-                    ArrayPool<byte>.Shared.Return(data);
-                    return (null, 0);
+                    var read = await _readChannel.ReadAsync(data.AsMemory(totalRead, length - totalRead), cancellationToken).ConfigureAwait(false);
+                    if (read == 0)
+                    {
+                        ArrayPool<byte>.Shared.Return(data);
+                        return (null, 0);
+                    }
+                    totalRead += read;
                 }
-                totalRead += read;
-            }
 
-            return (data, length);
+                return (data, length);
+            }
+            catch
+            {
+                ArrayPool<byte>.Shared.Return(data);
+                throw;
+            }
         }
         finally
         {

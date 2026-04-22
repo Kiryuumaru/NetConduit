@@ -5,6 +5,7 @@ using System.Runtime.InteropServices;
 using System.Text;
 using System.Text.Json.Serialization;
 using NetConduit;
+using NetConduit.Models;
 using NetConduit.Tcp;
 using NetConduit.Transits;
 
@@ -61,29 +62,12 @@ async Task RunServerAsync(int port)
         Process.GetCurrentProcess().Kill();
     };
 
-    // Background key monitor - press Q to quit
-    _ = Task.Run(() =>
-    {
-        while (!cts.Token.IsCancellationRequested)
-        {
-            if (Console.KeyAvailable)
-            {
-                var key = Console.ReadKey(intercept: true);
-                if (key.Key == ConsoleKey.Q || (key.Modifiers == ConsoleModifiers.Control && key.Key == ConsoleKey.C))
-                {
-                    Shutdown();
-                    Process.GetCurrentProcess().Kill();
-                    return;
-                }
-            }
-            Thread.Sleep(100);
-        }
-    });
+    // Shutdown via Ctrl+C only — key monitoring removed to avoid terminal compatibility issues
 
     listener.Start();
     WriteColored("● ", ConsoleColor.Green);
     Console.WriteLine($"Remote Shell Server listening on port {port}");
-    WriteColored("  Press Q or Ctrl+C to stop", ConsoleColor.DarkGray);
+    WriteColored("  Press Ctrl+C to stop", ConsoleColor.DarkGray);
     Console.WriteLine();
     Console.WriteLine();
 

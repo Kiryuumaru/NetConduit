@@ -3,6 +3,7 @@ using System.Net;
 using System.Net.Sockets;
 using System.Text;
 using NetConduit;
+using NetConduit.Models;
 using NetConduit.Tcp;
 
 Console.WriteLine("═══════════════════════════════════════════════════════════════");
@@ -130,6 +131,8 @@ async Task ReceiveFileAsync(ReadChannel channel, string outputDir, CancellationT
         var headerBuffer = new byte[4];
         await channel.ReadExactlyAsync(headerBuffer, ct);
         var filenameLen = BinaryPrimitives.ReadInt32BigEndian(headerBuffer);
+        if (filenameLen <= 0 || filenameLen > 4096)
+            throw new InvalidDataException($"Invalid filename length: {filenameLen}");
         
         var filenameBytes = new byte[filenameLen];
         await channel.ReadExactlyAsync(filenameBytes, ct);

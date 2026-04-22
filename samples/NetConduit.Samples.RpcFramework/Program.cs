@@ -7,6 +7,7 @@ using System.Net.Sockets;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using NetConduit;
+using NetConduit.Models;
 using NetConduit.Tcp;
 using NetConduit.Transits;
 
@@ -44,12 +45,20 @@ async Task RunServerAsync(string serverHost, int serverPort, CancellationToken c
     
     while (!cancellationToken.IsCancellationRequested)
     {
-        // Use CreateServerOptions pattern to accept multiplexed connection
-        var options = TcpMultiplexer.CreateServerOptions(listener);
-        await using var mux = StreamMultiplexer.Create(options);
+        var tcpClient = await listener.AcceptTcpClientAsync(cancellationToken);
+        tcpClient.NoDelay = true;
         Console.WriteLine($"[RPC Server] Client connected");
         
-        _ = HandleClientAsync(mux, cancellationToken);
+        _ = Task.Run(async () =>
+        {
+            var stream = tcpClient.GetStream();
+            var options = new MultiplexerOptions
+            {
+                StreamFactory = _ => Task.FromResult<IStreamPair>(new StreamPair(stream, tcpClient))
+            };
+            await using var mux = StreamMultiplexer.Create(options);
+            await HandleClientAsync(mux, cancellationToken);
+        }, cancellationToken);
     }
 }
 

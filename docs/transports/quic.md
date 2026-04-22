@@ -143,11 +143,10 @@ QUIC parameters are passed directly to the factory method:
 var options = QuicMultiplexer.CreateOptions(
     "localhost", 5000,
     alpn: "my-protocol",
-    allowInsecure: false,
-    configure: o =>
-    {
-        o.PingInterval = TimeSpan.FromSeconds(15);
-    });
+    allowInsecure: false) with
+{
+    PingInterval = TimeSpan.FromSeconds(15)
+};
 ```
 
 ## QUIC vs NetConduit Multiplexing

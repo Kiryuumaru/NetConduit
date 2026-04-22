@@ -1,5 +1,6 @@
 using System.Collections.Concurrent;
 using System.Security.Cryptography;
+using NetConduit.Models;
 
 namespace NetConduit.UnitTests;
 

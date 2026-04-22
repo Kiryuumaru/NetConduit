@@ -1,4 +1,5 @@
 using System.Buffers.Binary;
+using NetConduit.Enums;
 using NetConduit.Internal;
 
 namespace NetConduit.UnitTests;
