@@ -111,4 +111,55 @@ public partial class DeltaTransitTests
     }
 
     #endregion
+
+    #region DeserializeDelta Consistent Exception Types
+
+    [Fact]
+    public void DeserializeDelta_StringOpCode_ThrowsJsonException()
+    {
+        // OpCode must be an integer. A string value should produce JsonException,
+        // consistent with all other malformed-input code paths.
+        var json = Encoding.UTF8.GetBytes("""[["text", ["field"]]]""");
+        Assert.ThrowsAny<JsonException>(() => DeltaTransit<SimpleState>.DeserializeDelta(json));
+    }
+
+    [Fact]
+    public void DeserializeDelta_BooleanOpCode_ThrowsJsonException()
+    {
+        var json = Encoding.UTF8.GetBytes("""[[true, ["field"]]]""");
+        Assert.ThrowsAny<JsonException>(() => DeltaTransit<SimpleState>.DeserializeDelta(json));
+    }
+
+    [Fact]
+    public void DeserializeDelta_NullOpCode_ThrowsJsonException()
+    {
+        var json = Encoding.UTF8.GetBytes("""[[null, ["field"]]]""");
+        Assert.ThrowsAny<JsonException>(() => DeltaTransit<SimpleState>.DeserializeDelta(json));
+    }
+
+    [Fact]
+    public void DeserializeDelta_NonArrayPath_ThrowsJsonException()
+    {
+        // Path (second element) must be an array. A string value should produce JsonException.
+        var json = Encoding.UTF8.GetBytes("""[[0, "not_an_array", "value"]]""");
+        Assert.ThrowsAny<JsonException>(() => DeltaTransit<SimpleState>.DeserializeDelta(json));
+    }
+
+    [Fact]
+    public void DeserializeDelta_NonIntegerArrayRemoveIndex_ThrowsJsonException()
+    {
+        // ArrayRemove index must be an integer. A string should produce JsonException.
+        var json = Encoding.UTF8.GetBytes("""[[12, ["arr"], "not_int"]]""");
+        Assert.ThrowsAny<JsonException>(() => DeltaTransit<SimpleState>.DeserializeDelta(json));
+    }
+
+    [Fact]
+    public void DeserializeDelta_NonIntegerArrayInsertIndex_ThrowsJsonException()
+    {
+        // ArrayInsert index (4th element) must be an integer. A string should produce JsonException.
+        var json = Encoding.UTF8.GetBytes("""[[11, ["arr"], "val", "not_int"]]""");
+        Assert.ThrowsAny<JsonException>(() => DeltaTransit<SimpleState>.DeserializeDelta(json));
+    }
+
+    #endregion
 }
