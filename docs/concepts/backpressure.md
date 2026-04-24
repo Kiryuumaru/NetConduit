@@ -27,7 +27,7 @@ Credit-based flow control prevents fast senders from overwhelming slow receivers
 Out of the box, backpressure works automatically:
 
 ```csharp
-var channel = await mux.OpenChannelAsync(new() { ChannelId = "data" });
+var channel = await mux.OpenChannelAsync("data");
 
 // Writes may block if receiver is slow
 await channel.WriteAsync(largeData);  // Might wait for credits

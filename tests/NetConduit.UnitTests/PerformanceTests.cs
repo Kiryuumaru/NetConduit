@@ -34,7 +34,7 @@ public class PerformanceTests
             }
         });
 
-        var writeChannel = await initiator.OpenChannelAsync(new ChannelOptions { ChannelId = "throughput_test" }, cts.Token);
+        var writeChannel = await initiator.OpenChannelAsync("throughput_test", cts.Token);
         await acceptTask;
 
         const int totalMB = 100;
@@ -124,7 +124,7 @@ public class PerformanceTests
         for (var i = 0; i < iterations; i++)
         {
             var sw = Stopwatch.StartNew();
-            var channel = await initiator.OpenChannelAsync(new ChannelOptions { ChannelId = $"latency_{i}" }, cts.Token);
+            var channel = await initiator.OpenChannelAsync($"latency_{i}", cts.Token);
             sw.Stop();
             latencies.Add(sw.Elapsed.TotalMilliseconds);
             await channel.DisposeAsync();
@@ -190,7 +190,7 @@ public class PerformanceTests
         // Open many channels
         for (var i = 0; i < channelCount; i++)
         {
-            var channel = await initiator.OpenChannelAsync(new ChannelOptions { ChannelId = $"memory_{i}" }, cts.Token);
+            var channel = await initiator.OpenChannelAsync($"memory_{i}", cts.Token);
             channels.Add(channel);
         }
 
@@ -276,7 +276,7 @@ public class PerformanceTests
         // Open channels and send data in parallel
         var sendTasks = Enumerable.Range(0, channelCount).Select(async i =>
         {
-            var channel = await initiator.OpenChannelAsync(new ChannelOptions { ChannelId = $"parallel_{i}" }, cts.Token);
+            var channel = await initiator.OpenChannelAsync($"parallel_{i}", cts.Token);
             var chunk = new byte[chunkSize];
             new Random(i).NextBytes(chunk);
             
@@ -347,7 +347,7 @@ public class PerformanceTests
             }
         });
 
-        var writeChannel = await initiator.OpenChannelAsync(new ChannelOptions { ChannelId = "small_messages" }, cts.Token);
+        var writeChannel = await initiator.OpenChannelAsync("small_messages", cts.Token);
         await acceptTask;
 
         const int messageCount = 2000;

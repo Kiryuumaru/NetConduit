@@ -233,7 +233,7 @@ static async Task HandleRelayConnectionAsync(
         Console.WriteLine($"[Relay] {transport} connection {connectionId} established");
 
         // Open control channels
-        var ctrlSend = await mux.OpenChannelAsync(new ChannelOptions { ChannelId = "ctrl<<" }, ct);
+        var ctrlSend = await mux.OpenChannelAsync("ctrl<<", ct);
         ReadChannel? ctrlRecv = null;
 
         await foreach (var ch in mux.AcceptChannelsAsync(ct))
@@ -398,7 +398,7 @@ static async Task<int> RunAgentAsync(string[] args, CancellationToken ct)
     Console.WriteLine($"[Agent] Connected to relay via {transport}");
 
     // Open control channel
-    var ctrlSend = await mux.OpenChannelAsync(new ChannelOptions { ChannelId = "ctrl>>" }, ct);
+    var ctrlSend = await mux.OpenChannelAsync("ctrl>>", ct);
 
     ReadChannel? ctrlRecv = null;
     await foreach (var ch in mux.AcceptChannelsAsync(ct))
@@ -452,7 +452,7 @@ static async Task<int> RunAgentAsync(string[] args, CancellationToken ct)
                     try
                     {
                         var writeChannel = await mux.OpenChannelAsync(
-                            new ChannelOptions { ChannelId = $"tunnel:{tunnelId}<<" }, ct);
+                            $"tunnel:{tunnelId}<<", ct);
                         var duplex = new DuplexStreamTransit(writeChannel, readChannel);
                         await HandleAgentTunnelAsync(duplex, localPort, tunnelId, ct);
                     }
@@ -548,7 +548,7 @@ static async Task<int> RunForwardAsync(string[] args, CancellationToken ct)
     Console.WriteLine($"[Forward] Connected to relay via {transport}");
 
     // Open control channel
-    var ctrlSend = await mux.OpenChannelAsync(new ChannelOptions { ChannelId = "ctrl>>" }, ct);
+    var ctrlSend = await mux.OpenChannelAsync("ctrl>>", ct);
 
     ReadChannel? ctrlRecv = null;
     var ctrlReceivedTcs = new TaskCompletionSource();
@@ -572,7 +572,7 @@ static async Task<int> RunForwardAsync(string[] args, CancellationToken ct)
                     try
                     {
                         var writeChannel = await mux.OpenChannelAsync(
-                            new ChannelOptions { ChannelId = $"tunnel:{tunnelId}<<" }, ct);
+                            $"tunnel:{tunnelId}<<", ct);
                         var duplex = new DuplexStreamTransit(writeChannel, readChannel);
                         tcs.TrySetResult(duplex);
                     }
@@ -729,7 +729,7 @@ static async Task<int> RunListAsync(string[] args, CancellationToken ct)
     await mux.WaitForReadyAsync(ct);
 
     // Open control channel
-    var ctrlSend = await mux.OpenChannelAsync(new ChannelOptions { ChannelId = "ctrl>>" }, ct);
+    var ctrlSend = await mux.OpenChannelAsync("ctrl>>", ct);
 
     ReadChannel? ctrlRecv = null;
     using var acceptCts = CancellationTokenSource.CreateLinkedTokenSource(ct);

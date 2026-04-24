@@ -262,7 +262,7 @@ public class BackpressureTests
 
         var (muxA, muxB, _, _) = await TestMuxHelper.CreateMuxPairAsync(pipe, cancellationToken: cts.Token);
 
-        var writeChannel = await muxA.OpenChannelAsync(new() { ChannelId = "credit_test" }, cts.Token);
+        var writeChannel = await muxA.OpenChannelAsync("credit_test", cts.Token);
         var readChannel = await muxB.AcceptChannelAsync("credit_test", cts.Token);
 
         var drainTask = Task.Run(async () =>
@@ -321,7 +321,7 @@ public class BackpressureTests
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
         var (muxA, muxB, _, _) = await TestMuxHelper.CreateMuxPairAsync(pipe, cancellationToken: cts.Token);
 
-        var writeChannel = await muxA.OpenChannelAsync(new() { ChannelId = "credit_1byte" }, cts.Token);
+        var writeChannel = await muxA.OpenChannelAsync("credit_1byte", cts.Token);
         var readChannel = await muxB.AcceptChannelAsync("credit_1byte", cts.Token);
 
         var drainTask = Task.Run(async () =>
@@ -356,7 +356,7 @@ public class BackpressureTests
 
         var (muxA, muxB, _, _) = await TestMuxHelper.CreateMuxPairAsync(pipe, opts, opts, cts.Token);
 
-        var writeChannel = await muxA.OpenChannelAsync(new() { ChannelId = "credit_exact" }, cts.Token);
+        var writeChannel = await muxA.OpenChannelAsync("credit_exact", cts.Token);
         var readChannel = await muxB.AcceptChannelAsync("credit_exact", cts.Token);
 
         var drainTask = Task.Run(async () =>
@@ -385,7 +385,7 @@ public class BackpressureTests
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
         var (muxA, muxB, _, _) = await TestMuxHelper.CreateMuxPairAsync(pipe, cancellationToken: cts.Token);
 
-        var writeChannel = await muxA.OpenChannelAsync(new() { ChannelId = "credit_zero" }, cts.Token);
+        var writeChannel = await muxA.OpenChannelAsync("credit_zero", cts.Token);
         var readChannel = await muxB.AcceptChannelAsync("credit_zero", cts.Token);
 
         await writeChannel.WriteAsync(ReadOnlyMemory<byte>.Empty, cts.Token);
@@ -419,7 +419,7 @@ public class BackpressureTests
 
         var (muxA, muxB, _, _) = await TestMuxHelper.CreateMuxPairAsync(pipe, opts, opts, cts.Token);
 
-        var writeChannel = await muxA.OpenChannelAsync(new() { ChannelId = "starvation" }, cts.Token);
+        var writeChannel = await muxA.OpenChannelAsync("starvation", cts.Token);
         var readChannel = await muxB.AcceptChannelAsync("starvation", cts.Token);
 
         var starvationCount = 0;
@@ -470,7 +470,7 @@ public class BackpressureTests
 
         var (muxA, muxB, _, _) = await TestMuxHelper.CreateMuxPairAsync(pipe, opts, opts, cts.Token);
 
-        var writeChannel = await muxA.OpenChannelAsync(new() { ChannelId = "starvation_restore" }, cts.Token);
+        var writeChannel = await muxA.OpenChannelAsync("starvation_restore", cts.Token);
         var readChannel = await muxB.AcceptChannelAsync("starvation_restore", cts.Token);
 
         var restoredDurations = new ConcurrentBag<TimeSpan>();
@@ -519,7 +519,7 @@ public class BackpressureTests
 
         var (muxA, muxB, _, _) = await TestMuxHelper.CreateMuxPairAsync(pipe, opts, opts, cts.Token);
 
-        var writeChannel = await muxA.OpenChannelAsync(new() { ChannelId = "starvation_throw" }, cts.Token);
+        var writeChannel = await muxA.OpenChannelAsync("starvation_throw", cts.Token);
         var readChannel = await muxB.AcceptChannelAsync("starvation_throw", cts.Token);
 
         writeChannel.OnCreditStarvation += () => throw new InvalidOperationException("test exception");

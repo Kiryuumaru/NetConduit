@@ -67,7 +67,7 @@ public class TcpMultiplexerTests
         await Task.WhenAll(client.WaitForReadyAsync(cts.Token), server.WaitForReadyAsync(cts.Token));
 
         // Act
-        var writeChannel = await client.OpenChannelAsync(new ChannelOptions { ChannelId = "test" }, cts.Token);
+        var writeChannel = await client.OpenChannelAsync("test", cts.Token);
         var readChannel = await server.AcceptChannelAsync("test", cts.Token);
 
         var testData = "Hello, TCP Multiplexer!"u8.ToArray();
@@ -122,7 +122,7 @@ public class TcpMultiplexerTests
             tasks.Add(Task.Run(async () =>
             {
                 var channelId = $"channel-{channelIndex}";
-                var writeChannel = await client.OpenChannelAsync(new ChannelOptions { ChannelId = channelId }, cts.Token);
+                var writeChannel = await client.OpenChannelAsync(channelId, cts.Token);
                 var readChannel = await server.AcceptChannelAsync(channelId, cts.Token);
 
                 var testData = new byte[dataSize];
@@ -175,11 +175,11 @@ public class TcpMultiplexerTests
         await Task.WhenAll(client.WaitForReadyAsync(cts.Token), server.WaitForReadyAsync(cts.Token));
 
         // Act - Client opens channel to server
-        var clientToServerWrite = await client.OpenChannelAsync(new ChannelOptions { ChannelId = "c2s" }, cts.Token);
+        var clientToServerWrite = await client.OpenChannelAsync("c2s", cts.Token);
         var clientToServerRead = await server.AcceptChannelAsync("c2s", cts.Token);
 
         // Server opens channel to client
-        var serverToClientWrite = await server.OpenChannelAsync(new ChannelOptions { ChannelId = "s2c" }, cts.Token);
+        var serverToClientWrite = await server.OpenChannelAsync("s2c", cts.Token);
         var serverToClientRead = await client.AcceptChannelAsync("s2c", cts.Token);
 
         // Send data both ways
@@ -235,7 +235,7 @@ public class TcpMultiplexerTests
         await Task.WhenAll(client.WaitForReadyAsync(cts.Token), server.WaitForReadyAsync(cts.Token));
 
         // Act
-        var writeChannel = await client.OpenChannelAsync(new ChannelOptions { ChannelId = "large" }, cts.Token);
+        var writeChannel = await client.OpenChannelAsync("large", cts.Token);
         var readChannel = await server.AcceptChannelAsync("large", cts.Token);
 
         // 10 MB of data
@@ -325,7 +325,7 @@ public class TcpMultiplexerTests
         await Task.WhenAll(client.WaitForReadyAsync(cts.Token), server.WaitForReadyAsync(cts.Token));
 
         // Open a channel
-        var writeChannel = await client.OpenChannelAsync(new ChannelOptions { ChannelId = "test" }, cts.Token);
+        var writeChannel = await client.OpenChannelAsync("test", cts.Token);
         await server.AcceptChannelAsync("test", cts.Token);
 
         // Act - Graceful shutdown

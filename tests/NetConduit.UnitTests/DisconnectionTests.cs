@@ -58,7 +58,7 @@ public class DisconnectionTests
         await Task.Delay(100);
 
         // Open channels
-        await using var writeChannel = await mux1.OpenChannelAsync(new ChannelOptions { ChannelId = "test" }, cts.Token);
+        await using var writeChannel = await mux1.OpenChannelAsync("test", cts.Token);
 
         var channelCloseEvent = new TaskCompletionSource<ChannelCloseReason>();
         writeChannel.OnClosed += (reason, ex) => channelCloseEvent.TrySetResult(reason);
@@ -94,7 +94,7 @@ public class DisconnectionTests
         await Task.Delay(100);
 
         // Open a channel
-        await using var writeChannel = await mux1.OpenChannelAsync(new ChannelOptions { ChannelId = "test" }, cts.Token);
+        await using var writeChannel = await mux1.OpenChannelAsync("test", cts.Token);
 
         // Act - time the dispose
         var stopwatch = System.Diagnostics.Stopwatch.StartNew();
@@ -220,7 +220,7 @@ public class DisconnectionTests
         await Task.Delay(100);
 
         // Open channel from mux2
-        await using var writeChannel = await mux2.OpenChannelAsync(new ChannelOptions { ChannelId = "test" }, cts.Token);
+        await using var writeChannel = await mux2.OpenChannelAsync("test", cts.Token);
 
         var channelCloseEvent = new TaskCompletionSource<ChannelCloseReason>();
         writeChannel.OnClosed += (reason, ex) => channelCloseEvent.TrySetResult(reason);
@@ -333,7 +333,7 @@ public class DisconnectionTests
         await Task.WhenAll(mux1.WaitForReadyAsync(cts.Token), mux2.WaitForReadyAsync(cts.Token));
 
         // Open channel
-        await using var writeChannel = await mux1.OpenChannelAsync(new ChannelOptions { ChannelId = "test" }, cts.Token);
+        await using var writeChannel = await mux1.OpenChannelAsync("test", cts.Token);
 
         var channelCloseEvent = new TaskCompletionSource<ChannelCloseReason>();
         writeChannel.OnClosed += (reason, ex) => channelCloseEvent.TrySetResult(reason);
@@ -371,7 +371,7 @@ public class DisconnectionTests
 
         await Task.Delay(100);
 
-        var writeChannel = await mux1.OpenChannelAsync(new ChannelOptions { ChannelId = "test" }, cts.Token);
+        var writeChannel = await mux1.OpenChannelAsync("test", cts.Token);
 
         var closeEvent = new TaskCompletionSource<ChannelCloseReason>();
         writeChannel.OnClosed += (reason, ex) => closeEvent.TrySetResult(reason);
@@ -405,7 +405,7 @@ public class DisconnectionTests
 
         await Task.Delay(100);
 
-        var writeChannel = await mux1.OpenChannelAsync(new ChannelOptions { ChannelId = "test" }, cts.Token);
+        var writeChannel = await mux1.OpenChannelAsync("test", cts.Token);
 
         // Dispose mux first
         await mux1.DisposeAsync();
@@ -439,7 +439,7 @@ public class DisconnectionTests
 
         await Task.Delay(100);
 
-        var writeChannel = await mux1.OpenChannelAsync(new ChannelOptions { ChannelId = "test" }, cts.Token);
+        var writeChannel = await mux1.OpenChannelAsync("test", cts.Token);
         await writeChannel.DisposeAsync();
 
         // Act & Assert
@@ -470,7 +470,7 @@ public class DisconnectionTests
 
         await Task.Delay(100);
 
-        var writeChannel = await mux1.OpenChannelAsync(new ChannelOptions { ChannelId = "test" }, cts.Token);
+        var writeChannel = await mux1.OpenChannelAsync("test", cts.Token);
 
         // Dispose mux
         await mux1.DisposeAsync();
@@ -503,7 +503,7 @@ public class DisconnectionTests
 
         await Task.Delay(100);
 
-        var writeChannel = await mux1.OpenChannelAsync(new ChannelOptions { ChannelId = "test" }, cts.Token);
+        var writeChannel = await mux1.OpenChannelAsync("test", cts.Token);
 
         // Initially null
         Assert.Null(writeChannel.CloseReason);
@@ -536,7 +536,7 @@ public class DisconnectionTests
         await Task.Delay(100);
 
         // Open channel from mux1
-        await using var writeChannel = await mux1.OpenChannelAsync(new ChannelOptions { ChannelId = "test" }, cts.Token);
+        await using var writeChannel = await mux1.OpenChannelAsync("test", cts.Token);
 
         // Accept on mux2
         var acceptTask = Task.Run(async () =>
@@ -584,7 +584,7 @@ public class DisconnectionTests
         await Task.Delay(100);
 
         // Open channel from mux1
-        await using var writeChannel = await mux1.OpenChannelAsync(new ChannelOptions { ChannelId = "test" }, cts.Token);
+        await using var writeChannel = await mux1.OpenChannelAsync("test", cts.Token);
 
         // Accept on mux2
         var acceptTask = Task.Run(async () =>
@@ -632,7 +632,7 @@ public class DisconnectionTests
         await Task.Delay(100);
 
         // Open channel from mux1
-        await using var writeChannel = await mux1.OpenChannelAsync(new ChannelOptions { ChannelId = "test" }, cts.Token);
+        await using var writeChannel = await mux1.OpenChannelAsync("test", cts.Token);
 
         // Accept on mux2
         var acceptTask = Task.Run(async () =>
@@ -683,7 +683,7 @@ public class DisconnectionTests
         await Task.Delay(100);
 
         // Open channel
-        await using var writeChannel = await mux1.OpenChannelAsync(new ChannelOptions { ChannelId = "test" }, cts.Token);
+        await using var writeChannel = await mux1.OpenChannelAsync("test", cts.Token);
 
         // Act - dispose should complete within reasonable time even with open channels
         var stopwatch = System.Diagnostics.Stopwatch.StartNew();
@@ -720,7 +720,7 @@ public class DisconnectionTests
         await Task.Delay(100);
 
         // Open channel
-        await using var writeChannel = await mux1.OpenChannelAsync(new ChannelOptions { ChannelId = "test" }, cts.Token);
+        await using var writeChannel = await mux1.OpenChannelAsync("test", cts.Token);
 
         // Act
         var stopwatch = System.Diagnostics.Stopwatch.StartNew();
@@ -756,7 +756,7 @@ public class DisconnectionTests
         await Task.Delay(100);
 
         // Open channel
-        await using var writeChannel = await mux1.OpenChannelAsync(new ChannelOptions { ChannelId = "test" }, cts.Token);
+        await using var writeChannel = await mux1.OpenChannelAsync("test", cts.Token);
 
         var events = new List<string>();
         writeChannel.OnClosed += (reason, ex) => events.Add("ChannelClosed");
@@ -806,7 +806,7 @@ public class DisconnectionTests
         await Task.WhenAll(mux1.WaitForReadyAsync(cts.Token), mux2.WaitForReadyAsync(cts.Token));
 
         // Open channel
-        await using var writeChannel = await mux1.OpenChannelAsync(new ChannelOptions { ChannelId = "test" }, cts.Token);
+        await using var writeChannel = await mux1.OpenChannelAsync("test", cts.Token);
 
         var events = new List<string>();
         var eventLock = new object();
@@ -883,7 +883,7 @@ public class DisconnectionTests
 
         await Task.Delay(100);
 
-        var writeChannel = await mux1.OpenChannelAsync(new ChannelOptions { ChannelId = "test" }, cts.Token);
+        var writeChannel = await mux1.OpenChannelAsync("test", cts.Token);
 
         // Dispose mux to put channel in bad state
         await mux1.DisposeAsync();
@@ -913,7 +913,7 @@ public class DisconnectionTests
         await Task.Delay(100);
 
         // Open channel from mux1
-        await using var writeChannel = await mux1.OpenChannelAsync(new ChannelOptions { ChannelId = "test" }, cts.Token);
+        await using var writeChannel = await mux1.OpenChannelAsync("test", cts.Token);
 
         // Accept on mux2
         var acceptTask = Task.Run(async () =>
@@ -987,7 +987,7 @@ public class DisconnectionTests
 
         await Task.Delay(100);
 
-        var writeChannel = await mux1.OpenChannelAsync(new ChannelOptions { ChannelId = "test" }, cts.Token);
+        var writeChannel = await mux1.OpenChannelAsync("test", cts.Token);
 
         // Act
         await writeChannel.DisposeAsync();
@@ -1031,7 +1031,7 @@ public class DisconnectionTests
 
         for (int i = 0; i < 5; i++)
         {
-            var channel = await mux1.OpenChannelAsync(new ChannelOptions { ChannelId = $"test{i}" }, cts.Token);
+            var channel = await mux1.OpenChannelAsync($"test{i}", cts.Token);
             channels.Add(channel);
 
             var tcs = new TaskCompletionSource<ChannelCloseReason>();
@@ -1095,7 +1095,7 @@ public class DisconnectionTests
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
         var (muxA, muxB, _, _) = await TestMuxHelper.CreateMuxPairAsync(pipe, cancellationToken: cts.Token);
 
-        var writeChannel = await muxA.OpenChannelAsync(new() { ChannelId = "read_dispose" }, cts.Token);
+        var writeChannel = await muxA.OpenChannelAsync("read_dispose", cts.Token);
         var readChannel = await muxB.AcceptChannelAsync("read_dispose", cts.Token);
 
         var readTask = Task.Run(async () =>
@@ -1124,7 +1124,7 @@ public class DisconnectionTests
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
         var (muxA, muxB, _, _) = await TestMuxHelper.CreateMuxPairAsync(pipe, cancellationToken: cts.Token);
 
-        var writeChannel = await muxA.OpenChannelAsync(new() { ChannelId = "read_close" }, cts.Token);
+        var writeChannel = await muxA.OpenChannelAsync("read_close", cts.Token);
         var readChannel = await muxB.AcceptChannelAsync("read_close", cts.Token);
 
         await writeChannel.WriteAsync(new byte[] { 1, 2, 3 }, cts.Token);
@@ -1145,7 +1145,7 @@ public class DisconnectionTests
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
         var (muxA, muxB, _, _) = await TestMuxHelper.CreateMuxPairAsync(pipe, cancellationToken: cts.Token);
 
-        var writeChannel = await muxA.OpenChannelAsync(new() { ChannelId = "read_seq" }, cts.Token);
+        var writeChannel = await muxA.OpenChannelAsync("read_seq", cts.Token);
         var readChannel = await muxB.AcceptChannelAsync("read_seq", cts.Token);
 
         var data = new byte[8192];
@@ -1172,7 +1172,7 @@ public class DisconnectionTests
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
         var (muxA, muxB, _, _) = await TestMuxHelper.CreateMuxPairAsync(pipe, cancellationToken: cts.Token);
 
-        var writeChannel = await muxA.OpenChannelAsync(new() { ChannelId = "close_reason" }, cts.Token);
+        var writeChannel = await muxA.OpenChannelAsync("close_reason", cts.Token);
         var readChannel = await muxB.AcceptChannelAsync("close_reason", cts.Token);
 
         await writeChannel.CloseAsync(cts.Token);

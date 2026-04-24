@@ -24,7 +24,7 @@ public class PublicApiTests
         await using var a = muxA;
         await using var b = muxB;
 
-        var writer = await muxA.OpenChannelAsync(new ChannelOptions { ChannelId = "ch1" }, cts.Token);
+        var writer = await muxA.OpenChannelAsync("ch1", cts.Token);
         await muxB.AcceptChannelAsync("ch1", cts.Token);
 
         var found = muxA.GetWriteChannel("ch1");
@@ -62,7 +62,7 @@ public class PublicApiTests
         await using var a = muxA;
         await using var b = muxB;
 
-        await muxA.OpenChannelAsync(new ChannelOptions { ChannelId = "ch1" }, cts.Token);
+        await muxA.OpenChannelAsync("ch1", cts.Token);
         var reader = await muxB.AcceptChannelAsync("ch1", cts.Token);
 
         var found = muxB.GetReadChannel("ch1");
@@ -100,7 +100,7 @@ public class PublicApiTests
         await using var a = muxA;
         await using var b = muxB;
 
-        var writer = await muxA.OpenChannelAsync(new ChannelOptions { ChannelId = "ch1" }, cts.Token);
+        var writer = await muxA.OpenChannelAsync("ch1", cts.Token);
         var reader = await muxB.AcceptChannelAsync("ch1", cts.Token);
 
         await writer.CloseAsync();
@@ -151,10 +151,10 @@ public class PublicApiTests
         await using var a = muxA;
         await using var b = muxB;
 
-        await muxA.OpenChannelAsync(new ChannelOptions { ChannelId = "ch1" }, cts.Token);
+        await muxA.OpenChannelAsync("ch1", cts.Token);
         await muxB.AcceptChannelAsync("ch1", cts.Token);
 
-        await muxA.OpenChannelAsync(new ChannelOptions { ChannelId = "ch2" }, cts.Token);
+        await muxA.OpenChannelAsync("ch2", cts.Token);
         await muxB.AcceptChannelAsync("ch2", cts.Token);
 
         var idsA = muxA.ActiveChannelIds;
@@ -174,7 +174,7 @@ public class PublicApiTests
         await using var a = muxA;
         await using var b = muxB;
 
-        await muxA.OpenChannelAsync(new ChannelOptions { ChannelId = "fromA" }, cts.Token);
+        await muxA.OpenChannelAsync("fromA", cts.Token);
         await muxB.AcceptChannelAsync("fromA", cts.Token);
 
         var openedA = muxA.OpenedChannelIds;
@@ -196,7 +196,7 @@ public class PublicApiTests
         await using var a = muxA;
         await using var b = muxB;
 
-        await muxA.OpenChannelAsync(new ChannelOptions { ChannelId = "fromA" }, cts.Token);
+        await muxA.OpenChannelAsync("fromA", cts.Token);
         await muxB.AcceptChannelAsync("fromA", cts.Token);
 
         var acceptedA = muxA.AcceptedChannelIds;
@@ -218,10 +218,10 @@ public class PublicApiTests
         await using var a = muxA;
         await using var b = muxB;
 
-        await muxA.OpenChannelAsync(new ChannelOptions { ChannelId = "AtoB" }, cts.Token);
+        await muxA.OpenChannelAsync("AtoB", cts.Token);
         await muxB.AcceptChannelAsync("AtoB", cts.Token);
 
-        await muxB.OpenChannelAsync(new ChannelOptions { ChannelId = "BtoA" }, cts.Token);
+        await muxB.OpenChannelAsync("BtoA", cts.Token);
         await muxA.AcceptChannelAsync("BtoA", cts.Token);
 
         var idsA = muxA.ActiveChannelIds;
@@ -244,7 +244,7 @@ public class PublicApiTests
         await using var a = muxA;
         await using var b = muxB;
 
-        var writer = await muxA.OpenChannelAsync(new ChannelOptions { ChannelId = "ch1" }, cts.Token);
+        var writer = await muxA.OpenChannelAsync("ch1", cts.Token);
         var reader = await muxB.AcceptChannelAsync("ch1", cts.Token);
 
         Assert.Contains("ch1", muxA.ActiveChannelIds);
@@ -348,12 +348,12 @@ public class PublicApiTests
         await using var a = muxA;
         await using var b = muxB;
 
-        await muxA.OpenChannelAsync(new ChannelOptions { ChannelId = "ch1" }, cts.Token);
+        await muxA.OpenChannelAsync("ch1", cts.Token);
         await muxB.AcceptChannelAsync("ch1", cts.Token);
 
         Assert.True(muxA.Stats.TotalChannelsOpened >= 1);
 
-        await muxA.OpenChannelAsync(new ChannelOptions { ChannelId = "ch2" }, cts.Token);
+        await muxA.OpenChannelAsync("ch2", cts.Token);
         await muxB.AcceptChannelAsync("ch2", cts.Token);
 
         Assert.True(muxA.Stats.TotalChannelsOpened >= 2);
@@ -371,7 +371,7 @@ public class PublicApiTests
         await using var a = muxA;
         await using var b = muxB;
 
-        var writer = await muxA.OpenChannelAsync(new ChannelOptions { ChannelId = "ch1" }, cts.Token);
+        var writer = await muxA.OpenChannelAsync("ch1", cts.Token);
         var reader = await muxB.AcceptChannelAsync("ch1", cts.Token);
 
         await writer.CloseAsync();
@@ -416,7 +416,7 @@ public class PublicApiTests
         await using var a = muxA;
         await using var b = muxB;
 
-        var writer = await muxA.OpenChannelAsync(new ChannelOptions { ChannelId = "data" }, cts.Token);
+        var writer = await muxA.OpenChannelAsync("data", cts.Token);
         var reader = await muxB.AcceptChannelAsync("data", cts.Token);
 
         var data = new byte[5000];
@@ -450,7 +450,7 @@ public class PublicApiTests
         string? openedChannelId = null;
         muxA.OnChannelOpened += id => openedChannelId = id;
 
-        await muxA.OpenChannelAsync(new ChannelOptions { ChannelId = "event_ch" }, cts.Token);
+        await muxA.OpenChannelAsync("event_ch", cts.Token);
         await muxB.AcceptChannelAsync("event_ch", cts.Token);
         await Task.Delay(100);
 
@@ -472,7 +472,7 @@ public class PublicApiTests
         var closedTcs = new TaskCompletionSource<string>();
         muxA.OnChannelClosed += (id, _) => closedTcs.TrySetResult(id);
 
-        var writer = await muxA.OpenChannelAsync(new ChannelOptions { ChannelId = "close_ch" }, cts.Token);
+        var writer = await muxA.OpenChannelAsync("close_ch", cts.Token);
         var reader = await muxB.AcceptChannelAsync("close_ch", cts.Token);
 
         await writer.CloseAsync();
@@ -526,7 +526,7 @@ public class PublicApiTests
         await using var a = muxA;
         await using var b = muxB;
 
-        await muxA.OpenChannelAsync(new ChannelOptions { ChannelId = "rprops" }, cts.Token);
+        await muxA.OpenChannelAsync("rprops", cts.Token);
         var reader = await muxB.AcceptChannelAsync("rprops", cts.Token);
 
         Assert.Equal("rprops", reader.ChannelId);
@@ -547,7 +547,7 @@ public class PublicApiTests
         await using var a = muxA;
         await using var b = muxB;
 
-        var writer = await muxA.OpenChannelAsync(new ChannelOptions { ChannelId = "closing" }, cts.Token);
+        var writer = await muxA.OpenChannelAsync("closing", cts.Token);
         var reader = await muxB.AcceptChannelAsync("closing", cts.Token);
 
         await writer.CloseAsync();
@@ -568,7 +568,7 @@ public class PublicApiTests
         await using var a = muxA;
         await using var b = muxB;
 
-        var writer = await muxA.OpenChannelAsync(new ChannelOptions { ChannelId = "rclose" }, cts.Token);
+        var writer = await muxA.OpenChannelAsync("rclose", cts.Token);
         var reader = await muxB.AcceptChannelAsync("rclose", cts.Token);
 
         await writer.CloseAsync();
@@ -593,7 +593,7 @@ public class PublicApiTests
         await using var a = muxA;
         await using var b = muxB;
 
-        var writer = await muxA.OpenChannelAsync(new ChannelOptions { ChannelId = "stats_ch" }, cts.Token);
+        var writer = await muxA.OpenChannelAsync("stats_ch", cts.Token);
         var reader = await muxB.AcceptChannelAsync("stats_ch", cts.Token);
 
         var data = new byte[2048];
@@ -624,7 +624,7 @@ public class PublicApiTests
 
         var (muxA, muxB, runA, runB) = await TestMuxHelper.CreateMuxPairAsync(pipe, cancellationToken: cts.Token);
 
-        var writer = await muxA.OpenChannelAsync(new ChannelOptions { ChannelId = "onclose" }, cts.Token);
+        var writer = await muxA.OpenChannelAsync("onclose", cts.Token);
         var reader = await muxB.AcceptChannelAsync("onclose", cts.Token);
 
         var closedTcs = new TaskCompletionSource<ChannelCloseReason>();
@@ -650,7 +650,7 @@ public class PublicApiTests
         await using var a = muxA;
         await using var b = muxB;
 
-        var writer = await muxA.OpenChannelAsync(new ChannelOptions { ChannelId = "ronclose" }, cts.Token);
+        var writer = await muxA.OpenChannelAsync("ronclose", cts.Token);
         var reader = await muxB.AcceptChannelAsync("ronclose", cts.Token);
 
         var closedTcs = new TaskCompletionSource<bool>();
@@ -681,7 +681,7 @@ public class PublicApiTests
         await using var a = muxA;
         await using var b = muxB;
 
-        var writer = await muxA.OpenChannelAsync(new ChannelOptions { ChannelId = "stream" }, cts.Token);
+        var writer = await muxA.OpenChannelAsync("stream", cts.Token);
         await muxB.AcceptChannelAsync("stream", cts.Token);
 
         Assert.True(writer.CanWrite);
@@ -701,7 +701,7 @@ public class PublicApiTests
         await using var a = muxA;
         await using var b = muxB;
 
-        await muxA.OpenChannelAsync(new ChannelOptions { ChannelId = "stream" }, cts.Token);
+        await muxA.OpenChannelAsync("stream", cts.Token);
         var reader = await muxB.AcceptChannelAsync("stream", cts.Token);
 
         Assert.True(reader.CanRead);

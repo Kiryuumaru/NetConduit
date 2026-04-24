@@ -49,7 +49,7 @@ public static class TransitExtensions
         string channelId,
         CancellationToken cancellationToken = default)
     {
-        var channel = await mux.OpenChannelAsync(new ChannelOptions { ChannelId = channelId }, cancellationToken);
+        var channel = await mux.OpenChannelAsync(channelId, cancellationToken);
         return new StreamTransit(channel);
     }
 
@@ -98,7 +98,7 @@ public static class TransitExtensions
         string channelId,
         CancellationToken cancellationToken = default)
     {
-        var writeChannel = await mux.OpenChannelAsync(new ChannelOptions { ChannelId = channelId + OutboundSuffix }, cancellationToken);
+        var writeChannel = await mux.OpenChannelAsync(channelId + OutboundSuffix, cancellationToken);
         var readChannel = await mux.AcceptChannelAsync(channelId + InboundSuffix, cancellationToken);
         return new DuplexStreamTransit(writeChannel, readChannel);
     }
@@ -118,7 +118,7 @@ public static class TransitExtensions
         CancellationToken cancellationToken = default)
     {
         var readChannel = await mux.AcceptChannelAsync(channelId + OutboundSuffix, cancellationToken);
-        var writeChannel = await mux.OpenChannelAsync(new ChannelOptions { ChannelId = channelId + InboundSuffix }, cancellationToken);
+        var writeChannel = await mux.OpenChannelAsync(channelId + InboundSuffix, cancellationToken);
         return new DuplexStreamTransit(writeChannel, readChannel);
     }
 
@@ -136,7 +136,7 @@ public static class TransitExtensions
         string readChannelId,
         CancellationToken cancellationToken = default)
     {
-        var writeChannel = await mux.OpenChannelAsync(new ChannelOptions { ChannelId = writeChannelId }, cancellationToken);
+        var writeChannel = await mux.OpenChannelAsync(writeChannelId, cancellationToken);
         var readChannel = await mux.AcceptChannelAsync(readChannelId, cancellationToken);
         return new DuplexStreamTransit(writeChannel, readChannel);
     }
@@ -163,7 +163,7 @@ public static class TransitExtensions
         int maxMessageSize = 16 * 1024 * 1024,
         CancellationToken cancellationToken = default)
     {
-        var writeChannel = await mux.OpenChannelAsync(new ChannelOptions { ChannelId = channelId + OutboundSuffix }, cancellationToken);
+        var writeChannel = await mux.OpenChannelAsync(channelId + OutboundSuffix, cancellationToken);
         var readChannel = await mux.AcceptChannelAsync(channelId + InboundSuffix, cancellationToken);
         return new MessageTransit<TSend, TReceive>(writeChannel, readChannel, sendTypeInfo, receiveTypeInfo, maxMessageSize);
     }
@@ -192,7 +192,7 @@ public static class TransitExtensions
         CancellationToken cancellationToken = default)
     {
         var readChannel = await mux.AcceptChannelAsync(channelId + OutboundSuffix, cancellationToken);
-        var writeChannel = await mux.OpenChannelAsync(new ChannelOptions { ChannelId = channelId + InboundSuffix }, cancellationToken);
+        var writeChannel = await mux.OpenChannelAsync(channelId + InboundSuffix, cancellationToken);
         return new MessageTransit<TSend, TReceive>(writeChannel, readChannel, sendTypeInfo, receiveTypeInfo, maxMessageSize);
     }
 
@@ -260,7 +260,7 @@ public static class TransitExtensions
         int maxMessageSize = 16 * 1024 * 1024,
         CancellationToken cancellationToken = default)
     {
-        var writeChannel = await mux.OpenChannelAsync(new ChannelOptions { ChannelId = writeChannelId }, cancellationToken);
+        var writeChannel = await mux.OpenChannelAsync(writeChannelId, cancellationToken);
         var readChannel = await mux.AcceptChannelAsync(readChannelId, cancellationToken);
         return new MessageTransit<TSend, TReceive>(writeChannel, readChannel, sendTypeInfo, receiveTypeInfo, maxMessageSize);
     }
@@ -282,7 +282,7 @@ public static class TransitExtensions
         int maxMessageSize = 16 * 1024 * 1024,
         CancellationToken cancellationToken = default)
     {
-        var writeChannel = await mux.OpenChannelAsync(new ChannelOptions { ChannelId = channelId }, cancellationToken);
+        var writeChannel = await mux.OpenChannelAsync(channelId, cancellationToken);
         return new MessageTransit<TSend, object>(writeChannel, null, sendTypeInfo, null!, maxMessageSize);
     }
 
@@ -329,7 +329,7 @@ public static class TransitExtensions
         int maxMessageSize = 16 * 1024 * 1024,
         CancellationToken cancellationToken = default)
     {
-        var writeChannel = await mux.OpenChannelAsync(new ChannelOptions { ChannelId = channelId + OutboundSuffix }, cancellationToken);
+        var writeChannel = await mux.OpenChannelAsync(channelId + OutboundSuffix, cancellationToken);
         var readChannel = await mux.AcceptChannelAsync(channelId + InboundSuffix, cancellationToken);
         return new MessageTransit<TSend, TReceive>(writeChannel, readChannel, jsonOptions, maxMessageSize);
     }
@@ -358,7 +358,7 @@ public static class TransitExtensions
         CancellationToken cancellationToken = default)
     {
         var readChannel = await mux.AcceptChannelAsync(channelId + OutboundSuffix, cancellationToken);
-        var writeChannel = await mux.OpenChannelAsync(new ChannelOptions { ChannelId = channelId + InboundSuffix }, cancellationToken);
+        var writeChannel = await mux.OpenChannelAsync(channelId + InboundSuffix, cancellationToken);
         return new MessageTransit<TSend, TReceive>(writeChannel, readChannel, jsonOptions, maxMessageSize);
     }
 
@@ -430,7 +430,7 @@ public static class TransitExtensions
         int maxMessageSize = 16 * 1024 * 1024,
         CancellationToken cancellationToken = default)
     {
-        var writeChannel = await mux.OpenChannelAsync(new ChannelOptions { ChannelId = writeChannelId }, cancellationToken);
+        var writeChannel = await mux.OpenChannelAsync(writeChannelId, cancellationToken);
         var readChannel = await mux.AcceptChannelAsync(readChannelId, cancellationToken);
         return new MessageTransit<TSend, TReceive>(writeChannel, readChannel, jsonOptions, maxMessageSize);
     }
@@ -454,7 +454,7 @@ public static class TransitExtensions
         int maxMessageSize = 16 * 1024 * 1024,
         CancellationToken cancellationToken = default)
     {
-        var writeChannel = await mux.OpenChannelAsync(new ChannelOptions { ChannelId = channelId }, cancellationToken);
+        var writeChannel = await mux.OpenChannelAsync(channelId, cancellationToken);
         return new MessageTransit<TSend, object>(writeChannel, null, jsonOptions, maxMessageSize);
     }
 
@@ -504,7 +504,7 @@ public static class TransitExtensions
         int maxMessageSize = 16 * 1024 * 1024,
         CancellationToken cancellationToken = default)
     {
-        var writeChannel = await mux.OpenChannelAsync(new ChannelOptions { ChannelId = channelId + OutboundSuffix }, cancellationToken);
+        var writeChannel = await mux.OpenChannelAsync(channelId + OutboundSuffix, cancellationToken);
         var readChannel = await mux.AcceptChannelAsync(channelId + InboundSuffix, cancellationToken);
         return new DeltaTransit<T>(writeChannel, readChannel, typeInfo, maxMessageSize);
     }
@@ -530,7 +530,7 @@ public static class TransitExtensions
         CancellationToken cancellationToken = default)
     {
         var readChannel = await mux.AcceptChannelAsync(channelId + OutboundSuffix, cancellationToken);
-        var writeChannel = await mux.OpenChannelAsync(new ChannelOptions { ChannelId = channelId + InboundSuffix }, cancellationToken);
+        var writeChannel = await mux.OpenChannelAsync(channelId + InboundSuffix, cancellationToken);
         return new DeltaTransit<T>(writeChannel, readChannel, typeInfo, maxMessageSize);
     }
 
@@ -552,7 +552,7 @@ public static class TransitExtensions
         int maxMessageSize = 16 * 1024 * 1024,
         CancellationToken cancellationToken = default)
     {
-        var writeChannel = await mux.OpenChannelAsync(new ChannelOptions { ChannelId = channelId }, cancellationToken);
+        var writeChannel = await mux.OpenChannelAsync(channelId, cancellationToken);
         return new DeltaTransit<T>(writeChannel, null, typeInfo, maxMessageSize);
     }
 

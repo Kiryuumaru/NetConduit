@@ -193,7 +193,7 @@ public class WebSocketMultiplexerTests
             await Task.WhenAll(clientConnection.WaitForReadyAsync(cts.Token), serverConnection.WaitForReadyAsync(cts.Token));
 
             // Act
-            var writeChannel = await clientConnection.OpenChannelAsync(new ChannelOptions { ChannelId = "test" }, cts.Token);
+            var writeChannel = await clientConnection.OpenChannelAsync("test", cts.Token);
             var readChannel = await serverConnection.AcceptChannelAsync("test", cts.Token);
 
             var testData = "Hello, WebSocket Multiplexer!"u8.ToArray();
@@ -253,7 +253,7 @@ public class WebSocketMultiplexerTests
                 tasks.Add(Task.Run(async () =>
                 {
                     var channelId = $"channel-{channelIndex}";
-                    var writeChannel = await clientConnection.OpenChannelAsync(new ChannelOptions { ChannelId = channelId }, cts.Token);
+                    var writeChannel = await clientConnection.OpenChannelAsync(channelId, cts.Token);
                     var readChannel = await serverConnection.AcceptChannelAsync(channelId, cts.Token);
 
                     var testData = new byte[dataSize];
@@ -311,11 +311,11 @@ public class WebSocketMultiplexerTests
             await Task.WhenAll(clientConnection.WaitForReadyAsync(cts.Token), serverConnection.WaitForReadyAsync(cts.Token));
 
             // Act - Client opens channel to server
-            var clientToServerWrite = await clientConnection.OpenChannelAsync(new ChannelOptions { ChannelId = "c2s" }, cts.Token);
+            var clientToServerWrite = await clientConnection.OpenChannelAsync("c2s", cts.Token);
             var clientToServerRead = await serverConnection.AcceptChannelAsync("c2s", cts.Token);
 
             // Server opens channel to client
-            var serverToClientWrite = await serverConnection.OpenChannelAsync(new ChannelOptions { ChannelId = "s2c" }, cts.Token);
+            var serverToClientWrite = await serverConnection.OpenChannelAsync("s2c", cts.Token);
             var serverToClientRead = await clientConnection.AcceptChannelAsync("s2c", cts.Token);
 
             // Send data both ways
@@ -376,7 +376,7 @@ public class WebSocketMultiplexerTests
             await Task.WhenAll(clientConnection.WaitForReadyAsync(cts.Token), serverConnection.WaitForReadyAsync(cts.Token));
 
             // Act
-            var writeChannel = await clientConnection.OpenChannelAsync(new ChannelOptions { ChannelId = "large" }, cts.Token);
+            var writeChannel = await clientConnection.OpenChannelAsync("large", cts.Token);
             var readChannel = await serverConnection.AcceptChannelAsync("large", cts.Token);
 
             // 1 MB of data
@@ -482,7 +482,7 @@ public class WebSocketMultiplexerTests
 
             await Task.WhenAll(clientConnection.WaitForReadyAsync(cts.Token), serverConnection.WaitForReadyAsync(cts.Token));
 
-            var writeChannel = await clientConnection.OpenChannelAsync(new ChannelOptions { ChannelId = "test" }, cts.Token);
+            var writeChannel = await clientConnection.OpenChannelAsync("test", cts.Token);
             var readChannel = await serverConnection.AcceptChannelAsync("test", cts.Token);
 
             var testData = "CreateServerOptions test"u8.ToArray();

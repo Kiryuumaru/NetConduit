@@ -137,7 +137,7 @@ Dynamic types work without source generation:
 using System.Text.Json.Nodes;
 
 // JsonObject doesn't need JsonTypeInfo
-var writeChannel = await mux.OpenChannelAsync(new() { ChannelId = "state" });
+var writeChannel = await mux.OpenChannelAsync("state");
 var sender = new DeltaTransit<JsonObject>(writeChannel, null);
 
 // Send state

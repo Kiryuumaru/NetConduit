@@ -27,7 +27,7 @@ public class ProtocolEdgeCaseTests
         await using var b = muxB;
 
         var longId = new string('x', 500);
-        var writer = await muxA.OpenChannelAsync(new ChannelOptions { ChannelId = longId }, cts.Token);
+        var writer = await muxA.OpenChannelAsync(longId, cts.Token);
         var reader = await muxB.AcceptChannelAsync(longId, cts.Token);
 
         await writer.WriteAsync(new byte[] { 42 }, cts.Token);
@@ -52,7 +52,7 @@ public class ProtocolEdgeCaseTests
         await using var b = muxB;
 
         var specialId = "ch/test:with.special-chars_and spaces!@#$%";
-        var writer = await muxA.OpenChannelAsync(new ChannelOptions { ChannelId = specialId }, cts.Token);
+        var writer = await muxA.OpenChannelAsync(specialId, cts.Token);
         var reader = await muxB.AcceptChannelAsync(specialId, cts.Token);
 
         await writer.WriteAsync(new byte[] { 1, 2, 3 }, cts.Token);
@@ -82,7 +82,7 @@ public class ProtocolEdgeCaseTests
         await using var b = muxB;
 
         var unicodeId = "频道_チャンネル_канал";
-        var writer = await muxA.OpenChannelAsync(new ChannelOptions { ChannelId = unicodeId }, cts.Token);
+        var writer = await muxA.OpenChannelAsync(unicodeId, cts.Token);
         var reader = await muxB.AcceptChannelAsync(unicodeId, cts.Token);
 
         await writer.WriteAsync(new byte[] { 99 }, cts.Token);
@@ -107,13 +107,13 @@ public class ProtocolEdgeCaseTests
         await using var b = muxB;
 
         // Open channels with similar prefixes
-        var w1 = await muxA.OpenChannelAsync(new ChannelOptions { ChannelId = "channel" }, cts.Token);
+        var w1 = await muxA.OpenChannelAsync("channel", cts.Token);
         var r1 = await muxB.AcceptChannelAsync("channel", cts.Token);
 
-        var w2 = await muxA.OpenChannelAsync(new ChannelOptions { ChannelId = "channel_1" }, cts.Token);
+        var w2 = await muxA.OpenChannelAsync("channel_1", cts.Token);
         var r2 = await muxB.AcceptChannelAsync("channel_1", cts.Token);
 
-        var w3 = await muxA.OpenChannelAsync(new ChannelOptions { ChannelId = "channel_10" }, cts.Token);
+        var w3 = await muxA.OpenChannelAsync("channel_10", cts.Token);
         var r3 = await muxB.AcceptChannelAsync("channel_10", cts.Token);
 
         // Write unique data to each
@@ -157,7 +157,7 @@ public class ProtocolEdgeCaseTests
         await using var a = muxA;
         await using var b = muxB;
 
-        var writer = await muxA.OpenChannelAsync(new ChannelOptions { ChannelId = "tiny" }, cts.Token);
+        var writer = await muxA.OpenChannelAsync("tiny", cts.Token);
         var reader = await muxB.AcceptChannelAsync("tiny", cts.Token);
 
         await writer.WriteAsync(new byte[] { 0xFF }, cts.Token);
@@ -181,7 +181,7 @@ public class ProtocolEdgeCaseTests
         await using var a = muxA;
         await using var b = muxB;
 
-        var writer = await muxA.OpenChannelAsync(new ChannelOptions { ChannelId = "large" }, cts.Token);
+        var writer = await muxA.OpenChannelAsync("large", cts.Token);
         var reader = await muxB.AcceptChannelAsync("large", cts.Token);
 
         var data = new byte[256 * 1024];
@@ -212,7 +212,7 @@ public class ProtocolEdgeCaseTests
         await using var a = muxA;
         await using var b = muxB;
 
-        var writer = await muxA.OpenChannelAsync(new ChannelOptions { ChannelId = "small" }, cts.Token);
+        var writer = await muxA.OpenChannelAsync("small", cts.Token);
         var reader = await muxB.AcceptChannelAsync("small", cts.Token);
 
         // Write 1000 single-byte messages
@@ -263,7 +263,7 @@ public class ProtocolEdgeCaseTests
         await Task.Delay(100);
 
         // Then open
-        var writer = await muxA.OpenChannelAsync(new ChannelOptions { ChannelId = "future" }, cts.Token);
+        var writer = await muxA.OpenChannelAsync("future", cts.Token);
 
         var reader = await acceptTask;
         Assert.NotNull(reader);
@@ -290,9 +290,9 @@ public class ProtocolEdgeCaseTests
         await Task.Delay(50);
 
         // Open in reverse order
-        await muxA.OpenChannelAsync(new ChannelOptions { ChannelId = "ch_c" }, cts.Token);
-        await muxA.OpenChannelAsync(new ChannelOptions { ChannelId = "ch_a" }, cts.Token);
-        await muxA.OpenChannelAsync(new ChannelOptions { ChannelId = "ch_b" }, cts.Token);
+        await muxA.OpenChannelAsync("ch_c", cts.Token);
+        await muxA.OpenChannelAsync("ch_a", cts.Token);
+        await muxA.OpenChannelAsync("ch_b", cts.Token);
 
         var r1 = await t1;
         var r2 = await t2;

@@ -865,7 +865,11 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IFrameDispatcher
 
     #region Channel Operations
 
-    /// <summary>Opens a new channel for writing.</summary>
+    /// <summary>Opens a new channel for writing with default options.</summary>
+    public ValueTask<WriteChannel> OpenChannelAsync(string channelId, CancellationToken cancellationToken = default)
+        => OpenChannelAsync(new ChannelOptions { ChannelId = channelId }, cancellationToken);
+
+    /// <summary>Opens a new channel for writing with custom options.</summary>
     public async ValueTask<WriteChannel> OpenChannelAsync(ChannelOptions options, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(options);

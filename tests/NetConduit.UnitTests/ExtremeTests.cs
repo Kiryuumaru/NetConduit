@@ -47,7 +47,7 @@ public class ExtremeTests
                 break;
             }
         });
-        var reverseWrite = await outerAcceptor.OpenChannelAsync(new ChannelOptions { ChannelId = "reverse_channel" }, cts.Token);
+        var reverseWrite = await outerAcceptor.OpenChannelAsync("reverse_channel", cts.Token);
         await reverseAcceptTask;
 
         // Create inner multiplexer using outer channels as transport
@@ -81,7 +81,7 @@ public class ExtremeTests
             }
         });
 
-        var innerWriteChannel = await innerInitiator.OpenChannelAsync(new ChannelOptions { ChannelId = "inner_data" }, cts.Token);
+        var innerWriteChannel = await innerInitiator.OpenChannelAsync("inner_data", cts.Token);
         await innerAcceptChannelTask;
 
         // Transfer data through nested multiplexer
@@ -144,7 +144,7 @@ public class ExtremeTests
             }
         });
 
-        var l2WriteChannel = await l2Initiator.OpenChannelAsync(new ChannelOptions { ChannelId = "l2_data" }, cts.Token);
+        var l2WriteChannel = await l2Initiator.OpenChannelAsync("l2_data", cts.Token);
         await acceptTask;
 
         var testData = new byte[8192];
@@ -221,7 +221,7 @@ public class ExtremeTests
             }
         });
 
-        var l3WriteChannel = await l3Initiator.OpenChannelAsync(new ChannelOptions { ChannelId = "l3_data" }, cts.Token);
+        var l3WriteChannel = await l3Initiator.OpenChannelAsync("l3_data", cts.Token);
         await acceptTask;
 
         var testData = new byte[8192];
@@ -312,7 +312,7 @@ public class ExtremeTests
                 var channelIndex = c;
                 allTasks.Add(Task.Run(async () =>
                 {
-                    var channel = await initiator.OpenChannelAsync(new ChannelOptions { ChannelId = $"mux_{mi}_ch_{channelIndex}" }, cts.Token);
+                    var channel = await initiator.OpenChannelAsync($"mux_{mi}_ch_{channelIndex}", cts.Token);
                     var data = new byte[dataSize];
                     Random.Shared.NextBytes(data);
                     
@@ -402,7 +402,7 @@ public class ExtremeTests
             // Open channel
             async () =>
             {
-                var ch = await initiator.OpenChannelAsync(new ChannelOptions { ChannelId = $"chaos_{Guid.NewGuid():N}" }, cts.Token);
+                var ch = await initiator.OpenChannelAsync($"chaos_{Guid.NewGuid():N}", cts.Token);
                 channels.Add(ch);
             },
             // Write random data
@@ -483,7 +483,7 @@ public class ExtremeTests
         {
             for (int i = 0; i < iterations; i++)
             {
-                var ch = await initiator.OpenChannelAsync(new ChannelOptions { ChannelId = $"rapid_open_{i}" }, cts.Token);
+                var ch = await initiator.OpenChannelAsync($"rapid_open_{i}", cts.Token);
                 // Random: either close gracefully or dispose immediately
                 if (Random.Shared.NextDouble() > 0.5)
                     await ch.CloseAsync(cts.Token);
@@ -566,7 +566,7 @@ public class ExtremeTests
         var sendTasks = Enumerable.Range(0, channelCount).Select(async i =>
         {
             var rng = new Random(i); // Per-channel RNG for determinism
-            var channel = await initiator.OpenChannelAsync(new ChannelOptions { ChannelId = $"interleaved_{i}" }, cts.Token);
+            var channel = await initiator.OpenChannelAsync($"interleaved_{i}", cts.Token);
             
             using var sha = SHA256.Create();
             var totalSize = rng.Next(1024, 65536);
@@ -671,7 +671,7 @@ public class ExtremeTests
             var batchNum = batch;
             var tasks = Enumerable.Range(0, batchSize).Select(async i =>
             {
-                var ch = await initiator.OpenChannelAsync(new ChannelOptions { ChannelId = $"scale10k_{batchNum}_{i}" }, cts.Token);
+                var ch = await initiator.OpenChannelAsync($"scale10k_{batchNum}_{i}", cts.Token);
                 ch.Dispose();
             });
             await Task.WhenAll(tasks);
@@ -713,7 +713,7 @@ public class ExtremeTests
             }
         });
 
-        var writeChannel = await initiator.OpenChannelAsync(new ChannelOptions { ChannelId = "large_data_500mb" }, cts.Token);
+        var writeChannel = await initiator.OpenChannelAsync("large_data_500mb", cts.Token);
         await acceptTask;
 
         // Transfer 500MB
@@ -785,7 +785,7 @@ public class ExtremeTests
             }
         });
 
-        var writeChannel = await initiator.OpenChannelAsync(new ChannelOptions { ChannelId = "small_messages_100k" }, cts.Token);
+        var writeChannel = await initiator.OpenChannelAsync("small_messages_100k", cts.Token);
         await acceptTask;
 
         const int messageCount = 20_000;
@@ -853,10 +853,10 @@ public class ExtremeTests
             var side2ChId = $"side2_ch_{i}";
 
             // Side 1 opens a channel
-            var write1 = await side1.OpenChannelAsync(new ChannelOptions { ChannelId = side1ChId }, cts.Token);
+            var write1 = await side1.OpenChannelAsync(side1ChId, cts.Token);
             
             // Side 2 opens a channel
-            var write2 = await side2.OpenChannelAsync(new ChannelOptions { ChannelId = side2ChId }, cts.Token);
+            var write2 = await side2.OpenChannelAsync(side2ChId, cts.Token);
 
             // Accept channels by name
             var read1 = await side2.AcceptChannelAsync(side1ChId, cts.Token);
@@ -974,7 +974,7 @@ public class ExtremeTests
         // Client: send requests sequentially to avoid overwhelming
         for (var i = 0; i < requestCount; i++)
         {
-            var ch = await client.OpenChannelAsync(new ChannelOptions { ChannelId = $"echo_request_{i}" }, cts.Token);
+            var ch = await client.OpenChannelAsync($"echo_request_{i}", cts.Token);
             var data = new byte[Random.Shared.Next(100, 500)];
             Random.Shared.NextBytes(data);
             sentData[ch.ChannelId] = data;
@@ -1031,7 +1031,7 @@ public class ExtremeTests
             }
         });
 
-        var writeChannel = await initiator.OpenChannelAsync(new ChannelOptions { ChannelId = "zero_length" }, cts.Token);
+        var writeChannel = await initiator.OpenChannelAsync("zero_length", cts.Token);
         await acceptTask;
 
         // Write zero bytes
@@ -1083,7 +1083,7 @@ public class ExtremeTests
             }
         });
 
-        var writeChannel = await initiator.OpenChannelAsync(new ChannelOptions { ChannelId = "max_frame" }, cts.Token);
+        var writeChannel = await initiator.OpenChannelAsync("max_frame", cts.Token);
         await acceptTask;
 
         // Write exactly max frame size
@@ -1162,7 +1162,7 @@ public class ExtremeTests
                 break;
             }
         });
-        var initiatorWrite = await initiator.OpenChannelAsync(new ChannelOptions { ChannelId = channel1Id }, ct);
+        var initiatorWrite = await initiator.OpenChannelAsync(channel1Id, ct);
         await accept1Task;
 
         // Channel 2: Acceptor -> Initiator
@@ -1175,7 +1175,7 @@ public class ExtremeTests
                 break;
             }
         });
-        var acceptorWrite = await acceptor.OpenChannelAsync(new ChannelOptions { ChannelId = channel2Id }, ct);
+        var acceptorWrite = await acceptor.OpenChannelAsync(channel2Id, ct);
         await accept2Task;
 
         return new BidirectionalPipe(initiatorWrite, initiatorRead!, acceptorWrite, acceptorRead!);
@@ -1194,7 +1194,7 @@ public class ExtremeTests
             }
         });
 
-        var writeChannel = await initiator.OpenChannelAsync(new ChannelOptions { ChannelId = channelId }, ct);
+        var writeChannel = await initiator.OpenChannelAsync(channelId, ct);
         await acceptTask;
 
         return (writeChannel, readChannel!);
@@ -1239,7 +1239,7 @@ public class ExtremeTests
         // Open and send sequentially to avoid overwhelming the multiplexer
         for (var i = 0; i < count; i++)
         {
-            var ch = await mux.OpenChannelAsync(new ChannelOptions { ChannelId = $"{channelIdPrefix}_{i}" }, ct);
+            var ch = await mux.OpenChannelAsync($"{channelIdPrefix}_{i}", ct);
             var data = new byte[Random.Shared.Next(100, 1000)];
             Random.Shared.NextBytes(data);
             sent[ch.ChannelId] = data;
@@ -1350,7 +1350,7 @@ public class ExtremeTests
             var channelIndex = i;
             sendTasks.Add(Task.Run(async () =>
             {
-                var channel = await initiator.OpenChannelAsync(new ChannelOptions { ChannelId = $"scale_ch_{channelIndex}" }, cts.Token);
+                var channel = await initiator.OpenChannelAsync($"scale_ch_{channelIndex}", cts.Token);
                 await channel.WriteAsync(new byte[] { 0x42 }, cts.Token);
                 await channel.FlushAsync(cts.Token);
                 await channel.CloseAsync(cts.Token);
@@ -1437,7 +1437,7 @@ public class ExtremeTests
         // Send many messages per channel
         var sendTasks = Enumerable.Range(0, channelCount).Select(async chIdx =>
         {
-            var channel = await initiator.OpenChannelAsync(new ChannelOptions { ChannelId = $"heavy_ch_{chIdx}" }, cts.Token);
+            var channel = await initiator.OpenChannelAsync($"heavy_ch_{chIdx}", cts.Token);
             var data = new byte[messageSize];
             Random.Shared.NextBytes(data);
             
@@ -1500,7 +1500,7 @@ public class ExtremeTests
             }
         });
 
-        var writeChannel = await initiator.OpenChannelAsync(new ChannelOptions { ChannelId = "large_transfer" }, cts.Token);
+        var writeChannel = await initiator.OpenChannelAsync("large_transfer", cts.Token);
         await acceptTask;
 
         const long totalBytes = 1L * 1024 * 1024 * 1024; // 1GB
@@ -1609,7 +1609,7 @@ public class ExtremeTests
         // Send 1MB per channel
         var sendTasks = Enumerable.Range(0, channelCount).Select(async i =>
         {
-            var channel = await initiator.OpenChannelAsync(new ChannelOptions { ChannelId = $"small_msg_{i}" }, cts.Token);
+            var channel = await initiator.OpenChannelAsync($"small_msg_{i}", cts.Token);
             var rng = new Random(i);
             
             using var hash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
@@ -1686,7 +1686,7 @@ public class ExtremeTests
             }
         });
 
-        var writeChannel = await initiator.OpenChannelAsync(new ChannelOptions { ChannelId = "video_stream" }, cts.Token);
+        var writeChannel = await initiator.OpenChannelAsync("video_stream", cts.Token);
         await acceptTask;
 
         const int frameSize = 500 * 1024; // 500KB per frame (compressed 4K)
@@ -1839,7 +1839,7 @@ public class ExtremeTests
                 var channelIndex = batch * batchSize + i;
                 tasks.Add(Task.Run(async () =>
                 {
-                    var channel = await initiator.OpenChannelAsync(new ChannelOptions { ChannelId = $"mem_ch_{channelIndex}" }, cts.Token);
+                    var channel = await initiator.OpenChannelAsync($"mem_ch_{channelIndex}", cts.Token);
                     await channel.CloseAsync(cts.Token);
                     channel.Dispose();
                     Interlocked.Increment(ref completedCount);
@@ -1942,7 +1942,7 @@ public class ExtremeTests
             }
         });
 
-        var writeChannel = await initiator.OpenChannelAsync(new ChannelOptions { ChannelId = "game_state" }, cts.Token);
+        var writeChannel = await initiator.OpenChannelAsync("game_state", cts.Token);
         await acceptTask;
 
         const int messageSize = 64; // Small packets like game state updates
@@ -2072,7 +2072,7 @@ public class ExtremeTests
             try
             {
                 var idx = Interlocked.Increment(ref channelCounter);
-                var channel = await initiator.OpenChannelAsync(new ChannelOptions { ChannelId = $"sustained_ch_{idx}" }, cts.Token);
+                var channel = await initiator.OpenChannelAsync($"sustained_ch_{idx}", cts.Token);
                 var data = new byte[dataPerChannel];
                 await channel.WriteAsync(data, cts.Token);
                 await channel.FlushAsync(cts.Token);

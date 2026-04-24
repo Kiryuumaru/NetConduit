@@ -26,7 +26,7 @@ public class BugFixTests
 
         var (muxA, muxB, _, _) = await TestMuxHelper.CreateMuxPairAsync(pipe, cancellationToken: cts.Token);
 
-        var writeChannel = await muxA.OpenChannelAsync(new ChannelOptions { ChannelId = "delta_atomic" }, cts.Token);
+        var writeChannel = await muxA.OpenChannelAsync("delta_atomic", cts.Token);
         var readChannel = await muxB.AcceptChannelAsync("delta_atomic", cts.Token);
 
         await using var sender = new DeltaTransit<JsonObject>(writeChannel, null);
@@ -49,7 +49,7 @@ public class BugFixTests
 
         var (muxA, muxB, _, _) = await TestMuxHelper.CreateMuxPairAsync(pipe, cancellationToken: cts.Token);
 
-        var writeChannel = await muxA.OpenChannelAsync(new ChannelOptions { ChannelId = "delta_multi" }, cts.Token);
+        var writeChannel = await muxA.OpenChannelAsync("delta_multi", cts.Token);
         var readChannel = await muxB.AcceptChannelAsync("delta_multi", cts.Token);
 
         await using var sender = new DeltaTransit<JsonObject>(writeChannel, null);

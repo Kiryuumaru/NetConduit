@@ -132,7 +132,7 @@ public class TcpRelayTests
         // Open channels and send data sequentially
         for (int i = 0; i < connectionCount; i++)
         {
-            var senderChannel = await muxInitiator.OpenChannelAsync(new ChannelOptions { ChannelId = $"relay_conn_{i}" }, cts.Token);
+            var senderChannel = await muxInitiator.OpenChannelAsync($"relay_conn_{i}", cts.Token);
             
             // Generate random data
             var data = new byte[dataSize];
@@ -542,7 +542,7 @@ public class TcpRelayTests
             }
             catch (OperationCanceledException) { }
         });
-        var initiatorWrite = await initiator.OpenChannelAsync(new ChannelOptions { ChannelId = $"tcp_init_to_accept_{Guid.NewGuid():N}" }, ct);
+        var initiatorWrite = await initiator.OpenChannelAsync($"tcp_init_to_accept_{Guid.NewGuid():N}", ct);
         
         // Wait for channel to be accepted
         var waitStart = DateTime.UtcNow;
@@ -565,7 +565,7 @@ public class TcpRelayTests
             }
             catch (OperationCanceledException) { }
         });
-        var acceptorWrite = await acceptor.OpenChannelAsync(new ChannelOptions { ChannelId = $"tcp_accept_to_init_{Guid.NewGuid():N}" }, ct);
+        var acceptorWrite = await acceptor.OpenChannelAsync($"tcp_accept_to_init_{Guid.NewGuid():N}", ct);
         
         // Wait for channel to be accepted
         waitStart = DateTime.UtcNow;

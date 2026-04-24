@@ -23,7 +23,7 @@ public class UdpMultiplexerTests
         await Task.WhenAll(client.WaitForReadyAsync(cts.Token), server.WaitForReadyAsync(cts.Token));
 
         // open channel from client to server
-        var write = await client.OpenChannelAsync(new ChannelOptions { ChannelId = "udp-test" }, cts.Token);
+        var write = await client.OpenChannelAsync("udp-test", cts.Token);
         var read = await server.AcceptChannelAsync("udp-test", cts.Token);
 
         var payload = "hello over udp"u8.ToArray();
@@ -65,7 +65,7 @@ public class UdpMultiplexerTests
             tasks.Add(Task.Run(async () =>
             {
                 var channelId = $"udp-channel-{channelIndex}";
-                var writeChannel = await client.OpenChannelAsync(new ChannelOptions { ChannelId = channelId }, cts.Token);
+                var writeChannel = await client.OpenChannelAsync(channelId, cts.Token);
                 var readChannel = await server.AcceptChannelAsync(channelId, cts.Token);
 
                 var testData = new byte[dataSize];
@@ -112,11 +112,11 @@ public class UdpMultiplexerTests
         await Task.WhenAll(client.WaitForReadyAsync(cts.Token), server.WaitForReadyAsync(cts.Token));
 
         // Client opens channel to server
-        var clientToServerWrite = await client.OpenChannelAsync(new ChannelOptions { ChannelId = "c2s" }, cts.Token);
+        var clientToServerWrite = await client.OpenChannelAsync("c2s", cts.Token);
         var clientToServerRead = await server.AcceptChannelAsync("c2s", cts.Token);
 
         // Server opens channel to client
-        var serverToClientWrite = await server.OpenChannelAsync(new ChannelOptions { ChannelId = "s2c" }, cts.Token);
+        var serverToClientWrite = await server.OpenChannelAsync("s2c", cts.Token);
         var serverToClientRead = await client.AcceptChannelAsync("s2c", cts.Token);
 
         var clientMessage = "Hello from UDP client"u8.ToArray();
@@ -165,7 +165,7 @@ public class UdpMultiplexerTests
         var serverRun = server.Start(cts.Token);
         await Task.WhenAll(client.WaitForReadyAsync(cts.Token), server.WaitForReadyAsync(cts.Token));
 
-        var writeChannel = await client.OpenChannelAsync(new ChannelOptions { ChannelId = "large" }, cts.Token);
+        var writeChannel = await client.OpenChannelAsync("large", cts.Token);
         var readChannel = await server.AcceptChannelAsync("large", cts.Token);
 
         // 1 MB of data (smaller than TCP test due to UDP characteristics)

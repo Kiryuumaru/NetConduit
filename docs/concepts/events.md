@@ -314,7 +314,7 @@ var runTask = mux.Start();
 await mux.WaitForReadyAsync();
 
 // Open channel with events
-var channel = await mux.OpenChannelAsync(new() { ChannelId = "data" });
+var channel = await mux.OpenChannelAsync("data");
 
 channel.OnClosed += (reason, ex) =>
 {

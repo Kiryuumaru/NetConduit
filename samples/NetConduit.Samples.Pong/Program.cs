@@ -198,7 +198,7 @@ void RunServer(int port)
                                 return;
                             }
 
-                            var stateChannel = await mux.OpenChannelAsync(new ChannelOptions { ChannelId = "state" }, cts.Token);
+                            var stateChannel = await mux.OpenChannelAsync("state", cts.Token);
 
                             // DeltaTransit for efficient game state sync (write-only on server)
                             // Only changed properties are sent after initial full state
@@ -439,7 +439,7 @@ void RunClient(string host, int port)
                 _ = mux.Start(cts.Token);
                 await mux.WaitForReadyAsync(cts.Token);
 
-                var controlChannel = await mux.OpenChannelAsync(new ChannelOptions { ChannelId = "control" }, cts.Token);
+                var controlChannel = await mux.OpenChannelAsync("control", cts.Token);
 
                 ReadChannel? stateChannel = null;
                 using var acceptCts = CancellationTokenSource.CreateLinkedTokenSource(cts.Token);

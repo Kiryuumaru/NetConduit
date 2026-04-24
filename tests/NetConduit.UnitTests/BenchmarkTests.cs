@@ -61,7 +61,7 @@ public class BenchmarkTests
         // Warmup
         for (int i = 0; i < warmupCount; i++)
         {
-            var ch = await initiator.OpenChannelAsync(new ChannelOptions { ChannelId = $"warmup_{i}" }, cts.Token);
+            var ch = await initiator.OpenChannelAsync($"warmup_{i}", cts.Token);
             await ch.DisposeAsync();
         }
 
@@ -69,7 +69,7 @@ public class BenchmarkTests
         for (int i = 0; i < iterations; i++)
         {
             var sw = Stopwatch.StartNew();
-            var ch = await initiator.OpenChannelAsync(new ChannelOptions { ChannelId = $"measure_{i}" }, cts.Token);
+            var ch = await initiator.OpenChannelAsync($"measure_{i}", cts.Token);
             sw.Stop();
             latencies.Add(sw.Elapsed.TotalMicroseconds);
             await ch.DisposeAsync();
@@ -213,7 +213,7 @@ public class BenchmarkTests
             WriteChannel? writeChannel = null;
             try
             {
-                writeChannel = await initiator.OpenChannelAsync(new ChannelOptions { ChannelId = $"firstbyte_{i}" }, cts.Token);
+                writeChannel = await initiator.OpenChannelAsync($"firstbyte_{i}", cts.Token);
             }
             catch (TimeoutException)
             {
@@ -300,7 +300,7 @@ public class BenchmarkTests
             }
         });
 
-        var writeChannel = await initiator.OpenChannelAsync(new ChannelOptions { ChannelId = "chunk_benchmark" }, cts.Token);
+        var writeChannel = await initiator.OpenChannelAsync("chunk_benchmark", cts.Token);
         await acceptTask;
 
         var sizes = new[] { 1024, 16 * 1024, 64 * 1024, 256 * 1024 };
@@ -391,7 +391,7 @@ public class BenchmarkTests
             {
                 try
                 {
-                    writeChannels.Add(await initiator.OpenChannelAsync(new ChannelOptions { ChannelId = $"parallel_{channelCount}_{i}" }, cts.Token));
+                    writeChannels.Add(await initiator.OpenChannelAsync($"parallel_{channelCount}_{i}", cts.Token));
                 }
                 catch (TimeoutException)
                 {
@@ -487,7 +487,7 @@ public class BenchmarkTests
             }
         });
 
-        var writeChannel = await initiator.OpenChannelAsync(new ChannelOptions { ChannelId = "message_rate_channel" }, cts.Token);
+        var writeChannel = await initiator.OpenChannelAsync("message_rate_channel", cts.Token);
         await acceptTask;
 
         var messageSizes = new[] { 8, 16, 32, 64, 128, 256, 512 };
@@ -578,14 +578,14 @@ public class BenchmarkTests
         // Warmup
         for (int i = 0; i < warmupCount; i++)
         {
-            var ch = await initiator.OpenChannelAsync(new ChannelOptions { ChannelId = $"creation_warmup_{i}" }, cts.Token);
+            var ch = await initiator.OpenChannelAsync($"creation_warmup_{i}", cts.Token);
             await ch.DisposeAsync();
         }
 
         var sw = Stopwatch.StartNew();
         for (int i = 0; i < iterations; i++)
         {
-            var ch = await initiator.OpenChannelAsync(new ChannelOptions { ChannelId = $"creation_test_{i}" }, cts.Token);
+            var ch = await initiator.OpenChannelAsync($"creation_test_{i}", cts.Token);
             await ch.DisposeAsync();
         }
         await Task.WhenAny(acceptLoop, Task.Delay(10000, cts.Token));
@@ -746,7 +746,7 @@ public class BenchmarkTests
             {
                 try
                 {
-                    writeChannels.Add(await initiator.OpenChannelAsync(new ChannelOptions { ChannelId = $"scaling_{count}_{i}" }, cts.Token));
+                    writeChannels.Add(await initiator.OpenChannelAsync($"scaling_{count}_{i}", cts.Token));
                 }
                 catch (TimeoutException)
                 {
@@ -819,7 +819,7 @@ public class BenchmarkTests
                 }
             });
 
-            var writeChannel = await initiator.OpenChannelAsync(new ChannelOptions { ChannelId = $"credit_{credits}" }, cts.Token);
+            var writeChannel = await initiator.OpenChannelAsync($"credit_{credits}", cts.Token);
             await acceptTask;
 
             var data = new byte[chunkSize];
@@ -926,7 +926,7 @@ public class BenchmarkTests
                 }
             });
 
-            var writeChannel = await initiator.OpenChannelAsync(new ChannelOptions { ChannelId = "nested_benchmark" }, cts.Token);
+            var writeChannel = await initiator.OpenChannelAsync("nested_benchmark", cts.Token);
             await acceptTask;
 
             var readTask = Task.Run(async () =>
@@ -1002,8 +1002,8 @@ public class BenchmarkTests
             }
         });
 
-        var clientWrite = await client.OpenChannelAsync(new ChannelOptions { ChannelId = "client_to_server" }, ct);
-        var serverWrite = await server.OpenChannelAsync(new ChannelOptions { ChannelId = "server_to_client" }, ct);
+        var clientWrite = await client.OpenChannelAsync("client_to_server", ct);
+        var serverWrite = await server.OpenChannelAsync("server_to_client", ct);
 
         await clientAcceptTask;
         await serverAcceptTask;

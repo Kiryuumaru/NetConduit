@@ -23,7 +23,7 @@ public class IpcMultiplexerTests
         var serverRun = server.Start(cts.Token);
         await Task.WhenAll(client.WaitForReadyAsync(cts.Token), server.WaitForReadyAsync(cts.Token));
 
-        var write = await client.OpenChannelAsync(new ChannelOptions { ChannelId = "ipc" }, cts.Token);
+        var write = await client.OpenChannelAsync("ipc", cts.Token);
         var read = await server.AcceptChannelAsync("ipc", cts.Token);
 
         var payload = "hello over ipc"u8.ToArray();
@@ -69,7 +69,7 @@ public class IpcMultiplexerTests
             tasks.Add(Task.Run(async () =>
             {
                 var channelId = $"ipc-channel-{channelIndex}";
-                var writeChannel = await client.OpenChannelAsync(new ChannelOptions { ChannelId = channelId }, cts.Token);
+                var writeChannel = await client.OpenChannelAsync(channelId, cts.Token);
                 var readChannel = await server.AcceptChannelAsync(channelId, cts.Token);
 
                 var testData = new byte[dataSize];
@@ -120,11 +120,11 @@ public class IpcMultiplexerTests
         await Task.WhenAll(client.WaitForReadyAsync(cts.Token), server.WaitForReadyAsync(cts.Token));
 
         // Client opens channel to server
-        var clientToServerWrite = await client.OpenChannelAsync(new ChannelOptions { ChannelId = "c2s" }, cts.Token);
+        var clientToServerWrite = await client.OpenChannelAsync("c2s", cts.Token);
         var clientToServerRead = await server.AcceptChannelAsync("c2s", cts.Token);
 
         // Server opens channel to client
-        var serverToClientWrite = await server.OpenChannelAsync(new ChannelOptions { ChannelId = "s2c" }, cts.Token);
+        var serverToClientWrite = await server.OpenChannelAsync("s2c", cts.Token);
         var serverToClientRead = await client.AcceptChannelAsync("s2c", cts.Token);
 
         var clientMessage = "Hello from IPC client"u8.ToArray();
@@ -177,7 +177,7 @@ public class IpcMultiplexerTests
         var serverRun = server.Start(cts.Token);
         await Task.WhenAll(client.WaitForReadyAsync(cts.Token), server.WaitForReadyAsync(cts.Token));
 
-        var writeChannel = await client.OpenChannelAsync(new ChannelOptions { ChannelId = "large" }, cts.Token);
+        var writeChannel = await client.OpenChannelAsync("large", cts.Token);
         var readChannel = await server.AcceptChannelAsync("large", cts.Token);
 
         // 5 MB of data

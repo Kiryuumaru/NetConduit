@@ -84,7 +84,7 @@ public class DataIntegrityTests
         var sendTasks = Enumerable.Range(0, channelCount).Select(async i =>
         {
             var channelId = $"integrity_ch_{i}";
-            var ch = await muxA.OpenChannelAsync(new ChannelOptions { ChannelId = channelId }, cts.Token);
+            var ch = await muxA.OpenChannelAsync(channelId, cts.Token);
             
             var checksums = new List<string>();
             for (var j = 0; j < messagesPerChannel; j++)
@@ -158,10 +158,10 @@ public class DataIntegrityTests
             var bToAId = $"b_to_a_{i}";
             
             // A opens channel to B
-            var aToBWrite = await muxA.OpenChannelAsync(new ChannelOptions { ChannelId = aToBId }, cts.Token);
+            var aToBWrite = await muxA.OpenChannelAsync(aToBId, cts.Token);
             
             // B opens channel to A
-            var bToAWrite = await muxB.OpenChannelAsync(new ChannelOptions { ChannelId = bToAId }, cts.Token);
+            var bToAWrite = await muxB.OpenChannelAsync(bToAId, cts.Token);
             
             // Accept channels
             var aToBRead = await muxB.AcceptChannelAsync(aToBId, cts.Token);
@@ -293,7 +293,7 @@ public class DataIntegrityTests
         // Open channels from side A sequentially (for reliability)
         for (var i = 0; i < channelsPerSide; i++)
         {
-            var ch = await muxA.OpenChannelAsync(new ChannelOptions { ChannelId = $"from_a_{i}" }, cts.Token);
+            var ch = await muxA.OpenChannelAsync($"from_a_{i}", cts.Token);
             aChannels[ch.ChannelId] = ch;
             
             var data = BitConverter.GetBytes(i);
@@ -305,7 +305,7 @@ public class DataIntegrityTests
         // Open channels from side B sequentially (for reliability)
         for (var i = 0; i < channelsPerSide; i++)
         {
-            var ch = await muxB.OpenChannelAsync(new ChannelOptions { ChannelId = $"from_b_{i}" }, cts.Token);
+            var ch = await muxB.OpenChannelAsync($"from_b_{i}", cts.Token);
             bChannels[ch.ChannelId] = ch;
             
             var data = BitConverter.GetBytes(i + 10000);
@@ -380,7 +380,7 @@ public class DataIntegrityTests
         // Rapidly open and close channels
         for (var i = 0; i < cycles; i++)
         {
-            var ch = await muxA.OpenChannelAsync(new ChannelOptions { ChannelId = $"cycle_{i}" }, cts.Token);
+            var ch = await muxA.OpenChannelAsync($"cycle_{i}", cts.Token);
             await ch.WriteAsync(BitConverter.GetBytes(i), cts.Token);
             await ch.FlushAsync(cts.Token);
             await ch.CloseAsync(cts.Token);
@@ -410,8 +410,8 @@ public class DataIntegrityTests
         await Task.Delay(100);
 
         // Both sides open their first channel (both will get index 1)
-        var chAToB = await muxA.OpenChannelAsync(new ChannelOptions { ChannelId = "a_to_b_first" }, cts.Token);
-        var chBToA = await muxB.OpenChannelAsync(new ChannelOptions { ChannelId = "b_to_a_first" }, cts.Token);
+        var chAToB = await muxA.OpenChannelAsync("a_to_b_first", cts.Token);
+        var chBToA = await muxB.OpenChannelAsync("b_to_a_first", cts.Token);
 
         // Accept channels
         var readAToB = await muxB.AcceptChannelAsync("a_to_b_first", cts.Token);
@@ -480,7 +480,7 @@ public class DataIntegrityTests
 
         for (var i = 0; i < testChannels; i++)
         {
-            var ch = await muxA.OpenChannelAsync(new ChannelOptions { ChannelId = $"scale_test_{i}" }, cts.Token);
+            var ch = await muxA.OpenChannelAsync($"scale_test_{i}", cts.Token);
             channels.Add(ch);
         }
 

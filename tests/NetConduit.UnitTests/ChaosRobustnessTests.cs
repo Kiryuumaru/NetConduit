@@ -88,7 +88,7 @@ public class ChaosRobustnessTests
             try
             {
                 var channelIndex = int.Parse(channelId[3..]);
-                var writeChannel = await muxA.OpenChannelAsync(new ChannelOptions { ChannelId = channelId }, cts.Token);
+                var writeChannel = await muxA.OpenChannelAsync(channelId, cts.Token);
                 
                 var data = BitConverter.GetBytes((long)channelIndex);
                 dataToSend[channelId] = data;
@@ -243,12 +243,12 @@ public class ChaosRobustnessTests
                 {
                     // A->B: A opens, B accepts
                     var aChannelId = $"a_{index}";
-                    var aToBWrite = await muxA.OpenChannelAsync(new ChannelOptions { ChannelId = aChannelId }, cts.Token);
+                    var aToBWrite = await muxA.OpenChannelAsync(aChannelId, cts.Token);
                     var aToBRead = await muxB.AcceptChannelAsync(aChannelId, cts.Token);
                     
                     // B->A: B opens, A accepts
                     var bChannelId = $"b_{index}";
-                    var bToAWrite = await muxB.OpenChannelAsync(new ChannelOptions { ChannelId = bChannelId }, cts.Token);
+                    var bToAWrite = await muxB.OpenChannelAsync(bChannelId, cts.Token);
                     var bToARead = await muxA.AcceptChannelAsync(bChannelId, cts.Token);
                     
                     // Send data both directions
@@ -467,7 +467,7 @@ public class ChaosRobustnessTests
                 {
                     case 0: // Open new channel
                         var channelId = $"ch_{Interlocked.Increment(ref channelCounter)}";
-                        var ch = await muxA.OpenChannelAsync(new ChannelOptions { ChannelId = channelId }, cts.Token);
+                        var ch = await muxA.OpenChannelAsync(channelId, cts.Token);
                         openChannels[channelId] = ch;
                         sentData[channelId] = new List<byte[]>();
                         break;
@@ -583,7 +583,7 @@ public class ChaosRobustnessTests
         for (var i = 0; i < channelCount; i++)
         {
             var channelId = $"random_size_{i}";
-            var ch = await muxA.OpenChannelAsync(new ChannelOptions { ChannelId = channelId }, cts.Token);
+            var ch = await muxA.OpenChannelAsync(channelId, cts.Token);
             
             using var ms = new MemoryStream();
             for (var j = 0; j < messagesPerChannel; j++)
@@ -647,10 +647,10 @@ public class ChaosRobustnessTests
             var bToA = $"b_to_a_{i}";
 
             // A opens channel to B
-            var writeA = await muxA.OpenChannelAsync(new ChannelOptions { ChannelId = aToB }, cts.Token);
+            var writeA = await muxA.OpenChannelAsync(aToB, cts.Token);
             
             // B opens channel to A
-            var writeB = await muxB.OpenChannelAsync(new ChannelOptions { ChannelId = bToA }, cts.Token);
+            var writeB = await muxB.OpenChannelAsync(bToA, cts.Token);
 
             // Accept by name
             var readA = await muxB.AcceptChannelAsync(aToB, cts.Token);
@@ -724,10 +724,10 @@ public class ChaosRobustnessTests
             var bToA = $"b_to_a_{i}";
 
             // A opens
-            var chA = await muxA.OpenChannelAsync(new ChannelOptions { ChannelId = aToB }, cts.Token);
+            var chA = await muxA.OpenChannelAsync(aToB, cts.Token);
             
             // B opens
-            var chB = await muxB.OpenChannelAsync(new ChannelOptions { ChannelId = bToA }, cts.Token);
+            var chB = await muxB.OpenChannelAsync(bToA, cts.Token);
 
             // Accept by name
             var readA = await muxB.AcceptChannelAsync(aToB, cts.Token);
@@ -819,7 +819,7 @@ public class ChaosRobustnessTests
         for (var i = 0; i < channelCount; i++)
         {
             var channelId = $"hash_ch_{i}";
-            var ch = await muxA.OpenChannelAsync(new ChannelOptions { ChannelId = channelId }, cts.Token);
+            var ch = await muxA.OpenChannelAsync(channelId, cts.Token);
             
             var data = new byte[dataSize];
             Random.Shared.NextBytes(data);
@@ -890,7 +890,7 @@ public class ChaosRobustnessTests
         for (var i = 0; i < channelCount; i++)
         {
             var channelId = $"seq_{i}";
-            var ch = await muxA.OpenChannelAsync(new ChannelOptions { ChannelId = channelId }, cts.Token);
+            var ch = await muxA.OpenChannelAsync(channelId, cts.Token);
             
             var data = new byte[bytesPerChannel];
             for (var j = 0; j < bytesPerChannel; j++)
@@ -973,7 +973,7 @@ public class ChaosRobustnessTests
         });
 
         // Send
-        var ch = await muxA.OpenChannelAsync(new ChannelOptions { ChannelId = "large_messages" }, cts.Token);
+        var ch = await muxA.OpenChannelAsync("large_messages", cts.Token);
         foreach (var data in sentData)
         {
             await ch.WriteAsync(data, cts.Token);
@@ -1046,7 +1046,7 @@ public class ChaosRobustnessTests
         // Rapid cycles
         for (var i = 0; i < cycles; i++)
         {
-            var ch = await muxA.OpenChannelAsync(new ChannelOptions { ChannelId = $"rapid_{i}" }, cts.Token);
+            var ch = await muxA.OpenChannelAsync($"rapid_{i}", cts.Token);
             await ch.WriteAsync(new byte[] { (byte)(i & 0xFF) }, cts.Token);
             await ch.CloseAsync(cts.Token);
         }
@@ -1121,8 +1121,8 @@ public class ChaosRobustnessTests
         // Create channels - give some delay between pairs to avoid overwhelming
         for (var i = 0; i < count; i++)
         {
-            var chA = await muxA.OpenChannelAsync(new ChannelOptions { ChannelId = $"from_a_{i}" }, cts.Token);
-            var chB = await muxB.OpenChannelAsync(new ChannelOptions { ChannelId = $"from_b_{i}" }, cts.Token);
+            var chA = await muxA.OpenChannelAsync($"from_a_{i}", cts.Token);
+            var chB = await muxB.OpenChannelAsync($"from_b_{i}", cts.Token);
 
             await chA.WriteAsync(BitConverter.GetBytes(i), cts.Token);
             await chB.WriteAsync(BitConverter.GetBytes(i + 1000), cts.Token);
@@ -1186,7 +1186,7 @@ public class ChaosRobustnessTests
             }
         });
 
-        var ch = await muxA.OpenChannelAsync(new ChannelOptions { ChannelId = "empty_writes" }, cts.Token);
+        var ch = await muxA.OpenChannelAsync("empty_writes", cts.Token);
         
         // Intersperse data with empty writes
         var expected = new List<byte>();

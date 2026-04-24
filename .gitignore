@@ -6,6 +6,9 @@
 # Prompts
 .prompts/
 
+# Memory
+.memory/
+
 # User-specific files
 *.rsuser
 *.suo

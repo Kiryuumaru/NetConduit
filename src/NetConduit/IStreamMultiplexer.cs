@@ -77,7 +77,10 @@ public interface IStreamMultiplexer : IAsyncDisposable
     /// </summary>
     Task WaitForReadyAsync(CancellationToken cancellationToken = default);
 
-    /// <summary>Opens an outbound channel.</summary>
+    /// <summary>Opens an outbound channel with default options.</summary>
+    ValueTask<WriteChannel> OpenChannelAsync(string channelId, CancellationToken cancellationToken = default);
+
+    /// <summary>Opens an outbound channel with custom options.</summary>
     ValueTask<WriteChannel> OpenChannelAsync(ChannelOptions options, CancellationToken cancellationToken = default);
 
     /// <summary>Accepts a specific inbound channel.</summary>

@@ -51,11 +51,11 @@ public partial class UseCaseTests
         var (muxA, muxB, _, _) = await TestMuxHelper.CreateMuxPairAsync(pipe, cancellationToken: cts.Token);
 
         // Request channel: Client → Server (MessageTransit for request-response)
-        var reqWrite = await muxA.OpenChannelAsync(new() { ChannelId = "req" }, cts.Token);
+        var reqWrite = await muxA.OpenChannelAsync("req", cts.Token);
         var reqRead = await muxB.AcceptChannelAsync("req", cts.Token);
 
         // Response channel: Server → Client
-        var resWrite = await muxB.OpenChannelAsync(new() { ChannelId = "res" }, cts.Token);
+        var resWrite = await muxB.OpenChannelAsync("res", cts.Token);
         var resRead = await muxA.AcceptChannelAsync("res", cts.Token);
 
         await using var reqSender = new MessageTransit<SyncRequest, SyncRequest>(
@@ -128,7 +128,7 @@ public partial class UseCaseTests
             var userId = $"user_{u}";
             allReceived[userId] = new List<ChatMessage>();
 
-            var writeChannel = await muxA.OpenChannelAsync(new() { ChannelId = userId }, cts.Token);
+            var writeChannel = await muxA.OpenChannelAsync(userId, cts.Token);
             var readChannel = await muxB.AcceptChannelAsync(userId, cts.Token);
 
             var sender = new MessageTransit<ChatMessage, ChatMessage>(
@@ -212,11 +212,11 @@ public partial class UseCaseTests
         var (muxA, muxB, _, _) = await TestMuxHelper.CreateMuxPairAsync(pipe, cancellationToken: cts.Token);
 
         // Client → Server state channel
-        var clientWrite = await muxA.OpenChannelAsync(new() { ChannelId = "state_c2s" }, cts.Token);
+        var clientWrite = await muxA.OpenChannelAsync("state_c2s", cts.Token);
         var serverRead = await muxB.AcceptChannelAsync("state_c2s", cts.Token);
 
         // Server → Client state channel
-        var serverWrite = await muxB.OpenChannelAsync(new() { ChannelId = "state_s2c" }, cts.Token);
+        var serverWrite = await muxB.OpenChannelAsync("state_s2c", cts.Token);
         var clientRead = await muxA.AcceptChannelAsync("state_s2c", cts.Token);
 
         await using var clientSender = new DeltaTransit<JsonNode>(clientWrite, null);
@@ -318,7 +318,7 @@ public partial class UseCaseTests
         {
             var streamIndex = s;
             var channelId = $"file_stream_{streamIndex}";
-            var writeChannel = await muxA.OpenChannelAsync(new() { ChannelId = channelId }, cts.Token);
+            var writeChannel = await muxA.OpenChannelAsync(channelId, cts.Token);
             var readChannel = await muxB.AcceptChannelAsync(channelId, cts.Token);
 
             // Sender
@@ -414,10 +414,10 @@ public partial class UseCaseTests
 
         var (muxA, muxB, _, _) = await TestMuxHelper.CreateMuxPairAsync(pipe, cancellationToken: cts.Token);
 
-        var rpcWrite = await muxA.OpenChannelAsync(new() { ChannelId = "rpc_req" }, cts.Token);
+        var rpcWrite = await muxA.OpenChannelAsync("rpc_req", cts.Token);
         var rpcRead = await muxB.AcceptChannelAsync("rpc_req", cts.Token);
 
-        var rpcResWrite = await muxB.OpenChannelAsync(new() { ChannelId = "rpc_res" }, cts.Token);
+        var rpcResWrite = await muxB.OpenChannelAsync("rpc_res", cts.Token);
         var rpcResRead = await muxA.AcceptChannelAsync("rpc_res", cts.Token);
 
         await using var reqSender = new MessageTransit<RpcRequest, RpcRequest>(
@@ -516,7 +516,7 @@ public partial class UseCaseTests
         for (int s = 0; s < subscriberCount; s++)
         {
             var writeChannel = await muxA.OpenChannelAsync(
-                new() { ChannelId = $"sub_{s}" }, cts.Token);
+                $"sub_{s}", cts.Token);
             var readChannel = await muxB.AcceptChannelAsync($"sub_{s}", cts.Token);
 
             senders.Add(new DeltaTransit<JsonNode>(writeChannel, null));
@@ -687,7 +687,7 @@ public partial class UseCaseTests
         var (muxA, muxB, _, _) = await TestMuxHelper.CreateMuxPairAsync(pipe, cancellationToken: cts.Token);
 
         // Open a raw channel with a name that looks like a transit suffix
-        var write1 = await muxA.OpenChannelAsync(new() { ChannelId = "data>>" }, cts.Token);
+        var write1 = await muxA.OpenChannelAsync("data>>", cts.Token);
         var read1 = await muxB.AcceptChannelAsync("data>>", cts.Token);
 
         // Now open a duplex transit named "data" — it will create "data>>" and "data<<"
@@ -742,7 +742,7 @@ public partial class UseCaseTests
             try
             {
                 var channelId = $"session_{i}";
-                var write = await muxA.OpenChannelAsync(new() { ChannelId = channelId }, cts.Token);
+                var write = await muxA.OpenChannelAsync(channelId, cts.Token);
                 var read = await muxB.AcceptChannelAsync(channelId, cts.Token);
 
                 // Simulate a short-lived session
@@ -797,7 +797,7 @@ public partial class UseCaseTests
 
         var (muxA, muxB, _, _) = await TestMuxHelper.CreateMuxPairAsync(pipe, cancellationToken: cts.Token);
 
-        var writeChannel = await muxA.OpenChannelAsync(new() { ChannelId = "video" }, cts.Token);
+        var writeChannel = await muxA.OpenChannelAsync("video", cts.Token);
         var readChannel = await muxB.AcceptChannelAsync("video", cts.Token);
 
         const int frameSize = 500 * 1024; // 500KB per frame (720p compressed)
@@ -878,10 +878,10 @@ public partial class UseCaseTests
 
         var (muxA, muxB, _, _) = await TestMuxHelper.CreateMuxPairAsync(pipe, cancellationToken: cts.Token);
 
-        var pingWrite = await muxA.OpenChannelAsync(new() { ChannelId = "ping" }, cts.Token);
+        var pingWrite = await muxA.OpenChannelAsync("ping", cts.Token);
         var pingRead = await muxB.AcceptChannelAsync("ping", cts.Token);
 
-        var pongWrite = await muxB.OpenChannelAsync(new() { ChannelId = "pong" }, cts.Token);
+        var pongWrite = await muxB.OpenChannelAsync("pong", cts.Token);
         var pongRead = await muxA.AcceptChannelAsync("pong", cts.Token);
 
         await using var pingSender = new MessageTransit<SyncRequest, SyncRequest>(
@@ -934,7 +934,7 @@ public partial class UseCaseTests
 
         var (muxA, muxB, _, _) = await TestMuxHelper.CreateMuxPairAsync(pipe, cancellationToken: cts.Token);
 
-        var writeA = await muxA.OpenChannelAsync(new() { ChannelId = "hb_delta" }, cts.Token);
+        var writeA = await muxA.OpenChannelAsync("hb_delta", cts.Token);
         var readB = await muxB.AcceptChannelAsync("hb_delta", cts.Token);
 
         await using var sender = new DeltaTransit<JsonNode>(writeA, null);
@@ -981,7 +981,7 @@ public partial class UseCaseTests
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
         var (muxA, muxB, _, _) = await TestMuxHelper.CreateMuxPairAsync(pipe, cancellationToken: cts.Token);
 
-        var writeA = await muxA.OpenChannelAsync(new() { ChannelId = "db_replication" }, cts.Token);
+        var writeA = await muxA.OpenChannelAsync("db_replication", cts.Token);
         var readB = await muxB.AcceptChannelAsync("db_replication", cts.Token);
 
         await using var sender = new MessageTransit<SyncRequest, SyncRequest>(
@@ -1025,7 +1025,7 @@ public partial class UseCaseTests
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(20));
         var (muxA, muxB, _, _) = await TestMuxHelper.CreateMuxPairAsync(pipe, cancellationToken: cts.Token);
 
-        var writeA = await muxA.OpenChannelAsync(new() { ChannelId = "config_push" }, cts.Token);
+        var writeA = await muxA.OpenChannelAsync("config_push", cts.Token);
         var readB = await muxB.AcceptChannelAsync("config_push", cts.Token);
 
         await using var sender = new DeltaTransit<JsonNode>(writeA, null);
@@ -1075,13 +1075,13 @@ public partial class UseCaseTests
         var (muxA, muxB, _, _) = await TestMuxHelper.CreateMuxPairAsync(pipe, cancellationToken: cts.Token);
 
         // DeltaTransit: state sync
-        var dw = await muxA.OpenChannelAsync(new() { ChannelId = "mixed_delta" }, cts.Token);
+        var dw = await muxA.OpenChannelAsync("mixed_delta", cts.Token);
         var dr = await muxB.AcceptChannelAsync("mixed_delta", cts.Token);
         await using var deltaSender = new DeltaTransit<JsonNode>(dw, null);
         await using var deltaReceiver = new DeltaTransit<JsonNode>(null, dr);
 
         // MessageTransit: commands
-        var mw = await muxA.OpenChannelAsync(new() { ChannelId = "mixed_cmd" }, cts.Token);
+        var mw = await muxA.OpenChannelAsync("mixed_cmd", cts.Token);
         var mr = await muxB.AcceptChannelAsync("mixed_cmd", cts.Token);
         await using var cmdSender = new MessageTransit<RpcRequest, RpcRequest>(
             mw, null, UseCaseJsonContext.Default.RpcRequest, UseCaseJsonContext.Default.RpcRequest);
@@ -1089,7 +1089,7 @@ public partial class UseCaseTests
             null, mr, UseCaseJsonContext.Default.RpcRequest, UseCaseJsonContext.Default.RpcRequest);
 
         // Raw channel: binary data
-        var rw = await muxA.OpenChannelAsync(new() { ChannelId = "mixed_raw" }, cts.Token);
+        var rw = await muxA.OpenChannelAsync("mixed_raw", cts.Token);
         var rr = await muxB.AcceptChannelAsync("mixed_raw", cts.Token);
 
         // DuplexStream: bidirectional pipe
@@ -1135,7 +1135,7 @@ public partial class UseCaseTests
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
         var (muxA, muxB, _, _) = await TestMuxHelper.CreateMuxPairAsync(pipe, cancellationToken: cts.Token);
 
-        var mw = await muxA.OpenChannelAsync(new() { ChannelId = "metrics" }, cts.Token);
+        var mw = await muxA.OpenChannelAsync("metrics", cts.Token);
         var mr = await muxB.AcceptChannelAsync("metrics", cts.Token);
 
         await using var sender = new MessageTransit<ChatMessage, ChatMessage>(
@@ -1173,7 +1173,7 @@ public partial class UseCaseTests
         for (int gen = 0; gen < 50; gen++)
         {
             var id = $"session_gen_{gen}";
-            var write = await muxA.OpenChannelAsync(new() { ChannelId = id }, cts.Token);
+            var write = await muxA.OpenChannelAsync(id, cts.Token);
             var read = await muxB.AcceptChannelAsync(id, cts.Token);
 
             var data = BitConverter.GetBytes(gen);
@@ -1208,11 +1208,11 @@ public partial class UseCaseTests
         var (muxA, muxB, _, _) = await TestMuxHelper.CreateMuxPairAsync(pipe, cancellationToken: cts.Token);
 
         // A opens to B
-        var aToB_w = await muxA.OpenChannelAsync(new() { ChannelId = "a_to_b" }, cts.Token);
+        var aToB_w = await muxA.OpenChannelAsync("a_to_b", cts.Token);
         var aToB_r = await muxB.AcceptChannelAsync("a_to_b", cts.Token);
 
         // B opens to A
-        var bToA_w = await muxB.OpenChannelAsync(new() { ChannelId = "b_to_a" }, cts.Token);
+        var bToA_w = await muxB.OpenChannelAsync("b_to_a", cts.Token);
         var bToA_r = await muxA.AcceptChannelAsync("b_to_a", cts.Token);
 
         // Exchange data in both directions simultaneously
@@ -1246,7 +1246,7 @@ public partial class UseCaseTests
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
         var (muxA, muxB, _, _) = await TestMuxHelper.CreateMuxPairAsync(pipe, cancellationToken: cts.Token);
 
-        var write = await muxA.OpenChannelAsync(new() { ChannelId = "bulk_upload" }, cts.Token);
+        var write = await muxA.OpenChannelAsync("bulk_upload", cts.Token);
         var read = await muxB.AcceptChannelAsync("bulk_upload", cts.Token);
 
         var starvationCount = 0;
