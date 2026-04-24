@@ -244,8 +244,8 @@ public sealed class ReadChannel : Stream
                     _multiplexer.Options.FlushMode == FlushMode.Manual)
                 {
                     Interlocked.Add(ref _pendingGrantCredits, toGrant);
-                    _multiplexer.EnqueuePendingCredit(this);
-                    _multiplexer.SignalFlush();
+                    _multiplexer.Writer.EnqueuePendingCredit(this);
+                    _multiplexer.Writer.SignalFlush();
                 }
                 else
                 {
@@ -311,8 +311,8 @@ public sealed class ReadChannel : Stream
             {
                 // Accumulate — FlushLoopAsync drains pending queue under one lock
                 Interlocked.Add(ref _pendingGrantCredits, toGrant);
-                _multiplexer.EnqueuePendingCredit(this);
-                _multiplexer.SignalFlush();
+                _multiplexer.Writer.EnqueuePendingCredit(this);
+                _multiplexer.Writer.SignalFlush();
             }
             else
             {
