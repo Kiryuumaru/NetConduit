@@ -11,6 +11,9 @@ Understanding NetConduit's fundamental concepts.
 | Priority | Frame scheduling based on importance | [priority.md](priority.md) |
 | Reconnection | Automatic recovery from disconnects | [reconnection.md](reconnection.md) |
 | Events | Disconnection and state change notifications | [events.md](events.md) |
+| Graceful Shutdown | GoAway protocol and disposal patterns | [graceful-shutdown.md](graceful-shutdown.md) |
+| Heartbeat | Ping/pong health monitoring and RTT | [heartbeat.md](heartbeat.md) |
+| Flush Modes | Batched, immediate, and manual flushing | [flush-modes.md](flush-modes.md) |
 
 ## Mental Model
 
