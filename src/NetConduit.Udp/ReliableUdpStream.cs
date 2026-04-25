@@ -26,7 +26,7 @@ internal sealed class ReliableUdpStream : Stream
     private uint _expectedSeq = 1;
     private TaskCompletionSource<uint>? _pendingAck;
     private volatile bool _finReceived;
-    private volatile bool _disposed;
+    private int _disposeState;
     private byte[]? _currentBuffer;
     private int _currentOffset;
 
@@ -61,7 +61,7 @@ internal sealed class ReliableUdpStream : Stream
 
     public override async ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancellationToken = default)
     {
-        ObjectDisposedException.ThrowIf(_disposed, this);
+        ObjectDisposedException.ThrowIf(Volatile.Read(ref _disposeState) != 0, this);
         if (buffer.Length == 0)
             return 0;
 
@@ -99,7 +99,7 @@ internal sealed class ReliableUdpStream : Stream
 
     public override async ValueTask WriteAsync(ReadOnlyMemory<byte> buffer, CancellationToken cancellationToken = default)
     {
-        ObjectDisposedException.ThrowIf(_disposed, this);
+        ObjectDisposedException.ThrowIf(Volatile.Read(ref _disposeState) != 0, this);
         if (buffer.Length == 0)
             return;
 
@@ -115,8 +115,7 @@ internal sealed class ReliableUdpStream : Stream
 
     protected override void Dispose(bool disposing)
     {
-        if (_disposed) return;
-        _disposed = true;
+        if (Interlocked.CompareExchange(ref _disposeState, 1, 0) != 0) return;
         _cts.Cancel();
         _udp.Dispose();
         base.Dispose(disposing);
@@ -124,8 +123,7 @@ internal sealed class ReliableUdpStream : Stream
 
     public override async ValueTask DisposeAsync()
     {
-        if (_disposed) return;
-        _disposed = true;
+        if (Interlocked.CompareExchange(ref _disposeState, 1, 0) != 0) return;
         _cts.Cancel();
         try
         {

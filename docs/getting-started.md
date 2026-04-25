@@ -53,7 +53,7 @@ using System.Text;
 var mux = StreamMultiplexer.Create(TcpMultiplexer.CreateOptions("localhost", 5000));
 _ = mux.Start();
 
-var channel = await mux.OpenChannelAsync(new() { ChannelId = "greeting" });
+var channel = await mux.OpenChannelAsync("greeting");
 await channel.WriteAsync(Encoding.UTF8.GetBytes("Hello, Server!"));
 await channel.DisposeAsync();
 ```
@@ -111,13 +111,13 @@ await sender.SendAsync(new GameState(150, 80));  // Only Score delta sent
 `OpenChannelAsync` returns a **WriteChannel**, `AcceptChannelAsync` returns a **ReadChannel**.
 
 ```csharp
-// Client → WriteChannel
-var sendChannel = await mux.OpenChannelAsync(new() { ChannelId = "data" });
-await sendChannel.WriteAsync(data);
+// Client opens a channel to write
+var writer = await mux.OpenChannelAsync("data");
+await writer.WriteAsync(data);
 
-// Server → ReadChannel  
-var receiveChannel = await mux.AcceptChannelAsync("data");
-await receiveChannel.ReadAsync(buffer);
+// Server accepts the same channel to read
+var reader = await mux.AcceptChannelAsync("data");
+await reader.ReadAsync(buffer);
 ```
 
 For bidirectional, use [DuplexStreamTransit](transits/duplex-stream.md) or open two channels.
@@ -127,7 +127,7 @@ For bidirectional, use [DuplexStreamTransit](transits/duplex-stream.md) or open 
 [Channels](concepts/channels.md) inherit from `Stream`:
 
 ```csharp
-var channel = await mux.OpenChannelAsync(new() { ChannelId = "file" });
+var channel = await mux.OpenChannelAsync("file");
 await sourceStream.CopyToAsync(channel);
 ```
 

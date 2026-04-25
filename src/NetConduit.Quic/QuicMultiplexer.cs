@@ -68,12 +68,27 @@ public static class QuicMultiplexer
                 }
 
                 var connection = await QuicConnection.ConnectAsync(clientOptions, ct).ConfigureAwait(false);
-                var stream = await connection.OpenOutboundStreamAsync(QuicStreamType.Bidirectional, ct).ConfigureAwait(false);
+                try
+                {
+                    var stream = await connection.OpenOutboundStreamAsync(QuicStreamType.Bidirectional, ct).ConfigureAwait(false);
+                    try
+                    {
+                        await stream.WriteAsync(new byte[] { 0x01 }, ct).ConfigureAwait(false);
+                        await stream.FlushAsync(ct).ConfigureAwait(false);
 
-                await stream.WriteAsync(new byte[] { 0x01 }, ct).ConfigureAwait(false);
-                await stream.FlushAsync(ct).ConfigureAwait(false);
-
-                return new StreamPair(stream, stream, connection);
+                        return new StreamPair(stream, stream, connection);
+                    }
+                    catch
+                    {
+                        await stream.DisposeAsync().ConfigureAwait(false);
+                        throw;
+                    }
+                }
+                catch
+                {
+                    await connection.DisposeAsync().ConfigureAwait(false);
+                    throw;
+                }
             }
         };
     }
@@ -150,12 +165,27 @@ public static class QuicMultiplexer
                 accepted = true;
 
                 var connection = await listener.AcceptConnectionAsync(ct).ConfigureAwait(false);
-                var stream = await connection.AcceptInboundStreamAsync(ct).ConfigureAwait(false);
+                try
+                {
+                    var stream = await connection.AcceptInboundStreamAsync(ct).ConfigureAwait(false);
+                    try
+                    {
+                        var preface = new byte[1];
+                        _ = await stream.ReadAsync(preface, ct).ConfigureAwait(false);
 
-                var preface = new byte[1];
-                _ = await stream.ReadAsync(preface, ct).ConfigureAwait(false);
-
-                return new StreamPair(stream, stream, connection);
+                        return new StreamPair(stream, stream, connection);
+                    }
+                    catch
+                    {
+                        await stream.DisposeAsync().ConfigureAwait(false);
+                        throw;
+                    }
+                }
+                catch
+                {
+                    await connection.DisposeAsync().ConfigureAwait(false);
+                    throw;
+                }
             }
         };
     }

@@ -58,7 +58,7 @@ public partial class RealWorldFlowTests
         Assert.True(muxA.IsConnected);
         Assert.True(muxB.IsConnected);
 
-        var writer = await muxA.OpenChannelAsync(new() { ChannelId = "hello" }, cts.Token);
+        var writer = await muxA.OpenChannelAsync("hello", cts.Token);
         var reader = await muxB.AcceptChannelAsync("hello", cts.Token);
 
         var sent = "Hello, World!"u8.ToArray();
@@ -94,9 +94,9 @@ public partial class RealWorldFlowTests
         await using var a = muxA;
         await using var b = muxB;
 
-        var controlWriter = await muxA.OpenChannelAsync(new() { ChannelId = "control" }, cts.Token);
-        var dataWriter = await muxA.OpenChannelAsync(new() { ChannelId = "data" }, cts.Token);
-        var logWriter = await muxA.OpenChannelAsync(new() { ChannelId = "logs" }, cts.Token);
+        var controlWriter = await muxA.OpenChannelAsync("control", cts.Token);
+        var dataWriter = await muxA.OpenChannelAsync("data", cts.Token);
+        var logWriter = await muxA.OpenChannelAsync("logs", cts.Token);
 
         var controlReader = await muxB.AcceptChannelAsync("control", cts.Token);
         var dataReader = await muxB.AcceptChannelAsync("data", cts.Token);
@@ -162,14 +162,14 @@ public partial class RealWorldFlowTests
 
         var aToB = Task.Run(async () =>
         {
-            var w = await muxA.OpenChannelAsync(new() { ChannelId = "a-to-b" }, cts.Token);
+            var w = await muxA.OpenChannelAsync("a-to-b", cts.Token);
             await w.WriteAsync(new byte[] { 1, 2, 3 }, cts.Token);
             await w.CloseAsync();
         });
 
         var bToA = Task.Run(async () =>
         {
-            var w = await muxB.OpenChannelAsync(new() { ChannelId = "b-to-a" }, cts.Token);
+            var w = await muxB.OpenChannelAsync("b-to-a", cts.Token);
             await w.WriteAsync(new byte[] { 4, 5, 6 }, cts.Token);
             await w.CloseAsync();
         });
@@ -217,7 +217,7 @@ public partial class RealWorldFlowTests
         for (int round = 0; round < 10; round++)
         {
             var chId = $"session-{round}";
-            await using var writer = await muxA.OpenChannelAsync(new() { ChannelId = chId }, cts.Token);
+            await using var writer = await muxA.OpenChannelAsync(chId, cts.Token);
             var reader = await muxB.AcceptChannelAsync(chId, cts.Token);
 
             var payload = Encoding.UTF8.GetBytes($"round-{round}");
@@ -275,7 +275,7 @@ public partial class RealWorldFlowTests
                     var cmd = Encoding.UTF8.GetString(buf, 0, n);
 
                     var responseChId = ch.ChannelId + "-res";
-                    var resWriter = await server.OpenChannelAsync(new() { ChannelId = responseChId }, cts.Token);
+                    var resWriter = await server.OpenChannelAsync(responseChId, cts.Token);
                     await resWriter.WriteAsync(Encoding.UTF8.GetBytes($"OK:{cmd}"), cts.Token);
                     await resWriter.CloseAsync();
                 });
@@ -285,7 +285,7 @@ public partial class RealWorldFlowTests
         var clientTasks = Enumerable.Range(0, callCount).Select(i => Task.Run(async () =>
         {
             var reqId = $"rpc-{i}";
-            var writer = await client.OpenChannelAsync(new() { ChannelId = reqId }, cts.Token);
+            var writer = await client.OpenChannelAsync(reqId, cts.Token);
             await writer.WriteAsync(Encoding.UTF8.GetBytes($"cmd-{i}"), cts.Token);
 
             var resReader = await client.AcceptChannelAsync(reqId + "-res", cts.Token);
@@ -317,7 +317,7 @@ public partial class RealWorldFlowTests
         await using var c = client;
         await using var s = server;
 
-        var eventWriter = await server.OpenChannelAsync(new() { ChannelId = "events" }, cts.Token);
+        var eventWriter = await server.OpenChannelAsync("events", cts.Token);
         var eventReader = await client.AcceptChannelAsync("events", cts.Token);
 
         const int eventCount = 1000;
@@ -382,7 +382,7 @@ public partial class RealWorldFlowTests
 
         for (int i = 0; i < subCount; i++)
         {
-            writers[i] = await muxA.OpenChannelAsync(new() { ChannelId = $"sub-{i}" }, cts.Token);
+            writers[i] = await muxA.OpenChannelAsync($"sub-{i}", cts.Token);
             readers[i] = await muxB.AcceptChannelAsync($"sub-{i}", cts.Token);
         }
 
@@ -437,7 +437,7 @@ public partial class RealWorldFlowTests
         await using var c = client;
         await using var s = server;
 
-        var writer = await client.OpenChannelAsync(new() { ChannelId = "upload" }, cts.Token);
+        var writer = await client.OpenChannelAsync("upload", cts.Token);
         var reader = await server.AcceptChannelAsync("upload", cts.Token);
 
         const int totalSize = 10 * 1024 * 1024;
@@ -488,7 +488,7 @@ public partial class RealWorldFlowTests
         await using var a = muxA;
         await using var b = muxB;
 
-        var writer = await muxA.OpenChannelAsync(new() { ChannelId = "empty" }, cts.Token);
+        var writer = await muxA.OpenChannelAsync("empty", cts.Token);
         var reader = await muxB.AcceptChannelAsync("empty", cts.Token);
 
         await writer.CloseAsync();
@@ -515,7 +515,7 @@ public partial class RealWorldFlowTests
         await using var a = muxA;
         await using var b = muxB;
 
-        var writer = await muxA.OpenChannelAsync(new() { ChannelId = "half" }, cts.Token);
+        var writer = await muxA.OpenChannelAsync("half", cts.Token);
         var reader = await muxB.AcceptChannelAsync("half", cts.Token);
 
         var data = new byte[4096];
@@ -546,10 +546,10 @@ public partial class RealWorldFlowTests
         await using var a = muxA;
         await using var b = muxB;
 
-        var slowWriter = await muxA.OpenChannelAsync(new() { ChannelId = "slow" }, cts.Token);
+        var slowWriter = await muxA.OpenChannelAsync("slow", cts.Token);
         var slowReader = await muxB.AcceptChannelAsync("slow", cts.Token);
 
-        var fastWriter = await muxA.OpenChannelAsync(new() { ChannelId = "fast" }, cts.Token);
+        var fastWriter = await muxA.OpenChannelAsync("fast", cts.Token);
         var fastReader = await muxB.AcceptChannelAsync("fast", cts.Token);
 
         // Start writing to slow channel (reader won't read for a while)
@@ -594,7 +594,7 @@ public partial class RealWorldFlowTests
         for (int i = 0; i < 200; i++)
         {
             var id = $"ch-{i}";
-            var w = await muxA.OpenChannelAsync(new() { ChannelId = id }, cts.Token);
+            var w = await muxA.OpenChannelAsync(id, cts.Token);
             var r = await muxB.AcceptChannelAsync(id, cts.Token);
             await w.WriteAsync(new byte[] { (byte)(i & 0xFF) }, cts.Token);
             await w.CloseAsync();
@@ -621,7 +621,7 @@ public partial class RealWorldFlowTests
         await using var a = muxA;
         await using var b = muxB;
 
-        var writer = await muxA.OpenChannelAsync(new() { ChannelId = "msgs" }, cts.Token);
+        var writer = await muxA.OpenChannelAsync("msgs", cts.Token);
         var reader = await muxB.AcceptChannelAsync("msgs", cts.Token);
 
         const int messageCount = 500;
@@ -679,7 +679,7 @@ public partial class RealWorldFlowTests
         await using var a = muxA;
         await using var b = muxB;
 
-        var writer = await muxA.OpenChannelAsync(new() { ChannelId = "zero" }, cts.Token);
+        var writer = await muxA.OpenChannelAsync("zero", cts.Token);
         var reader = await muxB.AcceptChannelAsync("zero", cts.Token);
 
         await writer.WriteAsync(ReadOnlyMemory<byte>.Empty, cts.Token);
@@ -712,7 +712,7 @@ public partial class RealWorldFlowTests
         await using var a = muxA;
         await using var b = muxB;
 
-        var writer = await muxA.OpenChannelAsync(new() { ChannelId = "boundary" }, cts.Token);
+        var writer = await muxA.OpenChannelAsync("boundary", cts.Token);
         var reader = await muxB.AcceptChannelAsync("boundary", cts.Token);
 
         var sizes = new[] { 1, 2, 4, 8, 16, 255, 256, 1023, 1024, 4096, 8192, 65535, 65536 };
@@ -783,7 +783,7 @@ public partial class RealWorldFlowTests
         await using var a = muxA;
         await using var b = muxB;
 
-        var writer = await muxA.OpenChannelAsync(new() { ChannelId = "data" }, cts.Token);
+        var writer = await muxA.OpenChannelAsync("data", cts.Token);
         var reader = await muxB.AcceptChannelAsync("data", cts.Token);
 
         var payload = new byte[4096];
@@ -814,7 +814,7 @@ public partial class RealWorldFlowTests
         var (muxA, muxB, runA, runB) = await TestMuxHelper.CreateMuxPairAsync(pipe, cancellationToken: cts.Token);
         await using var b = muxB;
 
-        var writer = await muxA.OpenChannelAsync(new() { ChannelId = "ch" }, cts.Token);
+        var writer = await muxA.OpenChannelAsync("ch", cts.Token);
         var reader = await muxB.AcceptChannelAsync("ch", cts.Token);
 
         // Abrupt dispose of one side
@@ -845,7 +845,7 @@ public partial class RealWorldFlowTests
 
         await Assert.ThrowsAsync<InvalidOperationException>(async () =>
         {
-            await muxA.OpenChannelAsync(new() { ChannelId = "nope" }, cts.Token);
+            await muxA.OpenChannelAsync("nope", cts.Token);
         });
 
         cts.Cancel();
@@ -872,7 +872,7 @@ public partial class RealWorldFlowTests
         await using var m1 = mux1;
         await using var m2 = mux2;
 
-        var writer = await mux1.OpenChannelAsync(new() { ChannelId = "sensor" }, cts.Token);
+        var writer = await mux1.OpenChannelAsync("sensor", cts.Token);
         var reader = await mux2.AcceptChannelAsync("sensor", cts.Token);
 
         // Write some data
@@ -925,9 +925,9 @@ public partial class RealWorldFlowTests
         await using var m1 = mux1;
         await using var m2 = mux2;
 
-        var w1 = await mux1.OpenChannelAsync(new() { ChannelId = "ch-1" }, cts.Token);
-        var w2 = await mux1.OpenChannelAsync(new() { ChannelId = "ch-2" }, cts.Token);
-        var w3 = await mux1.OpenChannelAsync(new() { ChannelId = "ch-3" }, cts.Token);
+        var w1 = await mux1.OpenChannelAsync("ch-1", cts.Token);
+        var w2 = await mux1.OpenChannelAsync("ch-2", cts.Token);
+        var w3 = await mux1.OpenChannelAsync("ch-3", cts.Token);
 
         var r1 = await mux2.AcceptChannelAsync("ch-1", cts.Token);
         var r2 = await mux2.AcceptChannelAsync("ch-2", cts.Token);
@@ -1017,8 +1017,8 @@ public partial class RealWorldFlowTests
 
         var (muxA, muxB, _, _) = await TestMuxHelper.CreateMuxPairAsync(pipe, cancellationToken: cts.Token);
 
-        var w1 = await muxA.OpenChannelAsync(new() { ChannelId = "leak1" }, cts.Token);
-        var w2 = await muxA.OpenChannelAsync(new() { ChannelId = "leak2" }, cts.Token);
+        var w1 = await muxA.OpenChannelAsync("leak1", cts.Token);
+        var w2 = await muxA.OpenChannelAsync("leak2", cts.Token);
         var r1 = await muxB.AcceptChannelAsync("leak1", cts.Token);
         var r2 = await muxB.AcceptChannelAsync("leak2", cts.Token);
 
@@ -1045,12 +1045,12 @@ public partial class RealWorldFlowTests
 
         Assert.Equal(0, muxA.ActiveChannelCount);
 
-        var w1 = await muxA.OpenChannelAsync(new() { ChannelId = "c1" }, cts.Token);
+        var w1 = await muxA.OpenChannelAsync("c1", cts.Token);
         await muxB.AcceptChannelAsync("c1", cts.Token);
         await Task.Delay(100);
         Assert.True(muxA.ActiveChannelCount >= 1);
 
-        var w2 = await muxA.OpenChannelAsync(new() { ChannelId = "c2" }, cts.Token);
+        var w2 = await muxA.OpenChannelAsync("c2", cts.Token);
         await muxB.AcceptChannelAsync("c2", cts.Token);
         await Task.Delay(100);
         Assert.True(muxA.ActiveChannelCount >= 2);
@@ -1080,7 +1080,7 @@ public partial class RealWorldFlowTests
 
         Assert.Equal(0, muxA.Stats.OpenChannels);
 
-        var writer = await muxA.OpenChannelAsync(new() { ChannelId = "res1" }, cts.Token);
+        var writer = await muxA.OpenChannelAsync("res1", cts.Token);
         var reader = await muxB.AcceptChannelAsync("res1", cts.Token);
 
         Assert.Equal(1, muxA.Stats.OpenChannels);
@@ -1109,7 +1109,7 @@ public partial class RealWorldFlowTests
         await using var a = muxA;
         await using var b = muxB;
 
-        var writer = await muxA.OpenChannelAsync(new() { ChannelId = "stats" }, cts.Token);
+        var writer = await muxA.OpenChannelAsync("stats", cts.Token);
         var reader = await muxB.AcceptChannelAsync("stats", cts.Token);
 
         var data = new byte[10000];
@@ -1147,10 +1147,10 @@ public partial class RealWorldFlowTests
         await using var a = muxA;
         await using var b = muxB;
 
-        var cmdWriter = await muxA.OpenChannelAsync(new() { ChannelId = "cmd" }, cts.Token);
+        var cmdWriter = await muxA.OpenChannelAsync("cmd", cts.Token);
         var cmdReader = await muxB.AcceptChannelAsync("cmd", cts.Token);
 
-        var resWriter = await muxB.OpenChannelAsync(new() { ChannelId = "res" }, cts.Token);
+        var resWriter = await muxB.OpenChannelAsync("res", cts.Token);
         var resReader = await muxA.AcceptChannelAsync("res", cts.Token);
 
         await using var cmdSend = new MessageTransit<Command, Command>(
@@ -1197,9 +1197,9 @@ public partial class RealWorldFlowTests
         await using var a = muxA;
         await using var b = muxB;
 
-        var writeA = await muxA.OpenChannelAsync(new() { ChannelId = "shell-out" }, cts.Token);
+        var writeA = await muxA.OpenChannelAsync("shell-out", cts.Token);
         var readB = await muxB.AcceptChannelAsync("shell-out", cts.Token);
-        var writeB = await muxB.OpenChannelAsync(new() { ChannelId = "shell-in" }, cts.Token);
+        var writeB = await muxB.OpenChannelAsync("shell-in", cts.Token);
         var readA = await muxA.AcceptChannelAsync("shell-in", cts.Token);
 
         await using var transitA = new DuplexStreamTransit(writeA, readA);
@@ -1260,7 +1260,7 @@ public partial class RealWorldFlowTests
 
         var openTasks = Enumerable.Range(0, parallelCount).Select(i => Task.Run(async () =>
         {
-            var w = await muxA.OpenChannelAsync(new() { ChannelId = $"par-{i}" }, cts.Token);
+            var w = await muxA.OpenChannelAsync($"par-{i}", cts.Token);
             await w.WriteAsync(new byte[] { (byte)(i & 0xFF) }, cts.Token);
             await w.CloseAsync();
         })).ToArray();
@@ -1291,14 +1291,14 @@ public partial class RealWorldFlowTests
 
         var aOpens = Enumerable.Range(0, countPerSide).Select(i => Task.Run(async () =>
         {
-            var w = await muxA.OpenChannelAsync(new() { ChannelId = $"a-{i}" }, cts.Token);
+            var w = await muxA.OpenChannelAsync($"a-{i}", cts.Token);
             await w.WriteAsync(BitConverter.GetBytes(i), cts.Token);
             await w.CloseAsync();
         })).ToArray();
 
         var bOpens = Enumerable.Range(0, countPerSide).Select(i => Task.Run(async () =>
         {
-            var w = await muxB.OpenChannelAsync(new() { ChannelId = $"b-{i}" }, cts.Token);
+            var w = await muxB.OpenChannelAsync($"b-{i}", cts.Token);
             await w.WriteAsync(BitConverter.GetBytes(i + 1000), cts.Token);
             await w.CloseAsync();
         })).ToArray();
@@ -1356,7 +1356,7 @@ public partial class RealWorldFlowTests
 
         for (int i = 0; i < channelCount; i++)
         {
-            writers[i] = await muxA.OpenChannelAsync(new() { ChannelId = $"mch-{i}" }, cts.Token);
+            writers[i] = await muxA.OpenChannelAsync($"mch-{i}", cts.Token);
             readers[i] = await muxB.AcceptChannelAsync($"mch-{i}", cts.Token);
         }
 

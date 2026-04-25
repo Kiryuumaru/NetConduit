@@ -256,7 +256,7 @@ static async Task<double> RunThroughputMuxAsync(int channelCount, int dataSize, 
 
         var writeChannels = new WriteChannel[channelCount];
         for (int i = 0; i < channelCount; i++)
-            writeChannels[i] = await client.OpenChannelAsync(new ChannelOptions { ChannelId = $"ch-{i}" }, cts.Token);
+            writeChannels[i] = await client.OpenChannelAsync($"ch-{i}", cts.Token);
         await acceptTask;
         await Task.Delay(20, cts.Token);
 
@@ -430,7 +430,7 @@ static async Task<double> RunGameTickMuxAsync(int channelCount, int msgSize, int
 
         var writeChannels = new WriteChannel[channelCount];
         for (int i = 0; i < channelCount; i++)
-            writeChannels[i] = await client.OpenChannelAsync(new ChannelOptions { ChannelId = $"ch-{i}" }, cts.Token);
+            writeChannels[i] = await client.OpenChannelAsync($"ch-{i}", cts.Token);
         await acceptTask;
         await Task.Delay(20, cts.Token);
 

@@ -243,7 +243,7 @@ async Task HandleNewTcpClientAsync(TcpClient tcpClient, ChatServer server, Cance
             return;
         }
 
-        var broadcastChannel = await mux.OpenChannelAsync(new ChannelOptions { ChannelId = "broadcast" }, ct);
+        var broadcastChannel = await mux.OpenChannelAsync("broadcast", ct);
         var clientState = new ClientState(username, mux, broadcastChannel, chatChannel);
 
         if (!server.TryAddClient(username, clientState))
@@ -359,7 +359,7 @@ async Task HandleNewWebSocketClientAsync(System.Net.WebSockets.WebSocket webSock
             return;
         }
 
-        var broadcastChannel = await mux.OpenChannelAsync(new ChannelOptions { ChannelId = "broadcast" }, ct);
+        var broadcastChannel = await mux.OpenChannelAsync("broadcast", ct);
         var clientState = new ClientState(username, mux, broadcastChannel, chatChannel);
 
         if (!server.TryAddClient(username, clientState))
@@ -514,7 +514,7 @@ void PrintClientHeader(string transport)
 
 async Task RunClientChatAsync(IStreamMultiplexer mux, string username, CancellationToken ct)
 {
-    var chatChannel = await mux.OpenChannelAsync(new ChannelOptions { ChannelId = "chat" }, ct);
+    var chatChannel = await mux.OpenChannelAsync("chat", ct);
 
     var joinBytes = JsonSerializer.SerializeToUtf8Bytes(
         new ChatEvent { Type = ChatEventType.UserJoined, Username = username },

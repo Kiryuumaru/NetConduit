@@ -33,13 +33,21 @@ public static class UdpMultiplexer
             StreamFactory = async ct =>
             {
                 var client = new UdpClient(AddressFamily.InterNetworkV6);
-                client.Client.DualMode = true;
-                await client.Client.ConnectAsync(host, port, ct).ConfigureAwait(false);
-                await client.SendAsync(HelloPayload, ct).ConfigureAwait(false);
-                await TryReceiveHelloAckAsync(client, ct).ConfigureAwait(false);
+                try
+                {
+                    client.Client.DualMode = true;
+                    await client.Client.ConnectAsync(host, port, ct).ConfigureAwait(false);
+                    await client.SendAsync(HelloPayload, ct).ConfigureAwait(false);
+                    await TryReceiveHelloAckAsync(client, ct).ConfigureAwait(false);
 
-                var reliable = new ReliableUdpStream(client, udpOptions);
-                return new StreamPair(reliable);
+                    var reliable = new ReliableUdpStream(client, udpOptions);
+                    return new StreamPair(reliable);
+                }
+                catch
+                {
+                    client.Dispose();
+                    throw;
+                }
             }
         };
     }
@@ -70,20 +78,28 @@ public static class UdpMultiplexer
                 accepted = true;
 
                 var listener = new UdpClient(AddressFamily.InterNetworkV6);
-                listener.Client.DualMode = true;
-                listener.Client.Bind(new IPEndPoint(IPAddress.IPv6Any, listenPort));
-
-                var result = await listener.ReceiveAsync(ct).ConfigureAwait(false);
-                var remote = result.RemoteEndPoint;
-                listener.Connect(remote);
-
-                if (result.Buffer.AsSpan().SequenceEqual(HelloPayload))
+                try
                 {
-                    await listener.SendAsync(HelloAckPayload, ct).ConfigureAwait(false);
-                }
+                    listener.Client.DualMode = true;
+                    listener.Client.Bind(new IPEndPoint(IPAddress.IPv6Any, listenPort));
 
-                var reliable = new ReliableUdpStream(listener, udpOptions);
-                return new StreamPair(reliable);
+                    var result = await listener.ReceiveAsync(ct).ConfigureAwait(false);
+                    var remote = result.RemoteEndPoint;
+                    listener.Connect(remote);
+
+                    if (result.Buffer.AsSpan().SequenceEqual(HelloPayload))
+                    {
+                        await listener.SendAsync(HelloAckPayload, ct).ConfigureAwait(false);
+                    }
+
+                    var reliable = new ReliableUdpStream(listener, udpOptions);
+                    return new StreamPair(reliable);
+                }
+                catch
+                {
+                    listener.Dispose();
+                    throw;
+                }
             }
         };
     }

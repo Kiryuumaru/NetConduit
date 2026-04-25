@@ -1,7 +1,7 @@
 # NetConduit Comparison Benchmark Results
 
 All benchmarks run on loopback (127.0.0.1), identical workloads,
-5 runs with median reported. CPU-pinned via `taskset 0x3` (2 cores).
+3 runs with median reported. CPU-pinned via `taskset 0x3` (2 cores).
 
 **Fairness controls:** Both Go and .NET benchmarks pinned to same 2 CPU cores,
 GOMAXPROCS=2, `--network none` when Docker, `taskset` when native.
@@ -26,15 +26,15 @@ Each channel sends one data payload. Higher = better.
 
 | Channels | Data Size | NetConduit | FRP/Yamux | Smux | NC vs FRP | NC vs Smux |
 |----------|-----------|----------:|----------:|-----:|----------:|----------:|
-| 1 | 1KB | 8.1 | 8.4 | 9.9 | 0.96x | 0.82x |
-| 1 | 100KB | 132.6 | 516.8 | 629.7 | 0.26x | 0.21x |
-| 1 | 1MB | 966.8 | 1,204.0 | 1,274.1 | 0.80x | 0.76x |
-| 10 | 1KB | 21.6 | 22.6 | 20.3 | 0.96x | **1.06x** |
-| 10 | 100KB | 751.0 | 731.4 | 1,010.6 | **1.03x** | 0.74x |
-| 10 | 1MB | 1,152.8 | 1,215.9 | 1,768.8 | 0.95x | 0.65x |
-| 100 | 1KB | 37.8 | 30.7 | 25.4 | **1.23x** | **1.49x** |
-| 100 | 100KB | 980.4 | 598.9 | 969.6 | **1.64x** | **1.01x** |
-| 100 | 1MB | 921.4 | 1,158.4 | 1,794.4 | 0.80x | 0.51x |
+| 1 | 1KB | 8.1 | 9.4 | 11.0 | 0.87x | 0.74x |
+| 1 | 100KB | 347.5 | 484.5 | 605.0 | 0.72x | 0.57x |
+| 1 | 1MB | 692.8 | 1,017.8 | 1,293.3 | 0.68x | 0.54x |
+| 10 | 1KB | 27.5 | 23.1 | 18.9 | **1.19x** | **1.45x** |
+| 10 | 100KB | 759.8 | 612.8 | 803.1 | **1.24x** | 0.95x |
+| 10 | 1MB | 1,291.1 | 1,085.7 | 1,755.3 | **1.19x** | 0.74x |
+| 100 | 1KB | 29.1 | 23.0 | 20.6 | **1.27x** | **1.41x** |
+| 100 | 100KB | 859.0 | 701.6 | 1,054.0 | **1.22x** | 0.82x |
+| 100 | 1MB | 1,114.7 | 1,244.4 | 1,738.0 | 0.90x | 0.64x |
 
 ### Game-Tick Message Rate (msg/s)
 
@@ -42,37 +42,37 @@ Each channel sends many small messages (simulates game state updates). Higher = 
 
 | Channels | Msg Size | NetConduit | FRP/Yamux | Smux | NC vs FRP | NC vs Smux |
 |----------|----------|----------:|----------:|-----:|----------:|----------:|
-| 1 | 64B | 1,545,353 | 86,981 | 119,010 | **17.77x** | **12.99x** |
-| 1 | 256B | 1,224,526 | 86,895 | 115,359 | **14.09x** | **10.61x** |
-| 10 | 64B | 1,145,697 | 98,414 | 126,410 | **11.64x** | **9.06x** |
-| 10 | 256B | 833,527 | 103,570 | 121,220 | **8.05x** | **6.88x** |
-| 50 | 64B | 1,123,965 | 105,954 | 126,910 | **10.61x** | **8.86x** |
-| 50 | 256B | 863,508 | 104,984 | 124,650 | **8.23x** | **6.93x** |
-| 1000 | 64B | 1,141,511 | 109,705 | 107,583 | **10.41x** | **10.61x** |
-| 1000 | 256B | 954,321 | 277,140 | 104,908 | **3.44x** | **9.10x** |
+| 1 | 64B | 1,603,176 | 86,506 | 114,889 | **18.53x** | **13.95x** |
+| 1 | 256B | 1,183,454 | 85,117 | 120,433 | **13.90x** | **9.83x** |
+| 10 | 64B | 1,199,841 | 106,564 | 132,258 | **11.26x** | **9.07x** |
+| 10 | 256B | 840,004 | 103,586 | 132,380 | **8.11x** | **6.35x** |
+| 50 | 64B | 1,172,894 | 104,324 | 125,788 | **11.24x** | **9.32x** |
+| 50 | 256B | 832,948 | 107,740 | 128,823 | **7.73x** | **6.47x** |
+| 1000 | 64B | 1,150,963 | 109,079 | 107,045 | **10.55x** | **10.75x** |
+| 1000 | 256B | 848,187 | 117,278 | 108,764 | **7.23x** | **7.80x** |
 
 ---
 
 ## Key Takeaways
 
-**Bulk throughput:** NetConduit wins 6/18 throughput comparisons against Go multiplexers.
-At 100 channels with 1KB and 100KB payloads, NetConduit beats both FRP/Yamux (1.23–1.64x)
-and Smux (1.01–1.49x). Single-channel 100KB shows a gap (0.21–0.26x) due to credit
-round-trip latency dominating short transfers. At 1MB, NetConduit reaches 966.8 MB/s
-(0.76–0.80x of Go muxes).
+**Bulk throughput:** NetConduit wins 7/18 throughput comparisons against Go multiplexers.
+At 10+ channels with small payloads (1KB), NetConduit beats both FRP/Yamux (1.19–1.27x)
+and Smux (1.41–1.45x). At 10–100 channels with 100KB payloads, NetConduit beats FRP/Yamux
+(1.22–1.24x). Single-channel shows a gap (0.54–0.87x) due to credit round-trip latency
+dominating short transfers. At 100 channels 1MB, NetConduit reaches 1,114.7 MB/s (0.90x
+of FRP/Yamux).
 
 **Game-tick messaging:** NetConduit wins 16/16 comparisons against Go multiplexers,
-reaching **3.4–17.8x faster than FRP/Yamux** and **6.9–13.0x faster than Smux**.
-At 1 channel with 64B messages, NetConduit delivers 1,545,353 msg/s — nearly raw TCP
-speed (1,569,582 msg/s). Performance stays above 833K msg/s even at 1000 channels
-with 256B messages.
+reaching **7.2–18.5x faster than FRP/Yamux** and **6.3–14.0x faster than Smux**.
+At 1 channel with 64B messages, NetConduit delivers 1,603,176 msg/s — near raw TCP
+speed. Performance stays above 832K msg/s even at 1000 channels with 256B messages.
 
 **What NetConduit pays for:** Credit-based backpressure prevents OOM under load,
 priority queuing ensures critical channels aren't starved, and adaptive windowing
 automatically reclaims memory from idle channels. These features add measurable
 overhead in single-channel bulk transfer but provide production safety guarantees
 that simpler muxes don't offer — while dominating game-tick / real-time messaging
-and beating Go muxes at scale (100 channels).
+and beating Go muxes at scale (10–100 channels).
 
 ---
 
@@ -86,28 +86,28 @@ no flow control, no channel management).
 
 | Channels | Data Size | Raw TCP (Go) | FRP/Yamux (Go) | Smux (Go) | Raw TCP (.NET) | NetConduit Mux TCP |
 |----------|-----------|----------:|----------:|----------:|----------:|----------:|
-| 1 | 1KB | 8.3 | 8.4 | 9.9 | 4.2 | 8.1 |
-| 1 | 100KB | 631.9 | 516.8 | 629.7 | 294.1 | 132.6 |
-| 1 | 1MB | 2,552.1 | 1,204.0 | 1,274.1 | 1,531.9 | 966.8 |
-| 10 | 1KB | 14.8 | 22.6 | 20.3 | 8.2 | 21.6 |
-| 10 | 100KB | 1,051.4 | 731.4 | 1,010.6 | 799.5 | 751.0 |
-| 10 | 1MB | 2,978.6 | 1,215.9 | 1,768.8 | 2,629.8 | 1,152.8 |
-| 100 | 1KB | 13.5 | 30.7 | 25.4 | 11.4 | 37.8 |
-| 100 | 100KB | 877.3 | 598.9 | 969.6 | 854.1 | 980.4 |
-| 100 | 1MB | 3,147.0 | 1,158.4 | 1,794.4 | 1,912.7 | 921.4 |
+| 1 | 1KB | 7.9 | 9.4 | 11.0 | 1.9 | 8.1 |
+| 1 | 100KB | 580.5 | 484.5 | 605.0 | 384.5 | 347.5 |
+| 1 | 1MB | 2,420.2 | 1,017.8 | 1,293.3 | 1,982.6 | 692.8 |
+| 10 | 1KB | 15.4 | 23.1 | 18.9 | 9.1 | 27.5 |
+| 10 | 100KB | 1,088.2 | 612.8 | 803.1 | 688.8 | 759.8 |
+| 10 | 1MB | 3,269.2 | 1,085.7 | 1,755.3 | 2,579.2 | 1,291.1 |
+| 100 | 1KB | 12.9 | 23.0 | 20.6 | 11.6 | 29.1 |
+| 100 | 100KB | 1,046.5 | 701.6 | 1,054.0 | 507.8 | 859.0 |
+| 100 | 1MB | 3,259.4 | 1,244.4 | 1,738.0 | 1,788.0 | 1,114.7 |
 
 ### Game-Tick: All Implementations (msg/s)
 
 | Channels | Msg Size | Raw TCP (Go) | FRP/Yamux (Go) | Smux (Go) | Raw TCP (.NET) | NetConduit Mux TCP |
 |----------|----------|----------:|----------:|----------:|----------:|----------:|
-| 1 | 64B | 217,234 | 86,981 | 119,010 | 1,569,582 | 1,545,353 |
-| 1 | 256B | 242,392 | 86,895 | 115,359 | 1,358,788 | 1,224,526 |
-| 10 | 64B | 1,276,716 | 98,414 | 126,410 | 1,579,100 | 1,145,697 |
-| 10 | 256B | 1,428,223 | 103,570 | 121,220 | 1,434,407 | 833,527 |
-| 50 | 64B | 1,612,284 | 105,954 | 126,910 | 2,167,915 | 1,123,965 |
-| 50 | 256B | 1,569,689 | 104,984 | 124,650 | — | 863,508 |
-| 1000 | 64B | 1,667,558 | 109,705 | 107,583 | 2,592,601 | 1,141,511 |
-| 1000 | 256B | 1,581,526 | 277,140 | 104,908 | 2,247,352 | 954,321 |
+| 1 | 64B | 209,080 | 86,506 | 114,889 | 1,545,262 | 1,603,176 |
+| 1 | 256B | 238,889 | 85,117 | 120,433 | 1,363,667 | 1,183,454 |
+| 10 | 64B | 1,327,210 | 106,564 | 132,258 | 2,046,427 | 1,199,841 |
+| 10 | 256B | 1,443,900 | 103,586 | 132,380 | 1,379,750 | 840,004 |
+| 50 | 64B | 1,648,778 | 104,324 | 125,788 | 2,034,498 | 1,172,894 |
+| 50 | 256B | 1,544,985 | 107,740 | 128,823 | 1,892,524 | 832,948 |
+| 1000 | 64B | 1,661,790 | 109,079 | 107,045 | 2,467,335 | 1,150,963 |
+| 1000 | 256B | 1,590,780 | 117,278 | 108,764 | 2,229,076 | 848,187 |
 
 ---
 
@@ -122,15 +122,15 @@ Ratio = Raw TCP throughput / Mux throughput (how many times slower the mux is).
 
 | Channels | Data Size | NetConduit | FRP/Yamux | Smux |
 |----------|-----------|----------:|----------:|----------:|
-| 1 | 1KB | 0.5x | 1.0x | 0.8x |
-| 1 | 100KB | 2.2x | 1.2x | 1.0x |
-| 1 | 1MB | 1.6x | 2.1x | 2.0x |
-| 10 | 1KB | 0.4x | 0.7x | 0.7x |
-| 10 | 100KB | 1.1x | 1.4x | 1.0x |
-| 10 | 1MB | 2.3x | 2.4x | 1.7x |
-| 100 | 1KB | 0.3x | 0.4x | 0.5x |
-| 100 | 100KB | 0.9x | 1.5x | 0.9x |
-| 100 | 1MB | 2.1x | 2.7x | 1.8x |
+| 1 | 1KB | 0.2x | 0.8x | 0.7x |
+| 1 | 100KB | 1.1x | 1.2x | 1.0x |
+| 1 | 1MB | 2.9x | 2.4x | 1.9x |
+| 10 | 1KB | 0.3x | 0.7x | 0.8x |
+| 10 | 100KB | 0.9x | 1.8x | 1.4x |
+| 10 | 1MB | 2.0x | 3.0x | 1.9x |
+| 100 | 1KB | 0.4x | 0.6x | 0.6x |
+| 100 | 100KB | 0.6x | 1.5x | 1.0x |
+| 100 | 1MB | 1.6x | 2.6x | 1.9x |
 
 ### Game-Tick Overhead
 
@@ -138,20 +138,21 @@ Ratio = Raw TCP msg/s / Mux msg/s (how many times slower the mux is).
 
 | Channels | Msg Size | NetConduit | FRP/Yamux | Smux |
 |----------|----------|----------:|----------:|----------:|
-| 1 | 64B | 1.0x | 2.5x | 1.8x |
-| 1 | 256B | 1.1x | 2.8x | 2.1x |
-| 10 | 64B | 1.4x | 13.0x | 10.1x |
-| 10 | 256B | 1.7x | 13.8x | 11.8x |
-| 50 | 64B | 1.9x | 15.2x | 12.7x |
-| 50 | 256B | 1.8x | 15.0x | 12.6x |
-| 1000 | 64B | 2.3x | 15.2x | 15.5x |
-| 1000 | 256B | 2.4x | 5.7x | 15.1x |
+| 1 | 64B | 1.0x | 2.4x | 1.8x |
+| 1 | 256B | 1.2x | 2.8x | 2.0x |
+| 10 | 64B | 1.7x | 12.5x | 10.0x |
+| 10 | 256B | 1.6x | 13.9x | 10.9x |
+| 50 | 64B | 1.7x | 15.8x | 13.1x |
+| 50 | 256B | 2.3x | 14.3x | 12.0x |
+| 1000 | 64B | 2.1x | 15.2x | 15.5x |
+| 1000 | 256B | 2.6x | 13.6x | 14.6x |
 
 ---
 
 ## Internal .NET Benchmarks (BenchmarkDotNet)
 
-Measured with BenchmarkDotNet v0.15.8, InProcess toolchain, ShortRun (3 iterations).
+Measured with BenchmarkDotNet v0.15.8, InProcess toolchain, ShortRun (3 iterations),
+median of 3 independent runs.
 These measure multiplexer overhead vs raw TCP within the same .NET runtime.
 
 **Environment:** Linux Ubuntu 22.04.5, Intel Xeon Gold 5218R 2.10GHz, 16 physical cores,
@@ -163,35 +164,36 @@ Ratio = Mux Mean / Raw TCP Mean. Lower = less overhead.
 
 | Channels | Data Size | Raw TCP (ms) | Mux TCP (ms) | Ratio | Mux Allocated |
 |----------|-----------|-------------:|-------------:|------:|--------------:|
-| 1 | 1KB | 51.5 | 52.4 | 1.02x | 3.1 MB |
-| 1 | 100KB | 51.4 | 53.3 | 1.04x | 2.2 MB |
-| 1 | 1MB | 53.0 | 55.3 | 1.04x | 2.2 MB |
-| 10 | 1KB | 51.6 | 58.1 | 1.13x | 12.8 MB |
-| 10 | 100KB | 51.8 | 58.4 | 1.13x | 12.8 MB |
-| 10 | 1MB | 54.2 | 63.5 | 1.17x | 11.9 MB |
-| 100 | 1KB | 54.9 | 77.9 | 1.42x | 108.9 MB |
-| 100 | 100KB | 57.8 | 86.3 | 1.49x | 108.9 MB |
-| 100 | 1MB | 66.4 | 137.8 | 2.08x | 108.6 MB |
-| 1000 | 1KB | 88.0 | 227.3 | 2.58x | 1070.6 MB |
-| 1000 | 100KB | 93.2 | 287.9 | 3.09x | 1069.7 MB |
-| 1000 | 1MB | 173.9 | 889.3 | 5.11x | 1077.2 MB |
+| 1 | 1KB | 51.6 | 56.0 | 1.09x | 1.1 MB |
+| 1 | 100KB | 51.6 | 54.0 | 1.05x | 2.2 MB |
+| 1 | 1MB | 53.1 | 69.4 | 1.31x | 2.3 MB |
+| 10 | 1KB | 52.0 | 55.7 | 1.07x | 1.1 MB |
+| 10 | 100KB | 51.9 | 56.4 | 1.09x | 3.1 MB |
+| 10 | 1MB | 56.0 | 71.5 | 1.28x | 11.4 MB |
+| 100 | 1KB | 54.2 | 72.7 | 1.34x | 2.7 MB |
+| 100 | 100KB | 54.5 | 87.0 | 1.60x | 11.4 MB |
+| 100 | 1MB | 87.8 | 159.4 | 1.81x | 104.4 MB |
+| 1000 | 1KB | 71.4 | 154.2 | 2.16x | 7.7 MB |
+| 1000 | 100KB | 118.5 | 289.3 | 2.44x | 107.4 MB |
+| 1000 | 1MB | 311.0 | 1,246.9 | 4.01x | 1,032.5 MB |
 
 ### Key Observations
 
-**Low channel counts (1–10):** Mux overhead is 2–17% over raw TCP.
-The multiplexer adds minimal latency for typical use cases with a few channels.
+**Low channel counts (1–10):** Mux overhead is 5–31% over raw TCP.
+Small payloads (1KB–100KB) add minimal latency; 1MB single-channel shows
+higher overhead due to credit round-trip costs on the single stream.
 
-**Medium channel counts (100):** Overhead grows to 1.4–2.1x due to channel management,
+**Medium channel counts (100):** Overhead grows to 1.3–1.8x due to channel management,
 flow control credits, and per-channel state. Still practical for most applications.
 
-**High channel counts (1000):** Overhead reaches 2.6–5.1x. This is expected — managing
+**High channel counts (1000):** Overhead reaches 2.2–4.0x. This is expected — managing
 1000 concurrent channels with credit-based flow control, priority queuing, and
 adaptive windowing has inherent cost. Raw TCP at 1000 connections is also impractical
 in production (file descriptor limits, connection overhead).
 
-**Memory:** Mux allocates ~1 MB per channel for initial state (buffers, credit tracking,
-frame encoding). At 1000 channels, this becomes substantial (~1 GB). Memory profile
-is dominated by per-channel buffer allocation and is independent of data size.
+**Memory:** Mux allocates per-channel state for buffers, credit tracking, and
+frame encoding. At 1000 channels with 1MB data, total allocation reaches ~1 GB.
+Memory profile scales with both channel count and data size.
 
 ---
 

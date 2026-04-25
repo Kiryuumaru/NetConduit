@@ -189,7 +189,7 @@ public class ThroughputBenchmark
                 for (int i = 0; i < ConcurrentChannels; i++)
                 {
                     var channelId = $"ch-{i}";
-                    var channel = await client.OpenChannelAsync(new ChannelOptions { ChannelId = channelId }, cts.Token);
+                    var channel = await client.OpenChannelAsync(channelId, cts.Token);
                     channels.Add(channel);
 
                     var ch = channel;

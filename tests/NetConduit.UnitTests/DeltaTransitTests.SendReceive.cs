@@ -23,7 +23,7 @@ public partial class DeltaTransitTests
 
         var (muxA, muxB, _, _) = await TestMuxHelper.CreateMuxPairAsync(pipe, cancellationToken: cts.Token);
 
-        var writeA = await muxA.OpenChannelAsync(new() { ChannelId = "delta_dup" }, cts.Token);
+        var writeA = await muxA.OpenChannelAsync("delta_dup", cts.Token);
         var readB = await muxB.AcceptChannelAsync("delta_dup", cts.Token);
 
         await using var sender = new DeltaTransit<SimpleState>(writeA, null, DeltaSendReceiveJsonContext.Default.SimpleState);
@@ -55,7 +55,7 @@ public partial class DeltaTransitTests
 
         var (muxA, muxB, _, _) = await TestMuxHelper.CreateMuxPairAsync(pipe, cancellationToken: cts.Token);
 
-        var writeA = await muxA.OpenChannelAsync(new() { ChannelId = "fullsync" }, cts.Token);
+        var writeA = await muxA.OpenChannelAsync("fullsync", cts.Token);
         var readB = await muxB.AcceptChannelAsync("fullsync", cts.Token);
 
         await using var sender = new DeltaTransit<SimpleState>(writeA, null, DeltaSendReceiveJsonContext.Default.SimpleState);
@@ -86,7 +86,7 @@ public partial class DeltaTransitTests
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
         var (muxA, muxB, _, _) = await TestMuxHelper.CreateMuxPairAsync(pipe, cancellationToken: cts.Token);
 
-        var writeA = await muxA.OpenChannelAsync(new() { ChannelId = "delta_triple" }, cts.Token);
+        var writeA = await muxA.OpenChannelAsync("delta_triple", cts.Token);
         var readB = await muxB.AcceptChannelAsync("delta_triple", cts.Token);
 
         await using var sender = new DeltaTransit<SimpleState>(writeA, null, DeltaSendReceiveJsonContext.Default.SimpleState);
@@ -111,7 +111,7 @@ public partial class DeltaTransitTests
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
         var (muxA, muxB, _, _) = await TestMuxHelper.CreateMuxPairAsync(pipe, cancellationToken: cts.Token);
 
-        var writeA = await muxA.OpenChannelAsync(new() { ChannelId = "delta_after_diff" }, cts.Token);
+        var writeA = await muxA.OpenChannelAsync("delta_after_diff", cts.Token);
         var readB = await muxB.AcceptChannelAsync("delta_after_diff", cts.Token);
 
         await using var sender = new DeltaTransit<SimpleState>(writeA, null, DeltaSendReceiveJsonContext.Default.SimpleState);
@@ -139,7 +139,7 @@ public partial class DeltaTransitTests
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
         var (muxA, muxB, _, _) = await TestMuxHelper.CreateMuxPairAsync(pipe, cancellationToken: cts.Token);
 
-        var writeA = await muxA.OpenChannelAsync(new() { ChannelId = "delta_empty" }, cts.Token);
+        var writeA = await muxA.OpenChannelAsync("delta_empty", cts.Token);
         var readB = await muxB.AcceptChannelAsync("delta_empty", cts.Token);
 
         await using var sender = new DeltaTransit<JsonNode>(writeA, null);
@@ -163,7 +163,7 @@ public partial class DeltaTransitTests
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
         var (muxA, muxB, _, _) = await TestMuxHelper.CreateMuxPairAsync(pipe, cancellationToken: cts.Token);
 
-        var writeA = await muxA.OpenChannelAsync(new() { ChannelId = "delta_large" }, cts.Token);
+        var writeA = await muxA.OpenChannelAsync("delta_large", cts.Token);
         var readB = await muxB.AcceptChannelAsync("delta_large", cts.Token);
 
         await using var sender = new DeltaTransit<JsonNode>(writeA, null);
@@ -189,7 +189,7 @@ public partial class DeltaTransitTests
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
         var (muxA, muxB, _, _) = await TestMuxHelper.CreateMuxPairAsync(pipe, cancellationToken: cts.Token);
 
-        var writeA = await muxA.OpenChannelAsync(new() { ChannelId = "delta_reset" }, cts.Token);
+        var writeA = await muxA.OpenChannelAsync("delta_reset", cts.Token);
         var readB = await muxB.AcceptChannelAsync("delta_reset", cts.Token);
 
         await using var sender = new DeltaTransit<SimpleState>(writeA, null, DeltaSendReceiveJsonContext.Default.SimpleState);
@@ -217,7 +217,7 @@ public partial class DeltaTransitTests
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
         var (muxA, muxB, _, _) = await TestMuxHelper.CreateMuxPairAsync(pipe, cancellationToken: cts.Token);
 
-        var writeA = await muxA.OpenChannelAsync(new() { ChannelId = "delta_batch" }, cts.Token);
+        var writeA = await muxA.OpenChannelAsync("delta_batch", cts.Token);
         var readB = await muxB.AcceptChannelAsync("delta_batch", cts.Token);
 
         await using var sender = new DeltaTransit<SimpleState>(writeA, null, DeltaSendReceiveJsonContext.Default.SimpleState);
@@ -245,7 +245,7 @@ public partial class DeltaTransitTests
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
         var (muxA, muxB, _, _) = await TestMuxHelper.CreateMuxPairAsync(pipe, cancellationToken: cts.Token);
 
-        var writeA = await muxA.OpenChannelAsync(new() { ChannelId = "delta_nested" }, cts.Token);
+        var writeA = await muxA.OpenChannelAsync("delta_nested", cts.Token);
         var readB = await muxB.AcceptChannelAsync("delta_nested", cts.Token);
 
         await using var sender = new DeltaTransit<JsonNode>(writeA, null);
@@ -273,7 +273,7 @@ public partial class DeltaTransitTests
 
         var (muxA, muxB, _, _) = await TestMuxHelper.CreateMuxPairAsync(pipe, cancellationToken: cts.Token);
 
-        var writeA = await muxA.OpenChannelAsync(new() { ChannelId = "pool_test" }, cts.Token);
+        var writeA = await muxA.OpenChannelAsync("pool_test", cts.Token);
         var readB = await muxB.AcceptChannelAsync("pool_test", cts.Token);
 
         await using var sender = new DeltaTransit<SimpleState>(writeA, null, DeltaSendReceiveJsonContext.Default.SimpleState);
@@ -306,7 +306,7 @@ public partial class DeltaTransitTests
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
         var (muxA, muxB, _, _) = await TestMuxHelper.CreateMuxPairAsync(pipe, cancellationToken: cts.Token);
 
-        var writeA = await muxA.OpenChannelAsync(new() { ChannelId = "pool_rapid" }, cts.Token);
+        var writeA = await muxA.OpenChannelAsync("pool_rapid", cts.Token);
         var readB = await muxB.AcceptChannelAsync("pool_rapid", cts.Token);
 
         await using var sender = new DeltaTransit<JsonNode>(writeA, null);
@@ -335,7 +335,7 @@ public partial class DeltaTransitTests
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
         var (muxA, muxB, _, _) = await TestMuxHelper.CreateMuxPairAsync(pipe, cancellationToken: cts.Token);
 
-        var writeA = await muxA.OpenChannelAsync(new() { ChannelId = "pool_large" }, cts.Token);
+        var writeA = await muxA.OpenChannelAsync("pool_large", cts.Token);
         var readB = await muxB.AcceptChannelAsync("pool_large", cts.Token);
 
         await using var sender = new DeltaTransit<JsonNode>(writeA, null);
@@ -366,7 +366,7 @@ public partial class DeltaTransitTests
 
         var (muxA, muxB, _, _) = await TestMuxHelper.CreateMuxPairAsync(pipe, cancellationToken: cts.Token);
 
-        var writeA = await muxA.OpenChannelAsync(new() { ChannelId = "closure_reason" }, cts.Token);
+        var writeA = await muxA.OpenChannelAsync("closure_reason", cts.Token);
         var readB = await muxB.AcceptChannelAsync("closure_reason", cts.Token);
 
         await using var sender = new DeltaTransit<SimpleState>(writeA, null, DeltaSendReceiveJsonContext.Default.SimpleState);
@@ -398,7 +398,7 @@ public partial class DeltaTransitTests
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
         var (muxA, muxB, _, _) = await TestMuxHelper.CreateMuxPairAsync(pipe, cancellationToken: cts.Token);
 
-        var writeA = await muxA.OpenChannelAsync(new() { ChannelId = "recv_cancel" }, cts.Token);
+        var writeA = await muxA.OpenChannelAsync("recv_cancel", cts.Token);
         var readB = await muxB.AcceptChannelAsync("recv_cancel", cts.Token);
 
         await using var sender = new DeltaTransit<SimpleState>(writeA, null, DeltaSendReceiveJsonContext.Default.SimpleState);
@@ -433,7 +433,7 @@ public partial class DeltaTransitTests
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
         var (muxA, muxB, _, _) = await TestMuxHelper.CreateMuxPairAsync(pipe, cancellationToken: cts.Token);
 
-        var writeA = await muxA.OpenChannelAsync(new() { ChannelId = "recv_multi" }, cts.Token);
+        var writeA = await muxA.OpenChannelAsync("recv_multi", cts.Token);
         var readB = await muxB.AcceptChannelAsync("recv_multi", cts.Token);
 
         await using var sender = new DeltaTransit<JsonNode>(writeA, null);
@@ -472,7 +472,7 @@ public partial class DeltaTransitTests
 
         var (muxA, muxB, _, _) = await TestMuxHelper.CreateMuxPairAsync(pipe, cancellationToken: cts.Token);
 
-        var writeChannel = await muxA.OpenChannelAsync(new ChannelOptions { ChannelId = "partial_read" }, cts.Token);
+        var writeChannel = await muxA.OpenChannelAsync("partial_read", cts.Token);
         var readChannel = await muxB.AcceptChannelAsync("partial_read", cts.Token);
 
         await using var sender = new DeltaTransit<JsonObject>(writeChannel, null);
@@ -502,7 +502,7 @@ public partial class DeltaTransitTests
 
         var (muxA, muxB, _, _) = await TestMuxHelper.CreateMuxPairAsync(pipe, cancellationToken: cts.Token);
 
-        var writeChannel = await muxA.OpenChannelAsync(new ChannelOptions { ChannelId = "frag_test" }, cts.Token);
+        var writeChannel = await muxA.OpenChannelAsync("frag_test", cts.Token);
         var readChannel = await muxB.AcceptChannelAsync("frag_test", cts.Token);
 
         await using var sender = new DeltaTransit<JsonObject>(writeChannel, null);
@@ -529,7 +529,7 @@ public partial class DeltaTransitTests
 
         var (muxA, muxB, _, _) = await TestMuxHelper.CreateMuxPairAsync(pipe, cancellationToken: cts.Token);
 
-        var writeChannel = await muxA.OpenChannelAsync(new ChannelOptions { ChannelId = "no_leak" }, cts.Token);
+        var writeChannel = await muxA.OpenChannelAsync("no_leak", cts.Token);
         var readChannel = await muxB.AcceptChannelAsync("no_leak", cts.Token);
 
         await using var sender = new DeltaTransit<JsonObject>(writeChannel, null);

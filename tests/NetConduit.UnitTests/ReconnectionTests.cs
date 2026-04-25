@@ -240,7 +240,7 @@ public class ReconnectionTests
             return null;
         });
 
-        await using var writeChannel = await mux1.OpenChannelAsync(new ChannelOptions { ChannelId = "test" }, cts.Token);
+        await using var writeChannel = await mux1.OpenChannelAsync("test", cts.Token);
         var readChannel = await acceptTask;
 
         Assert.NotNull(readChannel);
@@ -377,7 +377,7 @@ public class ReconnectionTests
             return null;
         });
 
-        await using var writeChannel = await mux1.OpenChannelAsync(new ChannelOptions { ChannelId = "large-transfer" }, cts.Token);
+        await using var writeChannel = await mux1.OpenChannelAsync("large-transfer", cts.Token);
         var readChannel = await acceptTask;
         Assert.NotNull(readChannel);
 
@@ -772,7 +772,7 @@ public class ReconnectionTests
         await using var pipe = new DuplexPipe();
         var (muxA, muxB, _, _) = await TestMuxHelper.CreateMuxPairAsync(pipe, cancellationToken: cts.Token);
 
-        var writeChannel = await muxA.OpenChannelAsync(new ChannelOptions { ChannelId = "ack_sync" }, cts.Token);
+        var writeChannel = await muxA.OpenChannelAsync("ack_sync", cts.Token);
         var readChannel = await muxB.AcceptChannelAsync("ack_sync", cts.Token);
 
         // Send data and read it on the other side so read position advances

@@ -248,10 +248,10 @@ public sealed class WriteChannel : Stream
             _multiplexer.SendDataFrame(ChannelIndex, slice, Priority, cancellationToken);
             
             // For large frames, bypass FlushLoop and drain immediately on caller thread
-            if (toSend >= 65536 && Volatile.Read(ref _multiplexer._unflushedDataBytes) >= 262144)
-                await _multiplexer.ForceFlushPipeToStreamAsync(cancellationToken).ConfigureAwait(false);
+            if (toSend >= 65536 && Volatile.Read(ref _multiplexer.Writer.UnflushedDataBytes) >= 262144)
+                await _multiplexer.Writer.ForceFlushAsync(cancellationToken).ConfigureAwait(false);
             else if (toSend >= 8192)
-                await _multiplexer.TryCommitAndDrainAsync(cancellationToken).ConfigureAwait(false);
+                await _multiplexer.Writer.TryCommitAndDrainAsync(cancellationToken).ConfigureAwait(false);
             
             Stats.AddBytesSent(toSend);
             Stats.IncrementFramesSent();

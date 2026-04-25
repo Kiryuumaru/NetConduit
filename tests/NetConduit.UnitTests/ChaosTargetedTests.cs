@@ -37,7 +37,7 @@ public partial class ChaosTargetedTests
 
         var (muxA, muxB, _, _) = await TestMuxHelper.CreateMuxPairAsync(pipe, cancellationToken: cts.Token);
 
-        var writeChannel = await muxA.OpenChannelAsync(new() { ChannelId = "chaos_concurrent" }, cts.Token);
+        var writeChannel = await muxA.OpenChannelAsync("chaos_concurrent", cts.Token);
         var readChannel = await muxB.AcceptChannelAsync("chaos_concurrent", cts.Token);
 
         var totalSent = 0L;
@@ -112,7 +112,7 @@ public partial class ChaosTargetedTests
                 try
                 {
                     var id = $"a_{i}";
-                    var write = await muxA.OpenChannelAsync(new() { ChannelId = id }, cts.Token);
+                    var write = await muxA.OpenChannelAsync(id, cts.Token);
                     var read = await muxB.AcceptChannelAsync(id, cts.Token);
 
                     await write.WriteAsync(new byte[] { 0x01 }, cts.Token);
@@ -136,7 +136,7 @@ public partial class ChaosTargetedTests
                 try
                 {
                     var id = $"b_{i}";
-                    var write = await muxB.OpenChannelAsync(new() { ChannelId = id }, cts.Token);
+                    var write = await muxB.OpenChannelAsync(id, cts.Token);
                     var read = await muxA.AcceptChannelAsync(id, cts.Token);
 
                     await write.WriteAsync(new byte[] { 0x02 }, cts.Token);
@@ -174,13 +174,13 @@ public partial class ChaosTargetedTests
         var (muxA, muxB, _, _) = await TestMuxHelper.CreateMuxPairAsync(pipe, cancellationToken: cts.Token);
 
         // DeltaTransit pair
-        var deltaWriteA = await muxA.OpenChannelAsync(new() { ChannelId = "delta_chaos" }, cts.Token);
+        var deltaWriteA = await muxA.OpenChannelAsync("delta_chaos", cts.Token);
         var deltaReadB = await muxB.AcceptChannelAsync("delta_chaos", cts.Token);
         await using var deltaSender = new DeltaTransit<JsonNode>(deltaWriteA, null);
         await using var deltaReceiver = new DeltaTransit<JsonNode>(null, deltaReadB);
 
         // MessageTransit pair
-        var msgWriteA = await muxA.OpenChannelAsync(new() { ChannelId = "msg_chaos" }, cts.Token);
+        var msgWriteA = await muxA.OpenChannelAsync("msg_chaos", cts.Token);
         var msgReadB = await muxB.AcceptChannelAsync("msg_chaos", cts.Token);
         await using var msgSender = new MessageTransit<ChaosMessage, ChaosMessage>(
             msgWriteA, null, ChaosJsonContext.Default.ChaosMessage, ChaosJsonContext.Default.ChaosMessage);
@@ -188,7 +188,7 @@ public partial class ChaosTargetedTests
             null, msgReadB, ChaosJsonContext.Default.ChaosMessage, ChaosJsonContext.Default.ChaosMessage);
 
         // Raw stream pair
-        var rawWriteA = await muxA.OpenChannelAsync(new() { ChannelId = "raw_chaos" }, cts.Token);
+        var rawWriteA = await muxA.OpenChannelAsync("raw_chaos", cts.Token);
         var rawReadB = await muxB.AcceptChannelAsync("raw_chaos", cts.Token);
 
         var deltaErrors = new ConcurrentBag<Exception>();
@@ -301,7 +301,7 @@ public partial class ChaosTargetedTests
 
         var (muxA, muxB, _, _) = await TestMuxHelper.CreateMuxPairAsync(pipe, cancellationToken: cts.Token);
 
-        var writeChannel = await muxA.OpenChannelAsync(new() { ChannelId = "dispose_chaos" }, cts.Token);
+        var writeChannel = await muxA.OpenChannelAsync("dispose_chaos", cts.Token);
         var readChannel = await muxB.AcceptChannelAsync("dispose_chaos", cts.Token);
 
         var writeErrors = new ConcurrentBag<Exception>();
@@ -362,7 +362,7 @@ public partial class ChaosTargetedTests
 
         var (muxA, muxB, _, _) = await TestMuxHelper.CreateMuxPairAsync(pipe, cancellationToken: cts.Token);
 
-        var writeChannel = await muxA.OpenChannelAsync(new() { ChannelId = "read_dispose" }, cts.Token);
+        var writeChannel = await muxA.OpenChannelAsync("read_dispose", cts.Token);
         var readChannel = await muxB.AcceptChannelAsync("read_dispose", cts.Token);
 
         // Start a blocking read
@@ -403,7 +403,7 @@ public partial class ChaosTargetedTests
 
         var (muxA, muxB, _, _) = await TestMuxHelper.CreateMuxPairAsync(pipe, cancellationToken: cts.Token);
 
-        var writeChannel = await muxA.OpenChannelAsync(new() { ChannelId = "size_chaos" }, cts.Token);
+        var writeChannel = await muxA.OpenChannelAsync("size_chaos", cts.Token);
         var readChannel = await muxB.AcceptChannelAsync("size_chaos", cts.Token);
 
         // Sizes from 1 byte to 512KB
@@ -460,12 +460,12 @@ public partial class ChaosTargetedTests
 
             // A → B channel
             var abId = $"ab_{channelIndex}";
-            var abWrite = await muxA.OpenChannelAsync(new() { ChannelId = abId }, cts.Token);
+            var abWrite = await muxA.OpenChannelAsync(abId, cts.Token);
             var abRead = await muxB.AcceptChannelAsync(abId, cts.Token);
 
             // B → A channel
             var baId = $"ba_{channelIndex}";
-            var baWrite = await muxB.OpenChannelAsync(new() { ChannelId = baId }, cts.Token);
+            var baWrite = await muxB.OpenChannelAsync(baId, cts.Token);
             var baRead = await muxA.AcceptChannelAsync(baId, cts.Token);
 
             // A writes to B
@@ -567,7 +567,7 @@ public partial class ChaosTargetedTests
 
         var (muxA, muxB, _, _) = await TestMuxHelper.CreateMuxPairAsync(pipe, cancellationToken: cts.Token);
 
-        var writeA = await muxA.OpenChannelAsync(new() { ChannelId = "delta_rapid" }, cts.Token);
+        var writeA = await muxA.OpenChannelAsync("delta_rapid", cts.Token);
         var readB = await muxB.AcceptChannelAsync("delta_rapid", cts.Token);
 
         await using var sender = new DeltaTransit<JsonNode>(writeA, null);
@@ -604,7 +604,7 @@ public partial class ChaosTargetedTests
 
         var (muxA, muxB, _, _) = await TestMuxHelper.CreateMuxPairAsync(pipe, cancellationToken: cts.Token);
 
-        var writeA = await muxA.OpenChannelAsync(new() { ChannelId = "delta_alt" }, cts.Token);
+        var writeA = await muxA.OpenChannelAsync("delta_alt", cts.Token);
         var readB = await muxB.AcceptChannelAsync("delta_alt", cts.Token);
 
         await using var sender = new DeltaTransit<JsonNode>(writeA, null);
@@ -650,7 +650,7 @@ public partial class ChaosTargetedTests
         var errors = new ConcurrentBag<string>();
 
         // Long-lived channel
-        var longWrite = await muxA.OpenChannelAsync(new() { ChannelId = "long_lived" }, cts.Token);
+        var longWrite = await muxA.OpenChannelAsync("long_lived", cts.Token);
         var longRead = await muxB.AcceptChannelAsync("long_lived", cts.Token);
 
         var longLivedTask = Task.Run(async () =>
@@ -685,7 +685,7 @@ public partial class ChaosTargetedTests
             try
             {
                 var id = $"short_{idx}";
-                var w = await muxA.OpenChannelAsync(new() { ChannelId = id }, cts.Token);
+                var w = await muxA.OpenChannelAsync(id, cts.Token);
                 var r = await muxB.AcceptChannelAsync(id, cts.Token);
 
                 var data = new byte[32];
@@ -743,7 +743,7 @@ public partial class ChaosTargetedTests
 
         var (muxA, muxB, _, _) = await TestMuxHelper.CreateMuxPairAsync(pipe, opts, opts, cts.Token);
 
-        var writeChannel = await muxA.OpenChannelAsync(new() { ChannelId = "tiny_credits" }, cts.Token);
+        var writeChannel = await muxA.OpenChannelAsync("tiny_credits", cts.Token);
         var readChannel = await muxB.AcceptChannelAsync("tiny_credits", cts.Token);
 
         var errors = new ConcurrentBag<string>();
@@ -823,7 +823,7 @@ public partial class ChaosTargetedTests
                 {
                     case 0: // Open new channel
                         var id = $"rng_{Interlocked.Increment(ref channelCounter)}";
-                        var write = await muxA.OpenChannelAsync(new() { ChannelId = id }, cts.Token);
+                        var write = await muxA.OpenChannelAsync(id, cts.Token);
                         var read = await muxB.AcceptChannelAsync(id, cts.Token);
                         activeChannels.TryAdd(id, (write, read));
                         break;
@@ -911,7 +911,7 @@ public partial class ChaosTargetedTests
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
         var (muxA, muxB, _, _) = await TestMuxHelper.CreateMuxPairAsync(pipe, cancellationToken: cts.Token);
 
-        var writeA = await muxA.OpenChannelAsync(new() { ChannelId = "chaos_ident100" }, cts.Token);
+        var writeA = await muxA.OpenChannelAsync("chaos_ident100", cts.Token);
         var readB = await muxB.AcceptChannelAsync("chaos_ident100", cts.Token);
 
         await using var sender = new DeltaTransit<JsonNode>(writeA, null);
@@ -944,7 +944,7 @@ public partial class ChaosTargetedTests
         var (muxA, muxB, _, _) = await TestMuxHelper.CreateMuxPairAsync(pipe, cancellationToken: cts.Token);
 
         // MessageTransit channel
-        var msgW = await muxA.OpenChannelAsync(new() { ChannelId = "chaos_msg" }, cts.Token);
+        var msgW = await muxA.OpenChannelAsync("chaos_msg", cts.Token);
         var msgR = await muxB.AcceptChannelAsync("chaos_msg", cts.Token);
         await using var msgSender = new MessageTransit<ChaosMessage, ChaosMessage>(
             msgW, null, ChaosJsonContext.Default.ChaosMessage, ChaosJsonContext.Default.ChaosMessage);
@@ -952,13 +952,13 @@ public partial class ChaosTargetedTests
             null, msgR, ChaosJsonContext.Default.ChaosMessage, ChaosJsonContext.Default.ChaosMessage);
 
         // DeltaTransit channel
-        var deltaW = await muxA.OpenChannelAsync(new() { ChannelId = "chaos_delta" }, cts.Token);
+        var deltaW = await muxA.OpenChannelAsync("chaos_delta", cts.Token);
         var deltaR = await muxB.AcceptChannelAsync("chaos_delta", cts.Token);
         await using var deltaSender = new DeltaTransit<JsonNode>(deltaW, null);
         await using var deltaReceiver = new DeltaTransit<JsonNode>(null, deltaR);
 
         // Raw channel
-        var rawW = await muxA.OpenChannelAsync(new() { ChannelId = "chaos_raw" }, cts.Token);
+        var rawW = await muxA.OpenChannelAsync("chaos_raw", cts.Token);
         var rawR = await muxB.AcceptChannelAsync("chaos_raw", cts.Token);
 
         // DuplexStream
@@ -1063,7 +1063,7 @@ public partial class ChaosTargetedTests
         for (int c = 0; c < 10; c++)
         {
             var channelId = $"tiny_ch_{c}";
-            var write = await muxA.OpenChannelAsync(new() { ChannelId = channelId }, cts.Token);
+            var write = await muxA.OpenChannelAsync(channelId, cts.Token);
             var read = await muxB.AcceptChannelAsync(channelId, cts.Token);
 
             var cIdx = c;
@@ -1116,7 +1116,7 @@ public partial class ChaosTargetedTests
         for (int c = 0; c < 4; c++)
         {
             var id = $"large_ch_{c}";
-            var write = await muxA.OpenChannelAsync(new() { ChannelId = id }, cts.Token);
+            var write = await muxA.OpenChannelAsync(id, cts.Token);
             var read = await muxB.AcceptChannelAsync(id, cts.Token);
             var cIdx = c;
 
@@ -1294,7 +1294,7 @@ public partial class ChaosTargetedTests
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
         var (muxA, muxB, _, _) = await TestMuxHelper.CreateMuxPairAsync(pipe, cancellationToken: cts.Token);
 
-        var write = await muxA.OpenChannelAsync(new() { ChannelId = "dispose_order" }, cts.Token);
+        var write = await muxA.OpenChannelAsync("dispose_order", cts.Token);
         var read = await muxB.AcceptChannelAsync("dispose_order", cts.Token);
 
         // Dispose channels first, then mux — should not throw
@@ -1311,7 +1311,7 @@ public partial class ChaosTargetedTests
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
         var (muxA, muxB, _, _) = await TestMuxHelper.CreateMuxPairAsync(pipe, cancellationToken: cts.Token);
 
-        var write = await muxA.OpenChannelAsync(new() { ChannelId = "mux_dispose" }, cts.Token);
+        var write = await muxA.OpenChannelAsync("mux_dispose", cts.Token);
         var read = await muxB.AcceptChannelAsync("mux_dispose", cts.Token);
 
         // Dispose mux while channels are still active

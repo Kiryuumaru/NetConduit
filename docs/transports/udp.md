@@ -23,7 +23,7 @@ var runTask = mux.Start();
 await mux.WaitForReadyAsync();
 
 // Use channels - reliability is automatic
-var channel = await mux.OpenChannelAsync(new() { ChannelId = "game-state" });
+var channel = await mux.OpenChannelAsync("game-state");
 await channel.WriteAsync(gameData);
 ```
 

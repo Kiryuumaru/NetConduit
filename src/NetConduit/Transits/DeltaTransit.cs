@@ -461,12 +461,15 @@ public sealed class DeltaTransit<T> : IAsyncDisposable
             if (item is not JsonArray opArray || opArray.Count < 2)
                 throw new JsonException("Each delta operation must be an array with at least 2 elements.");
 
-            var rawOpCode = opArray[0]!.GetValue<int>();
+            if (opArray[0] is not JsonValue opVal || !opVal.TryGetValue<int>(out var rawOpCode))
+                throw new JsonException("Delta operation code must be an integer.");
             if (!Enum.IsDefined((DeltaOp)rawOpCode))
                 throw new JsonException($"Unknown delta operation code: {rawOpCode}");
 
             var opCode = (DeltaOp)rawOpCode;
-            var path = JsonArrayToPath(opArray[1]!.AsArray());
+            if (opArray[1] is not JsonArray pathArray)
+                throw new JsonException("Delta operation path must be a JSON array.");
+            var path = JsonArrayToPath(pathArray);
 
             JsonNode? value = null;
             int? index = null;
@@ -480,11 +483,11 @@ public sealed class DeltaTransit<T> : IAsyncDisposable
 
                 case DeltaOp.ArrayInsert:
                     value = opArray.Count > 2 ? opArray[2]?.DeepClone() : null;
-                    index = opArray.Count > 3 ? opArray[3]?.GetValue<int>() : null;
+                    index = opArray.Count > 3 ? GetOptionalInt(opArray[3], "array insert index") : null;
                     break;
 
                 case DeltaOp.ArrayRemove:
-                    index = opArray.Count > 2 ? opArray[2]?.GetValue<int>() : null;
+                    index = opArray.Count > 2 ? GetOptionalInt(opArray[2], "array remove index") : null;
                     break;
             }
 
@@ -492,6 +495,14 @@ public sealed class DeltaTransit<T> : IAsyncDisposable
         }
 
         return ops;
+    }
+
+    private static int? GetOptionalInt(JsonNode? node, string fieldName)
+    {
+        if (node is null) return null;
+        if (node is JsonValue jv && jv.TryGetValue<int>(out var intVal))
+            return intVal;
+        throw new JsonException($"Delta {fieldName} must be an integer.");
     }
 
     [UnconditionalSuppressMessage("AOT", "IL2026:RequiresUnreferencedCode", Justification = "Only adding primitive JsonValue (int, string) which are AOT-safe")]

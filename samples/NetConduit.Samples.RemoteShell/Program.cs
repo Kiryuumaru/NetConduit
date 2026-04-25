@@ -131,7 +131,7 @@ async Task HandleClientAsync(TcpClient tcp, string endpoint, CancellationToken s
         if (cmdCh == null || ctrlCh == null) return;
 
         // Open output channel
-        var outCh = await mux.OpenChannelAsync(new ChannelOptions { ChannelId = "out" }, cts.Token);
+        var outCh = await mux.OpenChannelAsync("out", cts.Token);
 
         var cmdTransit = new MessageTransit<Msg, Msg>(null, cmdCh, Ctx.Default.Msg, Ctx.Default.Msg);
         var ctrlTransit = new MessageTransit<Msg, Msg>(null, ctrlCh, Ctx.Default.Msg, Ctx.Default.Msg);
@@ -283,8 +283,8 @@ async Task RunClientAsync(string host, int port)
     }
 
     // Open channels
-    var cmdCh = await mux.OpenChannelAsync(new ChannelOptions { ChannelId = "cmd" }, mainCts.Token);
-    var ctrlCh = await mux.OpenChannelAsync(new ChannelOptions { ChannelId = "ctrl" }, mainCts.Token);
+    var cmdCh = await mux.OpenChannelAsync("cmd", mainCts.Token);
+    var ctrlCh = await mux.OpenChannelAsync("ctrl", mainCts.Token);
 
     // Accept output channel
     ReadChannel? outCh = null;

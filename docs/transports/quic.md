@@ -48,7 +48,7 @@ var runTask = mux.Start();
 await mux.WaitForReadyAsync();
 
 // Use channels
-var channel = await mux.OpenChannelAsync(new() { ChannelId = "data" });
+var channel = await mux.OpenChannelAsync("data");
 ```
 
 ## Server
@@ -162,7 +162,7 @@ You can use either QUIC's native streams or NetConduit's channels:
 
 ```csharp
 // Use NetConduit channels over QUIC
-var channel = await mux.OpenChannelAsync(new() { ChannelId = "chat" });
+var channel = await mux.OpenChannelAsync("chat");
 
 // Or access QUIC streams directly if needed
 // (transport-specific API)

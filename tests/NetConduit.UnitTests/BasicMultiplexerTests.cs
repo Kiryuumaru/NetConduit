@@ -47,7 +47,7 @@ public class BasicMultiplexerTests
 
         await Task.WhenAll(initiator.WaitForReadyAsync(cts.Token), acceptor.WaitForReadyAsync(cts.Token));
 
-        await using var writeChannel = await initiator.OpenChannelAsync(new ChannelOptions { ChannelId = "test_channel" }, cts.Token);
+        await using var writeChannel = await initiator.OpenChannelAsync("test_channel", cts.Token);
         
         Assert.NotNull(writeChannel);
         Assert.Equal(ChannelState.Open, writeChannel.State);
@@ -82,7 +82,7 @@ public class BasicMultiplexerTests
             return null;
         });
 
-        await using var writeChannel = await initiator.OpenChannelAsync(new ChannelOptions { ChannelId = "accept_channel" }, cts.Token);
+        await using var writeChannel = await initiator.OpenChannelAsync("accept_channel", cts.Token);
         
         var readChannel = await acceptTask.WaitAsync(cts.Token);
         
@@ -118,7 +118,7 @@ public class BasicMultiplexerTests
             }
         });
 
-        await using var writeChannel = await initiator.OpenChannelAsync(new ChannelOptions { ChannelId = "data_channel" }, cts.Token);
+        await using var writeChannel = await initiator.OpenChannelAsync("data_channel", cts.Token);
         await acceptTask;
 
         // Send data
@@ -160,7 +160,7 @@ public class BasicMultiplexerTests
             }
         });
 
-        await using var writeChannel = await initiator.OpenChannelAsync(new ChannelOptions { ChannelId = "large_data_channel" }, cts.Token);
+        await using var writeChannel = await initiator.OpenChannelAsync("large_data_channel", cts.Token);
         await acceptTask;
 
         // Send large data (larger than initial credits)
@@ -212,7 +212,7 @@ public class BasicMultiplexerTests
             }
         });
 
-        var writeChannel = await initiator.OpenChannelAsync(new ChannelOptions { ChannelId = "close_channel" }, cts.Token);
+        var writeChannel = await initiator.OpenChannelAsync("close_channel", cts.Token);
         await acceptTask;
 
         // Close the write channel
@@ -255,7 +255,7 @@ public class BasicMultiplexerTests
             return null;
         });
 
-        await using var writeChannel = await initiator.OpenChannelAsync(new ChannelOptions { ChannelId = "stats_channel" }, cts.Token);
+        await using var writeChannel = await initiator.OpenChannelAsync("stats_channel", cts.Token);
         var readChannel = await acceptTask;
 
         var testData = new byte[1024];
@@ -285,7 +285,7 @@ public class BasicMultiplexerTests
         for (int i = 0; i < 500; i++)
         {
             var channelId = $"ephemeral_{i}";
-            var write = await muxA.OpenChannelAsync(new() { ChannelId = channelId }, cts.Token);
+            var write = await muxA.OpenChannelAsync(channelId, cts.Token);
             var read = await muxB.AcceptChannelAsync(channelId, cts.Token);
 
             var data = new byte[] { (byte)(i & 0xFF) };
@@ -299,7 +299,7 @@ public class BasicMultiplexerTests
             await read.DisposeAsync();
         }
 
-        var finalWrite = await muxA.OpenChannelAsync(new() { ChannelId = "final_check" }, cts.Token);
+        var finalWrite = await muxA.OpenChannelAsync("final_check", cts.Token);
         var finalRead = await muxB.AcceptChannelAsync("final_check", cts.Token);
         await finalWrite.WriteAsync(new byte[] { 0xAB }, cts.Token);
         var finalBuf = new byte[1];
@@ -318,11 +318,11 @@ public class BasicMultiplexerTests
         for (int i = 0; i < 100; i++)
         {
             var idA = $"from_a_{i}";
-            var wA = await muxA.OpenChannelAsync(new() { ChannelId = idA }, cts.Token);
+            var wA = await muxA.OpenChannelAsync(idA, cts.Token);
             var rA = await muxB.AcceptChannelAsync(idA, cts.Token);
 
             var idB = $"from_b_{i}";
-            var wB = await muxB.OpenChannelAsync(new() { ChannelId = idB }, cts.Token);
+            var wB = await muxB.OpenChannelAsync(idB, cts.Token);
             var rB = await muxA.AcceptChannelAsync(idB, cts.Token);
 
             await wA.WriteAsync(new byte[] { 0xAA }, cts.Token);
@@ -351,7 +351,7 @@ public class BasicMultiplexerTests
         {
             try
             {
-                var write = await muxA.OpenChannelAsync(new() { ChannelId = $"churn_{i}" }, cts.Token);
+                var write = await muxA.OpenChannelAsync($"churn_{i}", cts.Token);
                 var read = await muxB.AcceptChannelAsync($"churn_{i}", cts.Token);
                 await write.DisposeAsync();
                 await read.DisposeAsync();
@@ -375,7 +375,7 @@ public class BasicMultiplexerTests
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
         var (muxA, muxB, _, _) = await TestMuxHelper.CreateMuxPairAsync(pipe, cancellationToken: cts.Token);
 
-        var w1 = await muxA.OpenChannelAsync(new() { ChannelId = "reuse_test" }, cts.Token);
+        var w1 = await muxA.OpenChannelAsync("reuse_test", cts.Token);
         var r1 = await muxB.AcceptChannelAsync("reuse_test", cts.Token);
         await w1.WriteAsync(new byte[] { 1 }, cts.Token);
         var buf = new byte[1];
@@ -385,7 +385,7 @@ public class BasicMultiplexerTests
 
         try
         {
-            var w2 = await muxA.OpenChannelAsync(new() { ChannelId = "reuse_test" }, cts.Token);
+            var w2 = await muxA.OpenChannelAsync("reuse_test", cts.Token);
             var r2 = await muxB.AcceptChannelAsync("reuse_test", cts.Token);
             await w2.WriteAsync(new byte[] { 2 }, cts.Token);
             Assert.Equal(1, await r2.ReadAsync(buf, cts.Token));
@@ -414,7 +414,7 @@ public class BasicMultiplexerTests
         Assert.True(muxA.IsRunning);
         Assert.True(muxB.IsRunning);
 
-        var write = await muxA.OpenChannelAsync(new() { ChannelId = "post_handshake" }, cts.Token);
+        var write = await muxA.OpenChannelAsync("post_handshake", cts.Token);
         var read = await muxB.AcceptChannelAsync("post_handshake", cts.Token);
 
         await write.WriteAsync(new byte[] { 0xFF }, cts.Token);
@@ -459,7 +459,7 @@ public class BasicMultiplexerTests
 
         var (muxA, muxB, _, _) = await TestMuxHelper.CreateMuxPairAsync(pipe, opts, opts, cts.Token);
 
-        var writeChannel = await muxA.OpenChannelAsync(new() { ChannelId = "flush_imm" }, cts.Token);
+        var writeChannel = await muxA.OpenChannelAsync("flush_imm", cts.Token);
         var readChannel = await muxB.AcceptChannelAsync("flush_imm", cts.Token);
 
         await writeChannel.WriteAsync(new byte[] { 0xDD }, cts.Token);
@@ -486,7 +486,7 @@ public class BasicMultiplexerTests
 
         var (muxA, muxB, _, _) = await TestMuxHelper.CreateMuxPairAsync(pipe, opts, opts, cts.Token);
 
-        var writeChannel = await muxA.OpenChannelAsync(new() { ChannelId = "flush_bat" }, cts.Token);
+        var writeChannel = await muxA.OpenChannelAsync("flush_bat", cts.Token);
         var readChannel = await muxB.AcceptChannelAsync("flush_bat", cts.Token);
 
         await writeChannel.WriteAsync(new byte[] { 0xEE }, cts.Token);
@@ -513,7 +513,7 @@ public class BasicMultiplexerTests
 
         var (muxA, muxB, _, _) = await TestMuxHelper.CreateMuxPairAsync(pipe, manualOpts, manualOpts, cts.Token);
 
-        var writeChannel = await muxA.OpenChannelAsync(new() { ChannelId = "flush_manual2" }, cts.Token);
+        var writeChannel = await muxA.OpenChannelAsync("flush_manual2", cts.Token);
         var readChannel = await muxB.AcceptChannelAsync("flush_manual2", cts.Token);
 
         await writeChannel.WriteAsync(new byte[256], cts.Token);
@@ -548,7 +548,7 @@ public class BasicMultiplexerTests
 
             var (muxA, muxB, _, _) = await TestMuxHelper.CreateMuxPairAsync(pipe, opts, opts, cts.Token);
 
-            var write = await muxA.OpenChannelAsync(new() { ChannelId = $"mode_{mode}" }, cts.Token);
+            var write = await muxA.OpenChannelAsync($"mode_{mode}", cts.Token);
             var read = await muxB.AcceptChannelAsync($"mode_{mode}", cts.Token);
 
             await write.WriteAsync(new byte[] { (byte)mode }, cts.Token);

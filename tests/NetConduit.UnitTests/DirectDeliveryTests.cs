@@ -22,7 +22,7 @@ public class DirectDeliveryTests
         var run2 = acceptor.Start(cts.Token);
         await Task.WhenAll(initiator.WaitForReadyAsync(cts.Token), acceptor.WaitForReadyAsync(cts.Token));
 
-        await using var writer = await initiator.OpenChannelAsync(new ChannelOptions { ChannelId = "dd-1" }, cts.Token);
+        await using var writer = await initiator.OpenChannelAsync("dd-1", cts.Token);
         await using var reader = await acceptor.AcceptChannelAsync("dd-1", cts.Token);
 
         // Start reading before data is sent — forces direct delivery path
@@ -54,7 +54,7 @@ public class DirectDeliveryTests
         var run2 = acceptor.Start(cts.Token);
         await Task.WhenAll(initiator.WaitForReadyAsync(cts.Token), acceptor.WaitForReadyAsync(cts.Token));
 
-        await using var writer = await initiator.OpenChannelAsync(new ChannelOptions { ChannelId = "dd-2" }, cts.Token);
+        await using var writer = await initiator.OpenChannelAsync("dd-2", cts.Token);
         await using var reader = await acceptor.AcceptChannelAsync("dd-2", cts.Token);
 
         // Start reading with a separate token that we'll cancel
@@ -92,7 +92,7 @@ public class DirectDeliveryTests
         var run2 = acceptor.Start(cts.Token);
         await Task.WhenAll(initiator.WaitForReadyAsync(cts.Token), acceptor.WaitForReadyAsync(cts.Token));
 
-        await using var writer = await initiator.OpenChannelAsync(new ChannelOptions { ChannelId = "dd-3" }, cts.Token);
+        await using var writer = await initiator.OpenChannelAsync("dd-3", cts.Token);
         await using var reader = await acceptor.AcceptChannelAsync("dd-3", cts.Token);
 
         // Start reading, then close the writer (sends FIN)
@@ -120,7 +120,7 @@ public class DirectDeliveryTests
         var run2 = acceptor.Start(cts.Token);
         await Task.WhenAll(initiator.WaitForReadyAsync(cts.Token), acceptor.WaitForReadyAsync(cts.Token));
 
-        await using var writer = await initiator.OpenChannelAsync(new ChannelOptions { ChannelId = "dd-4" }, cts.Token);
+        await using var writer = await initiator.OpenChannelAsync("dd-4", cts.Token);
         await using var reader = await acceptor.AcceptChannelAsync("dd-4", cts.Token);
 
         // Send 256 bytes but read into a 64-byte buffer
@@ -167,7 +167,7 @@ public class DirectDeliveryTests
         var run2 = acceptor.Start(cts.Token);
         await Task.WhenAll(initiator.WaitForReadyAsync(cts.Token), acceptor.WaitForReadyAsync(cts.Token));
 
-        await using var writer = await initiator.OpenChannelAsync(new ChannelOptions { ChannelId = "dd-5" }, cts.Token);
+        await using var writer = await initiator.OpenChannelAsync("dd-5", cts.Token);
         await using var reader = await acceptor.AcceptChannelAsync("dd-5", cts.Token);
 
         for (int i = 0; i < 20; i++)
@@ -201,7 +201,7 @@ public class DirectDeliveryTests
         var run2 = acceptor.Start(cts.Token);
         await Task.WhenAll(initiator.WaitForReadyAsync(cts.Token), acceptor.WaitForReadyAsync(cts.Token));
 
-        await using var writer = await initiator.OpenChannelAsync(new ChannelOptions { ChannelId = "dd-6" }, cts.Token);
+        await using var writer = await initiator.OpenChannelAsync("dd-6", cts.Token);
         await using var reader = await acceptor.AcceptChannelAsync("dd-6", cts.Token);
 
         // Send data FIRST, then read — should use fast path (pipe already has data)
@@ -231,7 +231,7 @@ public class DirectDeliveryTests
         var run2 = acceptor.Start(cts.Token);
         await Task.WhenAll(initiator.WaitForReadyAsync(cts.Token), acceptor.WaitForReadyAsync(cts.Token));
 
-        await using var writer = await initiator.OpenChannelAsync(new ChannelOptions { ChannelId = "dd-7" }, cts.Token);
+        await using var writer = await initiator.OpenChannelAsync("dd-7", cts.Token);
         await using var reader = await acceptor.AcceptChannelAsync("dd-7", cts.Token);
 
         // Repeat to exercise the cancel/enqueue race many times
@@ -271,7 +271,7 @@ public class DirectDeliveryTests
         var run2 = acceptor.Start(cts.Token);
         await Task.WhenAll(initiator.WaitForReadyAsync(cts.Token), acceptor.WaitForReadyAsync(cts.Token));
 
-        var writer = await initiator.OpenChannelAsync(new ChannelOptions { ChannelId = "dd-8" }, cts.Token);
+        var writer = await initiator.OpenChannelAsync("dd-8", cts.Token);
         var reader = await acceptor.AcceptChannelAsync("dd-8", cts.Token);
 
         var readBuf = new byte[1024];
@@ -310,7 +310,7 @@ public class DirectDeliveryTests
         var run2 = acceptor.Start(cts.Token);
         await Task.WhenAll(initiator.WaitForReadyAsync(cts.Token), acceptor.WaitForReadyAsync(cts.Token));
 
-        var writer = await initiator.OpenChannelAsync(new ChannelOptions { ChannelId = "dd-9" }, cts.Token);
+        var writer = await initiator.OpenChannelAsync("dd-9", cts.Token);
         var reader = await acceptor.AcceptChannelAsync("dd-9", cts.Token);
 
         var readBuf = new byte[1024];
@@ -351,7 +351,7 @@ public class DirectDeliveryTests
         var run2 = acceptor.Start(cts.Token);
         await Task.WhenAll(initiator.WaitForReadyAsync(cts.Token), acceptor.WaitForReadyAsync(cts.Token));
 
-        await using var writer = await initiator.OpenChannelAsync(new ChannelOptions { ChannelId = "dd-10" }, cts.Token);
+        await using var writer = await initiator.OpenChannelAsync("dd-10", cts.Token);
         await using var reader = await acceptor.AcceptChannelAsync("dd-10", cts.Token);
 
         // Send 10MB and verify every byte arrives intact
@@ -405,7 +405,7 @@ public class DirectDeliveryTests
 
         for (int i = 0; i < channelCount; i++)
         {
-            writers[i] = await initiator.OpenChannelAsync(new ChannelOptions { ChannelId = $"dd-mc-{i}" }, cts.Token);
+            writers[i] = await initiator.OpenChannelAsync($"dd-mc-{i}", cts.Token);
             readers[i] = await acceptor.AcceptChannelAsync($"dd-mc-{i}", cts.Token);
         }
 
@@ -458,7 +458,7 @@ public class DirectDeliveryTests
         var run2 = acceptor.Start(cts.Token);
         await Task.WhenAll(initiator.WaitForReadyAsync(cts.Token), acceptor.WaitForReadyAsync(cts.Token));
 
-        await using var writer = await initiator.OpenChannelAsync(new ChannelOptions { ChannelId = "dd-12" }, cts.Token);
+        await using var writer = await initiator.OpenChannelAsync("dd-12", cts.Token);
         await using var reader = await acceptor.AcceptChannelAsync("dd-12", cts.Token);
 
         // Zero-length read should return 0 immediately without entering direct delivery
@@ -480,7 +480,7 @@ public class DirectDeliveryTests
         var run2 = acceptor.Start(cts.Token);
         await Task.WhenAll(initiator.WaitForReadyAsync(cts.Token), acceptor.WaitForReadyAsync(cts.Token));
 
-        await using var writer = await initiator.OpenChannelAsync(new ChannelOptions { ChannelId = "dd-13" }, cts.Token);
+        await using var writer = await initiator.OpenChannelAsync("dd-13", cts.Token);
         await using var reader = await acceptor.AcceptChannelAsync("dd-13", cts.Token);
 
         // Send 1000 small messages as fast as possible, verify all arrive intact

@@ -41,7 +41,7 @@ public class ConcurrencyTests
                 var channelId = $"channel_{i}";
                 
                 // Open channel
-                var writeChannel = await initiator.OpenChannelAsync(new ChannelOptions { ChannelId = channelId }, cts.Token);
+                var writeChannel = await initiator.OpenChannelAsync(channelId, cts.Token);
                 
                 // Accept by name
                 var readChannel = await acceptor.AcceptChannelAsync(channelId, cts.Token);
@@ -124,12 +124,12 @@ public class ConcurrencyTests
             {
                 // Initiator->Acceptor channel
                 var iToAId = $"initiator_channel_{i}";
-                var iToAWrite = await initiator.OpenChannelAsync(new ChannelOptions { ChannelId = iToAId }, cts.Token);
+                var iToAWrite = await initiator.OpenChannelAsync(iToAId, cts.Token);
                 var iToARead = await acceptor.AcceptChannelAsync(iToAId, cts.Token);
                 
                 // Acceptor->Initiator channel
                 var aToIId = $"acceptor_channel_{i}";
-                var aToIWrite = await acceptor.OpenChannelAsync(new ChannelOptions { ChannelId = aToIId }, cts.Token);
+                var aToIWrite = await acceptor.OpenChannelAsync(aToIId, cts.Token);
                 var aToIRead = await initiator.AcceptChannelAsync(aToIId, cts.Token);
                 
                 // Generate and send data both directions
@@ -225,7 +225,7 @@ public class ConcurrencyTests
             }
         });
 
-        var writeChannel = await initiator.OpenChannelAsync(new ChannelOptions { ChannelId = "multiwriter_channel" }, cts.Token);
+        var writeChannel = await initiator.OpenChannelAsync("multiwriter_channel", cts.Token);
         await acceptTask;
 
         const int writerCount = 10;

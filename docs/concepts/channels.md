@@ -13,7 +13,7 @@ Channels are **simplex** (one-way):
 
 ```csharp
 // Side A opens - gets WriteChannel
-var send = await muxA.OpenChannelAsync(new() { ChannelId = "data" });
+var send = await muxA.OpenChannelAsync("data");
 
 // Side B accepts - gets ReadChannel
 var receive = await muxB.AcceptChannelAsync("data");
@@ -29,12 +29,12 @@ Channel IDs are strings (max 1024 bytes UTF-8):
 
 ```csharp
 // Simple names
-var ch1 = await mux.OpenChannelAsync(new() { ChannelId = "control" });
-var ch2 = await mux.OpenChannelAsync(new() { ChannelId = "data" });
+var ch1 = await mux.OpenChannelAsync("control");
+var ch2 = await mux.OpenChannelAsync("data");
 
 // Structured names
-var ch3 = await mux.OpenChannelAsync(new() { ChannelId = "user/123/messages" });
-var ch4 = await mux.OpenChannelAsync(new() { ChannelId = $"file-{Guid.NewGuid()}" });
+var ch3 = await mux.OpenChannelAsync("user/123/messages");
+var ch4 = await mux.OpenChannelAsync($"file-{Guid.NewGuid()}");
 ```
 
 Each channel ID must be unique per direction:
@@ -46,7 +46,7 @@ Each channel ID must be unique per direction:
 Channels inherit from `Stream`:
 
 ```csharp
-var channel = await mux.OpenChannelAsync(new() { ChannelId = "text" });
+var channel = await mux.OpenChannelAsync("text");
 
 // Standard Stream methods
 await channel.WriteAsync(data);
@@ -65,7 +65,7 @@ await sourceStream.CopyToAsync(channel);
 
 ```csharp
 // Basic open
-var channel = await mux.OpenChannelAsync(new() { ChannelId = "data" });
+var channel = await mux.OpenChannelAsync("data");
 
 // With options
 var channel = await mux.OpenChannelAsync(new ChannelOptions
@@ -150,10 +150,10 @@ For two-way communication, use two channels:
 
 ```csharp
 // Manual approach
-var sendToB = await muxA.OpenChannelAsync(new() { ChannelId = "a-to-b" });
+var sendToB = await muxA.OpenChannelAsync("a-to-b");
 var receiveFromB = await muxA.AcceptChannelAsync("b-to-a");
 
-var sendToA = await muxB.OpenChannelAsync(new() { ChannelId = "b-to-a" });
+var sendToA = await muxB.OpenChannelAsync("b-to-a");
 var receiveFromA = await muxB.AcceptChannelAsync("a-to-b");
 ```
 

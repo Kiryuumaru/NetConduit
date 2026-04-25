@@ -209,6 +209,6 @@ var buffer = new byte[64 * 1024];  // 64KB
 ```csharp
 // StreamTransit is just a thin wrapper
 // For maximum control, use channels directly
-var channel = await mux.OpenChannelAsync(new() { ChannelId = "data" });
+var channel = await mux.OpenChannelAsync("data");
 await channel.WriteAsync(data);
 ```

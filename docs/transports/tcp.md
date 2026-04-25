@@ -26,7 +26,7 @@ var runTask = mux.Start();
 await mux.WaitForReadyAsync();
 
 // Use channels...
-var channel = await mux.OpenChannelAsync(new() { ChannelId = "data" });
+var channel = await mux.OpenChannelAsync("data");
 await channel.WriteAsync(data);
 ```
 

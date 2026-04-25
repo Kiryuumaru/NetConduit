@@ -62,7 +62,7 @@ public class NegativeTests
         var acceptorTask = acceptor.Start(cts.Token);
         await Task.WhenAll(initiator.WaitForReadyAsync(cts.Token), acceptor.WaitForReadyAsync(cts.Token));
 
-        var writeChannel = await initiator.OpenChannelAsync(new ChannelOptions { ChannelId = "disconnect_test" }, cts.Token);
+        var writeChannel = await initiator.OpenChannelAsync("disconnect_test", cts.Token);
 
         // Disconnect the acceptor side
         await pipe.Stream2.DisposeAsync();
@@ -111,7 +111,7 @@ public class NegativeTests
             }
         });
 
-        var writeChannel = await initiator.OpenChannelAsync(new ChannelOptions { ChannelId = "read_disconnect" }, cts.Token);
+        var writeChannel = await initiator.OpenChannelAsync("read_disconnect", cts.Token);
         await acceptTask;
 
         // Write some data
@@ -168,7 +168,7 @@ public class NegativeTests
             }
         });
 
-        var writeChannel = await initiator.OpenChannelAsync(new ChannelOptions { ChannelId = "close_remote" }, cts.Token);
+        var writeChannel = await initiator.OpenChannelAsync("close_remote", cts.Token);
         await acceptTask;
 
         // Write data then close
@@ -222,7 +222,7 @@ public class NegativeTests
         // Open multiple channels
         for (int i = 0; i < 5; i++)
         {
-            channels.Add(await initiator.OpenChannelAsync(new ChannelOptions { ChannelId = $"dispose_{i}" }, cts.Token));
+            channels.Add(await initiator.OpenChannelAsync($"dispose_{i}", cts.Token));
         }
         await acceptLoop;
 
@@ -259,7 +259,7 @@ public class NegativeTests
         var acceptorTask = acceptor.Start(cts.Token);
         await Task.WhenAll(initiator.WaitForReadyAsync(cts.Token), acceptor.WaitForReadyAsync(cts.Token));
 
-        var writeChannel = await initiator.OpenChannelAsync(new ChannelOptions { ChannelId = "write_after_close" }, cts.Token);
+        var writeChannel = await initiator.OpenChannelAsync("write_after_close", cts.Token);
         await writeChannel.CloseAsync(cts.Token);
 
         await Assert.ThrowsAsync<InvalidOperationException>(async () =>
@@ -288,7 +288,7 @@ public class NegativeTests
 
         await Assert.ThrowsAsync<InvalidOperationException>(async () =>
         {
-            await initiator.OpenChannelAsync(new ChannelOptions { ChannelId = "after_dispose" }, cts.Token);
+            await initiator.OpenChannelAsync("after_dispose", cts.Token);
         });
 
         cts.Cancel();
@@ -308,7 +308,7 @@ public class NegativeTests
         var acceptorTask = acceptor.Start(cts.Token);
         await Task.WhenAll(initiator.WaitForReadyAsync(cts.Token), acceptor.WaitForReadyAsync(cts.Token));
 
-        var writeChannel = await initiator.OpenChannelAsync(new ChannelOptions { ChannelId = "empty_buffer" }, cts.Token);
+        var writeChannel = await initiator.OpenChannelAsync("empty_buffer", cts.Token);
         
         // Empty write should succeed (no-op)
         await writeChannel.WriteAsync(Array.Empty<byte>(), cts.Token);
@@ -346,7 +346,7 @@ public class NegativeTests
             }
         });
 
-        var writeChannel = await initiator.OpenChannelAsync(new ChannelOptions { ChannelId = "write_cancel" }, runCts.Token);
+        var writeChannel = await initiator.OpenChannelAsync("write_cancel", runCts.Token);
         await acceptTask;
 
         using var writeCts = new CancellationTokenSource();
@@ -445,7 +445,7 @@ public class NegativeTests
             {
                 try
                 {
-                    var ch = await initiator.OpenChannelAsync(new ChannelOptions { ChannelId = $"concurrent_{Guid.NewGuid():N}" }, cts.Token);
+                    var ch = await initiator.OpenChannelAsync($"concurrent_{Guid.NewGuid():N}", cts.Token);
                     await ch.WriteAsync(new byte[64], cts.Token);
                     await ch.CloseAsync(cts.Token);
                 }
@@ -488,7 +488,7 @@ public class NegativeTests
             }
         });
 
-        var writeChannel = await initiator.OpenChannelAsync(new ChannelOptions { ChannelId = "concurrent_writes" }, cts.Token);
+        var writeChannel = await initiator.OpenChannelAsync("concurrent_writes", cts.Token);
         await acceptTask;
 
         // Multiple threads writing to the same channel
@@ -584,7 +584,7 @@ public class NegativeTests
         var acceptorTask = acceptor.Start(cts.Token);
         await Task.Delay(100);
 
-        var writeChannel = await initiator.OpenChannelAsync(new ChannelOptions { ChannelId = "dispose_idempotent" }, cts.Token);
+        var writeChannel = await initiator.OpenChannelAsync("dispose_idempotent", cts.Token);
 
         // Multiple disposes should not throw
         await writeChannel.DisposeAsync();
@@ -621,7 +621,7 @@ public class NegativeTests
 
         for (int i = 0; i < 10; i++)
         {
-            channels.Add(await initiator.OpenChannelAsync(new ChannelOptions { ChannelId = $"abandoned_{i}" }, cts.Token));
+            channels.Add(await initiator.OpenChannelAsync($"abandoned_{i}", cts.Token));
         }
         await acceptLoop;
 
@@ -677,7 +677,7 @@ public class NegativeTests
             }
         });
 
-        var writeChannel = await initiator.OpenChannelAsync(new ChannelOptions { ChannelId = "small_credits" }, cts.Token);
+        var writeChannel = await initiator.OpenChannelAsync("small_credits", cts.Token);
         await acceptTask;
 
         // Send 1KB in small chunks (should require many credit grants)
@@ -730,7 +730,7 @@ public class NegativeTests
             }
         });
 
-        var writeChannel = await initiator.OpenChannelAsync(new ChannelOptions { ChannelId = "zero_read" }, cts.Token);
+        var writeChannel = await initiator.OpenChannelAsync("zero_read", cts.Token);
         await acceptTask;
 
         // Zero-length read
@@ -779,7 +779,7 @@ public class NegativeTests
         // Open and immediately close many channels
         for (int i = 0; i < targetCount; i++)
         {
-            var ch = await initiator.OpenChannelAsync(new ChannelOptions { ChannelId = $"rapid_{i}" }, cts.Token);
+            var ch = await initiator.OpenChannelAsync($"rapid_{i}", cts.Token);
             await ch.DisposeAsync();
         }
 

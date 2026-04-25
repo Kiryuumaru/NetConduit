@@ -72,7 +72,7 @@ public class HalfCloseBoundaryTests
         await using var a = muxA;
         await using var b = muxB;
 
-        var writer = await muxA.OpenChannelAsync(new ChannelOptions { ChannelId = "hc" }, cts.Token);
+        var writer = await muxA.OpenChannelAsync("hc", cts.Token);
         var reader = await muxB.AcceptChannelAsync("hc", cts.Token);
 
         // Start a read that will block
@@ -108,7 +108,7 @@ public class HalfCloseBoundaryTests
         await using var a = muxA;
         await using var b = muxB;
 
-        var writer = await muxA.OpenChannelAsync(new ChannelOptions { ChannelId = "disp" }, cts.Token);
+        var writer = await muxA.OpenChannelAsync("disp", cts.Token);
         var reader = await muxB.AcceptChannelAsync("disp", cts.Token);
 
         var readTask = Task.Run(async () =>
@@ -142,7 +142,7 @@ public class HalfCloseBoundaryTests
         await using var a = muxA;
         await using var b = muxB;
 
-        var writer = await muxA.OpenChannelAsync(new ChannelOptions { ChannelId = "rclose" }, cts.Token);
+        var writer = await muxA.OpenChannelAsync("rclose", cts.Token);
         var reader = await muxB.AcceptChannelAsync("rclose", cts.Token);
 
         var closedTcs = new TaskCompletionSource<bool>();
@@ -179,7 +179,7 @@ public class HalfCloseBoundaryTests
         for (int i = 0; i < 20; i++)
         {
             var id = $"rapid_{i}";
-            var writer = await muxA.OpenChannelAsync(new ChannelOptions { ChannelId = id }, cts.Token);
+            var writer = await muxA.OpenChannelAsync(id, cts.Token);
             var reader = await muxB.AcceptChannelAsync(id, cts.Token);
 
             await writer.WriteAsync(new byte[] { (byte)i }, cts.Token);
@@ -211,7 +211,7 @@ public class HalfCloseBoundaryTests
         for (int i = 0; i < 10; i++)
         {
             var id = $"empty_{i}";
-            var writer = await muxA.OpenChannelAsync(new ChannelOptions { ChannelId = id }, cts.Token);
+            var writer = await muxA.OpenChannelAsync(id, cts.Token);
             var reader = await muxB.AcceptChannelAsync(id, cts.Token);
 
             // Close immediately without writing
@@ -242,7 +242,7 @@ public class HalfCloseBoundaryTests
         await using var a = muxA;
         await using var b = muxB;
 
-        var writer = await muxA.OpenChannelAsync(new ChannelOptions { ChannelId = "transfer" }, cts.Token);
+        var writer = await muxA.OpenChannelAsync("transfer", cts.Token);
         var reader = await muxB.AcceptChannelAsync("transfer", cts.Token);
 
         // Write data before GoAway
@@ -282,7 +282,7 @@ public class HalfCloseBoundaryTests
         await using var a = muxA;
         await using var b = muxB;
 
-        var writer = await muxA.OpenChannelAsync(new ChannelOptions { ChannelId = "cr" }, cts.Token);
+        var writer = await muxA.OpenChannelAsync("cr", cts.Token);
         await muxB.AcceptChannelAsync("cr", cts.Token);
 
         await writer.CloseAsync();
@@ -304,7 +304,7 @@ public class HalfCloseBoundaryTests
         await using var a = muxA;
         await using var b = muxB;
 
-        var writer = await muxA.OpenChannelAsync(new ChannelOptions { ChannelId = "rfin" }, cts.Token);
+        var writer = await muxA.OpenChannelAsync("rfin", cts.Token);
         var reader = await muxB.AcceptChannelAsync("rfin", cts.Token);
 
         await writer.CloseAsync();

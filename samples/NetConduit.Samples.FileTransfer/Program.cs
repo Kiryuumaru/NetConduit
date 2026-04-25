@@ -3,7 +3,6 @@ using System.Net;
 using System.Net.Sockets;
 using System.Text;
 using NetConduit;
-using NetConduit.Models;
 using NetConduit.Tcp;
 
 Console.WriteLine("═══════════════════════════════════════════════════════════════");
@@ -226,7 +225,7 @@ async Task SendFileAsync(IStreamMultiplexer connection, string filePath, int ind
     {
         // Open a dedicated channel for this file
         await using var channel = await connection.OpenChannelAsync(
-            new ChannelOptions { ChannelId = $"file-{index}-{filename}" }, ct);
+            $"file-{index}-{filename}", ct);
         
         Console.WriteLine($"[Send] Starting: {filename} ({FormatSize(fileSize)})");
         

@@ -23,7 +23,7 @@ var runTask = mux.Start();
 await mux.WaitForReadyAsync();
 
 // Use channels
-var channel = await mux.OpenChannelAsync(new() { ChannelId = "rpc" });
+var channel = await mux.OpenChannelAsync("rpc");
 await channel.WriteAsync(requestData);
 ```
 

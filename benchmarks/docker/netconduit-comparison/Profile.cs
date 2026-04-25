@@ -89,7 +89,7 @@ public static class Profile
 
         var writeChannels = new WriteChannel[channelCount];
         for (int i = 0; i < channelCount; i++)
-            writeChannels[i] = await client.OpenChannelAsync(new ChannelOptions { ChannelId = $"ch-{i}" }, cts.Token);
+            writeChannels[i] = await client.OpenChannelAsync($"ch-{i}", cts.Token);
         await acceptTask;
         await Task.Delay(50, cts.Token);
 
@@ -183,7 +183,7 @@ public static class Profile
 
         var writeChannels = new WriteChannel[channelCount];
         for (int i = 0; i < channelCount; i++)
-            writeChannels[i] = await client.OpenChannelAsync(new ChannelOptions { ChannelId = $"ch-{i}" }, cts.Token);
+            writeChannels[i] = await client.OpenChannelAsync($"ch-{i}", cts.Token);
         await acceptTask;
         await Task.Delay(50, cts.Token);
 
