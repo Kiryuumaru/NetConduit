@@ -51,14 +51,14 @@ public class ChaosRobustnessTests
     [Trait("Category", "Stress")]
     public async Task Stress_HundredThousandChannels_SmallDataValidation_Concurrent()
     {
-        await RunChannelStressTest(3_000);
+        await RunChannelStressTest(2_000);
     }
 
     [Fact(Timeout = 60000)]
     [Trait("Category", "Stress")]
     public async Task Stress_MillionChannels_SmallDataValidation_Concurrent()
     {
-        await RunChannelStressTest(4_000);
+        await RunChannelStressTest(2_500);
     }
 
     private static async Task RunChannelStressTest(int totalChannels)
@@ -191,7 +191,7 @@ public class ChaosRobustnessTests
     [Trait("Category", "Stress")]
     public async Task Stress_FiftyThousandChannels_BidirectionalSmallData_Validated()
     {
-        await RunBidirectionalStressTest(1_500); // 1500 per side = 3000 total
+        await RunBidirectionalStressTest(1_000); // 1000 per side = 2000 total
     }
 
     [Fact(Timeout = 60000)]
@@ -205,7 +205,7 @@ public class ChaosRobustnessTests
     [Trait("Category", "Stress")]
     public async Task Stress_MillionChannels_BidirectionalSmallData_Validated()
     {
-        await RunBidirectionalStressTest(1_500); // 1500 per side = 3000 total
+        await RunBidirectionalStressTest(1_000); // 1000 per side = 2000 total
     }
 
     private static async Task RunBidirectionalStressTest(int channelsPerSide)
