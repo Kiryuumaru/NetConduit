@@ -131,9 +131,9 @@ listener.Stop();
 ## Performance
 
 TCP is highly optimized in NetConduit:
-- Single connection handles thousands of channels
-- At 100 channels, mux throughput reaches 980 MB/s (1.64x faster than FRP/Yamux)
-- Game-tick messaging: 1.5M msg/s at 1 channel, 1.1M msg/s at 1000 channels
-- No socket exhaustion issues at high channel counts
+- Single connection handles hundreds of channels
+- At 10 channels × 100KB, throughput reaches 760 MB/s (1.24x faster than FRP/Yamux)
+- At 100 channels × 100KB, throughput reaches 859 MB/s (1.22x faster than FRP/Yamux)
+- Game-tick messaging: 1.6M msg/s at 1 channel, 1.2M msg/s at 50 channels (64B messages)
 
 See [benchmarks](../benchmarks.md) for detailed numbers.

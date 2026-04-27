@@ -48,13 +48,7 @@ The synchronous `Read(byte[], int, int)` method is also available but blocks the
 
 ### FlushAsync
 
-Sends a credit grant frame to the remote side, replenishing the writer's send window:
-
-```csharp
-await channel.FlushAsync(cancellationToken);
-```
-
-Credits are normally granted automatically. Manual flush is useful when you want to immediately signal the writer that more data can be sent.
+No-op on ReadChannel. Credits are granted automatically as data is read — no manual flushing is needed.
 
 ### CloseAsync
 

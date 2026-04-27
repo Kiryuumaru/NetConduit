@@ -103,7 +103,7 @@ ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken ct = default);
 string ChannelId { get; }
 ChannelState State { get; }
 ChannelPriority Priority { get; }
-long CurrentWindowSize { get; }
+uint CurrentWindowSize { get; }
 ChannelCloseReason? CloseReason { get; }
 Exception? CloseException { get; }
 ChannelStats Stats { get; }
@@ -255,7 +255,7 @@ MultiplexerOptions CreateServerOptions(string endpoint);
 ### QuicMultiplexer
 
 ```csharp
-MultiplexerOptions CreateOptions(string host, int port, string? alpn = null, bool allowInsecure = true);
+MultiplexerOptions CreateOptions(string host, int port, string? alpn = null, bool allowInsecure = false);
 MultiplexerOptions CreateServerOptions(QuicListener listener);
 Task<QuicListener> ListenAsync(IPEndPoint endPoint, X509Certificate2 certificate, string? alpn = null, CancellationToken ct = default);
 ```

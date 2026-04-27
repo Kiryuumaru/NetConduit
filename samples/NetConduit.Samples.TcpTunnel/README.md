@@ -31,11 +31,7 @@ TCP port forwarding through a relay server - similar to SSH `-L` tunneling or ng
 ### 1. Start the Relay Server
 
 ```bash
-# TCP only
-dotnet run -- relay 6000
-
-# TCP + WebSocket
-dotnet run -- relay 6000 6001/ws
+dotnet run -- relay 6000 6001/relay
 ```
 
 ### 2. Register a Service (Agent)
@@ -92,17 +88,14 @@ dotnet run -- forward localhost 6000 webapp 8080
 
 ### WebSocket Transport
 
-Use `/path` suffix for WebSocket connections:
+Agents and forwards can connect via WebSocket instead of TCP:
 
 ```bash
-# Relay with WebSocket endpoint
-dotnet run -- relay 6000 6001/ws
-
 # Agent connecting via WebSocket
-dotnet run -- agent localhost 6001/ws myservice 8080
+dotnet run -- agent localhost 6001/relay myservice 8080
 
 # Forward via WebSocket
-dotnet run -- forward localhost 6001/ws myservice 4000
+dotnet run -- forward localhost 6001/relay myservice 4000
 ```
 
 ## Features
@@ -144,7 +137,7 @@ Control channel messages (JSON with `$type` discriminator):
 Usage: TcpTunnel <command> [options]
 
 Commands:
-  relay    <tcp-port> [ws-port/path]    Start relay server
+  relay    <tcp-port> <ws-port/path>    Start relay server
   agent    <host> <port[/path]> <name> <local-port>   Register service
   forward  <host> <port[/path]> <name> <local-port>   Forward to service
   list     <host> <port[/path]>         List services
