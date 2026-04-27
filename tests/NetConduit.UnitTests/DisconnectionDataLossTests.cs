@@ -14,6 +14,7 @@ namespace NetConduit.UnitTests;
 /// sized automatically from the credit window (MaxCredits).
 /// </summary>
 [Collection("HighMemory")]
+[Trait("Category", "HighMemory")]
 public class DisconnectionDataLossTests
 {
     private const int TestTimeout = 60000;
