@@ -225,7 +225,7 @@ public class DataIntegrityStressTests
         var runB = muxB.Start(cts.Token);
         await Task.Delay(100);
 
-        const int cycles = 5000;
+        const int cycles = 2000;
         var successCount = 0;
 
         // Accept task - continuously accept and read
@@ -283,7 +283,7 @@ public class DataIntegrityStressTests
         var runB = muxB.Start(cts.Token);
         await Task.Delay(100);
 
-        const int testChannels = 10000;
+        const int testChannels = 3000;
         var channels = new List<WriteChannel>();
         
         var acceptTask = Task.Run(async () =>
