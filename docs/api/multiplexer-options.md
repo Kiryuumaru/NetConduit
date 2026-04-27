@@ -62,7 +62,7 @@ Defaults applied to channels when not overridden in `ChannelOptions`:
 | Property | Type | Default | Description |
 |----------|------|---------|-------------|
 | `MinCredits` | `uint` | 64KB | Minimum credit window |
-| `MaxCredits` | `uint` | 4MB | Maximum credit window (initial) |
+| `MaxCredits` | `uint` | 4MB | Maximum credit window (initial). Also sizes the [reconnection](../concepts/reconnection.md) replay buffer |
 | `SendTimeout` | `TimeSpan` | 30s | Timeout waiting for credits |
 | `Priority` | `ChannelPriority` | Normal (128) | Default channel priority |
 

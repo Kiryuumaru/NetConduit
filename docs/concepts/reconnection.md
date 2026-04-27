@@ -80,7 +80,7 @@ mux.OnAutoReconnectFailed += (exception) =>
 
 mux.OnReconnected += () =>
 {
-    Console.WriteLine("Reconnected — channels restored, buffered data delivered");
+    Console.WriteLine("Reconnected — channels restored, in-flight data replayed");
 };
 ```
 
@@ -104,23 +104,65 @@ var options = TcpMultiplexer.CreateOptions("localhost", 5000) with
 };
 ```
 
-## Data Preservation
+## Data Integrity
 
-The multiplexer's internal write buffer (Pipe) persists across reconnections. Data written during the disconnect window is buffered in memory and drained to the new stream after reconnect completes.
+Every channel maintains an automatic replay buffer that mirrors sent data. On reconnect, both sides exchange byte-position markers and replay any data the remote side hasn't confirmed receiving.
 
 ```
-Write("A") → Write("B") → [disconnect] → Write("C") → [reconnect] → A, B, C all delivered
+┌──────────────────────────────────────────────────────────────┐
+│                                                              │
+│  Normal operation:                                           │
+│  Sender ──── data ───▶ Receiver                              │
+│         ◀── credits ──                                       │
+│  Ring buffer records every byte sent.                        │
+│  Credit grants trim confirmed data from the ring.            │
+│                                                              │
+│  Disconnect:                                                 │
+│  Sender    ╳╳╳╳╳╳    Receiver                                │
+│  Ring buffer still holds unacknowledged bytes.               │
+│                                                              │
+│  Reconnect:                                                  │
+│  Sender ── RECONNECT(positions) ──▶ Receiver                 │
+│         ◀── RECONNECT(positions) ──                          │
+│  Each side reports per-channel BytesReceived.                │
+│  Each side replays unacked data from its ring buffer.        │
+│                                                              │
+│  Result: zero data loss                                      │
+│                                                              │
+└──────────────────────────────────────────────────────────────┘
 ```
 
 **What is preserved:**
 - Data written to channels before disconnect (already in the Pipe)
 - Data written to channels during the disconnect window (buffered in the Pipe)
+- Data that was in-flight through the transport at disconnect time (replayed from the ring buffer)
 - Channel state (channels remain open across reconnects)
 
-**What is lost:**
-- Data that was in-flight through the transport at disconnect time (already handed to the OS/network, not yet received by the remote)
+### How the Replay Buffer Works
 
-This is analogous to real network behavior: data inside your application is safe, data on the wire may be lost.
+Each `WriteChannel` records every byte sent into a per-channel ring buffer. The ring buffer is sized to the channel's [`MaxCredits`](../api/channel-options.md) (default 4MB). This is safe because the credit-based [backpressure](backpressure.md) system guarantees the sender can never have more unacknowledged in-flight data than `MaxCredits` — the ring buffer can always hold everything that hasn't been confirmed.
+
+The ring buffer is a fixed-size circular buffer. When it fills, new data overwrites the oldest data. Because the credit window bounds in-flight data to `MaxCredits`, and the ring is sized to `MaxCredits`, the ring always retains all unacknowledged data.
+
+### Ring Buffer Sizing
+
+The replay buffer is sized automatically from `MaxCredits`:
+
+| MaxCredits | Replay Buffer | Use Case |
+|------------|---------------|----------|
+| 64KB | 64KB | Low-memory telemetry |
+| 4MB (default) | 4MB | General purpose |
+| 8MB | 8MB | High-throughput bulk transfer |
+
+To change the replay buffer size, adjust `MaxCredits` in [ChannelOptions](../api/channel-options.md):
+
+```csharp
+var options = new ChannelOptions
+{
+    ChannelId = "bulk-data",
+    MaxCredits = 8 * 1024 * 1024  // 8MB credit window + 8MB replay buffer
+};
+```
 
 ## Channel Behavior During Reconnection
 

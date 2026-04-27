@@ -67,12 +67,12 @@ mux.OnAutoReconnectFailed += (exception) =>
 
 ### OnReconnected
 
-Fired when the connection is restored after a disconnection:
+Fired when the connection is restored after a disconnection. At this point, both sides have exchanged byte positions and replayed any unacknowledged in-flight data:
 
 ```csharp
 mux.OnReconnected += () =>
 {
-    Console.WriteLine("Reconnected — channels restored");
+    Console.WriteLine("Reconnected — channels restored, in-flight data replayed");
     // UI: Update status to "Connected"
 };
 ```

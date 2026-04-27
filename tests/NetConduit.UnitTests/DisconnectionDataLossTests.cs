@@ -9,20 +9,35 @@ namespace NetConduit.UnitTests;
 /// DuplexPipe — they validate reconnection mechanics only.
 ///
 /// Data integrity tests (regions 2, 7-8, 11-12, 15, 19) use
-/// InFlightLossDuplexPipe with HoldableWriteStream to create a real
-/// in-flight window. These are expected to FAIL until Layer 4 replay
-/// is implemented.
+/// InFlightLossDuplexPipe with HoldableWriteStream to verify that
+/// in-flight data is replayed after reconnection. The ring buffer is
+/// sized automatically from the credit window (MaxCredits).
 /// </summary>
+[Collection("HighMemory")]
 public class DisconnectionDataLossTests
 {
-    private const int TestTimeout = 30000;
+    private const int TestTimeout = 60000;
+
+    /// <summary>
+    /// Registers OnReconnected handlers on both muxes and returns a Task
+    /// that completes when both have reconnected. Call BEFORE disconnecting
+    /// to avoid the race where reconnection completes before handlers fire.
+    /// </summary>
+    private static Task PrepareReconnectWait(StreamMultiplexer mux1, StreamMultiplexer mux2, CancellationToken ct)
+    {
+        var tcs1 = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var tcs2 = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        mux1.OnReconnected += () => tcs1.TrySetResult();
+        mux2.OnReconnected += () => tcs2.TrySetResult();
+        return Task.WhenAll(tcs1.Task.WaitAsync(ct), tcs2.Task.WaitAsync(ct));
+    }
 
     #region 1. Write After Disconnect — Channel Must Survive
 
     [Fact(Timeout = TestTimeout)]
     public async Task WriteAfterDisconnect_SmallData_Succeeds()
     {
-        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
         var (mux1, mux2, run1, run2, pipe) = await TestMuxHelper.CreateReconnectableMuxPairAsync(cancellationToken: cts.Token);
         await using var m1 = mux1;
         await using var m2 = mux2;
@@ -45,7 +60,7 @@ public class DisconnectionDataLossTests
     [Fact(Timeout = TestTimeout)]
     public async Task WriteAfterDisconnect_LargeData_Succeeds()
     {
-        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
         var (mux1, mux2, run1, run2, pipe) = await TestMuxHelper.CreateReconnectableMuxPairAsync(cancellationToken: cts.Token);
         await using var m1 = mux1;
         await using var m2 = mux2;
@@ -69,7 +84,7 @@ public class DisconnectionDataLossTests
     [Fact(Timeout = TestTimeout)]
     public async Task WriteAfterDisconnect_MultipleWrites_AllSucceed()
     {
-        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
         var (mux1, mux2, run1, run2, pipe) = await TestMuxHelper.CreateReconnectableMuxPairAsync(cancellationToken: cts.Token);
         await using var m1 = mux1;
         await using var m2 = mux2;
@@ -117,10 +132,6 @@ public class DisconnectionDataLossTests
             new ChannelOptions { ChannelId = "ch1" }, cts.Token);
         await accept;
 
-        var reconnected = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        mux1.OnReconnected += () => reconnected.TrySetResult();
-        mux2.OnReconnected += () => reconnected.TrySetResult();
-
         // Phase 1: send baseline data (delivered normally)
         var baseline = new byte[2000];
         Random.Shared.NextBytes(baseline);
@@ -135,15 +146,20 @@ public class DisconnectionDataLossTests
 
         // Drop held data + disconnect
         pipe.DropHeld();
+        var reconnected = PrepareReconnectWait(mux1, mux2, cts.Token);
         await pipe.DisconnectAsync();
-        await Task.WhenAny(reconnected.Task, Task.Delay(5000));
+        await reconnected;
 
         // Must receive ALL data — baseline + in-flight
         var totalExpected = baseline.Length + inFlight.Length;
+        var expected = new byte[totalExpected];
+        Buffer.BlockCopy(baseline, 0, expected, 0, baseline.Length);
+        Buffer.BlockCopy(inFlight, 0, expected, baseline.Length, inFlight.Length);
+
         var received = new byte[totalExpected];
         var totalRead = 0;
         using var readCts = CancellationTokenSource.CreateLinkedTokenSource(cts.Token);
-        readCts.CancelAfter(TimeSpan.FromSeconds(5));
+        readCts.CancelAfter(TimeSpan.FromSeconds(15));
         try
         {
             while (totalRead < totalExpected)
@@ -156,6 +172,7 @@ public class DisconnectionDataLossTests
         catch (OperationCanceledException) { }
 
         Assert.Equal(totalExpected, totalRead);
+        Assert.Equal(expected, received);
 
         cts.Cancel();
         await Task.WhenAll(run1.ContinueWith(_ => { }), run2.ContinueWith(_ => { }));
@@ -164,7 +181,7 @@ public class DisconnectionDataLossTests
     [Fact(Timeout = TestTimeout)]
     public async Task ReadAfterDisconnect_DataSentAfterDisconnect_Received()
     {
-        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
         var (mux1, mux2, run1, run2, pipe) = await TestMuxHelper.CreateReconnectableMuxPairAsync(cancellationToken: cts.Token);
         await using var m1 = mux1;
         await using var m2 = mux2;
@@ -180,8 +197,9 @@ public class DisconnectionDataLossTests
         await accept;
 
         // Kill transport first
+        var reconnected = PrepareReconnectWait(mux1, mux2, cts.Token);
         await pipe.DisconnectAsync();
-        await Task.Delay(200);
+        await reconnected;
 
         // Send data AFTER disconnect
         var sent = new byte[] { 10, 20, 30, 40, 50 };
@@ -210,14 +228,15 @@ public class DisconnectionDataLossTests
     [Fact(Timeout = TestTimeout)]
     public async Task OpenChannelAfterDisconnect_Succeeds()
     {
-        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
         var (mux1, mux2, run1, run2, pipe) = await TestMuxHelper.CreateReconnectableMuxPairAsync(cancellationToken: cts.Token);
         await using var m1 = mux1;
         await using var m2 = mux2;
 
         // Kill transport
+        var reconnected = PrepareReconnectWait(mux1, mux2, cts.Token);
         await pipe.DisconnectAsync();
-        await Task.Delay(200);
+        await reconnected;
 
         // Open new channel after disconnect — must not throw
         await using var writer = await mux1.OpenChannelAsync(
@@ -231,14 +250,15 @@ public class DisconnectionDataLossTests
     [Fact(Timeout = TestTimeout)]
     public async Task OpenChannelAfterDisconnect_CanSendAndReceive()
     {
-        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
         var (mux1, mux2, run1, run2, pipe) = await TestMuxHelper.CreateReconnectableMuxPairAsync(cancellationToken: cts.Token);
         await using var m1 = mux1;
         await using var m2 = mux2;
 
         // Kill transport
+        var reconnected = PrepareReconnectWait(mux1, mux2, cts.Token);
         await pipe.DisconnectAsync();
-        await Task.Delay(200);
+        await reconnected;
 
         // Open channel, accept on other side, send data
         var acceptTask = Task.Run(async () =>
@@ -277,7 +297,7 @@ public class DisconnectionDataLossTests
     [Fact(Timeout = TestTimeout)]
     public async Task MuxIsConnected_TrueAfterReconnect()
     {
-        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
         var (mux1, mux2, run1, run2, pipe) = await TestMuxHelper.CreateReconnectableMuxPairAsync(cancellationToken: cts.Token);
         await using var m1 = mux1;
         await using var m2 = mux2;
@@ -286,8 +306,9 @@ public class DisconnectionDataLossTests
         Assert.True(mux2.IsConnected);
 
         // Kill transport
+        var reconnected = PrepareReconnectWait(mux1, mux2, cts.Token);
         await pipe.DisconnectAsync();
-        await Task.Delay(500);
+        await reconnected;
 
         // Mux must recover to connected state
         Assert.True(mux1.IsConnected);
@@ -300,7 +321,7 @@ public class DisconnectionDataLossTests
     [Fact(Timeout = TestTimeout)]
     public async Task MuxIsRunning_TrueAfterDisconnect()
     {
-        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
         var (mux1, mux2, run1, run2, pipe) = await TestMuxHelper.CreateReconnectableMuxPairAsync(cancellationToken: cts.Token);
         await using var m1 = mux1;
         await using var m2 = mux2;
@@ -325,7 +346,7 @@ public class DisconnectionDataLossTests
     [Fact(Timeout = TestTimeout)]
     public async Task MultipleChannels_WriteAfterDisconnect_AllSucceed()
     {
-        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
         var (mux1, mux2, run1, run2, pipe) = await TestMuxHelper.CreateReconnectableMuxPairAsync(cancellationToken: cts.Token);
         await using var m1 = mux1;
         await using var m2 = mux2;
@@ -356,7 +377,7 @@ public class DisconnectionDataLossTests
     [Fact(Timeout = TestTimeout)]
     public async Task MultipleChannels_MixedOldAndNew_AfterDisconnect()
     {
-        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
         var (mux1, mux2, run1, run2, pipe) = await TestMuxHelper.CreateReconnectableMuxPairAsync(cancellationToken: cts.Token);
         await using var m1 = mux1;
         await using var m2 = mux2;
@@ -366,8 +387,9 @@ public class DisconnectionDataLossTests
             new ChannelOptions { ChannelId = "existing" }, cts.Token);
 
         // Kill transport
+        var reconnected = PrepareReconnectWait(mux1, mux2, cts.Token);
         await pipe.DisconnectAsync();
-        await Task.Delay(200);
+        await reconnected;
 
         // Write on existing channel after disconnect
         await existingCh.WriteAsync(new byte[] { 1, 2, 3 }, cts.Token);
@@ -388,7 +410,7 @@ public class DisconnectionDataLossTests
     [Fact(Timeout = TestTimeout)]
     public async Task Bidirectional_WriteAfterDisconnect_BothDirectionsSucceed()
     {
-        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
         var (mux1, mux2, run1, run2, pipe) = await TestMuxHelper.CreateReconnectableMuxPairAsync(cancellationToken: cts.Token);
         await using var m1 = mux1;
         await using var m2 = mux2;
@@ -438,10 +460,6 @@ public class DisconnectionDataLossTests
             new ChannelOptions { ChannelId = "integrity" }, cts.Token);
         await accept;
 
-        var reconnected = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        mux1.OnReconnected += () => reconnected.TrySetResult();
-        mux2.OnReconnected += () => reconnected.TrySetResult();
-
         // Phase 1: baseline
         var before = new byte[] { 1, 2, 3, 4, 5 };
         await writer.WriteAsync(before, cts.Token);
@@ -453,8 +471,9 @@ public class DisconnectionDataLossTests
         await Task.Delay(200);
 
         pipe.DropHeld();
+        var reconnected = PrepareReconnectWait(mux1, mux2, cts.Token);
         await pipe.DisconnectAsync();
-        await Task.WhenAny(reconnected.Task, Task.Delay(5000));
+        await reconnected;
 
         // Phase 3: after reconnect
         var after = new byte[] { 6, 7, 8, 9, 10 };
@@ -465,7 +484,7 @@ public class DisconnectionDataLossTests
         var received = new byte[totalExpected];
         var totalRead = 0;
         using var readCts = CancellationTokenSource.CreateLinkedTokenSource(cts.Token);
-        readCts.CancelAfter(TimeSpan.FromSeconds(5));
+        readCts.CancelAfter(TimeSpan.FromSeconds(15));
         try
         {
             while (totalRead < totalExpected)
@@ -508,10 +527,6 @@ public class DisconnectionDataLossTests
             new ChannelOptions { ChannelId = "inflight" }, cts.Token);
         await accept;
 
-        var reconnected = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        mux1.OnReconnected += () => reconnected.TrySetResult();
-        mux2.OnReconnected += () => reconnected.TrySetResult();
-
         var allData = new byte[1000];
         for (int i = 0; i < 1000; i++) allData[i] = (byte)(i % 256);
 
@@ -523,14 +538,15 @@ public class DisconnectionDataLossTests
 
         // Drop + disconnect — simulates in-flight data loss
         pipe.DropHeld();
+        var reconnected = PrepareReconnectWait(mux1, mux2, cts.Token);
         await pipe.DisconnectAsync();
-        await Task.WhenAny(reconnected.Task, Task.Delay(5000));
+        await reconnected;
 
         // Must get all 1000 bytes
         var received = new byte[1000];
         var totalRead = 0;
         using var readCts = CancellationTokenSource.CreateLinkedTokenSource(cts.Token);
-        readCts.CancelAfter(TimeSpan.FromSeconds(5));
+        readCts.CancelAfter(TimeSpan.FromSeconds(15));
         try
         {
             while (totalRead < 1000)
@@ -554,7 +570,7 @@ public class DisconnectionDataLossTests
     {
         // 1MB transfer in three phases: baseline (confirmed received),
         // in-flight (held + dropped), post-reconnect. All bytes must arrive.
-        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
         var (mux1, mux2, run1, run2, pipe) = await TestMuxHelper.CreateInFlightLossMuxPairAsync(cancellationToken: cts.Token);
         await using var m1 = mux1;
         await using var m2 = mux2;
@@ -568,10 +584,6 @@ public class DisconnectionDataLossTests
         await using var writer = await mux1.OpenChannelAsync(
             new ChannelOptions { ChannelId = "bigstream" }, cts.Token);
         await accept;
-
-        var reconnected = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        mux1.OnReconnected += () => reconnected.TrySetResult();
-        mux2.OnReconnected += () => reconnected.TrySetResult();
 
         var totalSize = 1024 * 1024;
         var third = totalSize / 3;
@@ -609,8 +621,9 @@ public class DisconnectionDataLossTests
 
         // Drop + disconnect
         pipe.DropHeld();
+        var reconnected = PrepareReconnectWait(mux1, mux2, cts.Token);
         await pipe.DisconnectAsync();
-        await Task.WhenAny(reconnected.Task, Task.Delay(5000));
+        await reconnected;
 
         // Phase 3: send last third after reconnect
         for (int offset = third * 2; offset < totalSize; offset += 8192)
@@ -624,7 +637,7 @@ public class DisconnectionDataLossTests
         var restReceived = new byte[remaining];
         var restRead = 0;
         using var readCts = CancellationTokenSource.CreateLinkedTokenSource(cts.Token);
-        readCts.CancelAfter(TimeSpan.FromSeconds(5));
+        readCts.CancelAfter(TimeSpan.FromSeconds(15));
         try
         {
             while (restRead < remaining)
@@ -639,6 +652,9 @@ public class DisconnectionDataLossTests
         var totalRead = phase1Read + restRead;
         Assert.Equal(totalSize, totalRead);
 
+        // Verify all content matches — phase 1 was already checked, verify phases 2+3
+        Assert.Equal(allData.AsSpan(phase1Read, restRead).ToArray(), restReceived.AsSpan(0, restRead).ToArray());
+
         cts.Cancel();
         await Task.WhenAll(run1.ContinueWith(_ => { }), run2.ContinueWith(_ => { }));
     }
@@ -652,7 +668,7 @@ public class DisconnectionDataLossTests
     {
         // After disconnect, the channel must remain in Open state
         // and be able to write data that eventually reaches the reader.
-        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
         var (mux1, mux2, run1, run2, pipe) = await TestMuxHelper.CreateReconnectableMuxPairAsync(cancellationToken: cts.Token);
         await using var m1 = mux1;
         await using var m2 = mux2;
@@ -670,8 +686,9 @@ public class DisconnectionDataLossTests
         Assert.Equal(ChannelState.Open, writer.State);
 
         // Kill transport
+        var reconnected = PrepareReconnectWait(mux1, mux2, cts.Token);
         await pipe.DisconnectAsync();
-        await Task.Delay(200);
+        await reconnected;
 
         // Channel must still be Open
         Assert.Equal(ChannelState.Open, writer.State);
@@ -693,7 +710,7 @@ public class DisconnectionDataLossTests
     {
         // After disconnect, the read channel must still receive data
         // written by the writer. State must be Open.
-        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
         var (mux1, mux2, run1, run2, pipe) = await TestMuxHelper.CreateReconnectableMuxPairAsync(cancellationToken: cts.Token);
         await using var m1 = mux1;
         await using var m2 = mux2;
@@ -711,8 +728,9 @@ public class DisconnectionDataLossTests
         Assert.Equal(ChannelState.Open, reader!.State);
 
         // Kill transport
+        var reconnected = PrepareReconnectWait(mux1, mux2, cts.Token);
         await pipe.DisconnectAsync();
-        await Task.Delay(200);
+        await reconnected;
 
         // Read channel must still be Open and able to receive
         Assert.Equal(ChannelState.Open, reader.State);
@@ -734,7 +752,7 @@ public class DisconnectionDataLossTests
     {
         // After disconnect, the channel must still allow writes that eventually
         // reach the other side. This verifies the channel stays functional.
-        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
         var (mux1, mux2, run1, run2, pipe) = await TestMuxHelper.CreateReconnectableMuxPairAsync(cancellationToken: cts.Token);
         await using var m1 = mux1;
         await using var m2 = mux2;
@@ -756,8 +774,9 @@ public class DisconnectionDataLossTests
         Assert.Equal(3, n);
 
         // Kill transport
+        var reconnected = PrepareReconnectWait(mux1, mux2, cts.Token);
         await pipe.DisconnectAsync();
-        await Task.Delay(200);
+        await reconnected;
 
         // Channel must still allow writes after disconnect
         await writer.WriteAsync(new byte[] { 4, 5, 6 }, cts.Token);
@@ -781,7 +800,7 @@ public class DisconnectionDataLossTests
     {
         // A channel opened BEFORE disconnect and one opened AFTER disconnect
         // must both be accepted by the same AcceptChannelsAsync iterator.
-        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
         var (mux1, mux2, run1, run2, pipe) = await TestMuxHelper.CreateReconnectableMuxPairAsync(cancellationToken: cts.Token);
         await using var m1 = mux1;
         await using var m2 = mux2;
@@ -807,15 +826,16 @@ public class DisconnectionDataLossTests
         await Task.Delay(100); // let accept process it
 
         // Kill transport
+        var reconnected = PrepareReconnectWait(mux1, mux2, cts.Token);
         await pipe.DisconnectAsync();
-        await Task.Delay(200);
+        await reconnected;
 
         // Open second channel after disconnect
         await using var ch2 = await mux1.OpenChannelAsync(
             new ChannelOptions { ChannelId = "after" }, cts.Token);
 
         // Both must be accepted
-        await Task.WhenAny(secondAccepted.Task, Task.Delay(5000));
+        await secondAccepted.Task.WaitAsync(cts.Token);
         Assert.Equal(2, accepted.Count);
         Assert.Equal("before", accepted[0].ChannelId);
         Assert.Equal("after", accepted[1].ChannelId);
@@ -848,10 +868,6 @@ public class DisconnectionDataLossTests
             new ChannelOptions { ChannelId = "ordering" }, cts.Token);
         await accept;
 
-        var reconnected = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        mux1.OnReconnected += () => reconnected.TrySetResult();
-        mux2.OnReconnected += () => reconnected.TrySetResult();
-
         var totalBytes = 10_000;
         var expected = new byte[totalBytes];
         for (int i = 0; i < totalBytes; i++) expected[i] = (byte)(i % 256);
@@ -865,8 +881,9 @@ public class DisconnectionDataLossTests
         await Task.Delay(200);
 
         pipe.DropHeld();
+        var reconnected = PrepareReconnectWait(mux1, mux2, cts.Token);
         await pipe.DisconnectAsync();
-        await Task.WhenAny(reconnected.Task, Task.Delay(5000));
+        await reconnected;
 
         // Phase 3: remaining 3000 bytes after reconnect
         await writer.WriteAsync(expected.AsMemory(7000, 3000), cts.Token);
@@ -875,7 +892,7 @@ public class DisconnectionDataLossTests
         var received = new byte[totalBytes];
         var totalRead = 0;
         using var readCts = CancellationTokenSource.CreateLinkedTokenSource(cts.Token);
-        readCts.CancelAfter(TimeSpan.FromSeconds(5));
+        readCts.CancelAfter(TimeSpan.FromSeconds(15));
         try
         {
             while (totalRead < totalBytes)
@@ -915,10 +932,6 @@ public class DisconnectionDataLossTests
             new ChannelOptions { ChannelId = "nodedup" }, cts.Token);
         await accept;
 
-        var reconnected = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        mux1.OnReconnected += () => reconnected.TrySetResult();
-        mux2.OnReconnected += () => reconnected.TrySetResult();
-
         var totalWrites = 200;
         var totalBytes = totalWrites * 4;
         var expected = new byte[totalBytes];
@@ -929,9 +942,17 @@ public class DisconnectionDataLossTests
             Buffer.BlockCopy(buf, 0, expected, seq * 4, 4);
         }
 
-        // Phase 1: first 80 counters normally
+        // Phase 1: first 80 counters normally — confirm receipt before holding
         for (int seq = 0; seq < 80; seq++)
             await writer.WriteAsync(expected.AsMemory(seq * 4, 4), cts.Token);
+        var phase1Buf = new byte[320];
+        var phase1Read = 0;
+        while (phase1Read < 320)
+        {
+            var n = await reader!.ReadAsync(phase1Buf.AsMemory(phase1Read), cts.Token);
+            if (n == 0) break;
+            phase1Read += n;
+        }
 
         // Phase 2: next 40 counters in-flight
         pipe.StartHolding();
@@ -940,28 +961,35 @@ public class DisconnectionDataLossTests
         await Task.Delay(200);
 
         pipe.DropHeld();
+        var reconnected = PrepareReconnectWait(mux1, mux2, cts.Token);
         await pipe.DisconnectAsync();
-        await Task.WhenAny(reconnected.Task, Task.Delay(5000));
+        await reconnected;
 
         // Phase 3: remaining 80 counters after reconnect
         for (int seq = 120; seq < totalWrites; seq++)
             await writer.WriteAsync(expected.AsMemory(seq * 4, 4), cts.Token);
 
-        // Read all with timeout
-        var received = new byte[totalBytes];
-        var totalRead = 0;
+        // Read remaining (phase 2 replayed + phase 3)
+        var remaining = totalBytes - phase1Read;
+        var restBuf = new byte[remaining];
+        var restRead = 0;
         using var readCts = CancellationTokenSource.CreateLinkedTokenSource(cts.Token);
-        readCts.CancelAfter(TimeSpan.FromSeconds(5));
+        readCts.CancelAfter(TimeSpan.FromSeconds(15));
         try
         {
-            while (totalRead < totalBytes)
+            while (restRead < remaining)
             {
-                var n = await reader!.ReadAsync(received.AsMemory(totalRead), readCts.Token);
+                var n = await reader!.ReadAsync(restBuf.AsMemory(restRead), readCts.Token);
                 if (n == 0) break;
-                totalRead += n;
+                restRead += n;
             }
         }
         catch (OperationCanceledException) { }
+
+        var received = new byte[totalBytes];
+        Buffer.BlockCopy(phase1Buf, 0, received, 0, phase1Read);
+        Buffer.BlockCopy(restBuf, 0, received, phase1Read, restRead);
+        var totalRead = phase1Read + restRead;
 
         Assert.Equal(totalBytes, totalRead);
         for (int seq = 0; seq < totalWrites; seq++)
@@ -1015,10 +1043,6 @@ public class DisconnectionDataLossTests
         }
         await acceptTask;
 
-        var reconnected = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        mux1.OnReconnected += () => reconnected.TrySetResult();
-        mux2.OnReconnected += () => reconnected.TrySetResult();
-
         // Phase 1: first third on all channels
         var third = dataSize / 3;
         for (int i = 0; i < channelCount; i++)
@@ -1031,8 +1055,9 @@ public class DisconnectionDataLossTests
         await Task.Delay(200);
 
         pipe.DropHeld();
+        var reconnected = PrepareReconnectWait(mux1, mux2, cts.Token);
         await pipe.DisconnectAsync();
-        await Task.WhenAny(reconnected.Task, Task.Delay(5000));
+        await reconnected;
 
         // Phase 3: last third after reconnect
         for (int i = 0; i < channelCount; i++)
@@ -1044,7 +1069,7 @@ public class DisconnectionDataLossTests
             var buf = new byte[dataSize];
             var totalRead = 0;
             using var readCts = CancellationTokenSource.CreateLinkedTokenSource(cts.Token);
-            readCts.CancelAfter(TimeSpan.FromSeconds(5));
+            readCts.CancelAfter(TimeSpan.FromSeconds(15));
             try
             {
                 while (totalRead < dataSize)
@@ -1072,7 +1097,7 @@ public class DisconnectionDataLossTests
     {
         // After disconnect, CloseAsync should deliver a FIN to the remote reader.
         // The remote ReadAsync should return 0 (EOF) after all buffered data.
-        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
         var (mux1, mux2, run1, run2, pipe) = await TestMuxHelper.CreateReconnectableMuxPairAsync(cancellationToken: cts.Token);
         await using var m1 = mux1;
         await using var m2 = mux2;
@@ -1089,8 +1114,9 @@ public class DisconnectionDataLossTests
 
         // Send some data, then kill transport
         await writer.WriteAsync(new byte[] { 1, 2, 3 }, cts.Token);
+        var reconnected = PrepareReconnectWait(mux1, mux2, cts.Token);
         await pipe.DisconnectAsync();
-        await Task.Delay(200);
+        await reconnected;
 
         // Close the writer after disconnect — must send FIN
         await writer.WriteAsync(new byte[] { 4, 5 }, cts.Token);
@@ -1121,7 +1147,7 @@ public class DisconnectionDataLossTests
     {
         // Disposing the writer after disconnect must still deliver all data
         // to the remote reader before signaling EOF.
-        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
         var (mux1, mux2, run1, run2, pipe) = await TestMuxHelper.CreateReconnectableMuxPairAsync(cancellationToken: cts.Token);
         await using var m1 = mux1;
         await using var m2 = mux2;
@@ -1138,8 +1164,9 @@ public class DisconnectionDataLossTests
 
         // Write data, kill transport, write more, dispose writer
         await writer.WriteAsync(new byte[] { 10, 20, 30 }, cts.Token);
+        var reconnected = PrepareReconnectWait(mux1, mux2, cts.Token);
         await pipe.DisconnectAsync();
-        await Task.Delay(200);
+        await reconnected;
         await writer.WriteAsync(new byte[] { 40, 50 }, cts.Token);
         await writer.DisposeAsync();
 
@@ -1198,10 +1225,6 @@ public class DisconnectionDataLossTests
             new ChannelOptions { ChannelId = "rev" }, cts.Token);
         await accept2;
 
-        var reconnected = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        mux1.OnReconnected += () => reconnected.TrySetResult();
-        mux2.OnReconnected += () => reconnected.TrySetResult();
-
         // Phase 1: baseline in both directions
         var fwdBefore = new byte[] { 1, 2, 3, 4, 5 };
         var revBefore = new byte[] { 10, 20, 30, 40, 50 };
@@ -1215,8 +1238,9 @@ public class DisconnectionDataLossTests
         await Task.Delay(200);
 
         pipe.DropHeld();
+        var reconnected = PrepareReconnectWait(mux1, mux2, cts.Token);
         await pipe.DisconnectAsync();
-        await Task.WhenAny(reconnected.Task, Task.Delay(5000));
+        await reconnected;
 
         // Phase 3: after reconnect
         var fwdAfter = new byte[] { 6, 7, 8, 9, 10 };
@@ -1229,7 +1253,7 @@ public class DisconnectionDataLossTests
         var fwdReceived = new byte[15];
         var fwdRead = 0;
         using var fwdCts = CancellationTokenSource.CreateLinkedTokenSource(cts.Token);
-        fwdCts.CancelAfter(TimeSpan.FromSeconds(5));
+        fwdCts.CancelAfter(TimeSpan.FromSeconds(15));
         try
         {
             while (fwdRead < 15)
@@ -1249,7 +1273,7 @@ public class DisconnectionDataLossTests
         var revReceived = new byte[10];
         var revRead = 0;
         using var revCts = CancellationTokenSource.CreateLinkedTokenSource(cts.Token);
-        revCts.CancelAfter(TimeSpan.FromSeconds(5));
+        revCts.CancelAfter(TimeSpan.FromSeconds(15));
         try
         {
             while (revRead < 10)
@@ -1276,7 +1300,7 @@ public class DisconnectionDataLossTests
     public async Task SyncState_BytesSent_Monotonic_AcrossDisconnect()
     {
         // BytesSent must keep counting across disconnect, never reset.
-        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
         var (mux1, mux2, run1, run2, pipe) = await TestMuxHelper.CreateReconnectableMuxPairAsync(cancellationToken: cts.Token);
         await using var m1 = mux1;
         await using var m2 = mux2;
@@ -1311,7 +1335,7 @@ public class DisconnectionDataLossTests
     {
         // All writes happen after disconnect. They buffer in the FrameWriter Pipe
         // and drain to the new transport after reconnect.
-        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
         var (mux1, mux2, run1, run2, pipe) = await TestMuxHelper.CreateReconnectableMuxPairAsync(cancellationToken: cts.Token);
         await using var m1 = mux1;
         await using var m2 = mux2;
@@ -1327,8 +1351,9 @@ public class DisconnectionDataLossTests
         await accept;
 
         // Kill transport
+        var reconnected = PrepareReconnectWait(mux1, mux2, cts.Token);
         await pipe.DisconnectAsync();
-        await Task.Delay(200);
+        await reconnected;
 
         // Rapidly write 20 chunks of 50 bytes each immediately after disconnect
         var totalBytes = 20 * 50;
@@ -1366,7 +1391,7 @@ public class DisconnectionDataLossTests
     {
         // A ReadAsync call that is blocked waiting for data when the transport drops
         // must resume and deliver data once the transport is restored.
-        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
         var (mux1, mux2, run1, run2, pipe) = await TestMuxHelper.CreateReconnectableMuxPairAsync(cancellationToken: cts.Token);
         await using var m1 = mux1;
         await using var m2 = mux2;
@@ -1391,8 +1416,9 @@ public class DisconnectionDataLossTests
         await Task.Delay(100); // ensure read is blocked
 
         // Kill transport while read is blocked
+        var reconnected = PrepareReconnectWait(mux1, mux2, cts.Token);
         await pipe.DisconnectAsync();
-        await Task.Delay(200);
+        await reconnected;
 
         // Now send data (after disconnect) — read must eventually get it
         await writer.WriteAsync(new byte[] { 42, 43, 44 }, cts.Token);
@@ -1411,15 +1437,13 @@ public class DisconnectionDataLossTests
 
     /// <summary>
     /// Proves that data accepted by the transport but not delivered to the
-    /// receiver is lost on disconnect when there is no replay buffer.
+    /// receiver is recovered via the Layer 4 replay buffer after reconnection.
     ///
     /// Uses a HoldableWriteStream to intercept mux1's transport writes.
     /// When holding is active, the FlushLoop's writes are accepted (sender
     /// thinks they were sent) but buffered locally — simulating an OS socket
     /// send buffer. DropHeld() discards the buffer, then disconnect kills the
-    /// transport. After reconnect, those bytes are permanently gone.
-    ///
-    /// This test is EXPECTED TO FAIL until Layer 4 replay is implemented.
+    /// transport. After reconnect, the ring buffer replays unacked bytes.
     ///
     /// Sequence:
     ///   1. Send 2000 bytes, confirm receipt (baseline)
@@ -1429,7 +1453,7 @@ public class DisconnectionDataLossTests
     ///   4. DropHeld — 5000 bytes discarded (simulating OS buffer loss)
     ///   5. Disconnect + auto-reconnect
     ///   6. Send 2000 more bytes on new transport
-    ///   7. Assert total received = 9000 → FAILS (~4000 received)
+    ///   7. Assert total received = 9000 (replay recovers in-flight data)
     /// </summary>
     [Fact(Timeout = TestTimeout)]
     public async Task InFlightData_HoldableTransport_LostOnDisconnect()
@@ -1479,13 +1503,11 @@ public class DisconnectionDataLossTests
         var droppedBytes = pipe.DropHeld();
         Assert.True(droppedBytes > 0, "Expected held bytes > 0 (FlushLoop should have drained to hold buffer)");
 
+        var reconnected = PrepareReconnectWait(mux1, mux2, cts.Token);
         await pipe.DisconnectAsync();
 
         // Wait for auto-reconnect
-        var reconnected = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        mux1.OnReconnected += () => reconnected.TrySetResult();
-        mux2.OnReconnected += () => reconnected.TrySetResult();
-        await Task.WhenAny(reconnected.Task, Task.Delay(5000));
+        await reconnected;
 
         // --- Phase 4: send more data on new transport ---
         var phase3 = new byte[2000];
@@ -1499,7 +1521,7 @@ public class DisconnectionDataLossTests
         var totalRead = phase1Read;
 
         using var readCts = CancellationTokenSource.CreateLinkedTokenSource(cts.Token);
-        readCts.CancelAfter(TimeSpan.FromSeconds(5));
+        readCts.CancelAfter(TimeSpan.FromSeconds(15));
         try
         {
             while (totalRead < totalExpected)
@@ -1515,8 +1537,14 @@ public class DisconnectionDataLossTests
         }
 
         // Without replay, totalRead ≈ 4000 (2000 phase1 + 2000 phase3).
-        // The 5000 held+dropped bytes are permanently lost.
+        // With replay, all 9000 bytes arrive including the 5000 held+dropped.
         Assert.Equal(totalExpected, totalRead);
+
+        // Verify content of replayed + post-reconnect data
+        var expectedRest = new byte[phase2.Length + phase3.Length];
+        Buffer.BlockCopy(phase2, 0, expectedRest, 0, phase2.Length);
+        Buffer.BlockCopy(phase3, 0, expectedRest, phase2.Length, phase3.Length);
+        Assert.Equal(expectedRest, allReceived.AsSpan(phase1Read, totalRead - phase1Read).ToArray());
 
         cts.Cancel();
         await Task.WhenAll(run1.ContinueWith(_ => { }), run2.ContinueWith(_ => { }));

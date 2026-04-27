@@ -43,7 +43,8 @@ public sealed class WriteChannel : Stream
         _availableCredits = 0;
         _creditSemaphore = new SemaphoreSlim(0, int.MaxValue);
         _closeCts = new CancellationTokenSource();
-        _syncState = new ChannelSyncState(0);
+        _syncState = new ChannelSyncState((int)options.MaxCredits);
+        _syncState.StartRecording();
         _openTcs = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         Stats = new ChannelStats();
     }
