@@ -31,6 +31,29 @@ internal sealed class FrameWriter(MultiplexerOptions options, MultiplexerStats s
             minimumSegmentSize: 65536));
     }
 
+    /// <summary>
+    /// Discards any uncommitted/unflushed data sitting in the pipe writer.
+    /// Call during reconnection to prevent stale frames from being sent after replay.
+    /// </summary>
+    internal void DrainStalePipeData()
+    {
+        lock (_writeLock)
+        {
+            if (_pipe == null) return;
+
+            // Commit whatever is pending in the writer so the reader can see it
+            _pendingFlush = false;
+            UnflushedDataBytes = 0;
+            CommitPipeWriter(_pipe.Writer);
+        }
+
+        // Consume and discard everything in the pipe reader
+        if (_pipe.Reader.TryRead(out var result))
+        {
+            _pipe.Reader.AdvanceTo(result.Buffer.End);
+        }
+    }
+
     internal void ClearWriteError() => _writeError = null;
 
     internal void WriteFrame(FrameHeader header, ReadOnlyMemory<byte> payload, bool forceFlush, CancellationToken ct)

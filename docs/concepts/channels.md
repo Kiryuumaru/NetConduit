@@ -132,6 +132,9 @@ var state = channel.State;
 
 switch (state)
 {
+    case ChannelState.Opening:
+        // Init sent, waiting for ACK
+        break;
     case ChannelState.Open:
         // Normal operation
         break;

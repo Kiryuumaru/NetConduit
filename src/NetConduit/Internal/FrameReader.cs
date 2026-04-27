@@ -62,7 +62,9 @@ internal sealed class FrameReader(MultiplexerOptions options, MultiplexerStats s
 
             if (TryParseFrame(ref buffer, dispatcher, ct))
             {
-                pipeReader.AdvanceTo(buffer.Start, buffer.End);
+                // Use buffer.Start (not buffer.End) for examined so the next
+                // ReadAsync returns immediately if unprocessed data remains.
+                pipeReader.AdvanceTo(buffer.Start, buffer.Start);
                 return;
             }
 

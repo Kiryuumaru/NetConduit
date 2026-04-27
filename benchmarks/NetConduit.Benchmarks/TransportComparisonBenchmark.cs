@@ -267,7 +267,7 @@ public class TransportComparisonBenchmark
         for (int i = 0; i < channelCount; i++)
         {
             var channelId = $"ch-{i}";
-            var channel = await mux.OpenChannelAsync(channelId, ct);
+            var channel = await mux.OpenChannelAsync(new ChannelOptions { ChannelId = channelId }, ct);
             channels.Add(channel);
 
             var ch = channel;

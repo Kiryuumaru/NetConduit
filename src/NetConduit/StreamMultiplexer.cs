@@ -313,11 +313,23 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IFrameDispatcher
                     _readStream = streamPair.ReadStream;
                     _writeStream = streamPair.WriteStream;
                     _frameWriter.EnsurePipeCreated();
+                    if (isReconnecting)
+                        _frameWriter.DrainStalePipeData();
                     _frameWriter.SetStream(_writeStream);
                     _frameWriter.ClearWriteError();
                     _frameReader.SetPipeReader(PipeReader.Create(_readStream, new StreamPipeReaderOptions(bufferSize: 1048576)));
 
+                    // Set up the TCS before handshake so that if the remote's
+                    // RECONNECT frame arrives during handshake reads, it is captured.
+                    if (isReconnecting)
+                        _syncPositionsTcs = new TaskCompletionSource<Dictionary<uint, long>>(TaskCreationOptions.RunContinuationsAsynchronously);
+
                     await PerformHandshakeAsync(ct).ConfigureAwait(false);
+
+                    if (isReconnecting)
+                    {
+                        await WaitForReconnectPositionsAndReplayAsync(ct).ConfigureAwait(false);
+                    }
 
                     _isConnected = true;
                     _currentConnectionAttempt = 0;
@@ -440,6 +452,7 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IFrameDispatcher
                     _frameWriter.ClearWriteError();
                     _disconnectReason = Enums.DisconnectReason.TransportError;
                     _disconnectException = ex;
+
 
                     try { OnDisconnected?.Invoke(Enums.DisconnectReason.TransportError, ex); } catch { }
 
@@ -749,6 +762,7 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IFrameDispatcher
                 break;
 
             case ControlSubtype.ReconnectAck:
+                ProcessReconnectAckFrame(data, ct);
                 break;
         }
     }
@@ -1069,6 +1083,8 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IFrameDispatcher
                 _channels.GetWriteChannelByIndex(channelIndex)?.SyncState.SetBytesAcked(bytesReceived);
             }
 
+            ReplayUnacknowledgedData(positions, cancellationToken);
+
             _isConnected = true;
             _isReconnecting = false;
             OnReconnected?.Invoke();
@@ -1271,6 +1287,121 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IFrameDispatcher
         return receivePositions;
     }
 
+    private void ReplayUnacknowledgedData(Dictionary<uint, long> positions, CancellationToken ct)
+    {
+        foreach (var (channelIndex, bytesReceived) in positions)
+        {
+            var writeChannel = _channels.GetWriteChannelByIndex(channelIndex);
+            if (writeChannel is null)
+                continue;
+
+            var unacked = writeChannel.SyncState.GetUnacknowledgedDataFrom(bytesReceived);
+            if (unacked.Length == 0)
+                continue;
+
+            ReadOnlyMemory<byte> unackedMemory = unacked;
+            var maxFrame = _options.MaxFrameSize;
+            var offset = 0;
+            while (offset < unackedMemory.Length)
+            {
+                var chunkSize = Math.Min(unackedMemory.Length - offset, maxFrame);
+                SendDataFrame(channelIndex, unackedMemory.Slice(offset, chunkSize), writeChannel.Priority, ct);
+                offset += chunkSize;
+            }
+        }
+    }
+
+    private TaskCompletionSource<Dictionary<uint, long>>? _syncPositionsTcs;
+
+    private async Task WaitForReconnectPositionsAndReplayAsync(CancellationToken ct)
+    {
+        // _syncPositionsTcs was set before PerformHandshakeAsync so that
+        // early RECONNECT frames arriving during handshake reads are captured.
+        // Send our own RECONNECT directly to the stream.
+        var writeStream = _writeStream ?? throw new InvalidOperationException("Write stream not set after reconnection");
+        await SendReconnectAsync(writeStream, ct).ConfigureAwait(false);
+
+        // Read frames until we get the RECONNECT from the other side.
+        // If it already arrived during handshake, the TCS is already completed.
+        while (!_syncPositionsTcs!.Task.IsCompleted)
+        {
+            await _frameReader.ReadSingleFrameAsync(this, ct).ConfigureAwait(false);
+        }
+
+        var positions = await _syncPositionsTcs.Task.ConfigureAwait(false);
+        _syncPositionsTcs = null;
+
+        // Write replay data directly to the stream (bypasses FrameWriter pipe)
+        // to guarantee ordering before the flush loop drains any queued data.
+        await ReplayUnacknowledgedDataToStreamAsync(positions, writeStream, ct).ConfigureAwait(false);
+    }
+
+    private async Task ReplayUnacknowledgedDataToStreamAsync(
+        Dictionary<uint, long> positions, Stream writeStream, CancellationToken ct)
+    {
+        foreach (var (channelIndex, bytesReceived) in positions)
+        {
+            var writeChannel = _channels.GetWriteChannelByIndex(channelIndex);
+            if (writeChannel is null)
+                continue;
+
+            var unacked = writeChannel.SyncState.GetUnacknowledgedDataFrom(bytesReceived);
+            if (unacked.Length == 0)
+                continue;
+
+            ReadOnlyMemory<byte> unackedMemory = unacked;
+            var maxFrame = _options.MaxFrameSize;
+            var offset = 0;
+            while (offset < unackedMemory.Length)
+            {
+                var chunkSize = Math.Min(unackedMemory.Length - offset, maxFrame);
+                var header = new FrameHeader(channelIndex, FrameFlags.Data, (uint)chunkSize);
+                var headerBytes = new byte[FrameHeader.Size];
+                header.Write(headerBytes);
+                await writeStream.WriteAsync(headerBytes, ct).ConfigureAwait(false);
+                await writeStream.WriteAsync(unackedMemory.Slice(offset, chunkSize), ct).ConfigureAwait(false);
+                offset += chunkSize;
+            }
+        }
+
+        await writeStream.FlushAsync(ct).ConfigureAwait(false);
+    }
+
+    private void ProcessReconnectAckFrame(ReadOnlyMemory<byte> data, CancellationToken ct)
+    {
+        if (data.Length < 20)
+        {
+            return;
+        }
+
+        var channelCount = BinaryPrimitives.ReadUInt32BigEndian(data.Span[16..]);
+        var expectedSize = 20 + (long)channelCount * 12;
+        if (expectedSize > data.Length)
+            return;
+
+        var positions = new Dictionary<uint, long>((int)channelCount);
+        var readOffset = 20;
+        for (int i = 0; i < channelCount; i++)
+        {
+            var channelIndex = BinaryPrimitives.ReadUInt32BigEndian(data.Span[readOffset..]);
+            var bytesReceived = BinaryPrimitives.ReadInt64BigEndian(data.Span[(readOffset + 4)..]);
+            _channels.GetWriteChannelByIndex(channelIndex)?.SyncState.SetBytesAcked(bytesReceived);
+            positions[channelIndex] = bytesReceived;
+            readOffset += 12;
+        }
+
+        // During reconnection sync: if the other side was faster, it already
+        // entered the normal read loop and responded with ACK instead of RECONNECT.
+        // Complete the TCS so the reconnection can proceed.
+        if (_syncPositionsTcs is { } tcs)
+        {
+            tcs.TrySetResult(positions);
+            return;
+        }
+
+        ReplayUnacknowledgedData(positions, ct);
+    }
+
     private void ProcessReconnectFrame(ReadOnlyMemory<byte> data, CancellationToken ct)
     {
         if (data.Length < 20)
@@ -1296,13 +1427,28 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IFrameDispatcher
         }
 
         var dataOffset = 20;
+        var positions = new Dictionary<uint, long>((int)channelCount);
         for (int i = 0; i < channelCount; i++)
         {
             var channelIndex = BinaryPrimitives.ReadUInt32BigEndian(data.Span[dataOffset..]);
             var bytesReceived = BinaryPrimitives.ReadInt64BigEndian(data.Span[(dataOffset + 4)..]);
-            _channels.GetWriteChannelByIndex(channelIndex)?.SyncState.SetBytesAcked(bytesReceived);
+            positions[channelIndex] = bytesReceived;
             dataOffset += 12;
         }
+
+        // During reconnection sync: capture positions for the caller, skip ACK/replay
+        if (_syncPositionsTcs is { } tcs)
+        {
+            foreach (var (channelIndex, bytesReceived) in positions)
+                _channels.GetWriteChannelByIndex(channelIndex)?.SyncState.SetBytesAcked(bytesReceived);
+
+            tcs.TrySetResult(positions);
+            return;
+        }
+
+        // Normal read-loop path: SetBytesAcked, send ACK, replay
+        foreach (var (channelIndex, bytesReceived) in positions)
+            _channels.GetWriteChannelByIndex(channelIndex)?.SyncState.SetBytesAcked(bytesReceived);
 
         var readChannels = _channels.ReadChannelEntries.ToArray();
         var payloadSize = 1 + 16 + 4 + (readChannels.Length * 12);
@@ -1322,6 +1468,8 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IFrameDispatcher
 
         var frameHeader = new FrameHeader(ChannelIndexLimits.ControlChannel, FrameFlags.Data, (uint)payload.Length);
         _frameWriter.WriteFrameDirect(frameHeader, payload, ct);
+
+        ReplayUnacknowledgedData(positions, ct);
     }
 
     #endregion

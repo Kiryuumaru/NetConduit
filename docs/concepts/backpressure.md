@@ -60,10 +60,10 @@ var channel = await mux.OpenChannelAsync(options);
 | Option | Default | Description |
 |--------|---------|-------------|
 | `MinCredits` | 64KB | Minimum credit buffer (adapts down to this) |
-| `MaxCredits` | 4MB | Maximum credit buffer (starts here) |
+| `MaxCredits` | 4MB | Maximum credit buffer (starts here). Also sizes the [reconnection](reconnection.md) replay buffer |
 | `SendTimeout` | 30s | Timeout waiting for credits |
 
-Credits are automatically granted back when the receiver has consumed 50% of the window.
+Credits are automatically granted back when the receiver has consumed 25% of the window.
 
 ## Adaptive Credits
 

@@ -184,6 +184,138 @@ public sealed class ReconnectableDuplexPipe : IAsyncDisposable
 }
 
 /// <summary>
+/// A write-only stream wrapper that can hold writes in a buffer instead
+/// of forwarding them. Simulates an OS socket send buffer: the sender's
+/// write "succeeds" (data accepted), but the data hasn't reached the
+/// remote yet. Calling DropHeld() discards the buffer — simulating
+/// data loss when a network connection dies.
+/// </summary>
+public sealed class HoldableWriteStream : Stream
+{
+    private readonly Stream _destination;
+    private readonly object _lock = new();
+    private readonly List<byte[]> _held = new();
+    private volatile bool _holding;
+
+    public HoldableWriteStream(Stream destination) => _destination = destination;
+
+    public void StartHolding() => _holding = true;
+
+    public int DropHeld()
+    {
+        lock (_lock)
+        {
+            var total = 0;
+            foreach (var chunk in _held) total += chunk.Length;
+            _held.Clear();
+            return total;
+        }
+    }
+
+    public override bool CanRead => false;
+    public override bool CanSeek => false;
+    public override bool CanWrite => true;
+    public override long Length => throw new NotSupportedException();
+    public override long Position { get => throw new NotSupportedException(); set => throw new NotSupportedException(); }
+    public override void Flush() { }
+    public override int Read(byte[] buffer, int offset, int count) => throw new NotSupportedException();
+    public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();
+    public override void SetLength(long value) => throw new NotSupportedException();
+    public override void Write(byte[] buffer, int offset, int count) => throw new NotSupportedException("Use async");
+
+    public override Task FlushAsync(CancellationToken cancellationToken)
+    {
+        if (_holding) return Task.CompletedTask;
+        return _destination.FlushAsync(cancellationToken);
+    }
+
+    public override ValueTask WriteAsync(ReadOnlyMemory<byte> buffer, CancellationToken cancellationToken = default)
+    {
+        if (_holding)
+        {
+            lock (_lock) { _held.Add(buffer.ToArray()); }
+            return ValueTask.CompletedTask;
+        }
+        return _destination.WriteAsync(buffer, cancellationToken);
+    }
+
+    public override Task WriteAsync(byte[] buffer, int offset, int count, CancellationToken cancellationToken)
+    {
+        if (_holding)
+        {
+            lock (_lock) { _held.Add(buffer.AsSpan(offset, count).ToArray()); }
+            return Task.CompletedTask;
+        }
+        return _destination.WriteAsync(buffer, offset, count, cancellationToken);
+    }
+}
+
+/// <summary>
+/// A ReconnectableDuplexPipe where mux1's transport writes pass through a
+/// HoldableWriteStream. When holding is active, the FlushLoop's writes are
+/// accepted but buffered locally — simulating data in an OS send buffer.
+/// DropHeld() discards the buffer, simulating in-flight data loss on disconnect.
+/// </summary>
+public sealed class InFlightLossDuplexPipe : IAsyncDisposable
+{
+    private readonly object _lock = new();
+    private DuplexPipe _current;
+    private bool _reconnectPending;
+    private HoldableWriteStream? _holdableWrite;
+
+    public InFlightLossDuplexPipe()
+    {
+        _current = new DuplexPipe();
+    }
+
+    public Task<IStreamPair> CreateStream1(CancellationToken ct)
+    {
+        lock (_lock)
+        {
+            if (_reconnectPending)
+            {
+                _current = new DuplexPipe();
+                _reconnectPending = false;
+            }
+            _holdableWrite = new HoldableWriteStream(_current.Stream1);
+            return Task.FromResult<IStreamPair>(new StreamPair(_current.Stream1, _holdableWrite));
+        }
+    }
+
+    public Task<IStreamPair> CreateStream2(CancellationToken ct)
+    {
+        lock (_lock)
+        {
+            if (_reconnectPending)
+            {
+                _current = new DuplexPipe();
+                _reconnectPending = false;
+            }
+            return Task.FromResult<IStreamPair>(new StreamPair(_current.Stream2));
+        }
+    }
+
+    public void StartHolding() => _holdableWrite?.StartHolding();
+    public int DropHeld() => _holdableWrite?.DropHeld() ?? 0;
+
+    public async Task DisconnectAsync()
+    {
+        DuplexPipe old;
+        lock (_lock)
+        {
+            old = _current;
+            _reconnectPending = true;
+        }
+        await old.DisposeAsync();
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        await _current.DisposeAsync();
+    }
+}
+
+/// <summary>
 /// Helper methods for creating StreamMultiplexer instances in tests.
 /// </summary>
 public static class TestMuxHelper
@@ -241,6 +373,30 @@ public static class TestMuxHelper
         CancellationToken cancellationToken = default)
     {
         var pipe = new ReconnectableDuplexPipe();
+        var opts1 = CopyOptionsWithStreamFactory(options1, pipe.CreateStream1);
+        var opts2 = CopyOptionsWithStreamFactory(options2, pipe.CreateStream2);
+        
+        var mux1 = StreamMultiplexer.Create(opts1);
+        var mux2 = StreamMultiplexer.Create(opts2);
+        
+        var runTask1 = mux1.Start(cancellationToken);
+        var runTask2 = mux2.Start(cancellationToken);
+        
+        await Task.WhenAll(mux1.WaitForReadyAsync(cancellationToken), mux2.WaitForReadyAsync(cancellationToken));
+        
+        return (mux1, mux2, runTask1, runTask2, pipe);
+    }
+    
+    /// <summary>
+    /// Creates a pair of connected StreamMultiplexer instances where mux1's
+    /// transport writes can be held and dropped — simulating in-flight data loss.
+    /// </summary>
+    public static async Task<(StreamMultiplexer Mux1, StreamMultiplexer Mux2, Task RunTask1, Task RunTask2, InFlightLossDuplexPipe Pipe)> CreateInFlightLossMuxPairAsync(
+        MultiplexerOptions? options1 = null,
+        MultiplexerOptions? options2 = null,
+        CancellationToken cancellationToken = default)
+    {
+        var pipe = new InFlightLossDuplexPipe();
         var opts1 = CopyOptionsWithStreamFactory(options1, pipe.CreateStream1);
         var opts2 = CopyOptionsWithStreamFactory(options2, pipe.CreateStream2);
         

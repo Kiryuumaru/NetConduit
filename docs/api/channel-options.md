@@ -9,7 +9,7 @@ Configuration for opening individual [channels](../concepts/channels.md).
 | `ChannelId` | `string` | *(required)* | Unique channel identifier (max 1024 UTF-8 bytes) |
 | `Priority` | `ChannelPriority` | `Normal` (128) | Frame scheduling priority (0-255 enum) |
 | `MinCredits` | `uint` | 64KB | Minimum credits — adaptive windowing floor |
-| `MaxCredits` | `uint` | 4MB | Maximum credits — window starts here on open |
+| `MaxCredits` | `uint` | 4MB | Maximum credits — window starts here on open. Also sizes the [reconnection](../concepts/reconnection.md) replay buffer |
 | `SendTimeout` | `TimeSpan` | 30s | Timeout for writes waiting for credits |
 
 Adaptive flow control starts each channel at `MaxCredits` and shrinks the window toward `MinCredits` after idle periods. See [Backpressure](../concepts/backpressure.md) for details.

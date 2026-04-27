@@ -9,8 +9,8 @@
 | [Getting Started](getting-started.md) | Installation, quick start, first multiplexer |
 | [Transports](transports/index.md) | TCP, WebSocket, UDP, IPC, QUIC |
 | [Transits](transits/index.md) | MessageTransit, DeltaTransit, DuplexStream, Stream |
-| [Concepts](concepts/index.md) | Channels, backpressure, priority, reconnection |
-| [API Reference](api/index.md) | Options, statistics, events |
+| [Concepts](concepts/index.md) | Channels, backpressure, priority, reconnection, shutdown, heartbeat |
+| [API Reference](api/index.md) | Multiplexer, channels, options, statistics, errors |
 | [Benchmarks](benchmarks.md) | Performance comparisons vs Yamux and Smux |
 | [Samples](samples/index.md) | Complete example applications |
 

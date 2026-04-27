@@ -158,14 +158,14 @@ await sender.SendAsync(state);  // Sends: [0, ["temperature"], 26.0]
 
 DeltaTransit supports:
 
-| Operation | JSON | Description |
-|-----------|------|-------------|
-| `Set` | `[0, ["path"], value]` | Add or update property |
-| `Remove` | `[1, ["path"]]` | Remove property |
-| `SetNull` | `[2, ["path"]]` | Set to null explicitly |
-| `ArrayInsert` | `[3, ["path"], index, value]` | Insert at index |
-| `ArrayRemove` | `[4, ["path"], index]` | Remove at index |
-| `ArrayReplace` | `[5, ["path"], array]` | Replace entire array |
+| Operation | Op Code | Description |
+|-----------|---------|-------------|
+| `Set` | 0 | Add or update property |
+| `Remove` | 1 | Remove property |
+| `SetNull` | 2 | Set to null explicitly |
+| `ArrayInsert` | 11 | Insert at index |
+| `ArrayRemove` | 12 | Remove at index |
+| `ArrayReplace` | 14 | Replace entire array |
 
 ## Nested Properties
 

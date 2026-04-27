@@ -6,9 +6,14 @@ Quick reference for NetConduit classes and options. See [Getting Started](../get
 
 | Type | Description |
 |------|-------------|
+| [StreamMultiplexer](stream-multiplexer.md) | Main multiplexer class — lifecycle, channels, events |
+| [ReadChannel](read-channel.md) | Channel for receiving data (read-only Stream) |
+| [WriteChannel](write-channel.md) | Channel for sending data (write-only Stream) |
 | [MultiplexerOptions](multiplexer-options.md) | Configuration for stream multiplexer |
 | [ChannelOptions](channel-options.md) | Configuration for individual channels |
 | [Statistics](statistics.md) | Runtime statistics for mux and channels |
+| [Errors](errors.md) | Error codes, exceptions, and error handling |
+| [StreamPair](stream-pair.md) | StreamPair, DuplexStream, and custom transports |
 
 ## Class Overview
 
@@ -98,7 +103,7 @@ ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken ct = default);
 string ChannelId { get; }
 ChannelState State { get; }
 ChannelPriority Priority { get; }
-long CurrentWindowSize { get; }
+uint CurrentWindowSize { get; }
 ChannelCloseReason? CloseReason { get; }
 Exception? CloseException { get; }
 ChannelStats Stats { get; }
@@ -250,7 +255,7 @@ MultiplexerOptions CreateServerOptions(string endpoint);
 ### QuicMultiplexer
 
 ```csharp
-MultiplexerOptions CreateOptions(string host, int port, string? alpn = null, bool allowInsecure = true);
+MultiplexerOptions CreateOptions(string host, int port, string? alpn = null, bool allowInsecure = false);
 MultiplexerOptions CreateServerOptions(QuicListener listener);
 Task<QuicListener> ListenAsync(IPEndPoint endPoint, X509Certificate2 certificate, string? alpn = null, CancellationToken ct = default);
 ```

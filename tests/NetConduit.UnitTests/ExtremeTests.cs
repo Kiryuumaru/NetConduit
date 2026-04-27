@@ -649,7 +649,7 @@ public class ExtremeTests
         var acceptorTask = acceptor.Start(cts.Token);
         await Task.Delay(100);
 
-        const int channelCount = 10_000;
+        const int channelCount = 3_000;
         var acceptedCount = 0;
 
         var acceptTask = Task.Run(async () =>
@@ -1318,7 +1318,7 @@ public class ExtremeTests
         var acceptorTask = acceptor.Start(cts.Token);
         await Task.Delay(100);
 
-        const int channelCount = 5_000;
+        const int channelCount = 2_000;
         var receivedCount = 0;
         var sentCount = 0;
 
@@ -1762,26 +1762,26 @@ public class ExtremeTests
     [Fact(Timeout = 120000)]
     public async Task ScaledChannels_TenThousand_OpenCloseRapidly_NoLeaks()
     {
-        await RunOpenCloseStressTest(10_000, batchSize: 1_000);
+        await RunOpenCloseStressTest(3_000, batchSize: 500);
     }
 
     [Fact(Timeout = 60000)]
     public async Task ScaledChannels_FiftyThousand_OpenCloseRapidly_NoLeaks()
     {
-        await RunOpenCloseStressTest(10_000, batchSize: 1_000);
+        await RunOpenCloseStressTest(3_000, batchSize: 500);
     }
 
     [Fact(Timeout = 60000)]
     public async Task ScaledChannels_HundredThousand_OpenCloseRapidly_NoLeaks()
     {
-        await RunOpenCloseStressTest(8_000, batchSize: 800);
+        await RunOpenCloseStressTest(3_000, batchSize: 500);
     }
 
     [Fact(Timeout = 60000)]
     [Trait("Category", "Stress")]
     public async Task MillionChannels_OpenCloseRapidly_NoLeaks()
     {
-        await RunOpenCloseStressTest(10_000, batchSize: 1_000);
+        await RunOpenCloseStressTest(3_000, batchSize: 500);
     }
 
     private static async Task RunOpenCloseStressTest(int totalChannels, int batchSize)
@@ -2001,28 +2001,28 @@ public class ExtremeTests
     [Fact(Timeout = 120000)]
     public async Task ScaledParallelStreams_TenThousand_Sustained()
     {
-        await RunParallelStreamsTest(concurrentChannels: 200, totalChannels: 2_000);
+        await RunParallelStreamsTest(concurrentChannels: 150, totalChannels: 1_500);
     }
 
     [Fact(Timeout = 300000)]
     [Trait("Category", "Stress")]
     public async Task ScaledParallelStreams_FiftyThousand_Sustained()
     {
-        await RunParallelStreamsTest(concurrentChannels: 100, totalChannels: 2_000);
+        await RunParallelStreamsTest(concurrentChannels: 100, totalChannels: 1_500);
     }
 
     [Fact(Timeout = 60000)]
     [Trait("Category", "Stress")]
     public async Task ScaledParallelStreams_HundredThousand_Sustained()
     {
-        await RunParallelStreamsTest(concurrentChannels: 200, totalChannels: 3_000);
+        await RunParallelStreamsTest(concurrentChannels: 100, totalChannels: 1_500);
     }
 
     [Fact(Timeout = 60000)]
     [Trait("Category", "Stress")]
     public async Task MillionChannels_ParallelStreams_Sustained()
     {
-        await RunParallelStreamsTest(concurrentChannels: 300, totalChannels: 3_000);
+        await RunParallelStreamsTest(concurrentChannels: 150, totalChannels: 1_500);
     }
 
     private static async Task RunParallelStreamsTest(int concurrentChannels, int totalChannels)

@@ -139,7 +139,7 @@ QUIC parameters are passed directly to the factory method:
 
 ```csharp
 // alpn: Application-Layer Protocol Negotiation identifier (default: "netconduit")
-// allowInsecure: Bypass certificate validation (default: true — set false in production)
+// allowInsecure: Bypass certificate validation (default: false)
 var options = QuicMultiplexer.CreateOptions(
     "localhost", 5000,
     alpn: "my-protocol",

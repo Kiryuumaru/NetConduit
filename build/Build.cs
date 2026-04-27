@@ -10,6 +10,7 @@ using NukeBuildHelpers.Entry.Extensions;
 using NukeBuildHelpers.Runner.Abstraction;
 using Serilog;
 using System;
+using System.Diagnostics;
 using System.Linq;
 
 class Build : BaseNukeBuildHelpers
@@ -78,6 +79,7 @@ class Build : BaseNukeBuildHelpers
                 var projectFile = RootDirectory / "tests" / spec.ProjectTestName / $"{spec.ProjectTestName}.csproj";
                 DotNetTasks.DotNetBuild(_ => _
                     .SetProjectFile(projectFile)
+                    .SetProperty("UseLocalNetConduit", true)
                     .SetConfiguration("Release"));
                 var runsettingsPath = RootDirectory / "tests" / spec.ProjectTestName / "ci.runsettings";
                 var settingsArg = runsettingsPath.FileExists() ? $"--settings {runsettingsPath} " : "";
@@ -95,15 +97,27 @@ class Build : BaseNukeBuildHelpers
                             "--filter \"Category!=HighMemory\" " + baseArgs)
                         .SetProjectFile(projectFile)
                         .SetConfiguration("Release"));
-                    // Run each HighMemory class in its own process to prevent OOM on CI (~7GB RAM).
-                    // Each invocation creates a fresh testhost with clean memory.
-                    string[] highMemoryClasses = [
-                        "BackpressureTests", "BenchmarkTests", "ChaosRobustnessTests",
-                        "ChaosTargetedTests", "ConcurrencyTests", "DataIntegrityStressTests",
-                        "DataIntegrityTests", "DirectDeliveryTests", "ExtremeTests",
-                        "MemoryPressureTests", "NegativeTests", "PerformanceTests",
-                        "ReconnectionTests", "UseCaseTests"
-                    ];
+                    // Discover HighMemory test classes by asking the test runner,
+                    // then run each in its own process to prevent OOM on CI (~7GB RAM).
+                    var proc = Process.Start(new ProcessStartInfo("dotnet",
+                        $"test \"{projectFile}\" -c Release --no-build --filter \"Category=HighMemory\" --list-tests")
+                    {
+                        RedirectStandardOutput = true,
+                        UseShellExecute = false
+                    })!;
+                    var listOutput = proc.StandardOutput.ReadToEnd();
+                    proc.WaitForExit();
+                    var highMemoryClasses = listOutput
+                        .Split('\n')
+                        .Where(l => l.StartsWith("    "))
+                        .Select(l => l.Trim().Split('.'))
+                        .Where(p => p.Length >= 2)
+                        .Select(p => p[^2])
+                        .Distinct()
+                        .OrderBy(n => n)
+                        .ToArray();
+                    Log.Information("Discovered {Count} HighMemory test classes: {Classes}",
+                        highMemoryClasses.Length, string.Join(", ", highMemoryClasses));
                     foreach (var className in highMemoryClasses)
                     {
                         DotNetTasks.DotNetTest(_ => _
