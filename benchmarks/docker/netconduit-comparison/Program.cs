@@ -3,6 +3,7 @@ using System.Net;
 using System.Net.Sockets;
 using System.Text.Json;
 using NetConduit;
+using NetConduit.Models;
 using NetConduit.Tcp;
 
 if (args.Length > 0 && args[0] == "diag")

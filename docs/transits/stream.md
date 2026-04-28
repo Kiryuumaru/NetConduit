@@ -111,13 +111,13 @@ await Task.WhenAll(
 ```csharp
 // Write stream
 var write = await mux.OpenStreamAsync("data");
-string channelId = write.ChannelId;  // "data"
-bool isOpen = write.IsOpen;
+string? channelId = write.WriteChannelId;  // "data"
+bool isConnected = write.IsConnected;
 
 // Read stream
 var read = await mux.AcceptStreamAsync("data");
-string channelId = read.ChannelId;  // "data"
-bool isOpen = read.IsOpen;
+string? channelId = read.ReadChannelId;  // "data"
+bool isConnected = read.IsConnected;
 ```
 
 ## EOF Detection

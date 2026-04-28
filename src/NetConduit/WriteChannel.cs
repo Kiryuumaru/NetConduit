@@ -374,6 +374,7 @@ public sealed class WriteChannel : Stream
             _closeCts.Cancel();
             _creditSemaphore.Dispose();
             _closeCts.Dispose();
+            _syncState.ReleaseBuffer();
             _multiplexer.OnWriteChannelDisposed(ChannelIndex, ChannelId);
         }
 
