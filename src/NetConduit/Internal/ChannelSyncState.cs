@@ -1,3 +1,4 @@
+using System.Buffers;
 using System.Collections.Concurrent;
 
 namespace NetConduit.Internal;
@@ -74,12 +75,12 @@ internal sealed class ChannelSyncState
             // Lazy-allocate ring buffer on first write
             if (_ringBuffer is null)
             {
-                _ringBuffer = new byte[_maxBufferSize];
+                _ringBuffer = ArrayPool<byte>.Shared.Rent(_maxBufferSize);
                 _ringStartOffset = startOffset;
             }
             
             var ring = _ringBuffer;
-            var ringLen = ring.Length;
+            var ringLen = _maxBufferSize;
             var dataLen = data.Length;
             
             // If data exceeds ring capacity, only keep the tail
@@ -162,7 +163,7 @@ internal sealed class ChannelSyncState
                 return Array.Empty<byte>();
             
             var result = new byte[available];
-            var ringLen = _ringBuffer!.Length;
+            var ringLen = _maxBufferSize;
             
             // Calculate read position in ring
             var offsetInRing = (int)(effectiveFrom - _ringStartOffset);
@@ -192,5 +193,21 @@ internal sealed class ChannelSyncState
     public void SetBytesAcked(long position)
     {
         Acknowledge(position);
+    }
+
+    /// <summary>
+    /// Returns the ring buffer to the ArrayPool if one was allocated.
+    /// </summary>
+    public void ReleaseBuffer()
+    {
+        lock (_lock)
+        {
+            if (_ringBuffer is not null)
+            {
+                ArrayPool<byte>.Shared.Return(_ringBuffer);
+                _ringBuffer = null;
+                _ringUsed = 0;
+            }
+        }
     }
 }

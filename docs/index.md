@@ -8,7 +8,7 @@
 |---------|-------------|
 | [Getting Started](getting-started.md) | Installation, quick start, first multiplexer |
 | [Transports](transports/index.md) | TCP, WebSocket, UDP, IPC, QUIC |
-| [Transits](transits/index.md) | MessageTransit, DeltaTransit, DuplexStream, Stream |
+| [Transits](transits/index.md) | MessageTransit, DeltaTransit, DuplexStreamTransit, StreamTransit |
 | [Concepts](concepts/index.md) | Channels, backpressure, priority, reconnection, shutdown, heartbeat |
 | [API Reference](api/index.md) | Multiplexer, channels, options, statistics, errors |
 | [Benchmarks](benchmarks.md) | Performance comparisons vs Yamux and Smux |
@@ -68,9 +68,9 @@ N streams → 1 stream (mux) → N streams (demux)
 │                              Application                                     │
 ├──────────────────────────────────────────────────────────────────────────────┤
 │  Transit Layer (Optional)                                                    │
-│  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐      │
-│  │MessageTransit│  │ DeltaTransit │  │ DuplexStream │  │    Stream    │      │
-│  └──────────────┘  └──────────────┘  └──────────────┘  └──────────────┘      │
+│  ┌──────────────┐  ┌──────────────┐  ┌───────────────────┐  ┌──────────────┐  │
+│  │MessageTransit│  │ DeltaTransit │  │DuplexStreamTransit│  │ StreamTransit│  │
+│  └──────────────┘  └──────────────┘  └───────────────────┘  └──────────────┘  │
 ├──────────────────────────────────────────────────────────────────────────────┤
 │                              NetConduit                                      │
 │  - Frame encoding/decoding                                                   │
