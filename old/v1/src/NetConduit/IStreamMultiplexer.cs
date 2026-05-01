@@ -1,0 +1,100 @@
+using System;
+using System.Collections.Generic;
+using System.Threading;
+using System.Threading.Tasks;
+using NetConduit.Enums;
+using NetConduit.Models;
+
+namespace NetConduit;
+
+/// <summary>
+/// Abstraction for a transport-agnostic stream multiplexer.
+/// </summary>
+public interface IStreamMultiplexer : IAsyncDisposable
+{
+    /// <summary>Multiplexer options.</summary>
+    MultiplexerOptions Options { get; }
+
+    /// <summary>Current multiplexer statistics.</summary>
+    MultiplexerStats Stats { get; }
+
+    /// <summary>Whether the multiplexer is currently connected.</summary>
+    bool IsConnected { get; }
+
+    /// <summary>Whether the multiplexer run loop is active.</summary>
+    bool IsRunning { get; }
+
+    /// <summary>Whether a GOAWAY has been sent or received (graceful shutdown in progress).</summary>
+    bool IsShuttingDown { get; }
+
+    /// <summary>The session identifier for this multiplexer.</summary>
+    Guid SessionId { get; }
+
+    /// <summary>The remote session identifier (available after handshake).</summary>
+    Guid RemoteSessionId { get; }
+
+    /// <summary>Gets the IDs of all active channels (both opened and accepted).</summary>
+    IReadOnlyCollection<string> ActiveChannelIds { get; }
+
+    /// <summary>Gets the IDs of channels opened by this side.</summary>
+    IReadOnlyCollection<string> OpenedChannelIds { get; }
+
+    /// <summary>Gets the IDs of channels accepted from the remote side.</summary>
+    IReadOnlyCollection<string> AcceptedChannelIds { get; }
+
+    /// <summary>Gets the count of active channels.</summary>
+    int ActiveChannelCount { get; }
+
+    /// <summary>Event raised when a channel is opened.</summary>
+    event Action<string>? OnChannelOpened;
+
+    /// <summary>Event raised when a channel is closed.</summary>
+    event Action<string, Exception?>? OnChannelClosed;
+
+    /// <summary>Event raised when an error occurs.</summary>
+    event Action<Exception>? OnError;
+
+    /// <summary>Event raised when the multiplexer disconnects.</summary>
+    event Action<DisconnectReason, Exception?>? OnDisconnected;
+
+    /// <summary>Event raised during auto-reconnection attempts.</summary>
+    event Action<AutoReconnectEventArgs>? OnAutoReconnecting;
+
+    /// <summary>Event raised when auto-reconnection has permanently failed.</summary>
+    event Action<Exception>? OnAutoReconnectFailed;
+
+    /// <summary>The reason for disconnection, if disconnected.</summary>
+    DisconnectReason? DisconnectReason { get; }
+
+    /// <summary>
+    /// Starts the multiplexer background loop. Returns immediately.
+    /// The returned task completes when the multiplexer shuts down (or fails permanently).
+    /// </summary>
+    Task Start(CancellationToken cancellationToken = default);
+    
+    /// <summary>
+    /// Waits until the multiplexer is ready (first successful connection + handshake).
+    /// </summary>
+    Task WaitForReadyAsync(CancellationToken cancellationToken = default);
+
+    /// <summary>Opens an outbound channel with default options.</summary>
+    ValueTask<WriteChannel> OpenChannelAsync(string channelId, CancellationToken cancellationToken = default);
+
+    /// <summary>Opens an outbound channel with custom options.</summary>
+    ValueTask<WriteChannel> OpenChannelAsync(ChannelOptions options, CancellationToken cancellationToken = default);
+
+    /// <summary>Accepts a specific inbound channel.</summary>
+    ValueTask<ReadChannel> AcceptChannelAsync(string channelId, CancellationToken cancellationToken = default);
+
+    /// <summary>Enumerates inbound channels as they arrive.</summary>
+    IAsyncEnumerable<ReadChannel> AcceptChannelsAsync(CancellationToken cancellationToken = default);
+
+    /// <summary>Gets a write channel by its ChannelId.</summary>
+    WriteChannel? GetWriteChannel(string channelId);
+
+    /// <summary>Gets a read channel by its ChannelId.</summary>
+    ReadChannel? GetReadChannel(string channelId);
+
+    /// <summary>Initiates a graceful shutdown (no new channels).</summary>
+    ValueTask GoAwayAsync(CancellationToken cancellationToken = default);
+}

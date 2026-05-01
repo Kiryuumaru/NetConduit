@@ -1,0 +1,200 @@
+[
+  {
+    "implementation": "Raw TCP (.NET)",
+    "scenario": "throughput",
+    "channels": 1,
+    "dataSizeBytes": 1024,
+    "totalBytes": 1024,
+    "durationMs": 0.7773,
+    "throughputMBps": 1.2563521163000129,
+    "messagesPerSec": 0,
+    "allocMB": 0
+  },
+  {
+    "implementation": "NetConduit Mux TCP",
+    "scenario": "throughput",
+    "channels": 1,
+    "dataSizeBytes": 1024,
+    "totalBytes": 1024,
+    "durationMs": 0.1819,
+    "throughputMBps": 5.368677844969763,
+    "messagesPerSec": 0,
+    "allocMB": 0
+  },
+  {
+    "implementation": "Raw TCP (.NET)",
+    "scenario": "throughput",
+    "channels": 1,
+    "dataSizeBytes": 102400,
+    "totalBytes": 102400,
+    "durationMs": 0.3025,
+    "throughputMBps": 322.8305785123967,
+    "messagesPerSec": 0,
+    "allocMB": 0
+  },
+  {
+    "implementation": "NetConduit Mux TCP",
+    "scenario": "throughput",
+    "channels": 1,
+    "dataSizeBytes": 102400,
+    "totalBytes": 102400,
+    "durationMs": 0.4167,
+    "throughputMBps": 234.35625149988002,
+    "messagesPerSec": 0,
+    "allocMB": 0
+  },
+  {
+    "implementation": "Raw TCP (.NET)",
+    "scenario": "throughput",
+    "channels": 1,
+    "dataSizeBytes": 1048576,
+    "totalBytes": 1048576,
+    "durationMs": 0.7175,
+    "throughputMBps": 1393.7282229965156,
+    "messagesPerSec": 0,
+    "allocMB": 0
+  },
+  {
+    "implementation": "NetConduit Mux TCP",
+    "scenario": "throughput",
+    "channels": 1,
+    "dataSizeBytes": 1048576,
+    "totalBytes": 1048576,
+    "durationMs": 1.3989,
+    "throughputMBps": 714.847380084352,
+    "messagesPerSec": 0,
+    "allocMB": 0
+  },
+  {
+    "implementation": "Raw TCP (.NET)",
+    "scenario": "throughput",
+    "channels": 10,
+    "dataSizeBytes": 1024,
+    "totalBytes": 10240,
+    "durationMs": 1.1726,
+    "throughputMBps": 8.328180965376088,
+    "messagesPerSec": 0,
+    "allocMB": 0
+  },
+  {
+    "implementation": "NetConduit Mux TCP",
+    "scenario": "throughput",
+    "channels": 10,
+    "dataSizeBytes": 1024,
+    "totalBytes": 10240,
+    "durationMs": 0.38430000000000003,
+    "throughputMBps": 25.411462399167316,
+    "messagesPerSec": 0,
+    "allocMB": 0
+  },
+  {
+    "implementation": "Raw TCP (.NET)",
+    "scenario": "throughput",
+    "channels": 10,
+    "dataSizeBytes": 102400,
+    "totalBytes": 1024000,
+    "durationMs": 1.3211,
+    "throughputMBps": 739.2040723639392,
+    "messagesPerSec": 0,
+    "allocMB": 0
+  },
+  {
+    "implementation": "NetConduit Mux TCP",
+    "scenario": "throughput",
+    "channels": 10,
+    "dataSizeBytes": 102400,
+    "totalBytes": 1024000,
+    "durationMs": 1.6434,
+    "throughputMBps": 594.2329925763661,
+    "messagesPerSec": 0,
+    "allocMB": 0
+  },
+  {
+    "implementation": "Raw TCP (.NET)",
+    "scenario": "throughput",
+    "channels": 10,
+    "dataSizeBytes": 1048576,
+    "totalBytes": 10485760,
+    "durationMs": 3.5294,
+    "throughputMBps": 2833.3427778092596,
+    "messagesPerSec": 0,
+    "allocMB": 0
+  },
+  {
+    "implementation": "NetConduit Mux TCP",
+    "scenario": "throughput",
+    "channels": 10,
+    "dataSizeBytes": 1048576,
+    "totalBytes": 10485760,
+    "durationMs": 10.2506,
+    "throughputMBps": 975.5526505765516,
+    "messagesPerSec": 0,
+    "allocMB": 0
+  },
+  {
+    "implementation": "Raw TCP (.NET)",
+    "scenario": "throughput",
+    "channels": 100,
+    "dataSizeBytes": 1024,
+    "totalBytes": 102400,
+    "durationMs": 14.5135,
+    "throughputMBps": 6.728649188686395,
+    "messagesPerSec": 0,
+    "allocMB": 0
+  },
+  {
+    "implementation": "NetConduit Mux TCP",
+    "scenario": "throughput",
+    "channels": 100,
+    "dataSizeBytes": 1024,
+    "totalBytes": 102400,
+    "durationMs": 30.4678,
+    "throughputMBps": 3.2052281424979814,
+    "messagesPerSec": 0,
+    "allocMB": 0
+  },
+  {
+    "implementation": "Raw TCP (.NET)",
+    "scenario": "throughput",
+    "channels": 100,
+    "dataSizeBytes": 102400,
+    "totalBytes": 10240000,
+    "durationMs": 28.566100000000002,
+    "throughputMBps": 341.86063200786947,
+    "messagesPerSec": 0,
+    "allocMB": 0
+  },
+  {
+    "implementation": "NetConduit Mux TCP",
+    "scenario": "throughput",
+    "channels": 100,
+    "dataSizeBytes": 102400,
+    "totalBytes": 10240000,
+    "durationMs": 29.8879,
+    "throughputMBps": 326.74175837044424,
+    "messagesPerSec": 0,
+    "allocMB": 0
+  },
+  {
+    "implementation": "Raw TCP (.NET)",
+    "scenario": "throughput",
+    "channels": 100,
+    "dataSizeBytes": 1048576,
+    "totalBytes": 104857600,
+    "durationMs": 72.0514,
+    "throughputMBps": 1387.8980838679054,
+    "messagesPerSec": 0,
+    "allocMB": 0
+  },
+  {
+    "implementation": "NetConduit Mux TCP",
+    "scenario": "throughput",
+    "channels": 100,
+    "dataSizeBytes": 1048576,
+    "totalBytes": 104857600,
+    "durationMs": 92.333,
+    "throughputMBps": 1083.0364008534327,
+    "messagesPerSec": 0,
+    "allocMB": 0
+  }
+]

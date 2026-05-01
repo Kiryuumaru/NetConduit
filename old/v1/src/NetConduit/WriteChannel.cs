@@ -1,0 +1,433 @@
+using System.Threading.Channels;
+using NetConduit.Enums;
+using NetConduit.Exceptions;
+using NetConduit.Internal;
+using NetConduit.Models;
+using ChannelClosedException = NetConduit.Exceptions.ChannelClosedException;
+using ChannelOptions = NetConduit.Models.ChannelOptions;
+
+namespace NetConduit;
+
+/// <summary>
+/// A write-only channel for sending data. Opened by this side.
+/// </summary>
+public sealed class WriteChannel : Stream
+{
+    private readonly StreamMultiplexer _multiplexer;
+    private readonly ChannelOptions _options;
+    private readonly SemaphoreSlim _creditSemaphore;
+    private readonly CancellationTokenSource _closeCts;
+    private readonly ChannelSyncState _syncState;
+    private readonly TaskCompletionSource _openTcs;
+    
+    private volatile ChannelState _state;
+    private long _availableCredits;
+    private int _writeActive; // 0 = idle, 1 = writing (lightweight write serialization)
+    private bool _disposed;
+    private ChannelCloseReason? _closeReason;
+    private Exception? _closeException;
+
+    internal WriteChannel(
+        StreamMultiplexer multiplexer,
+        uint channelIndex,
+        string channelId,
+        ChannelPriority priority,
+        ChannelOptions options)
+    {
+        _multiplexer = multiplexer;
+        ChannelIndex = channelIndex;
+        ChannelId = channelId;
+        Priority = priority;
+        _options = options;
+        _state = ChannelState.Opening;
+        _availableCredits = 0;
+        _creditSemaphore = new SemaphoreSlim(0, int.MaxValue);
+        _closeCts = new CancellationTokenSource();
+        _syncState = new ChannelSyncState((int)options.MaxCredits);
+        _syncState.StartRecording();
+        _openTcs = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        Stats = new ChannelStats();
+    }
+
+    /// <summary>The internal channel index used in wire protocol.</summary>
+    internal uint ChannelIndex { get; }
+    
+    /// <summary>The string channel identifier.</summary>
+    public string ChannelId { get; }
+    
+    /// <summary>Current channel state.</summary>
+    public ChannelState State => _state;
+    
+    /// <summary>Channel priority.</summary>
+    public ChannelPriority Priority { get; }
+    
+    /// <summary>Available send credits in bytes.</summary>
+    public long AvailableCredits => Volatile.Read(ref _availableCredits);
+    
+    /// <summary>Channel statistics.</summary>
+    public ChannelStats Stats { get; }
+    
+    /// <summary>Event raised when the channel is closed.</summary>
+    public event Action<ChannelCloseReason, Exception?>? OnClosed;
+    
+    /// <summary>
+    /// Event raised when credit starvation begins (no credits available to send).
+    /// This indicates the channel is experiencing backpressure from the receiver.
+    /// </summary>
+    public event Action? OnCreditStarvation;
+    
+    /// <summary>
+    /// Event raised when credits are restored after a starvation event.
+    /// The TimeSpan parameter indicates how long the wait lasted.
+    /// </summary>
+    public event Action<TimeSpan>? OnCreditRestored;
+    
+    /// <summary>The reason for channel closure, if closed.</summary>
+    public ChannelCloseReason? CloseReason => _closeReason;
+    
+    /// <summary>The exception associated with channel closure, if any.</summary>
+    public Exception? CloseException => _closeException;
+    
+    /// <summary>Synchronization state for reconnection.</summary>
+    internal ChannelSyncState SyncState => _syncState;
+
+    /// <inheritdoc/>
+    public override bool CanRead => false;
+    /// <inheritdoc/>
+    public override bool CanSeek => false;
+    /// <inheritdoc/>
+    public override bool CanWrite => _state == ChannelState.Open;
+    /// <inheritdoc/>
+    public override long Length => throw new NotSupportedException();
+    /// <inheritdoc/>
+    public override long Position
+    {
+        get => throw new NotSupportedException();
+        set => throw new NotSupportedException();
+    }
+
+    /// <inheritdoc/>
+    public override void Flush() { }
+    
+    /// <inheritdoc/>
+    public override Task FlushAsync(CancellationToken cancellationToken) => Task.CompletedTask;
+
+    /// <inheritdoc/>
+    public override int Read(byte[] buffer, int offset, int count)
+        => throw new NotSupportedException("WriteChannel does not support reading.");
+
+    /// <inheritdoc/>
+    public override long Seek(long offset, SeekOrigin origin)
+        => throw new NotSupportedException();
+
+    /// <inheritdoc/>
+    public override void SetLength(long value)
+        => throw new NotSupportedException();
+
+    /// <inheritdoc/>
+    public override void Write(byte[] buffer, int offset, int count)
+        => WriteAsync(buffer.AsMemory(offset, count), CancellationToken.None).AsTask().GetAwaiter().GetResult();
+
+    /// <inheritdoc/>
+    public override async ValueTask WriteAsync(ReadOnlyMemory<byte> buffer, CancellationToken cancellationToken = default)
+    {
+        // Check close reason first - provide more meaningful exception
+        if (_closeReason.HasValue)
+            throw new ChannelClosedException(ChannelId, _closeReason.Value, _closeException);
+        
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        
+        if (_state != ChannelState.Open)
+        {
+            throw new InvalidOperationException($"Channel is not open. State: {_state}");
+        }
+
+        // Handle zero-length writes - just return without doing anything
+        if (buffer.Length == 0)
+            return;
+
+        // Acquire write serialization — lightweight spin + yield for the rare multi-writer case
+        var spinner = new SpinWait();
+        while (Interlocked.CompareExchange(ref _writeActive, 1, 0) != 0)
+        {
+            spinner.SpinOnce();
+            cancellationToken.ThrowIfCancellationRequested();
+        }
+        try
+        {
+            var remaining = buffer;
+            while (remaining.Length > 0)
+        {
+            // Fast path: check if we already have credits without waiting
+            var credits = Volatile.Read(ref _availableCredits);
+            if (credits <= 0)
+            {
+                // Slow path: need to wait for credits - track starvation event
+                var starvationStartTicks = DateTime.UtcNow.Ticks;
+                Stats.RecordCreditStarvationStart();
+                _multiplexer.Stats.RecordCreditStarvationStart();
+                
+                try
+                {
+                    OnCreditStarvation?.Invoke();
+                }
+                catch
+                {
+                    // Swallow exceptions from event handlers
+                }
+                
+                try
+                {
+                    // Only allocate CTS when actually needed (timeout case)
+                    if (_options.SendTimeout != Timeout.InfiniteTimeSpan)
+                    {
+                        using var timeoutCts = new CancellationTokenSource(_options.SendTimeout);
+                        using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, timeoutCts.Token, _closeCts.Token);
+                        try
+                        {
+                            await _creditSemaphore.WaitAsync(linkedCts.Token).ConfigureAwait(false);
+                        }
+                        catch (OperationCanceledException) when (timeoutCts.IsCancellationRequested)
+                        {
+                            throw new TimeoutException($"Send operation timed out waiting for credits after {_options.SendTimeout}");
+                        }
+                    }
+                    else
+                    {
+                        // No timeout - just wait with user token and close token
+                        using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, _closeCts.Token);
+                        await _creditSemaphore.WaitAsync(linkedCts.Token).ConfigureAwait(false);
+                    }
+                }
+                finally
+                {
+                    // Record end of starvation event
+                    var waitTicks = DateTime.UtcNow.Ticks - starvationStartTicks;
+                    Stats.RecordCreditStarvationEnd();
+                    _multiplexer.Stats.RecordCreditStarvationEnd(waitTicks);
+                    
+                    try
+                    {
+                        OnCreditRestored?.Invoke(TimeSpan.FromTicks(waitTicks));
+                    }
+                    catch
+                    {
+                        // Swallow exceptions from event handlers
+                    }
+                }
+                
+                credits = Volatile.Read(ref _availableCredits);
+                if (credits <= 0)
+                    continue; // Spurious wakeup, retry
+            }
+
+            var toSend = (int)Math.Min(remaining.Length, Math.Min(credits, _multiplexer.Options.MaxFrameSize));
+            
+            // Consume credits atomically - use CompareExchange for lock-free
+            long newCredits;
+            long oldCredits;
+            do
+            {
+                oldCredits = Volatile.Read(ref _availableCredits);
+                if (oldCredits <= 0)
+                {
+                    toSend = 0;
+                    break;
+                }
+                toSend = (int)Math.Min(remaining.Length, Math.Min(oldCredits, _multiplexer.Options.MaxFrameSize));
+                newCredits = oldCredits - toSend;
+            } while (Interlocked.CompareExchange(ref _availableCredits, newCredits, oldCredits) != oldCredits);
+            
+            if (toSend == 0)
+                continue;
+                
+            Stats.AddCreditsConsumed(toSend);
+
+            // Buffer for potential replay and send the data frame
+            var slice = remaining[..toSend];
+            _syncState.RecordSend(slice.Span);
+            _multiplexer.SendDataFrame(ChannelIndex, slice, Priority, cancellationToken);
+            
+            // For large frames, bypass FlushLoop and drain immediately on caller thread
+            if (toSend >= 65536 && Volatile.Read(ref _multiplexer.Writer.UnflushedDataBytes) >= 262144)
+                await _multiplexer.Writer.ForceFlushAsync(cancellationToken).ConfigureAwait(false);
+            else if (toSend >= 8192)
+                await _multiplexer.Writer.TryCommitAndDrainAsync(cancellationToken).ConfigureAwait(false);
+            
+            Stats.AddBytesSent(toSend);
+            Stats.IncrementFramesSent();
+            
+                remaining = remaining[toSend..];
+
+                // If we have more credits, release the semaphore for next iteration
+                if (Volatile.Read(ref _availableCredits) > 0)
+                    _creditSemaphore.Release();
+            }
+        }
+        finally
+        {
+            Volatile.Write(ref _writeActive, 0);
+        }
+    }
+
+    /// <summary>
+    /// Gracefully close the channel.
+    /// </summary>
+    public ValueTask CloseAsync(CancellationToken cancellationToken = default)
+    {
+        if (_state == ChannelState.Closed || _state == ChannelState.Closing)
+            return default;
+
+        _state = ChannelState.Closing;
+        _multiplexer.SendFin(ChannelIndex, cancellationToken);
+        return default;
+    }
+
+    /// <summary>
+    /// Waits for the channel to be opened (ACK received from peer).
+    /// </summary>
+    internal Task WaitForOpenAsync(CancellationToken cancellationToken)
+        => _openTcs.Task.WaitAsync(cancellationToken);
+
+    internal void SetOpen(uint initialCredits)
+    {
+        _state = ChannelState.Open;
+        GrantCredits(initialCredits);
+        _openTcs.TrySetResult();
+    }
+
+    internal void GrantCredits(uint credits)
+    {
+        if (credits == 0) return;
+        
+        var previous = Interlocked.Add(ref _availableCredits, credits);
+        Stats.AddCreditsGranted(credits);
+        
+        // Signal that credits are available
+        if (previous - credits <= 0)
+            _creditSemaphore.Release();
+    }
+
+    internal void SetClosed()
+    {
+        SetClosed(ChannelCloseReason.RemoteFin, null);
+    }
+
+    internal void SetClosed(ChannelCloseReason reason, Exception? exception)
+    {
+        if (_state == ChannelState.Closed || _disposed)
+            return;
+            
+        _closeReason = reason;
+        _closeException = exception;
+        _state = ChannelState.Closed;
+        try { _closeCts.Cancel(); } catch (ObjectDisposedException) { }
+        _openTcs.TrySetCanceled();
+        
+        try
+        {
+            OnClosed?.Invoke(reason, exception);
+        }
+        catch
+        {
+            // Swallow exceptions from event handlers
+        }
+    }
+
+    /// <summary>
+    /// Aborts the channel immediately with the specified reason.
+    /// </summary>
+    internal void Abort(ChannelCloseReason reason, Exception? exception = null)
+    {
+        SetClosed(reason, exception);
+    }
+
+    internal void SetError(ErrorCode code, string message)
+    {
+        if (_disposed) return;
+        
+        var exception = new MultiplexerException(code, message);
+        _closeReason = ChannelCloseReason.RemoteError;
+        _closeException = exception;
+        _state = ChannelState.Closed;
+        try { _closeCts.Cancel(); } catch (ObjectDisposedException) { }
+        _openTcs.TrySetException(exception);
+        
+        try
+        {
+            OnClosed?.Invoke(ChannelCloseReason.RemoteError, exception);
+        }
+        catch
+        {
+            // Swallow exceptions from event handlers
+        }
+    }
+
+    /// <inheritdoc/>
+    protected override void Dispose(bool disposing)
+    {
+        if (_disposed) return;
+        _disposed = true;
+
+        if (disposing)
+        {
+            _closeCts.Cancel();
+            _creditSemaphore.Dispose();
+            _closeCts.Dispose();
+            _syncState.ReleaseBuffer();
+            _multiplexer.OnWriteChannelDisposed(ChannelIndex, ChannelId);
+        }
+
+        base.Dispose(disposing);
+    }
+
+    /// <inheritdoc/>
+    public override async ValueTask DisposeAsync()
+    {
+        if (_disposed) return;
+
+        // If already aborted by mux/transport, skip graceful close
+        if (_closeReason.HasValue && (_closeReason == ChannelCloseReason.MuxDisposed || _closeReason == ChannelCloseReason.TransportFailed))
+        {
+            Dispose(true);
+            GC.SuppressFinalize(this);
+            return;
+        }
+
+        if (_state == ChannelState.Open)
+        {
+            try
+            {
+                // Wait for pending writes to complete with timeout
+                var timeout = _multiplexer.Options.GracefulShutdownTimeout;
+                var deadline = Environment.TickCount64 + (long)timeout.TotalMilliseconds;
+                var spinner = new SpinWait();
+                while (Volatile.Read(ref _writeActive) != 0)
+                {
+                    if (Environment.TickCount64 >= deadline) break;
+                    spinner.SpinOnce();
+                }
+                
+                await CloseAsync().ConfigureAwait(false);
+                _closeReason = ChannelCloseReason.LocalClose;
+                
+                try
+                {
+                    OnClosed?.Invoke(ChannelCloseReason.LocalClose, null);
+                }
+                catch
+                {
+                    // Swallow exceptions from event handlers
+                }
+            }
+            catch
+            {
+                // Ignore errors during dispose - set reason if not already set
+                _closeReason ??= ChannelCloseReason.LocalClose;
+            }
+        }
+
+        Dispose(true);
+        GC.SuppressFinalize(this);
+    }
+}

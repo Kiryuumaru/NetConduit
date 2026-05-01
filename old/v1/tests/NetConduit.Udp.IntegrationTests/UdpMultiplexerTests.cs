@@ -1,0 +1,213 @@
+using NetConduit.Models;
+using NetConduit.Udp;
+
+namespace NetConduit.Udp.IntegrationTests;
+
+[Collection("UdpTests")]
+public class UdpMultiplexerTests
+{
+    [Fact(Timeout = 120000)]
+    public async Task UdpMux_SendReceive_Works()
+    {
+        var port = GetFreePort();
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(90));
+
+        var serverOptions = UdpMultiplexer.CreateServerOptions(port);
+        await using var server = StreamMultiplexer.Create(serverOptions);
+
+        var clientOptions = UdpMultiplexer.CreateOptions("127.0.0.1", port);
+        await using var client = StreamMultiplexer.Create(clientOptions);
+
+        var clientRun = client.Start(cts.Token);
+        var serverRun = server.Start(cts.Token);
+        await Task.WhenAll(client.WaitForReadyAsync(cts.Token), server.WaitForReadyAsync(cts.Token));
+
+        // open channel from client to server
+        var write = await client.OpenChannelAsync("udp-test", cts.Token);
+        var read = await server.AcceptChannelAsync("udp-test", cts.Token);
+
+        var payload = "hello over udp"u8.ToArray();
+        await write.WriteAsync(payload, cts.Token);
+        await write.CloseAsync(cts.Token);
+
+        var buffer = new byte[payload.Length];
+        var readBytes = await read.ReadAsync(buffer, cts.Token);
+        Assert.Equal(payload.Length, readBytes);
+        Assert.Equal(payload, buffer);
+
+        cts.Cancel();
+        await Task.WhenAll(serverRun, clientRun);
+    }
+
+    [Fact(Timeout = 120000)]
+    public async Task UdpMux_MultipleChannels_TransferDataConcurrently()
+    {
+        var port = GetFreePort();
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(90));
+
+        var serverOptions = UdpMultiplexer.CreateServerOptions(port);
+        await using var server = StreamMultiplexer.Create(serverOptions);
+
+        var clientOptions = UdpMultiplexer.CreateOptions("127.0.0.1", port);
+        await using var client = StreamMultiplexer.Create(clientOptions);
+
+        var clientRun = client.Start(cts.Token);
+        var serverRun = server.Start(cts.Token);
+        await Task.WhenAll(client.WaitForReadyAsync(cts.Token), server.WaitForReadyAsync(cts.Token));
+
+        const int channelCount = 5;
+        const int dataSize = 512;
+        var tasks = new List<Task>();
+
+        for (int i = 0; i < channelCount; i++)
+        {
+            int channelIndex = i;
+            tasks.Add(Task.Run(async () =>
+            {
+                var channelId = $"udp-channel-{channelIndex}";
+                var writeChannel = await client.OpenChannelAsync(channelId, cts.Token);
+                var readChannel = await server.AcceptChannelAsync(channelId, cts.Token);
+
+                var testData = new byte[dataSize];
+                Random.Shared.NextBytes(testData);
+
+                await writeChannel.WriteAsync(testData, cts.Token);
+                await writeChannel.CloseAsync(cts.Token);
+
+                var buffer = new byte[dataSize];
+                int totalRead = 0;
+                while (totalRead < buffer.Length)
+                {
+                    int read = await readChannel.ReadAsync(buffer.AsMemory(totalRead), cts.Token);
+                    if (read == 0) break;
+                    totalRead += read;
+                }
+
+                Assert.Equal(testData.Length, totalRead);
+                Assert.Equal(testData, buffer);
+            }, cts.Token));
+        }
+
+        await Task.WhenAll(tasks);
+        Assert.Equal(channelCount, client.OpenedChannelIds.Count);
+
+        cts.Cancel();
+        await Task.WhenAll(serverRun, clientRun);
+    }
+
+    [Fact(Timeout = 120000)]
+    public async Task UdpMux_BidirectionalCommunication_BothSidesOpenChannels()
+    {
+        var port = GetFreePort();
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(90));
+
+        var serverOptions = UdpMultiplexer.CreateServerOptions(port);
+        await using var server = StreamMultiplexer.Create(serverOptions);
+
+        var clientOptions = UdpMultiplexer.CreateOptions("127.0.0.1", port);
+        await using var client = StreamMultiplexer.Create(clientOptions);
+
+        var clientRun = client.Start(cts.Token);
+        var serverRun = server.Start(cts.Token);
+        await Task.WhenAll(client.WaitForReadyAsync(cts.Token), server.WaitForReadyAsync(cts.Token));
+
+        // Client opens channel to server
+        var clientToServerWrite = await client.OpenChannelAsync("c2s", cts.Token);
+        var clientToServerRead = await server.AcceptChannelAsync("c2s", cts.Token);
+
+        // Server opens channel to client
+        var serverToClientWrite = await server.OpenChannelAsync("s2c", cts.Token);
+        var serverToClientRead = await client.AcceptChannelAsync("s2c", cts.Token);
+
+        var clientMessage = "Hello from UDP client"u8.ToArray();
+        var serverMessage = "Hello from UDP server"u8.ToArray();
+
+        await clientToServerWrite.WriteAsync(clientMessage, cts.Token);
+        await serverToClientWrite.WriteAsync(serverMessage, cts.Token);
+
+        var clientBuffer = new byte[serverMessage.Length];
+        var serverBuffer = new byte[clientMessage.Length];
+
+        int clientRead = 0, serverRead = 0;
+        while (clientRead < clientBuffer.Length)
+        {
+            int read = await serverToClientRead.ReadAsync(clientBuffer.AsMemory(clientRead), cts.Token);
+            if (read == 0) break;
+            clientRead += read;
+        }
+        while (serverRead < serverBuffer.Length)
+        {
+            int read = await clientToServerRead.ReadAsync(serverBuffer.AsMemory(serverRead), cts.Token);
+            if (read == 0) break;
+            serverRead += read;
+        }
+
+        Assert.Equal(serverMessage, clientBuffer);
+        Assert.Equal(clientMessage, serverBuffer);
+
+        cts.Cancel();
+        await Task.WhenAll(serverRun, clientRun);
+    }
+
+    [Fact(Timeout = 120000)]
+    public async Task UdpMux_LargeDataTransfer_TransfersCorrectly()
+    {
+        var port = GetFreePort();
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(90));
+
+        var serverOptions = UdpMultiplexer.CreateServerOptions(port);
+        await using var server = StreamMultiplexer.Create(serverOptions);
+
+        var clientOptions = UdpMultiplexer.CreateOptions("127.0.0.1", port);
+        await using var client = StreamMultiplexer.Create(clientOptions);
+
+        var clientRun = client.Start(cts.Token);
+        var serverRun = server.Start(cts.Token);
+        await Task.WhenAll(client.WaitForReadyAsync(cts.Token), server.WaitForReadyAsync(cts.Token));
+
+        var writeChannel = await client.OpenChannelAsync("large", cts.Token);
+        var readChannel = await server.AcceptChannelAsync("large", cts.Token);
+
+        // 1 MB of data (smaller than TCP test due to UDP characteristics)
+        const int dataSize = 1 * 1024 * 1024;
+        var testData = new byte[dataSize];
+        Random.Shared.NextBytes(testData);
+
+        var writeTask = Task.Run(async () =>
+        {
+            const int chunkSize = 32 * 1024;
+            for (int offset = 0; offset < dataSize; offset += chunkSize)
+            {
+                int length = Math.Min(chunkSize, dataSize - offset);
+                await writeChannel.WriteAsync(testData.AsMemory(offset, length), cts.Token);
+            }
+            await writeChannel.CloseAsync(cts.Token);
+        }, cts.Token);
+
+        var buffer = new byte[dataSize];
+        int totalRead = 0;
+        while (totalRead < buffer.Length)
+        {
+            int read = await readChannel.ReadAsync(buffer.AsMemory(totalRead), cts.Token);
+            if (read == 0) break;
+            totalRead += read;
+        }
+
+        await writeTask;
+
+        Assert.Equal(dataSize, totalRead);
+        Assert.Equal(testData, buffer);
+
+        cts.Cancel();
+        await Task.WhenAll(serverRun, clientRun);
+    }
+
+    private static int GetFreePort()
+    {
+        var listener = new System.Net.Sockets.TcpListener(System.Net.IPAddress.Loopback, 0);
+        listener.Start();
+        var port = ((System.Net.IPEndPoint)listener.LocalEndpoint).Port;
+        listener.Stop();
+        return port;
+    }
+}

@@ -1,0 +1,232 @@
+using Nuke.Common;
+using Nuke.Common.IO;
+using Nuke.Common.Tooling;
+using Nuke.Common.Tools.DotNet;
+using NukeBuildHelpers;
+using NukeBuildHelpers.Common.Attributes;
+using NukeBuildHelpers.Common.Enums;
+using NukeBuildHelpers.Entry;
+using NukeBuildHelpers.Entry.Extensions;
+using NukeBuildHelpers.Runner.Abstraction;
+using Serilog;
+using System;
+using System.Diagnostics;
+using System.Linq;
+
+class Build : BaseNukeBuildHelpers
+{
+    public static int Main() => Execute<Build>(x => x.Interactive);
+
+    public override string[] EnvironmentBranches { get; } = ["prerelease", "master"];
+
+    public override string MainEnvironmentBranch => "master";
+
+    DeploymentAppSpec[] DeploymentApps =>
+    [
+        new DeploymentAppSpec
+        {
+            AppId = "net_conduit",
+            ProjectName = "NetConduit",
+            ProjectTestName = "NetConduit.UnitTests"
+        },
+        new DeploymentAppSpec
+        {
+            AppId = "net_conduit_tcp",
+            ProjectName = "NetConduit.Tcp",
+            ProjectTestName = "NetConduit.Tcp.IntegrationTests"
+        },
+        new DeploymentAppSpec
+        {
+            AppId = "net_conduit_websocket",
+            ProjectName = "NetConduit.WebSocket",
+            ProjectTestName = "NetConduit.WebSocket.IntegrationTests"
+        },
+        new DeploymentAppSpec
+        {
+            AppId = "net_conduit_udp",
+            ProjectName = "NetConduit.Udp",
+            ProjectTestName = "NetConduit.Udp.IntegrationTests"
+        },
+        new DeploymentAppSpec
+        {
+            AppId = "net_conduit_ipc",
+            ProjectName = "NetConduit.Ipc",
+            ProjectTestName = "NetConduit.Ipc.IntegrationTests"
+        },
+        new DeploymentAppSpec
+        {
+            AppId = "net_conduit_quic",
+            ProjectName = "NetConduit.Quic",
+            ProjectTestName = "NetConduit.Quic.IntegrationTests"
+        }
+    ];
+
+    [SecretVariable("NUGET_AUTH_TOKEN")]
+    readonly string? NuGetAuthToken;
+
+    [SecretVariable("GITHUB_TOKEN")]
+    readonly string? GithubToken;
+
+    TestEntry TestEntry => _ => _
+        .RunnerOS(RunnerOS.Ubuntu2204)
+        .Matrix(DeploymentApps, (test, spec) => test
+            .AppId(spec.AppId)
+            .WorkflowId($"{spec.AppId}_test")
+            .DisplayName($"Test {spec.ProjectName}")
+            .ExecuteBeforeBuild(true)
+            .Execute(() =>
+            {
+                var projectFile = RootDirectory / "tests" / spec.ProjectTestName / $"{spec.ProjectTestName}.csproj";
+                DotNetTasks.DotNetBuild(_ => _
+                    .SetProjectFile(projectFile)
+                    .SetProperty("UseLocalNetConduit", true)
+                    .SetConfiguration("Release"));
+                var runsettingsPath = RootDirectory / "tests" / spec.ProjectTestName / "ci.runsettings";
+                var settingsArg = runsettingsPath.FileExists() ? $"--settings {runsettingsPath} " : "";
+                var baseArgs =
+                    "--no-build " +
+                    "--logger \"GitHubActions;summary.includePassedTests=true;summary.includeSkippedTests=true\" " +
+                    settingsArg +
+                    "-- " +
+                    "RunConfiguration.CollectSourceInformation=true ";
+                if (spec.ProjectTestName == "NetConduit.UnitTests")
+                {
+                    // Run non-HighMemory tests in one batch
+                    DotNetTasks.DotNetTest(_ => _
+                        .SetProcessAdditionalArguments(
+                            "--filter \"Category!=HighMemory\" " + baseArgs)
+                        .SetProjectFile(projectFile)
+                        .SetConfiguration("Release"));
+                    // Discover HighMemory test classes by asking the test runner,
+                    // then run each in its own process to prevent OOM on CI (~7GB RAM).
+                    var proc = Process.Start(new ProcessStartInfo("dotnet",
+                        $"test \"{projectFile}\" -c Release --no-build --filter \"Category=HighMemory\" --list-tests")
+                    {
+                        RedirectStandardOutput = true,
+                        UseShellExecute = false
+                    })!;
+                    var listOutput = proc.StandardOutput.ReadToEnd();
+                    proc.WaitForExit();
+                    var highMemoryClasses = listOutput
+                        .Split('\n')
+                        .Where(l => l.StartsWith("    "))
+                        .Select(l => l.Trim().Split('.'))
+                        .Where(p => p.Length >= 2)
+                        .Select(p => p[^2])
+                        .Distinct()
+                        .OrderBy(n => n)
+                        .ToArray();
+                    Log.Information("Discovered {Count} HighMemory test classes: {Classes}",
+                        highMemoryClasses.Length, string.Join(", ", highMemoryClasses));
+                    foreach (var className in highMemoryClasses)
+                    {
+                        DotNetTasks.DotNetTest(_ => _
+                            .SetProcessAdditionalArguments(
+                                $"--filter \"FullyQualifiedName~{className}\" " + baseArgs)
+                            .SetProjectFile(projectFile)
+                            .SetConfiguration("Release"));
+                    }
+                }
+                else
+                {
+                    DotNetTasks.DotNetTest(_ => _
+                        .SetProcessAdditionalArguments(baseArgs)
+                        .SetProjectFile(projectFile)
+                        .SetConfiguration("Release"));
+                }
+            }));
+
+    BuildEntry BuildEntry => _ => _
+        .RunnerOS(RunnerOS.Ubuntu2204)
+        .Matrix(DeploymentApps, (test, spec) => test
+            .AppId(spec.AppId)
+            .WorkflowId($"{spec.AppId}_build")
+            .DisplayName($"Build {spec.ProjectName}")
+            .Execute(context =>
+            {
+                var app = context.Apps.Values.First();
+                string version = app.AppVersion.Version.ToString()!;
+                string? releaseNotes = null;
+                if (app.BumpVersion != null)
+                {
+                    version = app.BumpVersion.Version.ToString();
+                    releaseNotes = app.BumpVersion.ReleaseNotes;
+                }
+                else if (app.PullRequestVersion != null)
+                {
+                    version = app.PullRequestVersion.Version.ToString();
+                }
+                app.OutputDirectory.DeleteDirectory();
+                DotNetTasks.DotNetClean(_ => _
+                    .SetProject(RootDirectory / "src" / spec.ProjectName / $"{spec.ProjectName}.csproj"));
+                DotNetTasks.DotNetBuild(_ => _
+                    .SetProjectFile(RootDirectory / "src" / spec.ProjectName / $"{spec.ProjectName}.csproj")
+                    .SetProperty("UseLocalNetConduit", false)
+                    .SetConfiguration("Release"));
+                DotNetTasks.DotNetPack(_ => _
+                    .SetProject(RootDirectory / "src" / spec.ProjectName / $"{spec.ProjectName}.csproj")
+                    .SetConfiguration("Release")
+                    .SetNoRestore(true)
+                    .SetNoBuild(true)
+                    .SetIncludeSymbols(true)
+                    .SetSymbolPackageFormat("snupkg")
+                    .SetVersion(version)
+                    .SetPackageReleaseNotes(NormalizeReleaseNotes(releaseNotes))
+                    .SetProperty("UseLocalNetConduit", false)
+                    .SetOutputDirectory(app.OutputDirectory));
+            }));
+
+    PublishEntry PublishEntry => _ => _
+        .RunnerOS(RunnerOS.Ubuntu2204)
+        .Matrix(DeploymentApps, (test, spec) => test
+            .AppId(spec.AppId)
+            .WorkflowId($"{spec.AppId}_publish")
+            .DisplayName($"Publish {spec.ProjectName}")
+            .Execute(async context =>
+            {
+                var app = context.Apps.Values.First();
+                if (app.RunType == RunType.Bump)
+                {
+                    DotNetTasks.DotNetNuGetPush(_ => _
+                        .SetSource("https://nuget.pkg.github.com/kiryuumaru/index.json")
+                        .SetApiKey(GithubToken)
+                        .SetTargetPath(app.OutputDirectory / "**"));
+                    DotNetTasks.DotNetNuGetPush(_ => _
+                        .SetSource("https://api.nuget.org/v3/index.json")
+                        .SetApiKey(NuGetAuthToken)
+                        .SetTargetPath(app.OutputDirectory / "**"));
+                    await AddReleaseAsset(app.OutputDirectory, app.AppId);
+                }
+            }));
+
+    Target Clean => _ => _
+        .Executes(() =>
+        {
+            foreach (var path in RootDirectory.GetFiles("**", 99).Where(i => i.Name.EndsWith(".csproj")))
+            {
+                if (path.Name == "_build.csproj")
+                {
+                    continue;
+                }
+                Log.Information("Cleaning {path}", path);
+                (path.Parent / "bin").DeleteDirectory();
+                (path.Parent / "obj").DeleteDirectory();
+            }
+            (RootDirectory / ".vs").DeleteDirectory();
+        });
+
+    private string? NormalizeReleaseNotes(string? releaseNotes)
+    {
+        return releaseNotes?
+            .Replace(",", "%2C")?
+            .Replace(":", "%3A")?
+            .Replace(";", "%3B");
+    }
+
+    class DeploymentAppSpec
+    {
+        public required string AppId { get; set; }
+        public required string ProjectName { get; set; }
+        public required string ProjectTestName { get; set; }
+    }
+}

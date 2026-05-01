@@ -1,0 +1,17 @@
+version: 2
+updates:
+
+  - package-ecosystem: "nuget"
+    target-branch: "master"
+    directory: "/"
+    open-pull-requests-limit: 100
+    schedule:
+      interval: "daily"
+
+    allow:
+      - dependency-type: "direct"
+      
+    ignore:
+      - dependency-name: "Microsoft.NET.ILLink.*"
+      - dependency-name: "Microsoft.DotNet.*"
+      - dependency-name: "Microsoft.Build.*"
