@@ -702,8 +702,8 @@ public class StreamFactoryTests
         }
         Assert.Equal(data1, buffer1);
         
-        // Verify SyncState tracked the data
-        Assert.Equal(100, writeChannel.SyncState.BytesSent);
+        // Verify byte tracking
+        Assert.Equal(100, writeChannel.BytesSent);
         
         // Act - trigger disconnect by disposing the initial pipe
         await initialPipe.DisposeAsync();
@@ -712,8 +712,8 @@ public class StreamFactoryTests
         var result = await Task.WhenAny(factoryCalled.Task, Task.Delay(TimeSpan.FromSeconds(5)));
         Assert.Equal(factoryCalled.Task, result);
         
-        // Verify SyncState still tracks byte count after disconnect
-        Assert.Equal(100, writeChannel.SyncState.BytesSent);
+        // Verify byte tracking still works after disconnect
+        Assert.Equal(100, writeChannel.BytesSent);
         
         cts.Cancel();
     }

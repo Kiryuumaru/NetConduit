@@ -103,11 +103,21 @@ public class ReconnectDataSafetyTests
 
     #region Data Sent Before Disconnect Is Fully Received
 
-    [Fact(Timeout = TestTimeout)]
-    public async Task DataSentBeforeDisconnect_SmallPayloads_AllReceived()
+    [Theory(Timeout = TestTimeout)]
+    [InlineData(0)]
+    [InlineData(5)]
+    [InlineData(50)]
+    public async Task DataSentBeforeDisconnect_SmallPayloads_AllReceived(int latencyMs)
     {
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(20));
-        var (mux1, mux2, run1, run2, pipe) = await TestMuxHelper.CreateReconnectableMuxPairAsync(cancellationToken: cts.Token);
+        var reconnectable = new ReconnectableDuplexPipe(latencyMs);
+        var opts1 = new MultiplexerOptions { StreamFactory = reconnectable.CreateStream1 };
+        var opts2 = new MultiplexerOptions { StreamFactory = reconnectable.CreateStream2 };
+        var mux1 = StreamMultiplexer.Create(opts1);
+        var mux2 = StreamMultiplexer.Create(opts2);
+        var run1 = mux1.Start(cts.Token);
+        var run2 = mux2.Start(cts.Token);
+        await Task.WhenAll(mux1.WaitForReadyAsync(cts.Token), mux2.WaitForReadyAsync(cts.Token));
         await using var m1 = mux1;
         await using var m2 = mux2;
 
@@ -148,7 +158,7 @@ public class ReconnectDataSafetyTests
         Assert.Equal(expectedFull, received);
 
         // Now disconnect
-        await pipe.DisconnectAsync();
+        await reconnectable.DisconnectAsync();
         await Task.Delay(200);
 
         cts.Cancel();

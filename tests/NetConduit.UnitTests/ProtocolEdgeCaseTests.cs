@@ -67,6 +67,7 @@ public class ProtocolEdgeCaseTests
             total += n;
         }
         Assert.Equal(3, total);
+        Assert.Equal(new byte[] { 1, 2, 3 }, buf);
 
         cts.Cancel();
     }

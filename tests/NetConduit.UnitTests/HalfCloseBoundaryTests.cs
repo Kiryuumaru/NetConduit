@@ -81,19 +81,20 @@ public class HalfCloseBoundaryTests
             var buf = new byte[1024];
             var total = 0;
             int read;
-            while ((read = await reader.ReadAsync(buf, cts.Token)) > 0)
+            while ((read = await reader.ReadAsync(buf.AsMemory(total), cts.Token)) > 0)
             {
                 total += read;
             }
-            return total;
+            return (total, buf);
         });
 
         // Write some data, then close
         await writer.WriteAsync(new byte[] { 1, 2, 3, 4, 5 }, cts.Token);
         await writer.CloseAsync();
 
-        var totalRead = await readTask.WaitAsync(cts.Token);
+        var (totalRead, receivedBuf) = await readTask.WaitAsync(cts.Token);
         Assert.Equal(5, totalRead);
+        Assert.Equal(new byte[] { 1, 2, 3, 4, 5 }, receivedBuf[..totalRead]);
 
         cts.Cancel();
     }
@@ -114,16 +115,21 @@ public class HalfCloseBoundaryTests
         var readTask = Task.Run(async () =>
         {
             var buf = new byte[1024];
+            var total = 0;
             int read;
-            while ((read = await reader.ReadAsync(buf, cts.Token)) > 0) { }
-            return reader.State;
+            while ((read = await reader.ReadAsync(buf.AsMemory(total), cts.Token)) > 0)
+            {
+                total += read;
+            }
+            return (reader.State, buf[..total]);
         });
 
         await writer.WriteAsync(new byte[] { 10, 20, 30 }, cts.Token);
         await writer.DisposeAsync();
 
-        var finalState = await readTask.WaitAsync(cts.Token);
+        var (finalState, receivedData) = await readTask.WaitAsync(cts.Token);
         Assert.Equal(ChannelState.Closed, finalState);
+        Assert.Equal(new byte[] { 10, 20, 30 }, receivedData);
 
         cts.Cancel();
     }

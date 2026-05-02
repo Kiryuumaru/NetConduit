@@ -10,10 +10,13 @@ namespace NetConduit.UnitTests;
 [Trait("Category", "HighMemory")]
 public class DirectDeliveryTests
 {
-    [Fact(Timeout = 30000)]
-    public async Task ReadAsync_WhenDataArrivesAfterWaiting_DeliversCorrectData()
+    [Theory(Timeout = 30000)]
+    [InlineData(0)]
+    [InlineData(5)]
+    [InlineData(50)]
+    public async Task ReadAsync_WhenDataArrivesAfterWaiting_DeliversCorrectData(int latencyMs)
     {
-        await using var pipe = new DuplexPipe();
+        await using var pipe = new DuplexPipe(latencyMs);
         await using var initiator = await TestMuxHelper.CreateMuxAsync(pipe.Stream1);
         await using var acceptor = await TestMuxHelper.CreateMuxAsync(pipe.Stream2);
 
@@ -108,10 +111,13 @@ public class DirectDeliveryTests
         cts.Cancel();
     }
 
-    [Fact(Timeout = 30000)]
-    public async Task ReadAsync_PayloadLargerThanUserBuffer_DeliverPartialAndRemainderViaPipe()
+    [Theory(Timeout = 30000)]
+    [InlineData(0)]
+    [InlineData(5)]
+    [InlineData(50)]
+    public async Task ReadAsync_PayloadLargerThanUserBuffer_DeliverPartialAndRemainderViaPipe(int latencyMs)
     {
-        await using var pipe = new DuplexPipe();
+        await using var pipe = new DuplexPipe(latencyMs);
         await using var initiator = await TestMuxHelper.CreateMuxAsync(pipe.Stream1);
         await using var acceptor = await TestMuxHelper.CreateMuxAsync(pipe.Stream2);
 
@@ -155,10 +161,13 @@ public class DirectDeliveryTests
         cts.Cancel();
     }
 
-    [Fact(Timeout = 30000)]
-    public async Task ReadAsync_MultipleSequentialReads_AllDeliverCorrectData()
+    [Theory(Timeout = 30000)]
+    [InlineData(0)]
+    [InlineData(5)]
+    [InlineData(50)]
+    public async Task ReadAsync_MultipleSequentialReads_AllDeliverCorrectData(int latencyMs)
     {
-        await using var pipe = new DuplexPipe();
+        await using var pipe = new DuplexPipe(latencyMs);
         await using var initiator = await TestMuxHelper.CreateMuxAsync(pipe.Stream1);
         await using var acceptor = await TestMuxHelper.CreateMuxAsync(pipe.Stream2);
 
@@ -189,10 +198,13 @@ public class DirectDeliveryTests
         cts.Cancel();
     }
 
-    [Fact(Timeout = 30000)]
-    public async Task ReadAsync_DataAlreadyInPipe_UsesFastPathNotDirectDelivery()
+    [Theory(Timeout = 30000)]
+    [InlineData(0)]
+    [InlineData(5)]
+    [InlineData(50)]
+    public async Task ReadAsync_DataAlreadyInPipe_UsesFastPathNotDirectDelivery(int latencyMs)
     {
-        await using var pipe = new DuplexPipe();
+        await using var pipe = new DuplexPipe(latencyMs);
         await using var initiator = await TestMuxHelper.CreateMuxAsync(pipe.Stream1);
         await using var acceptor = await TestMuxHelper.CreateMuxAsync(pipe.Stream2);
 

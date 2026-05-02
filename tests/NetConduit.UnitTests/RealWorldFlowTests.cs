@@ -102,6 +102,9 @@ public partial class RealWorldFlowTests
         var dataReader = await muxB.AcceptChannelAsync("data", cts.Token);
         var logReader = await muxB.AcceptChannelAsync("logs", cts.Token);
 
+        var randomData = new byte[1024];
+        Random.Shared.NextBytes(randomData);
+
         var sendTasks = new[]
         {
             Task.Run(async () =>
@@ -112,9 +115,7 @@ public partial class RealWorldFlowTests
             }),
             Task.Run(async () =>
             {
-                var data = new byte[1024];
-                Random.Shared.NextBytes(data);
-                await dataWriter.WriteAsync(data, cts.Token);
+                await dataWriter.WriteAsync(randomData, cts.Token);
                 await dataWriter.CloseAsync();
             }),
             Task.Run(async () =>
@@ -139,9 +140,22 @@ public partial class RealWorldFlowTests
         await Task.WhenAll(sendTasks);
         await Task.WhenAll(recvTasks);
 
-        Assert.Equal(20, controlReceived.Length);
-        Assert.Equal(1024, dataReceived.Length);
-        Assert.True(logReceived.Length > 0);
+        // Verify control channel bytes
+        var controlBytes = controlReceived.ToArray();
+        Assert.Equal(20, controlBytes.Length);
+        for (int i = 0; i < 10; i++)
+        {
+            Assert.Equal(0xCC, controlBytes[i * 2]);
+            Assert.Equal((byte)i, controlBytes[i * 2 + 1]);
+        }
+
+        // Verify data channel bytes
+        Assert.Equal(randomData, dataReceived.ToArray());
+
+        // Verify log channel content
+        var logText = Encoding.UTF8.GetString(logReceived.ToArray());
+        for (int i = 0; i < 50; i++)
+            Assert.Contains($"log-{i}\n", logText);
 
         cts.Cancel();
     }
@@ -716,21 +730,22 @@ public partial class RealWorldFlowTests
         var reader = await muxB.AcceptChannelAsync("boundary", cts.Token);
 
         var sizes = new[] { 1, 2, 4, 8, 16, 255, 256, 1023, 1024, 4096, 8192, 65535, 65536 };
-        long totalSent = 0;
+        var allSent = new MemoryStream();
 
         foreach (int size in sizes)
         {
             var data = new byte[size];
             Random.Shared.NextBytes(data);
             await writer.WriteAsync(data, cts.Token);
-            totalSent += size;
+            allSent.Write(data);
         }
         await writer.CloseAsync();
 
         var received = new MemoryStream();
         await ReadToEndAsync(reader, received, cts.Token);
 
-        Assert.Equal(totalSent, received.Length);
+        Assert.Equal(allSent.Length, received.Length);
+        Assert.Equal(allSent.ToArray(), received.ToArray());
 
         cts.Cancel();
     }
@@ -1117,8 +1132,10 @@ public partial class RealWorldFlowTests
         await writer.WriteAsync(data, cts.Token);
         await writer.CloseAsync();
 
-        await ReadToEndAsync(reader, new MemoryStream(), cts.Token);
+        var receivedMs = new MemoryStream();
+        await ReadToEndAsync(reader, receivedMs, cts.Token);
 
+        Assert.Equal(data, receivedMs.ToArray());
         Assert.True(muxA.Stats.BytesSent > 0);
         Assert.True(muxB.Stats.BytesReceived > 0);
 
@@ -1326,8 +1343,11 @@ public partial class RealWorldFlowTests
 
         Assert.Equal(countPerSide, aResults.Length);
         Assert.Equal(countPerSide, bResults.Length);
-        Assert.All(aResults, r => Assert.True(r.Length > 0));
-        Assert.All(bResults, r => Assert.True(r.Length > 0));
+        for (int i = 0; i < countPerSide; i++)
+        {
+            Assert.Equal(BitConverter.GetBytes(i + 1000), aResults[i]);
+            Assert.Equal(BitConverter.GetBytes(i), bResults[i]);
+        }
 
         cts.Cancel();
     }

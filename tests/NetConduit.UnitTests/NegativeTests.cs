@@ -521,8 +521,8 @@ public class NegativeTests
         
         try { await writeChannel.CloseAsync(cts.Token); } catch { /* ignore */ }
 
-        // Read all data
-        var readBytes = 0L;
+        // Read all data and verify each message block is a consistent fill pattern
+        var allReceived = new MemoryStream();
         var buffer = new byte[4096];
         try
         {
@@ -530,13 +530,26 @@ public class NegativeTests
             {
                 var read = await readChannel!.ReadAsync(buffer, cts.Token);
                 if (read == 0) break;
-                readBytes += read;
+                allReceived.Write(buffer, 0, read);
             }
         }
         catch { /* ignore read errors after write completes */ }
 
-        // Just verify we transferred some data
-        Assert.True(readBytes > 0, "Should have transferred some data");
+        var receivedData = allReceived.ToArray();
+        Assert.True(receivedData.Length > 0, "Should have transferred some data");
+
+        // Verify each 256-byte block is a valid fill of a single threadId
+        var completeBlocks = receivedData.Length / messageSize;
+        for (int i = 0; i < completeBlocks; i++)
+        {
+            var block = receivedData.AsSpan(i * messageSize, messageSize);
+            var expected = block[0];
+            Assert.InRange(expected, 0, threadCount - 1);
+            for (int j = 1; j < messageSize; j++)
+            {
+                Assert.Equal(expected, block[j]);
+            }
+        }
 
         cts.Cancel();
     }
@@ -651,13 +664,16 @@ public class NegativeTests
 
     #region Edge Case Tests
 
-    [Fact(Timeout = 120000)]
-    public async Task VerySmallCredits_StillWorks()
+    [Theory(Timeout = 120000)]
+    [InlineData(0)]
+    [InlineData(5)]
+    [InlineData(50)]
+    public async Task VerySmallCredits_StillWorks(int latencyMs)
     {
-        await using var pipe = new DuplexPipe();
+        await using var pipe = new DuplexPipe(latencyMs);
         
         await using var initiator = await TestMuxHelper.CreateMuxAsync(pipe.Stream1,
-            new MultiplexerOptions { StreamFactory = _ => null!, DefaultChannelOptions = new DefaultChannelOptions { MinCredits = 64, MaxCredits = 64 } }); // Very small
+            new MultiplexerOptions { StreamFactory = _ => null!, DefaultChannelOptions = new DefaultChannelOptions { MinCredits = 64, MaxCredits = 64 } });
         await using var acceptor = await TestMuxHelper.CreateMuxAsync(pipe.Stream2,
             new MultiplexerOptions { StreamFactory = _ => null!, DefaultChannelOptions = new DefaultChannelOptions { MinCredits = 64, MaxCredits = 64 } });
 
@@ -665,7 +681,7 @@ public class NegativeTests
         
         var initiatorTask = initiator.Start(cts.Token);
         var acceptorTask = acceptor.Start(cts.Token);
-        await Task.Delay(100);
+        await Task.WhenAll(initiator.WaitForReadyAsync(cts.Token), acceptor.WaitForReadyAsync(cts.Token));
 
         ReadChannel? readChannel = null;
         var acceptTask = Task.Run(async () =>

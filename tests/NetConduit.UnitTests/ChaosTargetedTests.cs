@@ -6,7 +6,6 @@ using System.Security.Cryptography;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using System.Text.Json.Serialization;
-using NetConduit.Internal;
 using NetConduit.Transits;
 
 namespace NetConduit.UnitTests;
@@ -60,8 +59,8 @@ public partial class ChaosTargetedTests
             }
         })).ToArray();
 
-        // Reader
-        var totalReceived = 0L;
+        // Reader - collect all data and verify message integrity
+        var allReceived = new MemoryStream();
         var readerTask = Task.Run(async () =>
         {
             var buf = new byte[65536];
@@ -71,7 +70,7 @@ public partial class ChaosTargetedTests
                 {
                     var n = await readChannel.ReadAsync(buf, cts.Token);
                     if (n == 0) break;
-                    Interlocked.Add(ref totalReceived, n);
+                    allReceived.Write(buf, 0, n);
                 }
                 catch (OperationCanceledException) { break; }
                 catch { break; }
@@ -79,13 +78,26 @@ public partial class ChaosTargetedTests
         });
 
         await Task.WhenAll(writerTasks);
+        await writeChannel.CloseAsync(cts.Token);
 
-        // Give reader time to drain
-        await Task.Delay(2000);
-        await cts.CancelAsync();
+        await readerTask;
 
+        var receivedData = allReceived.ToArray();
         Assert.Empty(errors);
-        Assert.True(totalSent > 0);
+        Assert.True(receivedData.Length > 0);
+
+        // Verify each 512-byte block is a valid consistent fill
+        var completeBlocks = receivedData.Length / 512;
+        for (int i = 0; i < completeBlocks; i++)
+        {
+            var block = receivedData.AsSpan(i * 512, 512);
+            var expected = block[0];
+            Assert.True(expected < 16, $"Invalid thread id byte: {expected}");
+            for (int j = 1; j < 512; j++)
+            {
+                Assert.Equal(expected, block[j]);
+            }
+        }
     }
 
     #endregion
@@ -119,6 +131,7 @@ public partial class ChaosTargetedTests
                     var buf = new byte[1];
                     var n = await read.ReadAsync(buf, cts.Token);
                     Assert.Equal(1, n);
+                    Assert.Equal(0x01, buf[0]);
 
                     await write.DisposeAsync();
                     await read.DisposeAsync();
@@ -143,6 +156,7 @@ public partial class ChaosTargetedTests
                     var buf = new byte[1];
                     var n = await read.ReadAsync(buf, cts.Token);
                     Assert.Equal(1, n);
+                    Assert.Equal(0x02, buf[0]);
 
                     await write.DisposeAsync();
                     await read.DisposeAsync();
@@ -1250,36 +1264,6 @@ public partial class ChaosTargetedTests
         await Task.WhenAll(tasks);
         await cts.CancelAsync();
 
-        Assert.Empty(errors);
-    }
-
-    #endregion
-
-    #region Reconnection Buffer Chaos (Bug 10)
-
-    [Fact(Timeout = 60000)]
-    public async Task Chaos_ChannelSyncState_ConcurrentRecordAndAcknowledge()
-    {
-        var state = new ChannelSyncState(4096);
-        state.StartRecording();
-
-        var errors = new ConcurrentBag<string>();
-
-        // Multiple threads recording sends
-        var writers = Enumerable.Range(0, 4).Select(_ => Task.Run(() =>
-        {
-            var data = new byte[128];
-            for (int i = 0; i < 100; i++)
-            {
-                try { state.RecordSend(data); }
-                catch (Exception ex) { errors.Add($"write: {ex.Message}"); break; }
-            }
-        })).ToArray();
-
-        await Task.WhenAll(writers);
-
-        // Total should be 4 * 100 * 128
-        Assert.Equal(4 * 100 * 128, state.BytesSent);
         Assert.Empty(errors);
     }
 

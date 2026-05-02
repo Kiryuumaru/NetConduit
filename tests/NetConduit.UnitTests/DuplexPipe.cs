@@ -6,6 +6,7 @@ namespace NetConduit.UnitTests;
 
 /// <summary>
 /// A pair of connected in-memory streams for testing.
+/// Optionally injects per-operation latency to simulate slow transports.
 /// </summary>
 public sealed class DuplexPipe : IAsyncDisposable
 {
@@ -15,14 +16,17 @@ public sealed class DuplexPipe : IAsyncDisposable
     public Stream Stream1 { get; }
     public Stream Stream2 { get; }
 
-    public DuplexPipe()
+    public DuplexPipe(int latencyMs = 0)
     {
         var options = new PipeOptions(pauseWriterThreshold: 0, resumeWriterThreshold: 0);
         _pipe1 = new Pipe(options);
         _pipe2 = new Pipe(options);
         
-        Stream1 = new DuplexPipeStream(_pipe1.Reader, _pipe2.Writer);
-        Stream2 = new DuplexPipeStream(_pipe2.Reader, _pipe1.Writer);
+        Stream raw1 = new DuplexPipeStream(_pipe1.Reader, _pipe2.Writer);
+        Stream raw2 = new DuplexPipeStream(_pipe2.Reader, _pipe1.Writer);
+        
+        Stream1 = latencyMs > 0 ? new LatencyStream(raw1, latencyMs) : raw1;
+        Stream2 = latencyMs > 0 ? new LatencyStream(raw2, latencyMs) : raw2;
     }
 
     public async ValueTask DisposeAsync()
@@ -132,12 +136,14 @@ public sealed class DuplexPipe : IAsyncDisposable
 public sealed class ReconnectableDuplexPipe : IAsyncDisposable
 {
     private readonly object _lock = new();
+    private readonly int _latencyMs;
     private DuplexPipe _current;
     private bool _reconnectPending;
 
-    public ReconnectableDuplexPipe()
+    public ReconnectableDuplexPipe(int latencyMs = 0)
     {
-        _current = new DuplexPipe();
+        _latencyMs = latencyMs;
+        _current = new DuplexPipe(latencyMs);
     }
 
     public Task<IStreamPair> CreateStream1(CancellationToken ct)
@@ -146,7 +152,7 @@ public sealed class ReconnectableDuplexPipe : IAsyncDisposable
         {
             if (_reconnectPending)
             {
-                _current = new DuplexPipe();
+                _current = new DuplexPipe(_latencyMs);
                 _reconnectPending = false;
             }
             return Task.FromResult<IStreamPair>(new StreamPair(_current.Stream1));
@@ -159,7 +165,7 @@ public sealed class ReconnectableDuplexPipe : IAsyncDisposable
         {
             if (_reconnectPending)
             {
-                _current = new DuplexPipe();
+                _current = new DuplexPipe(_latencyMs);
                 _reconnectPending = false;
             }
             return Task.FromResult<IStreamPair>(new StreamPair(_current.Stream2));
@@ -259,13 +265,15 @@ public sealed class HoldableWriteStream : Stream
 public sealed class InFlightLossDuplexPipe : IAsyncDisposable
 {
     private readonly object _lock = new();
+    private readonly int _latencyMs;
     private DuplexPipe _current;
     private bool _reconnectPending;
     private HoldableWriteStream? _holdableWrite;
 
-    public InFlightLossDuplexPipe()
+    public InFlightLossDuplexPipe(int latencyMs = 0)
     {
-        _current = new DuplexPipe();
+        _latencyMs = latencyMs;
+        _current = new DuplexPipe(latencyMs);
     }
 
     public Task<IStreamPair> CreateStream1(CancellationToken ct)
@@ -274,7 +282,7 @@ public sealed class InFlightLossDuplexPipe : IAsyncDisposable
         {
             if (_reconnectPending)
             {
-                _current = new DuplexPipe();
+                _current = new DuplexPipe(_latencyMs);
                 _reconnectPending = false;
             }
             _holdableWrite = new HoldableWriteStream(_current.Stream1);
@@ -288,7 +296,7 @@ public sealed class InFlightLossDuplexPipe : IAsyncDisposable
         {
             if (_reconnectPending)
             {
-                _current = new DuplexPipe();
+                _current = new DuplexPipe(_latencyMs);
                 _reconnectPending = false;
             }
             return Task.FromResult<IStreamPair>(new StreamPair(_current.Stream2));
@@ -312,6 +320,64 @@ public sealed class InFlightLossDuplexPipe : IAsyncDisposable
     public async ValueTask DisposeAsync()
     {
         await _current.DisposeAsync();
+    }
+}
+
+/// <summary>
+/// Stream wrapper that injects a fixed delay before every read and write,
+/// simulating network latency on a transport.
+/// </summary>
+public sealed class LatencyStream(Stream inner, int latencyMs) : Stream
+{
+    public override bool CanRead => inner.CanRead;
+    public override bool CanSeek => false;
+    public override bool CanWrite => inner.CanWrite;
+    public override long Length => throw new NotSupportedException();
+    public override long Position
+    {
+        get => throw new NotSupportedException();
+        set => throw new NotSupportedException();
+    }
+
+    public override void Flush() => inner.Flush();
+
+    public override async Task FlushAsync(CancellationToken cancellationToken)
+    {
+        await Task.Delay(latencyMs, cancellationToken);
+        await inner.FlushAsync(cancellationToken);
+    }
+
+    public override int Read(byte[] buffer, int offset, int count)
+        => ReadAsync(buffer, offset, count).GetAwaiter().GetResult();
+
+    public override async Task<int> ReadAsync(byte[] buffer, int offset, int count, CancellationToken cancellationToken)
+    {
+        await Task.Delay(latencyMs, cancellationToken);
+        return await inner.ReadAsync(buffer, offset, count, cancellationToken);
+    }
+
+    public override async ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancellationToken = default)
+    {
+        await Task.Delay(latencyMs, cancellationToken);
+        return await inner.ReadAsync(buffer, cancellationToken);
+    }
+
+    public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();
+    public override void SetLength(long value) => throw new NotSupportedException();
+
+    public override void Write(byte[] buffer, int offset, int count)
+        => WriteAsync(buffer, offset, count).GetAwaiter().GetResult();
+
+    public override async Task WriteAsync(byte[] buffer, int offset, int count, CancellationToken cancellationToken)
+    {
+        await Task.Delay(latencyMs, cancellationToken);
+        await inner.WriteAsync(buffer, offset, count, cancellationToken);
+    }
+
+    public override async ValueTask WriteAsync(ReadOnlyMemory<byte> buffer, CancellationToken cancellationToken = default)
+    {
+        await Task.Delay(latencyMs, cancellationToken);
+        await inner.WriteAsync(buffer, cancellationToken);
     }
 }
 

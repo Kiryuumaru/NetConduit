@@ -260,95 +260,13 @@ public class ReconnectionTests
             totalRead += read;
         }
 
-        // Verify sync state tracked the bytes
-        Assert.Equal(1000, writeChannel.SyncState.BytesSent);
+        // Verify byte tracking
+        Assert.Equal(1000, writeChannel.BytesSent);
         Assert.Equal(1000, readChannel!.SyncState.BytesReceived);
         Assert.Equal(data, received);
 
         cts.Cancel();
         await Task.WhenAll(run1.ContinueWith(_ => { }), run2.ContinueWith(_ => { }));
-    }
-
-    [Fact(Timeout = 120000)]
-    public async Task ChannelSyncState_BuffersUnacknowledgedData()
-    {
-        // Arrange
-        var syncState = new NetConduit.Internal.ChannelSyncState(1024 * 1024);
-        syncState.StartRecording();
-
-        // Send some data
-        var data1 = new byte[100];
-        var data2 = new byte[200];
-        Random.Shared.NextBytes(data1);
-        Random.Shared.NextBytes(data2);
-
-        syncState.RecordSend(data1);
-        syncState.RecordSend(data2);
-
-        // Verify bytes sent
-        Assert.Equal(300, syncState.BytesSent);
-        Assert.Equal(0, syncState.BytesAcked);
-
-        // Get unacknowledged data from position 0
-        var replay = syncState.GetUnacknowledgedDataFrom(0);
-        Assert.Equal(300, replay.Length);
-        Assert.Equal(data1.Concat(data2).ToArray(), replay);
-
-        // Acknowledge first 100 bytes
-        syncState.Acknowledge(100);
-        Assert.Equal(100, syncState.BytesAcked);
-
-        // Get unacknowledged data - should only be data2
-        replay = syncState.GetUnacknowledgedDataFrom(100);
-        Assert.Equal(200, replay.Length);
-        Assert.Equal(data2, replay);
-    }
-
-    [Fact(Timeout = 120000)]
-    public async Task ChannelSyncState_GetUnacknowledgedDataFrom_PartialSegment()
-    {
-        // Arrange
-        var syncState = new NetConduit.Internal.ChannelSyncState(1024 * 1024);
-        syncState.StartRecording();
-
-        var data = new byte[100];
-        for (int i = 0; i < 100; i++) data[i] = (byte)i;
-        syncState.RecordSend(data);
-
-        // Get data starting from position 50
-        var replay = syncState.GetUnacknowledgedDataFrom(50);
-        
-        Assert.Equal(50, replay.Length);
-        for (int i = 0; i < 50; i++)
-        {
-            Assert.Equal((byte)(i + 50), replay[i]);
-        }
-    }
-
-    [Fact(Timeout = 120000)]
-    public async Task ChannelSyncState_BufferEviction_WhenFull()
-    {
-        // Arrange - small buffer of 100 bytes
-        var syncState = new NetConduit.Internal.ChannelSyncState(100);
-        syncState.StartRecording();
-
-        // Send 60 bytes
-        var data1 = new byte[60];
-        for (int i = 0; i < 60; i++) data1[i] = (byte)i;
-        syncState.RecordSend(data1);
-
-        // Send another 60 bytes - should evict first segment
-        var data2 = new byte[60];
-        for (int i = 0; i < 60; i++) data2[i] = (byte)(i + 100);
-        syncState.RecordSend(data2);
-
-        // Ring buffer (100 bytes) keeps as much data as possible.
-        // 120 total sent, ring holds 100, oldest 20 bytes evicted.
-        Assert.True(syncState.BytesAcked >= 20, "Oldest bytes should be evicted and acked");
-        
-        // Replay from ack position should return remaining ring contents
-        var replay = syncState.GetUnacknowledgedDataFrom(syncState.BytesAcked);
-        Assert.True(replay.Length <= 100, "Should not exceed ring capacity");
     }
 
     [Fact(Timeout = 120000)]
@@ -423,172 +341,6 @@ public class ReconnectionTests
     }
 
     [Fact(Timeout = 120000)]
-    public async Task ReconnectionSync_ReplaysMissedData_NoCorruption()
-    {
-        // This test verifies that the reconnection sync mechanism correctly
-        // replays missed data without corruption or gaps.
-        
-        // Simulate: Sender sent 1000 bytes, receiver only got 600 bytes before disconnect
-        // After reconnect, the remaining 400 bytes should be replayed correctly
-        
-        var syncState = new NetConduit.Internal.ChannelSyncState(1024 * 1024);
-        syncState.StartRecording();
-        
-        // Create test data with recognizable pattern
-        var totalBytes = 1000;
-        var allData = new byte[totalBytes];
-        for (int i = 0; i < totalBytes; i++)
-            allData[i] = (byte)(i % 256);
-        
-        // Simulate sending in chunks (as WriteChannel does)
-        var chunkSize = 100;
-        for (int offset = 0; offset < totalBytes; offset += chunkSize)
-        {
-            var chunk = new byte[Math.Min(chunkSize, totalBytes - offset)];
-            Array.Copy(allData, offset, chunk, 0, chunk.Length);
-            syncState.RecordSend(chunk);
-        }
-        
-        Assert.Equal(totalBytes, syncState.BytesSent);
-        
-        // Simulate: remote received only first 600 bytes
-        var receivedByRemote = 600;
-        
-        // Get replay data (what remote missed)
-        var replayData = syncState.GetUnacknowledgedDataFrom(receivedByRemote);
-        
-        // Should be exactly 400 bytes
-        Assert.Equal(400, replayData.Length);
-        
-        // Verify replay data matches the missing portion exactly
-        for (int i = 0; i < replayData.Length; i++)
-        {
-            var expectedByte = (byte)((receivedByRemote + i) % 256);
-            Assert.Equal(expectedByte, replayData[i]);
-        }
-        
-        // Simulate: combine what remote had + replay = complete data
-        var completeData = new byte[totalBytes];
-        Array.Copy(allData, 0, completeData, 0, receivedByRemote); // What remote already had
-        Array.Copy(replayData, 0, completeData, receivedByRemote, replayData.Length); // Replayed data
-        
-        // Verify complete data matches original
-        Assert.Equal(allData, completeData);
-    }
-
-    [Fact(Timeout = 120000)]
-    public async Task ReconnectionSync_MultipleChunks_PartialAck_CorrectReplay()
-    {
-        // Test replay when ack happens mid-chunk
-        var syncState = new NetConduit.Internal.ChannelSyncState(1024 * 1024);
-        syncState.StartRecording();
-        
-        // Send 3 chunks of 100 bytes each
-        var chunk1 = Enumerable.Range(0, 100).Select(i => (byte)i).ToArray();
-        var chunk2 = Enumerable.Range(100, 100).Select(i => (byte)i).ToArray();
-        var chunk3 = Enumerable.Range(200, 100).Select(i => (byte)(i % 256)).ToArray();
-        
-        syncState.RecordSend(chunk1);
-        syncState.RecordSend(chunk2);
-        syncState.RecordSend(chunk3);
-        
-        Assert.Equal(300, syncState.BytesSent);
-        
-        // Remote received 150 bytes (all of chunk1, half of chunk2)
-        var replayData = syncState.GetUnacknowledgedDataFrom(150);
-        
-        // Should be 150 bytes (second half of chunk2 + all of chunk3)
-        Assert.Equal(150, replayData.Length);
-        
-        // Verify first 50 bytes are second half of chunk2
-        for (int i = 0; i < 50; i++)
-        {
-            Assert.Equal((byte)(150 + i), replayData[i]);
-        }
-        
-        // Verify next 100 bytes are chunk3
-        for (int i = 0; i < 100; i++)
-        {
-            Assert.Equal((byte)((200 + i) % 256), replayData[50 + i]);
-        }
-    }
-
-    [Fact(Timeout = 120000)]
-    public async Task ReconnectionSync_ZeroBytesReceived_ReplaysAll()
-    {
-        // Edge case: remote received nothing (immediate disconnect)
-        var syncState = new NetConduit.Internal.ChannelSyncState(1024 * 1024);
-        syncState.StartRecording();
-        
-        var data = new byte[500];
-        for (int i = 0; i < 500; i++) data[i] = (byte)(i % 256);
-        syncState.RecordSend(data);
-        
-        var replayData = syncState.GetUnacknowledgedDataFrom(0);
-        
-        Assert.Equal(500, replayData.Length);
-        Assert.Equal(data, replayData);
-    }
-
-    [Fact(Timeout = 120000)]
-    public async Task ReconnectionSync_AllBytesReceived_ReplaysNothing()
-    {
-        // Edge case: remote received everything (no replay needed)
-        var syncState = new NetConduit.Internal.ChannelSyncState(1024 * 1024);
-        syncState.StartRecording();
-        
-        var data = new byte[500];
-        syncState.RecordSend(data);
-        
-        var replayData = syncState.GetUnacknowledgedDataFrom(500);
-        
-        Assert.Empty(replayData);
-    }
-
-    [Fact(Timeout = 120000)]
-    public async Task ReconnectionSync_LargeDataWithPattern_NoCorruption()
-    {
-        // Stress test: 5MB of data with complex pattern
-        var syncState = new NetConduit.Internal.ChannelSyncState(10 * 1024 * 1024); // 10MB buffer
-        syncState.StartRecording();
-        
-        var totalSize = 5 * 1024 * 1024; // 5MB
-        var allData = new byte[totalSize];
-        
-        // Create pattern: each byte = (position * 7 + 13) % 256
-        for (int i = 0; i < totalSize; i++)
-            allData[i] = (byte)((i * 7 + 13) % 256);
-        
-        // Send in random-ish chunk sizes
-        var random = new Random(42); // Fixed seed for reproducibility
-        var offset = 0;
-        while (offset < totalSize)
-        {
-            var chunkSize = Math.Min(random.Next(1000, 100000), totalSize - offset);
-            var chunk = new byte[chunkSize];
-            Array.Copy(allData, offset, chunk, 0, chunkSize);
-            syncState.RecordSend(chunk);
-            offset += chunkSize;
-        }
-        
-        Assert.Equal(totalSize, syncState.BytesSent);
-        
-        // Simulate disconnect at random point
-        var disconnectPoint = 2_500_000; // 2.5MB received
-        var replayData = syncState.GetUnacknowledgedDataFrom(disconnectPoint);
-        
-        Assert.Equal(totalSize - disconnectPoint, replayData.Length);
-        
-        // Verify every byte of replay matches expected pattern
-        for (int i = 0; i < replayData.Length; i++)
-        {
-            var position = disconnectPoint + i;
-            var expected = (byte)((position * 7 + 13) % 256);
-            Assert.Equal(expected, replayData[i]);
-        }
-    }
-
-    [Fact(Timeout = 120000)]
     public async Task WriteChannel_SyncState_TracksCorrectly_ThroughMultiplexer()
     {
         // Integration test: verify SyncState is correctly updated through actual channel writes
@@ -635,8 +387,8 @@ public class ReconnectionTests
             totalRead += read;
         }
 
-        // Verify SyncState tracked correctly
-        Assert.Equal(10000, writeChannel.SyncState.BytesSent);
+        // Verify byte tracking
+        Assert.Equal(10000, writeChannel.BytesSent);
         Assert.Equal(10000, readChannel!.SyncState.BytesReceived);
         
         // Verify data integrity
@@ -645,118 +397,6 @@ public class ReconnectionTests
         cts.Cancel();
         await Task.WhenAll(run1.ContinueWith(_ => { }), run2.ContinueWith(_ => { }));
     }
-
-    #region SyncState Ring Buffer Behavior
-
-    [Fact]
-    public void SyncState_BufferOverflow_DropsOldData()
-    {
-        var smallBuffer = new NetConduit.Internal.ChannelSyncState(1024);
-        smallBuffer.StartRecording();
-
-        var data1 = new byte[512];
-        data1.AsSpan().Fill(0xAA);
-        smallBuffer.RecordSend(data1);
-
-        var data2 = new byte[512];
-        data2.AsSpan().Fill(0xBB);
-        smallBuffer.RecordSend(data2);
-
-        var data3 = new byte[512];
-        data3.AsSpan().Fill(0xCC);
-        smallBuffer.RecordSend(data3);
-
-        Assert.Equal(1536, smallBuffer.BytesSent);
-    }
-
-    [Fact]
-    public void SyncState_ExactBufferFit_NoDataLoss()
-    {
-        var state = new NetConduit.Internal.ChannelSyncState(1024);
-        state.StartRecording();
-
-        var data = new byte[1024];
-        for (int i = 0; i < 1024; i++) data[i] = (byte)(i & 0xFF);
-        state.RecordSend(data);
-
-        Assert.Equal(1024, state.BytesSent);
-
-        var unacked = state.GetUnacknowledgedDataFrom(0);
-        Assert.Equal(1024, unacked.Length);
-    }
-
-    [Fact]
-    public void SyncState_JustOverBuffer_DropsOldest()
-    {
-        var state = new NetConduit.Internal.ChannelSyncState(1024);
-        state.StartRecording();
-
-        var data1 = new byte[512];
-        data1.AsSpan().Fill(0xAA);
-        state.RecordSend(data1);
-
-        var data2 = new byte[512];
-        data2.AsSpan().Fill(0xBB);
-        state.RecordSend(data2);
-
-        var data3 = new byte[1];
-        data3[0] = 0xCC;
-        state.RecordSend(data3);
-
-        Assert.Equal(1025, state.BytesSent);
-
-        var unacked = state.GetUnacknowledgedDataFrom(0);
-    }
-
-    [Fact]
-    public void SyncState_MultipleOverflows_OnlyTailKept()
-    {
-        var state = new NetConduit.Internal.ChannelSyncState(256);
-        state.StartRecording();
-
-        for (int i = 0; i < 4; i++)
-        {
-            var data = new byte[256];
-            data.AsSpan().Fill((byte)(i + 1));
-            state.RecordSend(data);
-        }
-
-        Assert.Equal(1024, state.BytesSent);
-
-        var unacked = state.GetUnacknowledgedDataFrom(768);
-        Assert.Equal(256, unacked.Length);
-        Assert.All(unacked, b => Assert.Equal(4, b));
-    }
-
-    [Fact]
-    public void SyncState_AcknowledgeThenRecord_FreesPreviousData()
-    {
-        var state = new NetConduit.Internal.ChannelSyncState(1024);
-        state.StartRecording();
-
-        var data = new byte[512];
-        state.RecordSend(data);
-        Assert.Equal(512, state.BytesSent);
-
-        state.Acknowledge(512);
-        Assert.Equal(512, state.BytesAcked);
-
-        var moreData = new byte[1024];
-        state.RecordSend(moreData);
-        Assert.Equal(1536, state.BytesSent);
-    }
-
-    [Fact]
-    public void SyncState_NotRecording_NoBuffer()
-    {
-        var state = new NetConduit.Internal.ChannelSyncState(1024);
-
-        var data = new byte[100];
-        state.RecordSend(data);
-        Assert.Equal(100, state.BytesSent);
-    }
-
-    #endregion
 
     #region Reconnect ACK Position Sync
 
@@ -790,8 +430,9 @@ public class ReconnectionTests
             totalRead += read;
         }
         Assert.Equal(payload.Length, totalRead);
+        Assert.Equal(payload, buf[..totalRead]);
         Assert.Equal(4096L, readChannel.SyncState.BytesReceived);
-        Assert.Equal(0L, writeChannel.SyncState.BytesAcked);
+        // Mux ring tracks ack at mux level, not per-channel
 
         // Simulate reconnect protocol: craft a RECONNECT_ACK with the peer's positions
         await using var reconnectPipe = new DuplexPipe();
@@ -827,7 +468,7 @@ public class ReconnectionTests
 
         await reconnectTask;
 
-        Assert.Equal(4096L, writeChannel.SyncState.BytesAcked);
+        // Mux ring ack is global, not per-channel — reconnect succeeded
 
         await muxA.DisposeAsync();
         await muxB.DisposeAsync();

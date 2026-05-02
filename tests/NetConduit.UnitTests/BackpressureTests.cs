@@ -46,6 +46,7 @@ public class BackpressureTests
 
         // Send more data than credits allow
         var largeData = new byte[4096]; // 4x the credits
+        Random.Shared.NextBytes(largeData);
         var writeStarted = DateTime.UtcNow;
         
         var writeTask = Task.Run(async () =>
@@ -61,21 +62,21 @@ public class BackpressureTests
 
         // Read data in multiple chunks and verify credits are granted
         var totalRead = 0;
+        var received = new byte[4096];
         var buffer = new byte[512]; // Read in chunks
-        while (totalRead < 4096 && !writeTask.IsCompleted)
+        while (totalRead < 4096)
         {
             var read = await readChannel!.ReadAsync(buffer, cts.Token);
             if (read == 0) break;
+            Buffer.BlockCopy(buffer, 0, received, totalRead, read);
             totalRead += read;
-            
-            // Give time for credit grant to propagate
-            await Task.Delay(50);
         }
 
         // Write should eventually complete
         await writeTask.WaitAsync(TimeSpan.FromSeconds(10));
 
         Assert.True(writeTask.IsCompleted);
+        Assert.Equal(largeData, received);
 
         cts.Cancel();
     }
@@ -165,11 +166,15 @@ public class BackpressureTests
         var creditsBeforeRead = writeChannel.Stats.CreditsGranted;
 
         // Send data to consume credits
-        await writeChannel.WriteAsync(new byte[512], cts.Token);
+        var sentData = new byte[512];
+        Random.Shared.NextBytes(sentData);
+        await writeChannel.WriteAsync(sentData, cts.Token);
         
         // Read data to trigger auto-grant
         var buffer = new byte[512];
         await readChannel!.ReadExactlyAsync(buffer, cts.Token);
+
+        Assert.Equal(sentData, buffer);
 
         await Task.Delay(100); // Wait for credit grant to arrive
 
@@ -217,9 +222,12 @@ public class BackpressureTests
             cts.Token);
         await acceptTask;
 
+        var sentData = new byte[1000];
+        Random.Shared.NextBytes(sentData);
+
         var writeTask = Task.Run(async () =>
         {
-            await writeChannel.WriteAsync(new byte[1000], cts.Token);
+            await writeChannel.WriteAsync(sentData, cts.Token);
         });
 
         // Wait a bit - should still be waiting (only 100 initial credits, but writing 1000 bytes)
@@ -228,25 +236,20 @@ public class BackpressureTests
 
         // Read to unblock - read in small chunks to trigger credit grants
         var totalRead = 0;
+        var received = new byte[1000];
         var buffer = new byte[100];
-        while (totalRead < 1000 && !writeTask.IsCompleted)
+        while (totalRead < 1000)
         {
-            try 
-            {
-                using var readCts = new CancellationTokenSource(TimeSpan.FromSeconds(2));
-                var read = await readChannel!.ReadAsync(buffer, readCts.Token);
-                if (read == 0) break;
-                totalRead += read;
-                await Task.Delay(50); // Allow credit grant to propagate
-            }
-            catch (OperationCanceledException)
-            {
-                break;
-            }
+            var read = await readChannel!.ReadAsync(buffer, cts.Token);
+            if (read == 0) break;
+            Buffer.BlockCopy(buffer, 0, received, totalRead, read);
+            totalRead += read;
         }
 
         // Wait for write to complete after reading all data
         await writeTask.WaitAsync(TimeSpan.FromSeconds(5));
+
+        Assert.Equal(sentData, received);
 
         // Cancel to cleanup
         cts.Cancel();
@@ -324,22 +327,31 @@ public class BackpressureTests
         var writeChannel = await muxA.OpenChannelAsync("credit_1byte", cts.Token);
         var readChannel = await muxB.AcceptChannelAsync("credit_1byte", cts.Token);
 
-        var drainTask = Task.Run(async () =>
+        const int count = 5000;
+        var readTask = Task.Run(async () =>
         {
-            var buf = new byte[65536];
-            while (!cts.Token.IsCancellationRequested)
+            var received = new byte[count];
+            var totalRead = 0;
+            while (totalRead < count)
             {
-                try { if (await readChannel.ReadAsync(buf, cts.Token) == 0) break; }
-                catch { break; }
+                var n = await readChannel.ReadAsync(received.AsMemory(totalRead), cts.Token);
+                if (n == 0) break;
+                totalRead += n;
             }
+            return received;
         });
 
-        for (int i = 0; i < 5000; i++)
+        for (int i = 0; i < count; i++)
         {
             await writeChannel.WriteAsync(new byte[] { (byte)(i & 0xFF) }, cts.Token);
         }
+        await writeChannel.CloseAsync(cts.Token);
 
-        await cts.CancelAsync();
+        var result = await readTask;
+        for (int i = 0; i < count; i++)
+        {
+            Assert.Equal((byte)(i & 0xFF), result[i]);
+        }
     }
 
     [Fact(Timeout = 60000)]
@@ -359,23 +371,36 @@ public class BackpressureTests
         var writeChannel = await muxA.OpenChannelAsync("credit_exact", cts.Token);
         var readChannel = await muxB.AcceptChannelAsync("credit_exact", cts.Token);
 
-        var drainTask = Task.Run(async () =>
+        var data = new byte[1024];
+        Random.Shared.NextBytes(data);
+        const int iterations = 100;
+        var totalExpected = data.Length * iterations;
+
+        var readTask = Task.Run(async () =>
         {
-            var buf = new byte[65536];
-            while (!cts.Token.IsCancellationRequested)
+            var received = new byte[totalExpected];
+            var totalRead = 0;
+            while (totalRead < totalExpected)
             {
-                try { if (await readChannel.ReadAsync(buf, cts.Token) == 0) break; }
-                catch { break; }
+                var n = await readChannel.ReadAsync(received.AsMemory(totalRead), cts.Token);
+                if (n == 0) break;
+                totalRead += n;
             }
+            return (received, totalRead);
         });
 
-        var data = new byte[1024];
-        for (int i = 0; i < 100; i++)
+        for (int i = 0; i < iterations; i++)
         {
             await writeChannel.WriteAsync(data, cts.Token);
         }
+        await writeChannel.CloseAsync(cts.Token);
 
-        await cts.CancelAsync();
+        var (received, receivedLen) = await readTask;
+        Assert.Equal(totalExpected, receivedLen);
+        for (int i = 0; i < iterations; i++)
+        {
+            Assert.Equal(data, received.AsSpan(i * data.Length, data.Length).ToArray());
+        }
     }
 
     [Fact(Timeout = 60000)]
@@ -401,10 +426,13 @@ public class BackpressureTests
 
     #region Credit Starvation Events
 
-    [Fact(Timeout = 30000)]
-    public async Task CreditStarvation_EventFires()
+    [Theory(Timeout = 30000)]
+    [InlineData(0)]
+    [InlineData(5)]
+    [InlineData(50)]
+    public async Task CreditStarvation_EventFires(int latencyMs)
     {
-        await using var pipe = new DuplexPipe();
+        await using var pipe = new DuplexPipe(latencyMs);
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
 
         var opts = new MultiplexerOptions
@@ -425,33 +453,39 @@ public class BackpressureTests
         var starvationCount = 0;
         writeChannel.OnCreditStarvation += () => Interlocked.Increment(ref starvationCount);
 
-        var drainTask = Task.Run(async () =>
-        {
-            var buf = new byte[64];
-            while (!cts.Token.IsCancellationRequested)
-            {
-                try
-                {
-                    var n = await readChannel.ReadAsync(buf, cts.Token);
-                    if (n == 0) break;
-                    await Task.Delay(10, cts.Token);
-                }
-                catch (OperationCanceledException) { break; }
-                catch { break; }
-            }
-        });
-
+        const int iterations = 20;
         var bigData = new byte[8192];
         Random.Shared.NextBytes(bigData);
-        for (int i = 0; i < 20; i++)
+        var totalExpected = iterations * bigData.Length;
+
+        var drainTask = Task.Run(async () =>
         {
-            try
+            var received = new byte[totalExpected];
+            var totalRead = 0;
+            while (totalRead < totalExpected)
             {
-                await writeChannel.WriteAsync(bigData, cts.Token);
+                var n = await readChannel.ReadAsync(received.AsMemory(totalRead), cts.Token);
+                if (n == 0) break;
+                totalRead += n;
+                await Task.Delay(10, cts.Token);
             }
-            catch (OperationCanceledException) { break; }
-            catch (TimeoutException) { break; }
+            return (received, totalRead);
+        });
+
+        for (int i = 0; i < iterations; i++)
+        {
+            await writeChannel.WriteAsync(bigData, cts.Token);
         }
+        await writeChannel.CloseAsync(cts.Token);
+
+        var (receivedData, receivedLen) = await drainTask;
+
+        Assert.Equal(totalExpected, receivedLen);
+        for (int i = 0; i < iterations; i++)
+        {
+            Assert.Equal(bigData, receivedData.AsSpan(i * bigData.Length, bigData.Length).ToArray());
+        }
+        Assert.True(starvationCount > 0, $"Expected credit starvation events, got {starvationCount}");
 
         await cts.CancelAsync();
     }
@@ -476,30 +510,43 @@ public class BackpressureTests
         var restoredDurations = new ConcurrentBag<TimeSpan>();
         writeChannel.OnCreditRestored += duration => restoredDurations.Add(duration);
 
+        var data = new byte[4096];
+        Random.Shared.NextBytes(data);
+        const int iterations = 10;
+        var totalExpected = data.Length * iterations;
+
         var drainTask = Task.Run(async () =>
         {
-            var buf = new byte[128];
-            while (!cts.Token.IsCancellationRequested)
+            var received = new byte[totalExpected];
+            var totalRead = 0;
+            while (totalRead < totalExpected)
             {
                 try
                 {
-                    var n = await readChannel.ReadAsync(buf, cts.Token);
+                    var n = await readChannel.ReadAsync(received.AsMemory(totalRead), cts.Token);
                     if (n == 0) break;
+                    totalRead += n;
                     await Task.Delay(5, cts.Token);
                 }
                 catch { break; }
             }
+            return (received, totalRead);
         });
 
-        var data = new byte[4096];
-        for (int i = 0; i < 10; i++)
+        for (int i = 0; i < iterations; i++)
         {
             try { await writeChannel.WriteAsync(data, cts.Token); }
             catch (OperationCanceledException) { break; }
             catch (TimeoutException) { break; }
         }
+        await writeChannel.CloseAsync(cts.Token);
 
-        await cts.CancelAsync();
+        var (received, receivedLen) = await drainTask;
+        Assert.Equal(totalExpected, receivedLen);
+        for (int i = 0; i < iterations; i++)
+        {
+            Assert.Equal(data, received.AsSpan(i * data.Length, data.Length).ToArray());
+        }
 
         foreach (var d in restoredDurations)
             Assert.True(d >= TimeSpan.Zero, $"Duration was negative: {d}");
@@ -525,18 +572,119 @@ public class BackpressureTests
         writeChannel.OnCreditStarvation += () => throw new InvalidOperationException("test exception");
         writeChannel.OnCreditRestored += _ => throw new InvalidOperationException("restore exception");
 
-        var drainTask = Task.Run(async () =>
+        var data = new byte[2048];
+        Random.Shared.NextBytes(data);
+
+        var readTask = Task.Run(async () =>
         {
-            var buf = new byte[1024];
-            while (!cts.Token.IsCancellationRequested)
+            var received = new byte[data.Length];
+            var totalRead = 0;
+            while (totalRead < data.Length)
             {
-                try { if (await readChannel.ReadAsync(buf, cts.Token) == 0) break; }
+                try 
+                { 
+                    var n = await readChannel.ReadAsync(received.AsMemory(totalRead), cts.Token);
+                    if (n == 0) break;
+                    totalRead += n;
+                }
                 catch { break; }
             }
+            return received[..totalRead];
         });
 
-        var data = new byte[2048];
         await writeChannel.WriteAsync(data, cts.Token);
+        await writeChannel.CloseAsync(cts.Token);
+
+        var result = await readTask;
+        Assert.Equal(data, result);
+    }
+
+    #endregion
+
+    #region Multi-Channel Credit Starvation Under Latency
+
+    [Theory(Timeout = 120000)]
+    [InlineData(20, 0)]
+    [InlineData(20, 5)]
+    [InlineData(20, 50)]
+    [InlineData(50, 0)]
+    [InlineData(50, 5)]
+    public async Task ManyChannels_SmallCredits_WithLatency_AllDataDelivered(int channelCount, int latencyMs)
+    {
+        await using var pipe = new DuplexPipe(latencyMs);
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(90));
+
+        var opts = new MultiplexerOptions
+        {
+            StreamFactory = _ => throw new NotSupportedException(),
+            DefaultChannelOptions = new DefaultChannelOptions
+            {
+                MinCredits = 512,
+                MaxCredits = 2048,
+            },
+        };
+
+        var (muxA, muxB, _, _) = await TestMuxHelper.CreateMuxPairAsync(pipe, opts, opts, cts.Token);
+
+        var dataPerChannel = new byte[4096];
+        Random.Shared.NextBytes(dataPerChannel);
+
+        var totalStarvation = 0;
+
+        var writers = new WriteChannel[channelCount];
+        var readers = new ReadChannel[channelCount];
+
+        for (int i = 0; i < channelCount; i++)
+        {
+            writers[i] = await muxA.OpenChannelAsync($"ch_{i}", cts.Token);
+            readers[i] = await muxB.AcceptChannelAsync($"ch_{i}", cts.Token);
+            writers[i].OnCreditStarvation += () => Interlocked.Increment(ref totalStarvation);
+        }
+
+        // Read all channels concurrently with slow drain
+        var readTasks = new Task<byte[]>[channelCount];
+        for (int i = 0; i < channelCount; i++)
+        {
+            var reader = readers[i];
+            readTasks[i] = Task.Run(async () =>
+            {
+                var received = new byte[dataPerChannel.Length];
+                var totalRead = 0;
+                while (totalRead < dataPerChannel.Length)
+                {
+                    var n = await reader.ReadAsync(received.AsMemory(totalRead), cts.Token);
+                    if (n == 0) break;
+                    totalRead += n;
+                }
+                return received[..totalRead];
+            });
+        }
+
+        // Write all channels concurrently
+        var writeTasks = new Task[channelCount];
+        for (int i = 0; i < channelCount; i++)
+        {
+            var writer = writers[i];
+            writeTasks[i] = Task.Run(async () =>
+            {
+                await writer.WriteAsync(dataPerChannel, cts.Token);
+                await writer.CloseAsync(cts.Token);
+            });
+        }
+
+        await Task.WhenAll(writeTasks);
+        var results = await Task.WhenAll(readTasks);
+
+        // Verify data integrity on every channel
+        for (int i = 0; i < channelCount; i++)
+        {
+            Assert.Equal(dataPerChannel.Length, results[i].Length);
+            Assert.Equal(dataPerChannel, results[i]);
+        }
+
+        // With small credits and many channels, starvation must occur
+        Assert.True(totalStarvation > 0,
+            $"Expected credit starvation with {channelCount} channels and {opts.DefaultChannelOptions.MaxCredits} max credits, got 0 events");
 
         await cts.CancelAsync();
     }

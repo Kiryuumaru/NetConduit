@@ -259,11 +259,13 @@ public class BasicMultiplexerTests
         var readChannel = await acceptTask;
 
         var testData = new byte[1024];
+        Random.Shared.NextBytes(testData);
         await writeChannel.WriteAsync(testData, cts.Token);
 
         var buffer = new byte[1024];
         await readChannel!.ReadExactlyAsync(buffer, cts.Token);
 
+        Assert.Equal(testData, buffer);
         Assert.True(initiator.Stats.BytesSent > 0);
         Assert.True(acceptor.Stats.BytesReceived > 0);
         Assert.Equal(1, initiator.Stats.TotalChannelsOpened);
@@ -328,9 +330,11 @@ public class BasicMultiplexerTests
             await wA.WriteAsync(new byte[] { 0xAA }, cts.Token);
             var buf = new byte[1];
             Assert.Equal(1, await rA.ReadAsync(buf, cts.Token));
+            Assert.Equal(0xAA, buf[0]);
 
             await wB.WriteAsync(new byte[] { 0xBB }, cts.Token);
             Assert.Equal(1, await rB.ReadAsync(buf, cts.Token));
+            Assert.Equal(0xBB, buf[0]);
 
             await wA.DisposeAsync();
             await rA.DisposeAsync();
@@ -380,6 +384,7 @@ public class BasicMultiplexerTests
         await w1.WriteAsync(new byte[] { 1 }, cts.Token);
         var buf = new byte[1];
         Assert.Equal(1, await r1.ReadAsync(buf, cts.Token));
+        Assert.Equal(1, buf[0]);
         await w1.DisposeAsync();
         await r1.DisposeAsync();
 

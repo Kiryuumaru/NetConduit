@@ -35,11 +35,21 @@ public class DisconnectionDataLossTests
 
     #region 1. Write After Disconnect — Channel Must Survive
 
-    [Fact(Timeout = TestTimeout)]
-    public async Task WriteAfterDisconnect_SmallData_Succeeds()
+    [Theory(Timeout = TestTimeout)]
+    [InlineData(0)]
+    [InlineData(5)]
+    [InlineData(50)]
+    public async Task WriteAfterDisconnect_SmallData_Succeeds(int latencyMs)
     {
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
-        var (mux1, mux2, run1, run2, pipe) = await TestMuxHelper.CreateReconnectableMuxPairAsync(cancellationToken: cts.Token);
+        var reconnectable = new ReconnectableDuplexPipe(latencyMs);
+        var opts1 = new MultiplexerOptions { StreamFactory = reconnectable.CreateStream1 };
+        var opts2 = new MultiplexerOptions { StreamFactory = reconnectable.CreateStream2 };
+        var mux1 = StreamMultiplexer.Create(opts1);
+        var mux2 = StreamMultiplexer.Create(opts2);
+        var run1 = mux1.Start(cts.Token);
+        var run2 = mux2.Start(cts.Token);
+        await Task.WhenAll(mux1.WaitForReadyAsync(cts.Token), mux2.WaitForReadyAsync(cts.Token));
         await using var m1 = mux1;
         await using var m2 = mux2;
 
@@ -47,7 +57,7 @@ public class DisconnectionDataLossTests
             new ChannelOptions { ChannelId = "ch1" }, cts.Token);
 
         // Kill transport
-        await pipe.DisconnectAsync();
+        await reconnectable.DisconnectAsync();
         await Task.Delay(200);
 
         // Write AFTER disconnect — must not throw
@@ -113,13 +123,23 @@ public class DisconnectionDataLossTests
 
     #region 2. Read After Disconnect — Data Must Eventually Arrive
 
-    [Fact(Timeout = TestTimeout)]
-    public async Task ReadAfterDisconnect_DataSentBeforeDisconnect_FullyReceived()
+    [Theory(Timeout = TestTimeout)]
+    [InlineData(0)]
+    [InlineData(5)]
+    [InlineData(50)]
+    public async Task ReadAfterDisconnect_DataSentBeforeDisconnect_FullyReceived(int latencyMs)
     {
         // Data written before disconnect includes bytes in-flight in the transport
         // buffer. All bytes — including in-flight — must eventually reach the receiver.
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
-        var (mux1, mux2, run1, run2, pipe) = await TestMuxHelper.CreateInFlightLossMuxPairAsync(cancellationToken: cts.Token);
+        var inflightPipe = new InFlightLossDuplexPipe(latencyMs);
+        var opts1 = new MultiplexerOptions { StreamFactory = inflightPipe.CreateStream1 };
+        var opts2 = new MultiplexerOptions { StreamFactory = inflightPipe.CreateStream2 };
+        var mux1 = StreamMultiplexer.Create(opts1);
+        var mux2 = StreamMultiplexer.Create(opts2);
+        var run1 = mux1.Start(cts.Token);
+        var run2 = mux2.Start(cts.Token);
+        await Task.WhenAll(mux1.WaitForReadyAsync(cts.Token), mux2.WaitForReadyAsync(cts.Token));
         await using var m1 = mux1;
         await using var m2 = mux2;
 
@@ -139,16 +159,16 @@ public class DisconnectionDataLossTests
         await writer.WriteAsync(baseline, cts.Token);
 
         // Phase 2: hold writes — simulates OS socket send buffer
-        pipe.StartHolding();
+        inflightPipe.StartHolding();
         var inFlight = new byte[2096];
         Random.Shared.NextBytes(inFlight);
         await writer.WriteAsync(inFlight, cts.Token);
         await Task.Delay(200);
 
         // Drop held data + disconnect
-        pipe.DropHeld();
+        inflightPipe.DropHeld();
         var reconnected = PrepareReconnectWait(mux1, mux2, cts.Token);
-        await pipe.DisconnectAsync();
+        await inflightPipe.DisconnectAsync();
         await reconnected;
 
         // Must receive ALL data — baseline + in-flight
@@ -179,11 +199,21 @@ public class DisconnectionDataLossTests
         await Task.WhenAll(run1.ContinueWith(_ => { }), run2.ContinueWith(_ => { }));
     }
 
-    [Fact(Timeout = TestTimeout)]
-    public async Task ReadAfterDisconnect_DataSentAfterDisconnect_Received()
+    [Theory(Timeout = TestTimeout)]
+    [InlineData(0)]
+    [InlineData(5)]
+    [InlineData(50)]
+    public async Task ReadAfterDisconnect_DataSentAfterDisconnect_Received(int latencyMs)
     {
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
-        var (mux1, mux2, run1, run2, pipe) = await TestMuxHelper.CreateReconnectableMuxPairAsync(cancellationToken: cts.Token);
+        var reconnectable = new ReconnectableDuplexPipe(latencyMs);
+        var opts1 = new MultiplexerOptions { StreamFactory = reconnectable.CreateStream1 };
+        var opts2 = new MultiplexerOptions { StreamFactory = reconnectable.CreateStream2 };
+        var mux1 = StreamMultiplexer.Create(opts1);
+        var mux2 = StreamMultiplexer.Create(opts2);
+        var run1 = mux1.Start(cts.Token);
+        var run2 = mux2.Start(cts.Token);
+        await Task.WhenAll(mux1.WaitForReadyAsync(cts.Token), mux2.WaitForReadyAsync(cts.Token));
         await using var m1 = mux1;
         await using var m2 = mux2;
 
@@ -199,7 +229,7 @@ public class DisconnectionDataLossTests
 
         // Kill transport first
         var reconnected = PrepareReconnectWait(mux1, mux2, cts.Token);
-        await pipe.DisconnectAsync();
+        await reconnectable.DisconnectAsync();
         await reconnected;
 
         // Send data AFTER disconnect
@@ -1311,7 +1341,7 @@ public class DisconnectionDataLossTests
 
         // Send 1000 bytes before disconnect
         await writer.WriteAsync(new byte[1000], cts.Token);
-        Assert.Equal(1000, writer.SyncState.BytesSent);
+        Assert.Equal(1000, writer.BytesSent);
 
         // Kill transport
         await pipe.DisconnectAsync();
@@ -1321,7 +1351,7 @@ public class DisconnectionDataLossTests
         await writer.WriteAsync(new byte[500], cts.Token);
 
         // BytesSent must be 1500, not reset to 500
-        Assert.Equal(1500, writer.SyncState.BytesSent);
+        Assert.Equal(1500, writer.BytesSent);
 
         cts.Cancel();
         await Task.WhenAll(run1.ContinueWith(_ => { }), run2.ContinueWith(_ => { }));

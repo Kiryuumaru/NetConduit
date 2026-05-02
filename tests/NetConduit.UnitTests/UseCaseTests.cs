@@ -167,6 +167,8 @@ public partial class UseCaseTests
                     {
                         var msg = await receiver.ReceiveAsync(cts.Token);
                         if (msg is null) { errors.Add($"Receiver {capturedUserId}: null at msg {m}"); break; }
+                        Assert.Equal(capturedUserId, msg.User);
+                        Assert.Equal($"Message {m} from {capturedUserId}", msg.Text);
                         allReceived[capturedUserId].Add(msg);
                     }
                 }
@@ -252,6 +254,7 @@ public partial class UseCaseTests
 
             var echo = await clientReceiver.ReceiveAsync(linked.Token);
             Assert.NotNull(echo);
+            Assert.Equal(1, echo["version"]!.GetValue<int>());
             clientEchoes++;
         }
 
@@ -259,6 +262,7 @@ public partial class UseCaseTests
         await clientSender.SendAsync(diffState.DeepClone(), cts.Token);
         var diffEcho = await clientReceiver.ReceiveAsync(cts.Token);
         Assert.NotNull(diffEcho);
+        Assert.Equal(2, diffEcho["version"]!.GetValue<int>());
         clientEchoes++;
 
         // Phase 3: back to same state
@@ -271,6 +275,7 @@ public partial class UseCaseTests
 
             var echo = await clientReceiver.ReceiveAsync(linked.Token);
             Assert.NotNull(echo);
+            Assert.Equal(1, echo["version"]!.GetValue<int>());
             clientEchoes++;
         }
 
@@ -540,6 +545,8 @@ public partial class UseCaseTests
                         errors.Add($"Subscriber {s}: null at update {i}");
                         break;
                     }
+                    Assert.Equal(i, state["seq"]!.GetValue<int>());
+                    Assert.Equal(i / 3, state["tick"]!.GetValue<int>());
                     subscriberReceived[s]++;
                 }
                 catch (OperationCanceledException)
@@ -954,7 +961,12 @@ public partial class UseCaseTests
             try
             {
                 var received = await receiver.ReceiveAsync(linked.Token);
-                if (received is not null) receivedPings++;
+                if (received is not null)
+                {
+                    Assert.Equal("ping", received["type"]!.GetValue<string>());
+                    Assert.Equal(1, received["seq"]!.GetValue<int>());
+                    receivedPings++;
+                }
             }
             catch (OperationCanceledException)
             {
@@ -1006,6 +1018,7 @@ public partial class UseCaseTests
             var msg = await receiver.ReceiveAsync(cts.Token);
             Assert.NotNull(msg);
             Assert.Equal("UPDATE", msg.Type);
+            Assert.Equal(i / 4, msg.Version);
             received++;
         }
 
@@ -1050,7 +1063,12 @@ public partial class UseCaseTests
             try
             {
                 var received = await receiver.ReceiveAsync(linked.Token);
-                if (received is not null) receivedCount++;
+                if (received is not null)
+                {
+                    Assert.Equal(3, received["maxRetries"]!.GetValue<int>());
+                    Assert.Equal(30000, received["timeout"]!.GetValue<int>());
+                    receivedCount++;
+                }
             }
             catch (OperationCanceledException)
             {
@@ -1102,6 +1120,7 @@ public partial class UseCaseTests
         await deltaSender.SendAsync(JsonNode.Parse("""{"status": "connected"}""")!, cts.Token);
         var deltaMsg = await deltaReceiver.ReceiveAsync(cts.Token);
         Assert.NotNull(deltaMsg);
+        Assert.Equal("connected", deltaMsg["status"]!.GetValue<string>());
 
         await cmdSender.SendAsync(new RpcRequest("ping", "1", null), cts.Token);
         var cmd = await cmdReceiver.ReceiveAsync(cts.Token);
@@ -1113,6 +1132,7 @@ public partial class UseCaseTests
         var total = 0;
         while (total < 2) { var n = await rr.ReadAsync(rawBuf.AsMemory(total), cts.Token); total += n; }
         Assert.Equal(0xDE, rawBuf[0]);
+        Assert.Equal(0xAD, rawBuf[1]);
 
         await duplex.WriteAsync(new byte[] { 0xBE }, cts.Token);
         var dBuf = new byte[1];
@@ -1152,6 +1172,7 @@ public partial class UseCaseTests
             var received = await receiver.ReceiveAsync(cts.Token);
             Assert.NotNull(received);
             Assert.Equal("cpu_gauge", received.User);
+            Assert.Equal("42.0", received.Text);
             receivedCount++;
         }
 
@@ -1268,22 +1289,29 @@ public partial class UseCaseTests
             }
         });
 
-        var receivedBytes = 0L;
         var downloadTask = Task.Run(async () =>
         {
+            var ms = new MemoryStream();
             var buf = new byte[65536];
-            while (Interlocked.Read(ref receivedBytes) < totalSize)
+            while (ms.Length < totalSize)
             {
                 var n = await read.ReadAsync(buf, cts.Token);
                 if (n == 0) break;
-                Interlocked.Add(ref receivedBytes, n);
+                ms.Write(buf, 0, n);
             }
+            return ms.ToArray();
         });
 
         await uploadTask;
-        await downloadTask;
+        var receivedData = await downloadTask;
 
-        Assert.Equal(totalSize, receivedBytes);
+        Assert.Equal(totalSize, receivedData.Length);
+
+        for (int offset = 0; offset < totalSize; offset += chunkSize)
+        {
+            var headerValue = BinaryPrimitives.ReadInt32BigEndian(receivedData.AsSpan(offset));
+            Assert.Equal(offset, headerValue);
+        }
     }
 
     #endregion

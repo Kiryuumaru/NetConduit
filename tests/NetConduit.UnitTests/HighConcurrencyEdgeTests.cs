@@ -190,13 +190,20 @@ public class HighConcurrencyEdgeTests
 
         const int iterations = 100;
 
+        var sentData = new byte[100];
+        Random.Shared.NextBytes(sentData);
+
         var acceptTask = Task.Run(async () =>
         {
             var count = 0;
             await foreach (var ch in muxB.AcceptChannelsAsync(cts.Token))
             {
-                var buf = new byte[1024];
-                while (await ch.ReadAsync(buf, cts.Token) > 0) { }
+                var buf = new byte[100];
+                var totalRead = 0;
+                int n;
+                while ((n = await ch.ReadAsync(buf.AsMemory(totalRead), cts.Token)) > 0)
+                    totalRead += n;
+                Assert.Equal(sentData, buf);
                 if (++count >= iterations) break;
             }
         });
@@ -205,7 +212,7 @@ public class HighConcurrencyEdgeTests
         {
             var w = await muxA.OpenChannelAsync(
                 new ChannelOptions { ChannelId = $"seq_{i}" }, cts.Token);
-            await w.WriteAsync(new byte[100], cts.Token);
+            await w.WriteAsync(sentData, cts.Token);
             await w.CloseAsync();
         }
 

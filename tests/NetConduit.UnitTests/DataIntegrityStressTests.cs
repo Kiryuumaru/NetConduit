@@ -242,7 +242,9 @@ public class DataIntegrityStressTests
                         var data = await ReadAllBytesAsync(channel, cts.Token);
                         if (data.Length == 4)
                         {
-                            Interlocked.Increment(ref successCount);
+                            var value = BitConverter.ToInt32(data);
+                            if (value >= 0 && value < cycles)
+                                Interlocked.Increment(ref successCount);
                         }
                     }
                     catch (OperationCanceledException) { }

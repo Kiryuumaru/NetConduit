@@ -136,6 +136,7 @@ public class MemoryPressureTests
             var buffer = new byte[64];
             var read = await ch.ReadAsync(buffer, cts.Token);
             Assert.Equal(64, read);
+            Assert.Equal(data, buffer);
         }
 
         // Close all channels
@@ -216,10 +217,10 @@ public class MemoryPressureTests
 
         // Read data slowly to create backpressure
         var totalRead = 0;
-        var buffer = new byte[512];
+        var received = new byte[data.Length];
         while (totalRead < data.Length)
         {
-            var read = await readChannel!.ReadAsync(buffer, cts.Token);
+            var read = await readChannel!.ReadAsync(received.AsMemory(totalRead), cts.Token);
             if (read == 0) break;
             totalRead += read;
             // Small delay to exacerbate backpressure
@@ -229,6 +230,7 @@ public class MemoryPressureTests
         await writeTask;
         
         Assert.Equal(data.Length, totalRead);
+        Assert.Equal(data, received);
         
         // Verify backpressure was detected
         Assert.True(starvationCount > 0, $"Expected credit starvation events, got {starvationCount}");
@@ -242,10 +244,13 @@ public class MemoryPressureTests
         cts.Cancel();
     }
 
-    [Fact(Timeout = 120000)]
-    public async Task BackpressureStats_TrackWaitTimes()
+    [Theory(Timeout = 120000)]
+    [InlineData(0)]
+    [InlineData(5)]
+    [InlineData(50)]
+    public async Task BackpressureStats_TrackWaitTimes(int latencyMs)
     {
-        await using var pipe = new DuplexPipe();
+        await using var pipe = new DuplexPipe(latencyMs);
         
         // Force immediate backpressure with tiny credits
         var acceptorOptions = new MultiplexerOptions
@@ -261,7 +266,7 @@ public class MemoryPressureTests
         var initiatorTask = initiator.Start(cts.Token);
         var acceptorTask = acceptor.Start(cts.Token);
 
-        await Task.Delay(100);
+        await Task.WhenAll(initiator.WaitForReadyAsync(cts.Token), acceptor.WaitForReadyAsync(cts.Token));
 
         ReadChannel? readChannel = null;
         var acceptTask = Task.Run(async () =>
@@ -285,6 +290,7 @@ public class MemoryPressureTests
         
         // Send more than credits allow
         var data = new byte[500];
+        Random.Shared.NextBytes(data);
         var writeTask = Task.Run(async () =>
         {
             await writeChannel.WriteAsync(data, cts.Token);
@@ -296,15 +302,18 @@ public class MemoryPressureTests
         // Now read to unblock
         var buffer = new byte[500];
         var totalRead = 0;
-        while (totalRead < data.Length && !writeTask.IsCompleted)
+        while (totalRead < data.Length)
         {
             var read = await readChannel!.ReadAsync(buffer.AsMemory(totalRead), cts.Token);
             if (read == 0) break;
             totalRead += read;
-            await Task.Delay(10);
         }
 
         await writeTask;
+
+        // Verify data integrity
+        Assert.Equal(data.Length, totalRead);
+        Assert.Equal(data, buffer[..totalRead]);
         
         // Verify backpressure was recorded
         Assert.True(writeChannel.Stats.CreditStarvationCount > 0, 
@@ -382,14 +391,18 @@ public class MemoryPressureTests
                 if (n == 0) break;
                 read += n;
             }
-            return read;
+            return buffer[..read];
         }).ToArray();
 
         await Task.WhenAll(writeTasks);
         var results = await Task.WhenAll(readTasks);
         
-        // Verify all data was transferred
-        Assert.All(results, r => Assert.Equal(data.Length, r));
+        // Verify all data was transferred with correct bytes
+        Assert.All(results, r =>
+        {
+            Assert.Equal(data.Length, r.Length);
+            Assert.Equal(data, r);
+        });
         
         // Verify aggregated backpressure was tracked
         Assert.True(initiator.Stats.TotalCreditStarvationEvents > 0);
@@ -493,6 +506,7 @@ public class MemoryPressureTests
 
         // Multiple writes to track multiple wait periods
         var data = new byte[200];
+        Random.Shared.NextBytes(data);
         
         for (int i = 0; i < 3; i++)
         {
@@ -506,7 +520,7 @@ public class MemoryPressureTests
             
             var buffer = new byte[200];
             var read = 0;
-            while (read < data.Length && !writeTask.IsCompleted)
+            while (read < data.Length)
             {
                 var n = await readChannel!.ReadAsync(buffer.AsMemory(read), cts.Token);
                 if (n == 0) break;
@@ -514,6 +528,7 @@ public class MemoryPressureTests
             }
             
             await writeTask;
+            Assert.Equal(data, buffer[..read]);
         }
 
         // Verify longest wait is tracked
@@ -573,6 +588,7 @@ public class MemoryPressureTests
         }
         
         Assert.Equal(data.Length, totalRead);
+        Assert.Equal(data, buffer[..totalRead]);
 
         cts.Cancel();
     }
