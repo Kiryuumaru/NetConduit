@@ -1,7 +1,6 @@
 using System.Threading.Channels;
 using NetConduit.Enums;
 using NetConduit.Exceptions;
-using NetConduit.Internal;
 using NetConduit.Models;
 using ChannelClosedException = NetConduit.Exceptions.ChannelClosedException;
 using ChannelOptions = NetConduit.Models.ChannelOptions;
@@ -17,11 +16,11 @@ public sealed class WriteChannel : Stream
     private readonly ChannelOptions _options;
     private readonly SemaphoreSlim _creditSemaphore;
     private readonly CancellationTokenSource _closeCts;
-    private readonly ChannelSyncState _syncState;
     private readonly TaskCompletionSource _openTcs;
     
     private volatile ChannelState _state;
     private long _availableCredits;
+    private long _totalBytesSent; // per-channel counter for reconnection (no ring, just counter)
     private int _writeActive; // 0 = idle, 1 = writing (lightweight write serialization)
     private bool _disposed;
     private ChannelCloseReason? _closeReason;
@@ -43,8 +42,6 @@ public sealed class WriteChannel : Stream
         _availableCredits = 0;
         _creditSemaphore = new SemaphoreSlim(0, int.MaxValue);
         _closeCts = new CancellationTokenSource();
-        _syncState = new ChannelSyncState((int)options.MaxCredits);
-        _syncState.StartRecording();
         _openTcs = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         Stats = new ChannelStats();
     }
@@ -88,8 +85,8 @@ public sealed class WriteChannel : Stream
     /// <summary>The exception associated with channel closure, if any.</summary>
     public Exception? CloseException => _closeException;
     
-    /// <summary>Synchronization state for reconnection.</summary>
-    internal ChannelSyncState SyncState => _syncState;
+    /// <summary>Total payload bytes sent on this channel.</summary>
+    internal long BytesSent => Volatile.Read(ref _totalBytesSent);
 
     /// <inheritdoc/>
     public override bool CanRead => false;
@@ -243,19 +240,19 @@ public sealed class WriteChannel : Stream
                 
             Stats.AddCreditsConsumed(toSend);
 
-            // Buffer for potential replay and send the data frame
+            // Send the data frame (reconnection recording happens at drain point)
             var slice = remaining[..toSend];
-            _syncState.RecordSend(slice.Span);
             _multiplexer.SendDataFrame(ChannelIndex, slice, Priority, cancellationToken);
             
-            // For large frames, bypass FlushLoop and drain immediately on caller thread
-            if (toSend >= 65536 && Volatile.Read(ref _multiplexer.Writer.UnflushedDataBytes) >= 262144)
+            // Eagerly try to drain to TCP on caller thread (reduces latency).
+            if (toSend >= 65536)
                 await _multiplexer.Writer.ForceFlushAsync(cancellationToken).ConfigureAwait(false);
-            else if (toSend >= 8192)
+            else
                 await _multiplexer.Writer.TryCommitAndDrainAsync(cancellationToken).ConfigureAwait(false);
             
             Stats.AddBytesSent(toSend);
             Stats.IncrementFramesSent();
+            Interlocked.Add(ref _totalBytesSent, toSend);
             
                 remaining = remaining[toSend..];
 
@@ -374,7 +371,6 @@ public sealed class WriteChannel : Stream
             _closeCts.Cancel();
             _creditSemaphore.Dispose();
             _closeCts.Dispose();
-            _syncState.ReleaseBuffer();
             _multiplexer.OnWriteChannelDisposed(ChannelIndex, ChannelId);
         }
 

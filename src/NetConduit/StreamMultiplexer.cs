@@ -46,7 +46,6 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IFrameDispatcher
 
     // Reconnection
     private readonly SemaphoreSlim _reconnectLock = new(1, 1);
-    private readonly List<(uint ChannelIndex, byte[] Data)> _pendingReconnectBuffer = new();
     private TaskCompletionSource? _disconnectedTcs;
     private Task? _autoReconnectTask;
     private CancellationTokenSource? _autoReconnectCts;
@@ -506,7 +505,10 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IFrameDispatcher
     internal void SendDataFrame(uint channelIndex, ReadOnlyMemory<byte> data, ChannelPriority priority, CancellationToken ct)
     {
         var header = new FrameHeader(channelIndex, FrameFlags.Data, (uint)data.Length);
-        _frameWriter.WriteFrame(header, data, priority >= ChannelPriority.High, ct);
+
+        // ALL data frames go through chunk path to guarantee ordering.
+        // Control frames (FIN, credits) go through Pipe.
+        _frameWriter.WriteFrameAsChunk(header, data, ct);
     }
 
     private async ValueTask SendHandshakeAsync(CancellationToken ct)
@@ -1078,11 +1080,6 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IFrameDispatcher
             await SendReconnectAsync(newWriteStream, cancellationToken).ConfigureAwait(false);
             var positions = await ReceiveReconnectAckAsync(newReadStream, cancellationToken).ConfigureAwait(false);
 
-            foreach (var (channelIndex, bytesReceived) in positions)
-            {
-                _channels.GetWriteChannelByIndex(channelIndex)?.SyncState.SetBytesAcked(bytesReceived);
-            }
-
             ReplayUnacknowledgedData(positions, cancellationToken);
 
             _isConnected = true;
@@ -1289,25 +1286,67 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IFrameDispatcher
 
     private void ReplayUnacknowledgedData(Dictionary<uint, long> positions, CancellationToken ct)
     {
-        foreach (var (channelIndex, bytesReceived) in positions)
+        // Get all data from the mux ring and scan for frames that need replay.
+        // The ring contains raw framed data: [header][payload][header][payload]...
+        var ringData = _frameWriter.MuxRing.GetUnacknowledgedDataFrom(0);
+        if (ringData.Length == 0)
+            return;
+
+        // Pass 1: sum payload per channel
+        var totalInRing = new Dictionary<uint, long>();
+        var offset = 0;
+        while (offset + FrameHeader.Size <= ringData.Length)
         {
-            var writeChannel = _channels.GetWriteChannelByIndex(channelIndex);
-            if (writeChannel is null)
-                continue;
+            var header = FrameHeader.Read(ringData.AsSpan(offset));
+            var frameEnd = offset + FrameHeader.Size + (int)header.Length;
+            if (frameEnd > ringData.Length)
+                break;
 
-            var unacked = writeChannel.SyncState.GetUnacknowledgedDataFrom(bytesReceived);
-            if (unacked.Length == 0)
-                continue;
-
-            ReadOnlyMemory<byte> unackedMemory = unacked;
-            var maxFrame = _options.MaxFrameSize;
-            var offset = 0;
-            while (offset < unackedMemory.Length)
+            if (header.Flags == FrameFlags.Data && header.ChannelId != ChannelIndexLimits.ControlChannel)
             {
-                var chunkSize = Math.Min(unackedMemory.Length - offset, maxFrame);
-                SendDataFrame(channelIndex, unackedMemory.Slice(offset, chunkSize), writeChannel.Priority, ct);
-                offset += chunkSize;
+                totalInRing.TryGetValue(header.ChannelId, out var sum);
+                totalInRing[header.ChannelId] = sum + (int)header.Length;
             }
+            offset = frameEnd;
+        }
+
+        // Pass 2: replay unacked frames via FrameWriter
+        var cumulativeSeen = new Dictionary<uint, long>();
+        offset = 0;
+        while (offset + FrameHeader.Size <= ringData.Length)
+        {
+            var header = FrameHeader.Read(ringData.AsSpan(offset));
+            var frameEnd = offset + FrameHeader.Size + (int)header.Length;
+            if (frameEnd > ringData.Length)
+                break;
+
+            if (header.Flags == FrameFlags.Data && header.ChannelId != ChannelIndexLimits.ControlChannel)
+            {
+                var chIdx = header.ChannelId;
+                cumulativeSeen.TryGetValue(chIdx, out var seen);
+                var payloadLen = (int)header.Length;
+
+                if (positions.TryGetValue(chIdx, out var bytesReceived))
+                {
+                    var writeChannel = _channels.GetWriteChannelByIndex(chIdx);
+                    if (writeChannel is not null && totalInRing.TryGetValue(chIdx, out var totalForCh))
+                    {
+                        var channelTotalSent = writeChannel.BytesSent;
+                        var ringStartForChannel = channelTotalSent - totalForCh;
+                        var framePayloadStart = ringStartForChannel + seen;
+
+                        if (framePayloadStart + payloadLen > bytesReceived)
+                        {
+                            ReadOnlyMemory<byte> payload = ringData.AsMemory(offset + FrameHeader.Size, payloadLen);
+                            SendDataFrame(chIdx, payload, writeChannel.Priority, ct);
+                        }
+                    }
+                }
+
+                cumulativeSeen[chIdx] = seen + payloadLen;
+            }
+
+            offset = frameEnd;
         }
     }
 
@@ -1339,29 +1378,78 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IFrameDispatcher
     private async Task ReplayUnacknowledgedDataToStreamAsync(
         Dictionary<uint, long> positions, Stream writeStream, CancellationToken ct)
     {
-        foreach (var (channelIndex, bytesReceived) in positions)
+        var ringData = _frameWriter.MuxRing.GetUnacknowledgedDataFrom(0);
+        if (ringData.Length == 0)
         {
-            var writeChannel = _channels.GetWriteChannelByIndex(channelIndex);
-            if (writeChannel is null)
-                continue;
+            await writeStream.FlushAsync(ct).ConfigureAwait(false);
+            return;
+        }
 
-            var unacked = writeChannel.SyncState.GetUnacknowledgedDataFrom(bytesReceived);
-            if (unacked.Length == 0)
-                continue;
+        // Two-pass approach:
+        // Pass 1: Count total data-frame payload bytes per channel in the ring
+        // Pass 2: Replay frames whose position is beyond what receiver acked
 
-            ReadOnlyMemory<byte> unackedMemory = unacked;
-            var maxFrame = _options.MaxFrameSize;
-            var offset = 0;
-            while (offset < unackedMemory.Length)
+        // Pass 1: sum payload per channel
+        var totalInRing = new Dictionary<uint, long>();
+        var offset = 0;
+        while (offset + FrameHeader.Size <= ringData.Length)
+        {
+            var header = FrameHeader.Read(ringData.AsSpan(offset));
+            var frameEnd = offset + FrameHeader.Size + (int)header.Length;
+            if (frameEnd > ringData.Length)
+                break;
+
+            if (header.Flags == FrameFlags.Data && header.ChannelId != ChannelIndexLimits.ControlChannel)
             {
-                var chunkSize = Math.Min(unackedMemory.Length - offset, maxFrame);
-                var header = new FrameHeader(channelIndex, FrameFlags.Data, (uint)chunkSize);
-                var headerBytes = new byte[FrameHeader.Size];
-                header.Write(headerBytes);
-                await writeStream.WriteAsync(headerBytes, ct).ConfigureAwait(false);
-                await writeStream.WriteAsync(unackedMemory.Slice(offset, chunkSize), ct).ConfigureAwait(false);
-                offset += chunkSize;
+                totalInRing.TryGetValue(header.ChannelId, out var sum);
+                totalInRing[header.ChannelId] = sum + (int)header.Length;
             }
+            offset = frameEnd;
+        }
+
+        // Pass 2: replay unacked frames
+        // For each channel, the ring contains the LAST totalInRing[ch] payload bytes.
+        // The channel has sent BytesSent total. So the ring covers [BytesSent - totalInRing[ch], BytesSent).
+        // We need to replay from positions[ch] (what receiver got) to BytesSent.
+        // As we scan, track cumulative payload per channel to determine position of each frame.
+        var cumulativeSeen = new Dictionary<uint, long>();
+        ReadOnlyMemory<byte> ringMemory = ringData;
+        offset = 0;
+
+        while (offset + FrameHeader.Size <= ringData.Length)
+        {
+            var header = FrameHeader.Read(ringData.AsSpan(offset));
+            var frameEnd = offset + FrameHeader.Size + (int)header.Length;
+            if (frameEnd > ringData.Length)
+                break;
+
+            if (header.Flags == FrameFlags.Data && header.ChannelId != ChannelIndexLimits.ControlChannel)
+            {
+                var chIdx = header.ChannelId;
+                cumulativeSeen.TryGetValue(chIdx, out var seen);
+                var payloadLen = (int)header.Length;
+
+                if (positions.TryGetValue(chIdx, out var bytesReceived))
+                {
+                    var writeChannel = _channels.GetWriteChannelByIndex(chIdx);
+                    if (writeChannel is not null)
+                    {
+                        var channelTotalSent = writeChannel.BytesSent;
+                        var ringStartForChannel = channelTotalSent - totalInRing[chIdx];
+                        var framePayloadStart = ringStartForChannel + seen;
+
+                        // Replay if any part of this frame is beyond what receiver got
+                        if (framePayloadStart + payloadLen > bytesReceived)
+                        {
+                            await writeStream.WriteAsync(ringMemory.Slice(offset, FrameHeader.Size + payloadLen), ct).ConfigureAwait(false);
+                        }
+                    }
+                }
+
+                cumulativeSeen[chIdx] = seen + payloadLen;
+            }
+
+            offset = frameEnd;
         }
 
         await writeStream.FlushAsync(ct).ConfigureAwait(false);
@@ -1385,7 +1473,6 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IFrameDispatcher
         {
             var channelIndex = BinaryPrimitives.ReadUInt32BigEndian(data.Span[readOffset..]);
             var bytesReceived = BinaryPrimitives.ReadInt64BigEndian(data.Span[(readOffset + 4)..]);
-            _channels.GetWriteChannelByIndex(channelIndex)?.SyncState.SetBytesAcked(bytesReceived);
             positions[channelIndex] = bytesReceived;
             readOffset += 12;
         }
@@ -1439,17 +1526,11 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IFrameDispatcher
         // During reconnection sync: capture positions for the caller, skip ACK/replay
         if (_syncPositionsTcs is { } tcs)
         {
-            foreach (var (channelIndex, bytesReceived) in positions)
-                _channels.GetWriteChannelByIndex(channelIndex)?.SyncState.SetBytesAcked(bytesReceived);
-
             tcs.TrySetResult(positions);
             return;
         }
 
-        // Normal read-loop path: SetBytesAcked, send ACK, replay
-        foreach (var (channelIndex, bytesReceived) in positions)
-            _channels.GetWriteChannelByIndex(channelIndex)?.SyncState.SetBytesAcked(bytesReceived);
-
+        // Normal read-loop path: send ACK, replay
         var readChannels = _channels.ReadChannelEntries.ToArray();
         var payloadSize = 1 + 16 + 4 + (readChannels.Length * 12);
         var payload = new byte[payloadSize];

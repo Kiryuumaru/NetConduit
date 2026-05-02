@@ -16,10 +16,16 @@ internal sealed class FrameWriter(MultiplexerOptions options, MultiplexerStats s
     private readonly SemaphoreSlim _streamLock = new(1, 1);
     private readonly SemaphoreSlim _flushSignal = new(0, 1);
     private readonly ConcurrentQueue<ReadChannel> _pendingCreditChannels = new();
+    private readonly ConcurrentQueue<byte[]> _chunkQueue = new();
     private volatile bool _pendingFlush;
+    private volatile bool _hasChunks;
+    internal bool HasPendingChunks => _hasChunks;
     internal long UnflushedDataBytes;
     private volatile Exception? _writeError;
     private Stream? _writeStream;
+    private readonly MuxRingBuffer _muxRing = new(16 * 1024 * 1024);
+
+    internal MuxRingBuffer MuxRing => _muxRing;
 
     internal void SetStream(Stream writeStream) => _writeStream = writeStream;
 
@@ -52,6 +58,13 @@ internal sealed class FrameWriter(MultiplexerOptions options, MultiplexerStats s
         {
             _pipe.Reader.AdvanceTo(result.Buffer.End);
         }
+
+        // Discard any pending chunks (they're already in the mux ring if previously sent)
+        while (_chunkQueue.TryDequeue(out var chunk))
+        {
+            ArrayPool<byte>.Shared.Return(chunk);
+        }
+        _hasChunks = false;
     }
 
     internal void ClearWriteError() => _writeError = null;
@@ -101,6 +114,28 @@ internal sealed class FrameWriter(MultiplexerOptions options, MultiplexerStats s
         stats.AddBytesSent(FrameHeader.Size + payload.Length);
     }
 
+    /// <summary>
+    /// Writes a frame as a pooled chunk, bypassing the Pipe entirely.
+    /// The chunk is enqueued for the drain thread to write directly to TCP.
+    /// Used for large data frames where avoiding the Pipe copy saves significant time.
+    /// </summary>
+    internal void WriteFrameAsChunk(FrameHeader header, ReadOnlyMemory<byte> payload, CancellationToken ct)
+    {
+        ct.ThrowIfCancellationRequested();
+        if (_writeError != null) throw new IOException("Write pipe failed.", _writeError);
+
+        var combinedLength = FrameHeader.Size + payload.Length;
+        var chunk = ArrayPool<byte>.Shared.Rent(combinedLength);
+        header.Write(chunk);
+        payload.Span.CopyTo(chunk.AsSpan(FrameHeader.Size));
+
+        _chunkQueue.Enqueue(chunk);
+        _hasChunks = true;
+        SignalFlush();
+
+        stats.AddBytesSent(combinedLength);
+    }
+
     internal void SignalFlush()
     {
         try { _flushSignal.Release(); }
@@ -133,7 +168,9 @@ internal sealed class FrameWriter(MultiplexerOptions options, MultiplexerStats s
                 var hasPendingGrants = !_pendingCreditChannels.IsEmpty;
                 if (profiling) HotPathProfiler.RecordHasPendingGrantsScan(HotPathProfiler.Timestamp() - t0);
 
-                if (_pendingFlush || hasPendingGrants)
+                var hasChunks = _hasChunks;
+
+                if (_pendingFlush || hasPendingGrants || hasChunks)
                 {
                     lock (_writeLock)
                     {
@@ -154,7 +191,7 @@ internal sealed class FrameWriter(MultiplexerOptions options, MultiplexerStats s
                     }
 
                     t0 = profiling ? HotPathProfiler.Timestamp() : 0;
-                    await DrainPipeToStreamAsync(ct).ConfigureAwait(false);
+                    await DrainPipeAndChunksToStreamAsync(ct).ConfigureAwait(false);
                     if (profiling) HotPathProfiler.RecordDrainPipe(HotPathProfiler.Timestamp() - t0);
 
                     if (profiling) HotPathProfiler.RecordFlushCycle(HotPathProfiler.Timestamp() - cycleStart);
@@ -192,7 +229,7 @@ internal sealed class FrameWriter(MultiplexerOptions options, MultiplexerStats s
             CommitPipeWriter(writer);
         }
 
-        await DrainPipeToStreamAsync(ct).ConfigureAwait(false);
+        await DrainPipeAndChunksToStreamAsync(ct).ConfigureAwait(false);
     }
 
     internal async ValueTask TryCommitAndDrainAsync(CancellationToken ct)
@@ -214,9 +251,15 @@ internal sealed class FrameWriter(MultiplexerOptions options, MultiplexerStats s
             return;
         try
         {
-            var pipeReader = _pipe?.Reader;
             var writeStream = _writeStream;
-            if (pipeReader != null && writeStream != null && pipeReader.TryRead(out var readResult))
+            if (writeStream == null) return;
+
+            // Drain chunks first (data frames)
+            await DrainChunkQueueToStreamAsync(writeStream, ct).ConfigureAwait(false);
+
+            // Then drain pipe data (control frames)
+            var pipeReader = _pipe?.Reader;
+            if (pipeReader != null && pipeReader.TryRead(out var readResult))
             {
                 bool consumed = false;
                 try
@@ -254,6 +297,7 @@ internal sealed class FrameWriter(MultiplexerOptions options, MultiplexerStats s
 
     internal void Dispose()
     {
+        _muxRing.Release();
         _streamLock.Dispose();
     }
 
@@ -264,14 +308,22 @@ internal sealed class FrameWriter(MultiplexerOptions options, MultiplexerStats s
         flushTask.GetAwaiter().GetResult();
     }
 
-    private async ValueTask DrainPipeToStreamAsync(CancellationToken ct)
+    private async ValueTask DrainPipeAndChunksToStreamAsync(CancellationToken ct)
     {
         await _streamLock.WaitAsync(ct).ConfigureAwait(false);
         try
         {
-            var pipeReader = _pipe?.Reader;
             var writeStream = _writeStream;
-            if (pipeReader != null && writeStream != null && pipeReader.TryRead(out var readResult))
+            if (writeStream == null) return;
+
+            // Drain chunk queue FIRST (data frames that bypassed Pipe).
+            // Since ALL data frames go through chunks, this ensures data arrives
+            // before any subsequent control frames (FIN) written to Pipe.
+            await DrainChunkQueueToStreamAsync(writeStream, ct).ConfigureAwait(false);
+
+            // Then drain pipe data (control frames: credit grants, FIN, etc.)
+            var pipeReader = _pipe?.Reader;
+            if (pipeReader != null && pipeReader.TryRead(out var readResult))
             {
                 bool consumed = false;
                 try
@@ -297,10 +349,37 @@ internal sealed class FrameWriter(MultiplexerOptions options, MultiplexerStats s
         }
     }
 
-    private static async ValueTask WriteBufferToStreamAsync(ReadOnlySequence<byte> buffer, Stream writeStream, CancellationToken ct)
+    private async ValueTask DrainChunkQueueToStreamAsync(Stream writeStream, CancellationToken ct)
+    {
+        while (_chunkQueue.TryDequeue(out var chunk))
+        {
+            // Determine actual frame length from the header
+            var header = FrameHeader.Read(chunk);
+            var frameLength = FrameHeader.Size + (int)header.Length;
+
+            // Record to mux ring for reconnection (we hold _streamLock)
+            _muxRing.Record(chunk.AsSpan(0, frameLength));
+
+            // Write to TCP
+            await writeStream.WriteAsync(chunk.AsMemory(0, frameLength), ct).ConfigureAwait(false);
+
+            // Return to pool
+            ArrayPool<byte>.Shared.Return(chunk);
+        }
+
+        _hasChunks = false;
+
+        // Flush TCP after all chunks
+        await writeStream.FlushAsync(ct).ConfigureAwait(false);
+    }
+
+    private async ValueTask WriteBufferToStreamAsync(ReadOnlySequence<byte> buffer, Stream writeStream, CancellationToken ct)
     {
         var profiling = HotPathProfiler.IsEnabled;
         if (profiling) HotPathProfiler.RecordDrainSegment(buffer.IsSingleSegment, buffer.Length);
+
+        // Record into mux ring for reconnection replay (we already hold _streamLock)
+        _muxRing.Record(buffer);
 
         long t0 = profiling ? HotPathProfiler.Timestamp() : 0;
         if (buffer.IsSingleSegment)

@@ -55,7 +55,7 @@ public sealed class ReadChannel : Stream
         _dataPipeReader = _dataPipe.Reader;
         _dataPipeWriter = _dataPipe.Writer;
         _closeCts = new CancellationTokenSource();
-        _syncState = new ChannelSyncState(0); // Read channels don't buffer, just track sequence
+        _syncState = new ChannelSyncState();
         _flowControl = new AdaptiveFlowControl(options.MinCredits, options.MaxCredits);
         Stats = new ChannelStats();
         _isDisposing = false;
