@@ -145,12 +145,13 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IFrameRouter
     /// <inheritdoc />
     public ValueTask<WriteChannel> OpenChannelAsync(string channelId, CancellationToken ct = default)
     {
+        var defaults = _options.DefaultChannelOptions;
         return OpenChannelAsync(new ChannelOptions
         {
             ChannelId = channelId,
-            Priority = _options.DefaultChannelOptions.Priority,
-            SlabSize = _options.DefaultChannelOptions.SlabSize,
-            SendTimeout = _options.DefaultChannelOptions.SendTimeout,
+            Priority = defaults.Priority,
+            SlabSize = defaults.SlabSize,
+            SendTimeout = defaults.SendTimeout,
         }, ct);
     }
 
