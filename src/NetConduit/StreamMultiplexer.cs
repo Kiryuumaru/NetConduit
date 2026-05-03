@@ -15,16 +15,17 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IFrameRouter
     private readonly MultiplexerOptions _options;
     private readonly ChannelRegistry _registry;
     private readonly MultiplexerStats _stats = new();
-    private readonly SemaphoreSlim _readySignal = new(0);
+    private readonly CoalescingSignal _readySignal = new();
+    private readonly CoalescingSignal _flushSignal = new();
     private readonly TaskCompletionSource _readyTcs = new(TaskCreationOptions.RunContinuationsAsynchronously);
     private readonly CancellationTokenSource _cts = new();
     private readonly object _readyLock = new();
     private readonly List<WriteChannel> _readyChannels = [];
-    private readonly SemaphoreSlim _flushSignal = new(0, 1);
 
     private IStreamPair? _transport;
     private Task? _writerTask;
     private Task? _readerTask;
+    private Task? _flusherTask;
     private Task? _keepaliveTask;
     private WriteChannel? _controlChannel;
     private volatile bool _isRunning;
@@ -118,9 +119,14 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IFrameRouter
             this);
         _controlChannel.MarkOpen();
 
-        // Start the writer and reader threads
+        // Start the writer, flusher, and reader threads
         var linkedCt = _cts.Token;
         _writerTask = Task.Run(() => RunWriterLoopAsync(linkedCt), linkedCt);
+        _flusherTask = Task.Factory.StartNew(
+            () => RunFlusherLoop(linkedCt),
+            linkedCt,
+            TaskCreationOptions.LongRunning,
+            TaskScheduler.Default);
         _readerTask = Task.Run(() => RunReaderLoopAsync(linkedCt), linkedCt);
 
         // Start keepalive if ping interval is configured
@@ -224,11 +230,7 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IFrameRouter
     /// <inheritdoc />
     public ValueTask FlushAsync(CancellationToken ct = default)
     {
-        if (_flushSignal.CurrentCount == 0)
-        {
-            try { _flushSignal.Release(); }
-            catch (SemaphoreFullException) { /* already signaled */ }
-        }
+        _flushSignal.Signal();
         return ValueTask.CompletedTask;
     }
 
@@ -240,53 +242,24 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IFrameRouter
             if (!_readyChannels.Contains(channel))
                 _readyChannels.Add(channel);
         }
-        if (_readySignal.CurrentCount == 0)
-        {
-            try { _readySignal.Release(); }
-            catch (SemaphoreFullException) { /* already signaled */ }
-        }
+        _readySignal.Signal();
     }
 
     // =====================================================================
     // Writer Thread — THE DUMB ROUTER (send side)
-    // Picks ready channels, sends their pre-built frames, flushes.
+    // Picks ready channels, writes their pre-built frames to the stream.
+    // Flush is handled by the separate flusher thread.
     // =====================================================================
     private async Task RunWriterLoopAsync(CancellationToken ct)
     {
         var transport = _transport ?? throw new InvalidOperationException("Transport not initialized.");
         var writeStream = transport.WriteStream;
-        var flushMode = _options.FlushMode;
-
-        // Batched mode: periodic flush timer
-        using var batchTimer = flushMode == FlushMode.Batched
-            ? new PeriodicTimer(_options.FlushInterval)
-            : null;
-        bool hasPendingFlush = false;
 
         try
         {
             while (!ct.IsCancellationRequested)
             {
-                if (flushMode == FlushMode.Batched)
-                {
-                    // Wait for either a ready signal or the batch timer
-                    using var waitCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
-                    var readyTask = _readySignal.WaitAsync(waitCts.Token);
-                    var timerTask = batchTimer!.WaitForNextTickAsync(waitCts.Token).AsTask();
-
-                    var completed = await Task.WhenAny(readyTask, timerTask);
-                    waitCts.Cancel();
-
-                    if (completed == timerTask && hasPendingFlush)
-                    {
-                        await writeStream.FlushAsync(ct);
-                        hasPendingFlush = false;
-                    }
-                }
-                else
-                {
-                    await _readySignal.WaitAsync(ct);
-                }
+                _readySignal.Wait(ct);
 
                 // Snapshot and sort ready channels by priority (highest first)
                 WriteChannel[] snapshot;
@@ -311,31 +284,41 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IFrameRouter
                 }
 
                 if (anyWritten)
-                {
-                    switch (flushMode)
-                    {
-                        case FlushMode.Immediate:
-                            await writeStream.FlushAsync(ct);
-                            break;
-                        case FlushMode.Batched:
-                            hasPendingFlush = true;
-                            break;
-                        case FlushMode.Manual:
-                            hasPendingFlush = true;
-                            if (_flushSignal.CurrentCount > 0)
-                            {
-                                _flushSignal.Wait(0);
-                                await writeStream.FlushAsync(ct);
-                                hasPendingFlush = false;
-                            }
-                            break;
-                    }
-                }
+                    _flushSignal.Signal();
             }
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
             // Normal shutdown
+        }
+        catch (Exception ex)
+        {
+            HandleTransportError(ex);
+        }
+    }
+
+    // =====================================================================
+    // Flusher Thread — dedicated thread that flushes the transport stream.
+    // Decouples write batching from kernel flush syscall.
+    // =====================================================================
+    private void RunFlusherLoop(CancellationToken ct)
+    {
+        var transport = _transport ?? throw new InvalidOperationException("Transport not initialized.");
+        var writeStream = transport.WriteStream;
+
+        try
+        {
+            while (!ct.IsCancellationRequested)
+            {
+                _flushSignal.Wait(ct);
+                writeStream.Flush();
+            }
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            // Normal shutdown — do one final flush to push any remaining data
+            try { writeStream.Flush(); }
+            catch { /* transport may already be closed */ }
         }
         catch (Exception ex)
         {
@@ -655,9 +638,14 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IFrameRouter
                 // Reset keepalive tracking
                 _lastPongTicks = Environment.TickCount64;
 
-                // Restart writer and reader
+                // Restart writer, flusher, and reader
                 var linkedCt = _cts.Token;
                 _writerTask = Task.Run(() => RunWriterLoopAsync(linkedCt), linkedCt);
+                _flusherTask = Task.Factory.StartNew(
+                    () => RunFlusherLoop(linkedCt),
+                    linkedCt,
+                    TaskCreationOptions.LongRunning,
+                    TaskScheduler.Default);
                 _readerTask = Task.Run(() => RunReaderLoopAsync(linkedCt), linkedCt);
 
                 if (_options.PingInterval > TimeSpan.Zero)
@@ -745,6 +733,13 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IFrameRouter
         if (_writerTask is not null)
         {
             try { await _writerTask; }
+            catch (OperationCanceledException) { }
+            catch { /* swallow during dispose */ }
+        }
+
+        if (_flusherTask is not null)
+        {
+            try { await _flusherTask; }
             catch (OperationCanceledException) { }
             catch { /* swallow during dispose */ }
         }

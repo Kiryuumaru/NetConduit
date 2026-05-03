@@ -5,8 +5,8 @@
     "channels": 1,
     "dataSizeBytes": 1024,
     "totalBytes": 1024,
-    "durationMs": 0.161571,
-    "throughputMBps": 6.044169436346869,
+    "durationMs": 0.16678400000000002,
+    "throughputMBps": 5.855252901957022,
     "messagesPerSec": 0,
     "allocMB": 0.078070068359375
   },
@@ -16,10 +16,10 @@
     "channels": 1,
     "dataSizeBytes": 1024,
     "totalBytes": 1024,
-    "durationMs": 0.13600600000000002,
-    "throughputMBps": 7.18028984015411,
+    "durationMs": 0.12415899999999999,
+    "throughputMBps": 7.8654185359096,
     "messagesPerSec": 0,
-    "allocMB": 0.0280914306640625
+    "allocMB": 0.02748870849609375
   },
   {
     "implementation": "Smux (Go)",
@@ -27,10 +27,10 @@
     "channels": 1,
     "dataSizeBytes": 1024,
     "totalBytes": 1024,
-    "durationMs": 0.10068300000000001,
-    "throughputMBps": 9.699378246575886,
+    "durationMs": 0.116729,
+    "throughputMBps": 8.366065844820053,
     "messagesPerSec": 0,
-    "allocMB": 0.16941680908203124
+    "allocMB": 0.16930999755859374
   },
   {
     "implementation": "Raw TCP (Go)",
@@ -38,8 +38,8 @@
     "channels": 1,
     "dataSizeBytes": 102400,
     "totalBytes": 102400,
-    "durationMs": 0.20876,
-    "throughputMBps": 467.79196206169763,
+    "durationMs": 0.198959,
+    "throughputMBps": 490.8360516488322,
     "messagesPerSec": 0,
     "allocMB": 0.12653350830078125
   },
@@ -49,10 +49,10 @@
     "channels": 1,
     "dataSizeBytes": 102400,
     "totalBytes": 102400,
-    "durationMs": 0.23095400000000002,
-    "throughputMBps": 422.83853061648637,
+    "durationMs": 0.24376800000000004,
+    "throughputMBps": 400.61144202684517,
     "messagesPerSec": 0,
-    "allocMB": 0.33428955078125
+    "allocMB": 0.33404998779296874
   },
   {
     "implementation": "Smux (Go)",
@@ -60,10 +60,10 @@
     "channels": 1,
     "dataSizeBytes": 102400,
     "totalBytes": 102400,
-    "durationMs": 0.171454,
-    "throughputMBps": 569.5769710826228,
+    "durationMs": 0.18241000000000004,
+    "throughputMBps": 535.3667562085411,
     "messagesPerSec": 0,
-    "allocMB": 0.252001953125
+    "allocMB": 0.2514312744140625
   },
   {
     "implementation": "Raw TCP (Go)",
@@ -71,8 +71,8 @@
     "channels": 1,
     "dataSizeBytes": 1048576,
     "totalBytes": 1048576,
-    "durationMs": 0.401187,
-    "throughputMBps": 2492.603200003988,
+    "durationMs": 0.4221660000000001,
+    "throughputMBps": 2368.736468592923,
     "messagesPerSec": 0,
     "allocMB": 0.12653350830078125
   },
@@ -82,10 +82,10 @@
     "channels": 1,
     "dataSizeBytes": 1048576,
     "totalBytes": 1048576,
-    "durationMs": 1.189865,
-    "throughputMBps": 840.431477520559,
+    "durationMs": 1.116967,
+    "throughputMBps": 895.2815973972374,
     "messagesPerSec": 0,
-    "allocMB": 0.8857208251953125
+    "allocMB": 1.0386871337890624
   },
   {
     "implementation": "Smux (Go)",
@@ -93,10 +93,10 @@
     "channels": 1,
     "dataSizeBytes": 1048576,
     "totalBytes": 1048576,
-    "durationMs": 0.687628,
-    "throughputMBps": 1454.2746950385963,
+    "durationMs": 0.891885,
+    "throughputMBps": 1121.2207851909159,
     "messagesPerSec": 0,
-    "allocMB": 0.429144287109375
+    "allocMB": 0.3919158935546875
   },
   {
     "implementation": "Raw TCP (Go)",
@@ -104,10 +104,10 @@
     "channels": 10,
     "dataSizeBytes": 1024,
     "totalBytes": 10240,
-    "durationMs": 0.554376,
-    "throughputMBps": 17.61552628540918,
+    "durationMs": 0.695923,
+    "throughputMBps": 14.032622862012033,
     "messagesPerSec": 0,
-    "allocMB": 0.641400146484375
+    "allocMB": 0.643365478515625
   },
   {
     "implementation": "FRP/Yamux (Go)",
@@ -115,10 +115,10 @@
     "channels": 10,
     "dataSizeBytes": 1024,
     "totalBytes": 10240,
-    "durationMs": 0.5054190000000001,
-    "throughputMBps": 19.321839899172765,
+    "durationMs": 0.46781100000000003,
+    "throughputMBps": 20.87515043468409,
     "messagesPerSec": 0,
-    "allocMB": 0.0807464599609375
+    "allocMB": 0.08069610595703125
   },
   {
     "implementation": "Smux (Go)",
@@ -126,10 +126,10 @@
     "channels": 10,
     "dataSizeBytes": 1024,
     "totalBytes": 10240,
-    "durationMs": 0.507678,
-    "throughputMBps": 19.235864071320798,
+    "durationMs": 0.511624,
+    "throughputMBps": 19.08750371366472,
     "messagesPerSec": 0,
-    "allocMB": 0.2062164306640625
+    "allocMB": 0.205926513671875
   },
   {
     "implementation": "Raw TCP (Go)",
@@ -137,10 +137,10 @@
     "channels": 10,
     "dataSizeBytes": 102400,
     "totalBytes": 1024000,
-    "durationMs": 0.8165749999999999,
-    "throughputMBps": 1195.9250528120504,
+    "durationMs": 0.883647,
+    "throughputMBps": 1105.1500203135415,
     "messagesPerSec": 0,
-    "allocMB": 0.7030120849609375
+    "allocMB": 0.702667236328125
   },
   {
     "implementation": "FRP/Yamux (Go)",
@@ -148,10 +148,10 @@
     "channels": 10,
     "dataSizeBytes": 102400,
     "totalBytes": 1024000,
-    "durationMs": 1.4838580000000001,
-    "throughputMBps": 658.1239579528499,
+    "durationMs": 1.471806,
+    "throughputMBps": 663.5130581068429,
     "messagesPerSec": 0,
-    "allocMB": 2.0465240478515625
+    "allocMB": 2.046281433105469
   },
   {
     "implementation": "Smux (Go)",
@@ -159,10 +159,10 @@
     "channels": 10,
     "dataSizeBytes": 102400,
     "totalBytes": 1024000,
-    "durationMs": 0.962373,
-    "throughputMBps": 1014.7442831417756,
+    "durationMs": 1.1097979999999998,
+    "throughputMBps": 879.94617038416,
     "messagesPerSec": 0,
-    "allocMB": 0.44443817138671876
+    "allocMB": 0.368121337890625
   },
   {
     "implementation": "Raw TCP (Go)",
@@ -170,8 +170,8 @@
     "channels": 10,
     "dataSizeBytes": 1048576,
     "totalBytes": 10485760,
-    "durationMs": 3.247912,
-    "throughputMBps": 3078.9011524942794,
+    "durationMs": 2.942818,
+    "throughputMBps": 3398.1034505022058,
     "messagesPerSec": 0,
     "allocMB": 0.702667236328125
   },
@@ -181,10 +181,10 @@
     "channels": 10,
     "dataSizeBytes": 1048576,
     "totalBytes": 10485760,
-    "durationMs": 8.089416,
-    "throughputMBps": 1236.1831805905395,
+    "durationMs": 8.669997,
+    "throughputMBps": 1153.4029365869446,
     "messagesPerSec": 0,
-    "allocMB": 9.465623474121093
+    "allocMB": 9.3651123046875
   },
   {
     "implementation": "Smux (Go)",
@@ -192,10 +192,10 @@
     "channels": 10,
     "dataSizeBytes": 1048576,
     "totalBytes": 10485760,
-    "durationMs": 5.133527,
-    "throughputMBps": 1947.9784561374665,
+    "durationMs": 5.31787,
+    "throughputMBps": 1880.4521359115586,
     "messagesPerSec": 0,
-    "allocMB": 1.2225357055664063
+    "allocMB": 1.2225875854492188
   },
   {
     "implementation": "Raw TCP (Go)",
@@ -203,10 +203,10 @@
     "channels": 100,
     "dataSizeBytes": 1024,
     "totalBytes": 102400,
-    "durationMs": 8.509792000000001,
-    "throughputMBps": 11.475750523632069,
+    "durationMs": 7.896927999999999,
+    "throughputMBps": 12.366359424829504,
     "messagesPerSec": 0,
-    "allocMB": 6.416653442382812
+    "allocMB": 6.416903686523438
   },
   {
     "implementation": "FRP/Yamux (Go)",
@@ -214,10 +214,10 @@
     "channels": 100,
     "dataSizeBytes": 1024,
     "totalBytes": 102400,
-    "durationMs": 4.341385,
-    "throughputMBps": 22.494261623882704,
+    "durationMs": 3.9068820000000004,
+    "throughputMBps": 24.995955854310417,
     "messagesPerSec": 0,
-    "allocMB": 0.5883636474609375
+    "allocMB": 0.58602294921875
   },
   {
     "implementation": "Smux (Go)",
@@ -225,10 +225,10 @@
     "channels": 100,
     "dataSizeBytes": 1024,
     "totalBytes": 102400,
-    "durationMs": 4.267634999999999,
-    "throughputMBps": 22.882990227608502,
+    "durationMs": 4.403928,
+    "throughputMBps": 22.174806218448623,
     "messagesPerSec": 0,
-    "allocMB": 0.5613372802734375
+    "allocMB": 0.5623977661132813
   },
   {
     "implementation": "Raw TCP (Go)",
@@ -236,10 +236,10 @@
     "channels": 100,
     "dataSizeBytes": 102400,
     "totalBytes": 10240000,
-    "durationMs": 9.971181000000001,
-    "throughputMBps": 979.3849896015325,
+    "durationMs": 10.154412,
+    "throughputMBps": 961.7125048698044,
     "messagesPerSec": 0,
-    "allocMB": 6.464151000976562
+    "allocMB": 6.4641571044921875
   },
   {
     "implementation": "FRP/Yamux (Go)",
@@ -247,10 +247,10 @@
     "channels": 100,
     "dataSizeBytes": 102400,
     "totalBytes": 10240000,
-    "durationMs": 13.276710000000001,
-    "throughputMBps": 735.545553077532,
+    "durationMs": 16.710573999999998,
+    "throughputMBps": 584.397938694386,
     "messagesPerSec": 0,
-    "allocMB": 19.214065551757812
+    "allocMB": 19.205990600585938
   },
   {
     "implementation": "Smux (Go)",
@@ -258,10 +258,10 @@
     "channels": 100,
     "dataSizeBytes": 102400,
     "totalBytes": 10240000,
-    "durationMs": 9.117419,
-    "throughputMBps": 1071.0953395911715,
+    "durationMs": 10.497325,
+    "throughputMBps": 930.2965279249713,
     "messagesPerSec": 0,
-    "allocMB": 1.469976806640625
+    "allocMB": 1.608929443359375
   },
   {
     "implementation": "Raw TCP (Go)",
@@ -269,10 +269,10 @@
     "channels": 100,
     "dataSizeBytes": 1048576,
     "totalBytes": 104857600,
-    "durationMs": 33.075575,
-    "throughputMBps": 3023.379034226918,
+    "durationMs": 30.849249,
+    "throughputMBps": 3241.5699973765977,
     "messagesPerSec": 0,
-    "allocMB": 6.464154052734375
+    "allocMB": 6.46414794921875
   },
   {
     "implementation": "FRP/Yamux (Go)",
@@ -280,10 +280,10 @@
     "channels": 100,
     "dataSizeBytes": 1048576,
     "totalBytes": 104857600,
-    "durationMs": 80.87013,
-    "throughputMBps": 1236.5505038757822,
+    "durationMs": 83.376571,
+    "throughputMBps": 1199.3777004813498,
     "messagesPerSec": 0,
-    "allocMB": 85.24122314453125
+    "allocMB": 89.61404724121094
   },
   {
     "implementation": "Smux (Go)",
@@ -291,9 +291,9 @@
     "channels": 100,
     "dataSizeBytes": 1048576,
     "totalBytes": 104857600,
-    "durationMs": 56.135985,
-    "throughputMBps": 1781.388533576101,
+    "durationMs": 53.996598999999996,
+    "throughputMBps": 1851.968491571108,
     "messagesPerSec": 0,
-    "allocMB": 2.8003280639648436
+    "allocMB": 2.8011550903320312
   }
 ]

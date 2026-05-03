@@ -28,12 +28,6 @@ public sealed record MultiplexerOptions
     /// <summary>Time to wait during graceful shutdown for channels to drain.</summary>
     public TimeSpan GoAwayTimeout { get; init; } = TimeSpan.FromSeconds(30);
 
-    /// <summary>Controls when the writer thread flushes to transport.</summary>
-    public FlushMode FlushMode { get; init; } = FlushMode.Batched;
-
-    /// <summary>Interval for batched flush mode.</summary>
-    public TimeSpan FlushInterval { get; init; } = TimeSpan.FromMilliseconds(1);
-
     /// <summary>Maximum auto-reconnect attempts. 0 = unlimited.</summary>
     public int MaxAutoReconnectAttempts { get; init; }
 

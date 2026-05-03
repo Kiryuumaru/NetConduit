@@ -11,7 +11,6 @@ public sealed class PriorityTests
         {
             StreamFactory = _ => Task.FromResult<IStreamPair>(duplex.SideA),
             PingInterval = TimeSpan.Zero,
-            FlushMode = FlushMode.Immediate,
         });
 
         var server = StreamMultiplexer.Create(new MultiplexerOptions

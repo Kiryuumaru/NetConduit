@@ -78,6 +78,6 @@ public interface IStreamMultiplexer : IAsyncDisposable
     /// <summary>Initiate graceful shutdown (GoAway).</summary>
     ValueTask GoAwayAsync(CancellationToken ct = default);
 
-    /// <summary>Flush pending writes to transport. Only needed with FlushMode.Manual.</summary>
+    /// <summary>Request an immediate flush of pending writes to the transport.</summary>
     ValueTask FlushAsync(CancellationToken ct = default);
 }
