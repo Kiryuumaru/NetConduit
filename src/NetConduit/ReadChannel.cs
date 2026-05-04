@@ -183,15 +183,17 @@ public sealed class ReadChannel : Stream, IAsyncDisposable, IValueTaskSource<int
             _pendingUserBuffer = null;
             _readCompletionActive = false;
             Interlocked.Add(ref Stats._bytesReceived, toCopy);
-            _readCompletion.Core.SetResult(toCopy);
 
-            // Buffer the remaining bytes if payload was larger than user buffer
+            // Buffer remaining bytes BEFORE signaling completion.
+            // SetResult may inline the continuation (lock is reentrant),
+            // and the next ReadAsync must find remaining bytes in the slab.
             if (toCopy < payload.Length)
             {
                 BufferInSlab(payload[toCopy..]);
             }
 
             MaybeSendAck();
+            _readCompletion.Core.SetResult(toCopy);
             return true;
         }
         return false;
