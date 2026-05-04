@@ -24,10 +24,10 @@ public sealed class StreamMultiplexerTests
     {
         var (client, server) = CreatePair();
 
-        var startClient = client.Start();
-        var startServer = server.Start();
+        client.Start();
+        server.Start();
 
-        await Task.WhenAll(startClient, startServer);
+        await Task.WhenAll(client.WaitForReadyAsync(), server.WaitForReadyAsync());
 
         Assert.True(client.IsRunning);
         Assert.True(server.IsRunning);
@@ -44,9 +44,10 @@ public sealed class StreamMultiplexerTests
     public async Task OpenChannel_SendsInitFrame_ServerAccepts()
     {
         var (client, server) = CreatePair();
-        await Task.WhenAll(client.Start(), server.Start());
+        client.Start(); server.Start();
+        await Task.WhenAll(client.WaitForReadyAsync(), server.WaitForReadyAsync());
 
-        var writeChannel = await client.OpenChannelAsync("ch1");
+        var writeChannel = client.OpenChannel("ch1");
         Assert.NotNull(writeChannel);
         Assert.Equal("ch1", writeChannel.ChannelId);
         Assert.Equal(ChannelState.Open, writeChannel.State);
@@ -63,9 +64,10 @@ public sealed class StreamMultiplexerTests
     public async Task DataFlow_ClientToServer()
     {
         var (client, server) = CreatePair();
-        await Task.WhenAll(client.Start(), server.Start());
+        client.Start(); server.Start();
+        await Task.WhenAll(client.WaitForReadyAsync(), server.WaitForReadyAsync());
 
-        var writeChannel = await client.OpenChannelAsync("data");
+        var writeChannel = client.OpenChannel("data");
         var readChannel = await server.AcceptChannelAsync("data", new CancellationTokenSource(TimeSpan.FromSeconds(5)).Token);
 
         byte[] sent = [1, 2, 3, 4, 5];
@@ -85,9 +87,10 @@ public sealed class StreamMultiplexerTests
     public async Task Dispose_ClosesAllChannels()
     {
         var (client, server) = CreatePair();
-        await Task.WhenAll(client.Start(), server.Start());
+        client.Start(); server.Start();
+        await Task.WhenAll(client.WaitForReadyAsync(), server.WaitForReadyAsync());
 
-        var writeChannel = await client.OpenChannelAsync("ch1");
+        var writeChannel = client.OpenChannel("ch1");
 
         await client.DisposeAsync();
 

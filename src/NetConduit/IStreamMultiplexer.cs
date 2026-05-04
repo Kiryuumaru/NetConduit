@@ -48,20 +48,23 @@ public interface IStreamMultiplexer : IAsyncDisposable
     /// <summary>Raised when the transport is disconnected.</summary>
     event Action<DisconnectReason, Exception?>? OnDisconnected;
 
+    /// <summary>Raised when the transport is connected (initial or reconnect).</summary>
+    event Action? OnConnected;
+
     /// <summary>Raised when a reconnection attempt begins. Parameter is the attempt number.</summary>
     event Action<int>? OnReconnecting;
 
     /// <summary>Start the multiplexer (handshake, read/write loops).</summary>
-    Task Start(CancellationToken ct = default);
+    void Start();
 
     /// <summary>Wait until the multiplexer is ready to open/accept channels.</summary>
     Task WaitForReadyAsync(CancellationToken ct = default);
 
     /// <summary>Open a new outbound channel with the given ID.</summary>
-    ValueTask<WriteChannel> OpenChannelAsync(string channelId, CancellationToken ct = default);
+    WriteChannel OpenChannel(string channelId);
 
     /// <summary>Open a new outbound channel with full options.</summary>
-    ValueTask<WriteChannel> OpenChannelAsync(ChannelOptions options, CancellationToken ct = default);
+    WriteChannel OpenChannel(ChannelOptions options);
 
     /// <summary>Accept an inbound channel with the given ID.</summary>
     ValueTask<ReadChannel> AcceptChannelAsync(string channelId, CancellationToken ct = default);
@@ -69,10 +72,10 @@ public interface IStreamMultiplexer : IAsyncDisposable
     /// <summary>Accept all inbound channels as they arrive.</summary>
     IAsyncEnumerable<ReadChannel> AcceptChannelsAsync(CancellationToken ct = default);
 
-    /// <summary>Get a previously opened write channel by its ID.</summary>
+    /// <summary>Get an outbound channel by its ID, or null if not found.</summary>
     WriteChannel? GetWriteChannel(string channelId);
 
-    /// <summary>Get a previously accepted read channel by its ID.</summary>
+    /// <summary>Get an inbound channel by its ID, or null if it hasn't arrived yet.</summary>
     ReadChannel? GetReadChannel(string channelId);
 
     /// <summary>Initiate graceful shutdown (GoAway).</summary>

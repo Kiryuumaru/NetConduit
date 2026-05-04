@@ -27,7 +27,8 @@ public sealed class GoAwayTests
     public async Task GoAway_SetsShuttingDown()
     {
         var (client, server) = CreatePair();
-        await Task.WhenAll(client.Start(), server.Start());
+        client.Start(); server.Start();
+        await Task.WhenAll(client.WaitForReadyAsync(), server.WaitForReadyAsync());
 
         Assert.False(client.IsShuttingDown);
 
@@ -43,7 +44,8 @@ public sealed class GoAwayTests
     public async Task GoAway_RemoteSideReceivesGoAway()
     {
         var (client, server) = CreatePair();
-        await Task.WhenAll(client.Start(), server.Start());
+        client.Start(); server.Start();
+        await Task.WhenAll(client.WaitForReadyAsync(), server.WaitForReadyAsync());
 
         var disconnectTcs = new TaskCompletionSource<DisconnectReason>();
         server.OnDisconnected += (reason, _) => disconnectTcs.TrySetResult(reason);
@@ -73,7 +75,8 @@ public sealed class GoAwayTests
     public async Task GoAway_Idempotent()
     {
         var (client, server) = CreatePair();
-        await Task.WhenAll(client.Start(), server.Start());
+        client.Start(); server.Start();
+        await Task.WhenAll(client.WaitForReadyAsync(), server.WaitForReadyAsync());
 
         await client.GoAwayAsync();
         await client.GoAwayAsync(); // second call should be no-op

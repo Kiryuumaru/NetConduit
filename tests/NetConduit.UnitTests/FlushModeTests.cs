@@ -25,9 +25,10 @@ public sealed class FlushTests
     public async Task DataArrivesViaFlusherThread()
     {
         var (client, server) = CreatePair();
-        await Task.WhenAll(client.Start(), server.Start());
+        client.Start(); server.Start();
+        await Task.WhenAll(client.WaitForReadyAsync(), server.WaitForReadyAsync());
 
-        var wch = await client.OpenChannelAsync("test");
+        var wch = client.OpenChannel("test");
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
         var rch = await server.AcceptChannelAsync("test", cts.Token);
 
@@ -46,9 +47,10 @@ public sealed class FlushTests
     public async Task ExplicitFlush_ForcesImmediateFlush()
     {
         var (client, server) = CreatePair();
-        await Task.WhenAll(client.Start(), server.Start());
+        client.Start(); server.Start();
+        await Task.WhenAll(client.WaitForReadyAsync(), server.WaitForReadyAsync());
 
-        var wch = await client.OpenChannelAsync("test");
+        var wch = client.OpenChannel("test");
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
         var rch = await server.AcceptChannelAsync("test", cts.Token);
 
@@ -68,9 +70,10 @@ public sealed class FlushTests
     public async Task MultipleBatches_AllDataArrives()
     {
         var (client, server) = CreatePair();
-        await Task.WhenAll(client.Start(), server.Start());
+        client.Start(); server.Start();
+        await Task.WhenAll(client.WaitForReadyAsync(), server.WaitForReadyAsync());
 
-        var wch = await client.OpenChannelAsync("test");
+        var wch = client.OpenChannel("test");
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
         var rch = await server.AcceptChannelAsync("test", cts.Token);
 

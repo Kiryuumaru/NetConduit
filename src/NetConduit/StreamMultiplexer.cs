@@ -23,12 +23,15 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IFrameRouter
     private readonly List<WriteChannel> _readyChannels = [];
 
     private IStreamPair? _transport;
+    private Task? _mainLoopTask;
     private Task? _writerTask;
     private Task? _readerTask;
     private Task? _flusherTask;
     private Task? _keepaliveTask;
+    private CancellationTokenSource? _loopCts;
     private WriteChannel? _controlChannel;
     private volatile bool _isRunning;
+    private volatile bool _isConnected;
     private volatile bool _isShuttingDown;
     private DisconnectReason? _disconnectReason;
     private Guid _sessionId;
@@ -42,7 +45,7 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IFrameRouter
     public MultiplexerStats Stats => _stats;
 
     /// <inheritdoc />
-    public bool IsConnected => _transport is not null && _isRunning;
+    public bool IsConnected => _isConnected;
 
     /// <inheritdoc />
     public bool IsRunning => _isRunning;
@@ -79,6 +82,8 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IFrameRouter
     /// <inheritdoc />
     public event Action<DisconnectReason, Exception?>? OnDisconnected;
     /// <inheritdoc />
+    public event Action? OnConnected;
+    /// <inheritdoc />
     public event Action<int>? OnReconnecting;
 
     private StreamMultiplexer(MultiplexerOptions options, bool useOddIndices)
@@ -97,69 +102,37 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IFrameRouter
     }
 
     /// <inheritdoc />
-    public async Task Start(CancellationToken ct = default)
+    public void Start()
     {
         if (_isRunning)
             throw new InvalidOperationException("Multiplexer is already running.");
 
-        _transport = await _options.StreamFactory(ct);
         _isRunning = true;
         _stats._startTicks = Environment.TickCount64;
-
-        // Perform handshake
-        await PerformHandshakeAsync(ct);
-
-        // Create control channel (channel 0) — used for ping/pong, GoAway, reconnect
-        _controlChannel = new WriteChannel(
-            "__control__",
-            ChannelConstants.ControlChannel,
-            ChannelPriority.Highest,
-            FrameConstants.MinSlabSize,
-            TimeSpan.FromSeconds(5),
-            this);
-        _controlChannel.MarkOpen();
-
-        // Start the writer, flusher, and reader threads
-        var linkedCt = _cts.Token;
-        _writerTask = Task.Run(() => RunWriterLoopAsync(linkedCt), linkedCt);
-        _flusherTask = Task.Factory.StartNew(
-            () => RunFlusherLoop(linkedCt),
-            linkedCt,
-            TaskCreationOptions.LongRunning,
-            TaskScheduler.Default);
-        _readerTask = Task.Run(() => RunReaderLoopAsync(linkedCt), linkedCt);
-
-        // Start keepalive if ping interval is configured
-        if (_options.PingInterval > TimeSpan.Zero)
-        {
-            _lastPongTicks = Environment.TickCount64;
-            _keepaliveTask = Task.Run(() => RunKeepaliveLoopAsync(linkedCt), linkedCt);
-        }
-
-        _readyTcs.TrySetResult();
+        _mainLoopTask = Task.Run(() => MainLoopAsync(_cts.Token));
     }
 
     /// <inheritdoc />
     public Task WaitForReadyAsync(CancellationToken ct = default) => _readyTcs.Task.WaitAsync(ct);
 
     /// <inheritdoc />
-    public ValueTask<WriteChannel> OpenChannelAsync(string channelId, CancellationToken ct = default)
+    public WriteChannel OpenChannel(string channelId)
     {
         var defaults = _options.DefaultChannelOptions;
-        return OpenChannelAsync(new ChannelOptions
+        return OpenChannel(new ChannelOptions
         {
             ChannelId = channelId,
             Priority = defaults.Priority,
             SlabSize = defaults.SlabSize,
             SendTimeout = defaults.SendTimeout,
-        }, ct);
+        });
     }
 
     /// <inheritdoc />
-    public ValueTask<WriteChannel> OpenChannelAsync(ChannelOptions options, CancellationToken ct = default)
+    public WriteChannel OpenChannel(ChannelOptions options)
     {
         if (!_isRunning)
-            throw new InvalidOperationException("Multiplexer is not running.");
+            throw new InvalidOperationException("Multiplexer has not been started.");
 
         bool enableReplay = _options.MaxAutoReconnectAttempts > 0;
         ushort index = _registry.AllocateChannelIndex();
@@ -183,7 +156,7 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IFrameRouter
         Interlocked.Increment(ref _stats._totalChannelsOpened);
         OnChannelOpened?.Invoke(options.ChannelId);
 
-        return new ValueTask<WriteChannel>(channel);
+        return channel;
     }
 
     /// <inheritdoc />
@@ -233,6 +206,188 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IFrameRouter
     {
         _flushSignal.Signal();
         return ValueTask.CompletedTask;
+    }
+
+    // =====================================================================
+    // Main Lifecycle Loop — single loop for initial connect AND reconnect.
+    // Connect → handshake → run loops → transport dies → loop back.
+    // =====================================================================
+    private async Task MainLoopAsync(CancellationToken ct)
+    {
+        bool hasConnectedBefore = false;
+
+        try
+        {
+            while (!ct.IsCancellationRequested)
+            {
+                // Connect with retry (no delay on first attempt)
+                var transport = await ConnectWithRetryAsync(hasConnectedBefore, ct);
+
+                // Handshake: reconnect if we've connected before, initial otherwise
+                if (hasConnectedBefore)
+                {
+                    await PerformReconnectHandshakeAsync(transport, ct);
+
+                    foreach (var ch in _registry.GetAllWriteChannels())
+                        ch.PrepareReplay();
+                }
+                else
+                {
+                    _transport = transport;
+                    await PerformHandshakeAsync(ct);
+                }
+
+                _transport = transport;
+                _isConnected = true;
+                _disconnectReason = null;
+
+                // Create control channel on first connect
+                if (_controlChannel is null)
+                {
+                    _controlChannel = new WriteChannel(
+                        "__control__",
+                        ChannelConstants.ControlChannel,
+                        ChannelPriority.Highest,
+                        FrameConstants.MinSlabSize,
+                        TimeSpan.FromSeconds(5),
+                        this);
+                    _controlChannel.MarkOpen();
+                }
+
+                // Start loops with a per-session CTS
+                _loopCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+                var loopCt = _loopCts.Token;
+
+                _lastPongTicks = Environment.TickCount64;
+
+                _writerTask = Task.Run(() => RunWriterLoopAsync(loopCt), loopCt);
+                _flusherTask = Task.Factory.StartNew(
+                    () => RunFlusherLoop(loopCt),
+                    loopCt,
+                    TaskCreationOptions.LongRunning,
+                    TaskScheduler.Default);
+                _readerTask = Task.Run(() => RunReaderLoopAsync(loopCt), loopCt);
+
+                if (_options.PingInterval > TimeSpan.Zero)
+                    _keepaliveTask = Task.Run(() => RunKeepaliveLoopAsync(loopCt), loopCt);
+
+                if (!hasConnectedBefore)
+                    _readyTcs.TrySetResult();
+                hasConnectedBefore = true;
+
+                OnConnected?.Invoke();
+
+                // Block until any loop faults (transport died)
+                var faulted = await Task.WhenAny(
+                    _writerTask,
+                    _readerTask,
+                    _flusherTask,
+                    _keepaliveTask ?? Task.Delay(Timeout.Infinite, ct));
+
+                // Transport is dead — cancel all loops and clean up
+                _isConnected = false;
+                _loopCts.Cancel();
+
+                await WaitForLoopsAsync();
+                _loopCts.Dispose();
+                _loopCts = null;
+
+                // Capture the exception if any
+                Exception? transportEx = faulted.Exception?.InnerException;
+                if (transportEx is not null)
+                    OnError?.Invoke(transportEx);
+
+                // Dispose old transport
+                await transport.DisposeAsync();
+                _transport = null;
+
+                if (_isShuttingDown)
+                    break;
+
+                OnDisconnected?.Invoke(NetConduit.DisconnectReason.TransportError, transportEx);
+            }
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            // Normal shutdown via Dispose/GoAway
+        }
+        catch (Exception ex)
+        {
+            // Fatal error (protocol error, exhausted retries) — notify waiters
+            _readyTcs.TrySetException(ex);
+        }
+    }
+
+    private async Task<IStreamPair> ConnectWithRetryAsync(bool isReconnect, CancellationToken ct)
+    {
+        int maxAttempts = _options.MaxAutoReconnectAttempts;
+        double delay = _options.AutoReconnectDelay.TotalMilliseconds;
+        double maxDelay = _options.MaxAutoReconnectDelay.TotalMilliseconds;
+
+        for (int attempt = 1; ; attempt++)
+        {
+            ct.ThrowIfCancellationRequested();
+
+            // Enforce max attempts (0 = unlimited)
+            if (maxAttempts > 0 && attempt > maxAttempts)
+                throw new MultiplexerException(ErrorCode.Internal,
+                    $"Connection failed after {maxAttempts} attempts.");
+
+            // Delay before retry (skip on first attempt of first connect)
+            if (attempt > 1 || isReconnect)
+            {
+                OnReconnecting?.Invoke(attempt);
+                await Task.Delay(TimeSpan.FromMilliseconds(delay), ct);
+                delay = Math.Min(delay * _options.AutoReconnectBackoffMultiplier, maxDelay);
+            }
+
+            try
+            {
+                if (_options.ConnectionTimeout > TimeSpan.Zero
+                    && _options.ConnectionTimeout != Timeout.InfiniteTimeSpan)
+                {
+                    using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+                    timeoutCts.CancelAfter(_options.ConnectionTimeout);
+                    try
+                    {
+                        return await _options.StreamFactory(timeoutCts.Token);
+                    }
+                    catch (OperationCanceledException) when (!ct.IsCancellationRequested)
+                    {
+                        throw new TimeoutException(
+                            $"Connection timed out after {_options.ConnectionTimeout}");
+                    }
+                }
+
+                return await _options.StreamFactory(ct);
+            }
+            catch (OperationCanceledException) when (ct.IsCancellationRequested)
+            {
+                throw;
+            }
+            catch (Exception ex)
+            {
+                OnError?.Invoke(ex);
+
+                // If max attempts is 0 (no retry on initial) and not reconnecting, propagate immediately
+                if (!isReconnect && maxAttempts == 0)
+                    throw;
+            }
+        }
+    }
+
+    private async Task WaitForLoopsAsync()
+    {
+        Task[] loops = [_writerTask!, _readerTask!, _flusherTask!];
+        if (_keepaliveTask is not null)
+            loops = [.. loops, _keepaliveTask];
+
+        foreach (var loop in loops)
+        {
+            try { await loop; }
+            catch (OperationCanceledException) { }
+            catch { /* loop faults are already handled */ }
+        }
     }
 
     // IFrameRouter — channels call this to signal they have ready frames
@@ -292,10 +447,6 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IFrameRouter
         {
             // Normal shutdown
         }
-        catch (Exception ex)
-        {
-            HandleTransportError(ex);
-        }
     }
 
     // =====================================================================
@@ -320,10 +471,6 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IFrameRouter
             // Normal shutdown — do one final flush to push any remaining data
             try { writeStream.Flush(); }
             catch { /* transport may already be closed */ }
-        }
-        catch (Exception ex)
-        {
-            HandleTransportError(ex);
         }
     }
 
@@ -396,14 +543,6 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IFrameRouter
         {
             // Normal shutdown
         }
-        catch (Exception ex) when (ex is IOException or ObjectDisposedException)
-        {
-            HandleTransportError(ex);
-        }
-        catch (Exception ex)
-        {
-            HandleTransportError(ex);
-        }
     }
 
     private void DispatchToChannel(FrameHeader header, ReadOnlySpan<byte> payload)
@@ -412,6 +551,12 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IFrameRouter
         {
             if (payload.Length > ChannelConstants.MaxChannelIdLength)
                 return; // channel name too long — drop frame
+
+            // After reconnect, Init frames are replayed from the slab.
+            // If the channel already exists, skip re-registration.
+            var existing = _registry.GetReadChannel(header.ChannelIndex);
+            if (existing is not null)
+                return;
 
             // Remote side is opening a channel — create a ReadChannel
             string channelId = Encoding.UTF8.GetString(payload);
@@ -520,9 +665,8 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IFrameRouter
                     missedPings++;
                     if (missedPings >= _options.MaxMissedPings)
                     {
-                        HandleTransportError(new IOException(
-                            $"Keepalive timeout: {missedPings} missed pings (timeout: {_options.PingTimeout})"));
-                        return;
+                        throw new IOException(
+                            $"Keepalive timeout: {missedPings} missed pings (timeout: {_options.PingTimeout})");
                     }
                 }
                 else
@@ -585,96 +729,11 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IFrameRouter
         _registry.SetIndexParity(useOdd);
     }
 
-    private void HandleTransportError(Exception ex)
-    {
-        if (!_isRunning) return;
-
-        if (_isShuttingDown || _options.MaxAutoReconnectAttempts == 0)
-        {
-            // No reconnection — abort everything
-            _isRunning = false;
-            _disconnectReason = NetConduit.DisconnectReason.TransportError;
-            _registry.AbortAllChannels(ChannelCloseReason.TransportFailed, ex);
-            _registry.CancelAllPendingAccepts();
-            OnDisconnected?.Invoke(NetConduit.DisconnectReason.TransportError, ex);
-            OnError?.Invoke(ex);
-            return;
-        }
-
-        // Reconnection enabled — attempt to re-establish transport
-        OnError?.Invoke(ex);
-        _ = Task.Run(() => AttemptReconnectAsync());
-    }
-
-    private async Task AttemptReconnectAsync()
-    {
-        int maxAttempts = _options.MaxAutoReconnectAttempts;
-        double delay = _options.AutoReconnectDelay.TotalMilliseconds;
-        double maxDelay = _options.MaxAutoReconnectDelay.TotalMilliseconds;
-
-        for (int attempt = 1; maxAttempts == 0 || attempt <= maxAttempts; attempt++)
-        {
-            if (_cts.IsCancellationRequested) break;
-
-            try
-            {
-                OnReconnecting?.Invoke(attempt);
-                await Task.Delay(TimeSpan.FromMilliseconds(delay), _cts.Token);
-
-                // Get new transport from factory
-                var newTransport = await _options.StreamFactory(_cts.Token);
-
-                // Perform reconnect handshake (sends session ID with Reconnect subtype)
-                await PerformReconnectHandshakeAsync(newTransport, _cts.Token);
-
-                // Success — swap transport and restart loops
-                if (_transport is not null)
-                    await _transport.DisposeAsync();
-                _transport = newTransport;
-
-                // Tell all write channels to prepare replay (reset sentPos to ackedPos)
-                foreach (var ch in _registry.GetAllWriteChannels())
-                    ch.PrepareReplay();
-
-                // Reset keepalive tracking
-                _lastPongTicks = Environment.TickCount64;
-
-                // Restart writer, flusher, and reader
-                var linkedCt = _cts.Token;
-                _writerTask = Task.Run(() => RunWriterLoopAsync(linkedCt), linkedCt);
-                _flusherTask = Task.Factory.StartNew(
-                    () => RunFlusherLoop(linkedCt),
-                    linkedCt,
-                    TaskCreationOptions.LongRunning,
-                    TaskScheduler.Default);
-                _readerTask = Task.Run(() => RunReaderLoopAsync(linkedCt), linkedCt);
-
-                if (_options.PingInterval > TimeSpan.Zero)
-                    _keepaliveTask = Task.Run(() => RunKeepaliveLoopAsync(linkedCt), linkedCt);
-
-                return; // reconnection succeeded
-            }
-            catch (OperationCanceledException) when (_cts.IsCancellationRequested)
-            {
-                break;
-            }
-            catch (Exception reconnectEx)
-            {
-                OnError?.Invoke(reconnectEx);
-                delay = Math.Min(delay * _options.AutoReconnectBackoffMultiplier, maxDelay);
-            }
-        }
-
-        // All reconnect attempts exhausted
-        _isRunning = false;
-        _disconnectReason = NetConduit.DisconnectReason.TransportError;
-        _registry.AbortAllChannels(ChannelCloseReason.TransportFailed);
-        _registry.CancelAllPendingAccepts();
-        OnDisconnected?.Invoke(NetConduit.DisconnectReason.TransportError, null);
-    }
-
     private async Task PerformReconnectHandshakeAsync(IStreamPair transport, CancellationToken ct)
     {
+        // Symmetric reconnect: both sides send Reconnect, both read Reconnect.
+        // Same pattern as initial handshake (send session ID, read session ID).
+
         // Send reconnect frame: [CtrlSubtype.Reconnect][sessionId:16B]
         byte[] reconnectPayload = new byte[1 + 16];
         reconnectPayload[0] = CtrlSubtype.Reconnect;
@@ -687,21 +746,21 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IFrameRouter
         await transport.WriteStream.WriteAsync(frame, ct);
         await transport.WriteStream.FlushAsync(ct);
 
-        // Read reconnect ack: [CtrlSubtype.ReconnectAck][sessionId:16B]
+        // Read remote reconnect frame: [CtrlSubtype.Reconnect][sessionId:16B]
         byte[] headerBuf = new byte[FrameHeader.Size];
         await ReadExactAsync(transport.ReadStream, headerBuf, ct);
         var header = FrameHeader.Parse(headerBuf);
 
         if (header.Flags != FrameFlags.Ctrl || header.PayloadLength < 17)
-            throw new MultiplexerException(ErrorCode.ProtocolError, "Invalid reconnect ack.");
+            throw new MultiplexerException(ErrorCode.ProtocolError, "Invalid reconnect frame.");
 
-        byte[] ackPayload = new byte[header.PayloadLength];
-        await ReadExactAsync(transport.ReadStream, ackPayload, ct);
+        byte[] remotePayload = new byte[header.PayloadLength];
+        await ReadExactAsync(transport.ReadStream, remotePayload, ct);
 
-        if (ackPayload[0] != CtrlSubtype.ReconnectAck)
-            throw new MultiplexerException(ErrorCode.ProtocolError, "Expected reconnect ack subtype.");
+        if (remotePayload[0] != CtrlSubtype.Reconnect)
+            throw new MultiplexerException(ErrorCode.ProtocolError, "Expected reconnect subtype.");
 
-        var remoteSession = new Guid(ackPayload.AsSpan(1, 16));
+        var remoteSession = new Guid(remotePayload.AsSpan(1, 16));
         if (remoteSession != _remoteSessionId)
             throw new MultiplexerException(ErrorCode.SessionMismatch, "Remote session ID mismatch on reconnect.");
     }
@@ -724,6 +783,7 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IFrameRouter
         if (!_isRunning && _transport is null) return;
 
         _isRunning = false;
+        _isConnected = false;
         _disconnectReason ??= NetConduit.DisconnectReason.LocalDispose;
 
         _cts.Cancel();
@@ -731,30 +791,9 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IFrameRouter
         _registry.AbortAllChannels(ChannelCloseReason.MuxDisposed);
         _registry.CancelAllPendingAccepts();
 
-        if (_writerTask is not null)
+        if (_mainLoopTask is not null)
         {
-            try { await _writerTask; }
-            catch (OperationCanceledException) { }
-            catch { /* swallow during dispose */ }
-        }
-
-        if (_flusherTask is not null)
-        {
-            try { await _flusherTask; }
-            catch (OperationCanceledException) { }
-            catch { /* swallow during dispose */ }
-        }
-
-        if (_readerTask is not null)
-        {
-            try { await _readerTask; }
-            catch (OperationCanceledException) { }
-            catch { /* swallow during dispose */ }
-        }
-
-        if (_keepaliveTask is not null)
-        {
-            try { await _keepaliveTask; }
+            try { await _mainLoopTask; }
             catch (OperationCanceledException) { }
             catch { /* swallow during dispose */ }
         }
@@ -771,6 +810,7 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IFrameRouter
             _controlChannel = null;
         }
 
+        _loopCts?.Dispose();
         _readySignal.Dispose();
         _flushSignal.Dispose();
         _cts.Dispose();

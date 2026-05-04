@@ -19,16 +19,17 @@ public sealed class PriorityTests
             PingInterval = TimeSpan.Zero,
         });
 
-        await Task.WhenAll(client.Start(), server.Start());
+        client.Start(); server.Start();
+        await Task.WhenAll(client.WaitForReadyAsync(), server.WaitForReadyAsync());
 
         // Open channels with different priorities
-        var lowCh = await client.OpenChannelAsync(new ChannelOptions
+        var lowCh = client.OpenChannel(new ChannelOptions
         {
             ChannelId = "low",
             Priority = ChannelPriority.Low,
         });
 
-        var highCh = await client.OpenChannelAsync(new ChannelOptions
+        var highCh = client.OpenChannel(new ChannelOptions
         {
             ChannelId = "high",
             Priority = ChannelPriority.High,

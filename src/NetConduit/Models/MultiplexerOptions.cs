@@ -40,6 +40,9 @@ public sealed record MultiplexerOptions
     /// <summary>Backoff multiplier for reconnect delay.</summary>
     public double AutoReconnectBackoffMultiplier { get; init; } = 2.0;
 
+    /// <summary>Timeout for individual StreamFactory connection attempts.</summary>
+    public TimeSpan ConnectionTimeout { get; init; } = TimeSpan.FromSeconds(30);
+
     /// <summary>Default options applied to channels that don't specify their own.</summary>
     public DefaultChannelOptions DefaultChannelOptions { get; init; } = new();
 }

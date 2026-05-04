@@ -33,15 +33,16 @@ public sealed class HandshakeTests
         var lowId = new Guid("00000000-0000-0000-0000-000000000001");
 
         var (client, server) = CreatePair(clientSessionId: highId, serverSessionId: lowId);
-        await Task.WhenAll(client.Start(), server.Start());
+        client.Start(); server.Start();
+        await Task.WhenAll(client.WaitForReadyAsync(), server.WaitForReadyAsync());
 
         // Higher session ID gets odd indices
         // Client (highId) opens channel → should get odd index (1, 3, 5, ...)
-        var ch1 = await client.OpenChannelAsync("test1");
-        var ch2 = await client.OpenChannelAsync("test2");
+        var ch1 = client.OpenChannel("test1");
+        var ch2 = client.OpenChannel("test2");
 
         // Server (lowId) opens channel → should get even index (2, 4, 6, ...)
-        var sCh1 = await server.OpenChannelAsync("server1");
+        var sCh1 = server.OpenChannel("server1");
 
         // Verify they can communicate (proves indices don't collide)
         var rch1 = await server.AcceptChannelAsync("test1", new CancellationTokenSource(TimeSpan.FromSeconds(5)).Token);
@@ -55,11 +56,12 @@ public sealed class HandshakeTests
     public async Task Handshake_BothSidesOpenChannels_NoCollision()
     {
         var (client, server) = CreatePair();
-        await Task.WhenAll(client.Start(), server.Start());
+        client.Start(); server.Start();
+        await Task.WhenAll(client.WaitForReadyAsync(), server.WaitForReadyAsync());
 
         // Both sides open channels concurrently
-        var clientCh = await client.OpenChannelAsync("from-client");
-        var serverCh = await server.OpenChannelAsync("from-server");
+        var clientCh = client.OpenChannel("from-client");
+        var serverCh = server.OpenChannel("from-server");
 
         // Both sides accept the other's channel
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
