@@ -1,8 +1,18 @@
 <Solution>
   <Folder Name="/src/">
     <Project Path="src/NetConduit/NetConduit.csproj" />
+    <Project Path="src/NetConduit.Tcp/NetConduit.Tcp.csproj" />
+    <Project Path="src/NetConduit.WebSocket/NetConduit.WebSocket.csproj" />
+    <Project Path="src/NetConduit.Ipc/NetConduit.Ipc.csproj" />
+    <Project Path="src/NetConduit.Udp/NetConduit.Udp.csproj" />
+    <Project Path="src/NetConduit.Quic/NetConduit.Quic.csproj" />
   </Folder>
   <Folder Name="/tests/">
     <Project Path="tests/NetConduit.UnitTests/NetConduit.UnitTests.csproj" />
+    <Project Path="tests/NetConduit.Tcp.IntegrationTests/NetConduit.Tcp.IntegrationTests.csproj" />
+    <Project Path="tests/NetConduit.WebSocket.IntegrationTests/NetConduit.WebSocket.IntegrationTests.csproj" />
+    <Project Path="tests/NetConduit.Ipc.IntegrationTests/NetConduit.Ipc.IntegrationTests.csproj" />
+    <Project Path="tests/NetConduit.Udp.IntegrationTests/NetConduit.Udp.IntegrationTests.csproj" />
+    <Project Path="tests/NetConduit.Quic.IntegrationTests/NetConduit.Quic.IntegrationTests.csproj" />
   </Folder>
 </Solution>

@@ -5,7 +5,8 @@ namespace NetConduit;
 /// </summary>
 public sealed class StreamPair : IStreamPair
 {
-    private readonly IAsyncDisposable? _owner;
+    private readonly IAsyncDisposable? _asyncOwner;
+    private readonly IDisposable? _syncOwner;
 
     /// <inheritdoc />
     public Stream ReadStream { get; }
@@ -20,13 +21,31 @@ public sealed class StreamPair : IStreamPair
     {
         ReadStream = readStream ?? throw new ArgumentNullException(nameof(readStream));
         WriteStream = writeStream ?? throw new ArgumentNullException(nameof(writeStream));
-        _owner = owner;
+        _asyncOwner = owner;
     }
 
     /// <summary>
     /// Creates a stream pair from a single bidirectional stream.
     /// </summary>
     public StreamPair(Stream stream, IAsyncDisposable? owner = null)
+        : this(stream, stream, owner)
+    {
+    }
+
+    /// <summary>
+    /// Creates a stream pair from separate read and write streams with a disposable owner.
+    /// </summary>
+    public StreamPair(Stream readStream, Stream writeStream, IDisposable owner)
+    {
+        ReadStream = readStream ?? throw new ArgumentNullException(nameof(readStream));
+        WriteStream = writeStream ?? throw new ArgumentNullException(nameof(writeStream));
+        _syncOwner = owner ?? throw new ArgumentNullException(nameof(owner));
+    }
+
+    /// <summary>
+    /// Creates a stream pair from a single bidirectional stream with a disposable owner.
+    /// </summary>
+    public StreamPair(Stream stream, IDisposable owner)
         : this(stream, stream, owner)
     {
     }
@@ -40,9 +59,11 @@ public sealed class StreamPair : IStreamPair
         }
         await WriteStream.DisposeAsync();
 
-        if (_owner is not null)
+        if (_asyncOwner is not null)
         {
-            await _owner.DisposeAsync();
+            await _asyncOwner.DisposeAsync();
         }
+
+        _syncOwner?.Dispose();
     }
 }
