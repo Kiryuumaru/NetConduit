@@ -104,8 +104,8 @@ public static class UdpMultiplexer
 
     private static async Task TryReceiveHelloAckAsync(UdpClient client, CancellationToken cancellationToken)
     {
-        const int maxRetries = 10;
-        const int retryDelayMs = 100;
+        const int maxRetries = 20;
+        const int retryDelayMs = 200;
 
         for (int i = 0; i < maxRetries; i++)
         {
@@ -121,6 +121,11 @@ public static class UdpMultiplexer
             }
             catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
             {
+                await client.SendAsync(HelloPayload, cancellationToken).ConfigureAwait(false);
+            }
+            catch (SocketException)
+            {
+                await Task.Delay(retryDelayMs, cancellationToken).ConfigureAwait(false);
                 await client.SendAsync(HelloPayload, cancellationToken).ConfigureAwait(false);
             }
         }
