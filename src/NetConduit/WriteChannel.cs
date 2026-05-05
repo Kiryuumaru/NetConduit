@@ -26,6 +26,7 @@ public sealed class WriteChannel : Stream, IAsyncDisposable
     private int _sentPos;
     private int _pendingPos;
     private int _writePos;
+    private bool _routerReading; // true between TakeReady and MarkSent — blocks compaction
 
     private volatile ChannelState _state = ChannelState.Opening;
     private ChannelCloseReason? _closeReason;
@@ -207,6 +208,7 @@ public sealed class WriteChannel : Stream, IAsyncDisposable
         lock (_posLock)
         {
             if (_pendingPos <= _sentPos) return Memory<byte>.Empty;
+            _routerReading = true;
             return _slabMemory[_sentPos.._pendingPos];
         }
     }
@@ -215,6 +217,7 @@ public sealed class WriteChannel : Stream, IAsyncDisposable
     {
         lock (_posLock)
         {
+            _routerReading = false;
             _sentPos += bytes;
             if (!_enableReplay)
             {
@@ -291,7 +294,7 @@ public sealed class WriteChannel : Stream, IAsyncDisposable
     // Must be called under _posLock
     private void TryCompactLocked()
     {
-        if (_ackedPos <= 0) return;
+        if (_ackedPos <= 0 || _routerReading) return;
 
         int acked = _ackedPos;
         int unackedLength = _writePos - acked;

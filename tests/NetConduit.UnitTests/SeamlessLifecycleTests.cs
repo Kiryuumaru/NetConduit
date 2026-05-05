@@ -1,5 +1,6 @@
 namespace NetConduit.UnitTests;
 
+[Collection("Sequential")]
 public sealed class SeamlessLifecycleTests
 {
     // =====================================================================

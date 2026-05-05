@@ -33,6 +33,7 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IFrameRouter
     private volatile bool _isRunning;
     private volatile bool _isConnected;
     private volatile bool _isShuttingDown;
+    private volatile bool _disconnectedFired;
     private DisconnectReason? _disconnectReason;
     private Guid _sessionId;
     private Guid _remoteSessionId;
@@ -271,11 +272,11 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IFrameRouter
                 if (_options.PingInterval > TimeSpan.Zero)
                     _keepaliveTask = Task.Run(() => RunKeepaliveLoopAsync(loopCt), loopCt);
 
+                OnConnected?.Invoke();
+
                 if (!hasConnectedBefore)
                     _readyTcs.TrySetResult();
                 hasConnectedBefore = true;
-
-                OnConnected?.Invoke();
 
                 // Block until any loop faults (transport died)
                 var faulted = await Task.WhenAny(
@@ -302,8 +303,20 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IFrameRouter
                 _transport = null;
 
                 if (_isShuttingDown)
+                {
+                    if (_disconnectReason == NetConduit.DisconnectReason.GoAwayReceived)
+                    {
+                        _disconnectedFired = true;
+                        OnDisconnected?.Invoke(NetConduit.DisconnectReason.GoAwayReceived, null);
+                    }
+                    break;
+                }
+
+                // If outer CTS is cancelled (Dispose was called), don't fire TransportError
+                if (ct.IsCancellationRequested)
                     break;
 
+                _disconnectedFired = true;
                 OnDisconnected?.Invoke(NetConduit.DisconnectReason.TransportError, transportEx);
             }
         }
@@ -815,6 +828,7 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IFrameRouter
         _flushSignal.Dispose();
         _cts.Dispose();
 
-        OnDisconnected?.Invoke(_disconnectReason.Value, null);
+        if (!_disconnectedFired && _disconnectReason.HasValue)
+            OnDisconnected?.Invoke(_disconnectReason.Value, null);
     }
 }

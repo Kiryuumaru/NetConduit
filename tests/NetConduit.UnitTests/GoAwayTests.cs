@@ -52,20 +52,11 @@ public sealed class GoAwayTests
 
         await client.GoAwayAsync();
 
-        // Give time for GoAway frame to be received
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
 
-        // The server should detect the shutdown
-        // Either via GoAway frame or transport close — both are valid
-        try
-        {
-            var reason = await disconnectTcs.Task.WaitAsync(cts.Token);
-            Assert.True(reason is DisconnectReason.GoAwayReceived or DisconnectReason.TransportError);
-        }
-        catch (OperationCanceledException)
-        {
-            // GoAway was sent but transport closed before server processed it — acceptable
-        }
+        // Server must detect client shutdown (via GoAway frame or transport close)
+        var reason = await disconnectTcs.Task.WaitAsync(cts.Token);
+        Assert.True(reason is DisconnectReason.GoAwayReceived or DisconnectReason.TransportError);
 
         await client.DisposeAsync();
         await server.DisposeAsync();

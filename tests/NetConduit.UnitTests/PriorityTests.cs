@@ -39,11 +39,11 @@ public sealed class PriorityTests
         var lowRead = await server.AcceptChannelAsync("low", cts.Token);
         var highRead = await server.AcceptChannelAsync("high", cts.Token);
 
-        // Write to both channels — high priority should arrive
-        await highCh.WriteAsync(new byte[] { 0xAA });
+        // Write low FIRST, then high — priority sorting should send high before low
         await lowCh.WriteAsync(new byte[] { 0xBB });
+        await highCh.WriteAsync(new byte[] { 0xAA });
 
-        // Both should eventually be received
+        // Both should be received
         byte[] buf = new byte[1];
         int read = await highRead.ReadAsync(buf, cts.Token);
         Assert.Equal(1, read);

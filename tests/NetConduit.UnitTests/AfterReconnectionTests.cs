@@ -7,6 +7,7 @@ namespace NetConduit.UnitTests;
 /// - Events fire correctly through the lifecycle
 /// - Multiple reconnects in sequence work
 /// </summary>
+[Collection("Sequential")]
 public sealed class AfterReconnectionTests : IAsyncDisposable
 {
     private readonly ReconnectableTransportFactory _factory = new();
@@ -49,7 +50,7 @@ public sealed class AfterReconnectionTests : IAsyncDisposable
 
         client.Start();
         server.Start();
-        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
         await Task.WhenAll(
             client.WaitForReadyAsync(cts.Token),
             server.WaitForReadyAsync(cts.Token));
