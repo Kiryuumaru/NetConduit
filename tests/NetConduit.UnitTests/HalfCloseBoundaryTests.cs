@@ -125,7 +125,7 @@ public sealed class HalfCloseBoundaryTests
             await foreach (var ch in server.AcceptChannelsAsync(cts.Token))
             {
                 var buf = new byte[16];
-                await ch.ReadAsync(buf, cts.Token);
+                _ = await ch.ReadAsync(buf, cts.Token);
                 count++;
                 if (count >= 100) break;
             }

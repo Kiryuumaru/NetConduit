@@ -352,7 +352,7 @@ public sealed class ChaosRobustnessTests
             await foreach (var ch in server.AcceptChannelsAsync(cts.Token))
             {
                 var buf = new byte[16];
-                await ch.ReadAsync(buf, cts.Token);
+                _ = await ch.ReadAsync(buf, cts.Token);
                 count++;
                 if (count >= cycles) break;
             }

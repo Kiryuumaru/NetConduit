@@ -18,7 +18,7 @@ jobs:
     runs-on:
       labels: ubuntu-22.04
     steps:
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@v6
       with:
         fetch-depth: 0
         fetch-tags: true
@@ -199,14 +199,14 @@ jobs:
     name: Test NetConduit
     runs-on: ${{ fromJson(needs.PRE_SETUP.outputs.NUKE_PRE_SETUP_NET_CONDUIT_TEST_RUNS_ON) }}
     steps:
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@v6
       with:
         fetch-depth: ${{ needs.PRE_SETUP.outputs.NUKE_PRE_SETUP_NET_CONDUIT_TEST_CHECKOUT_FETCH_DEPTH }}
         fetch-tags: ${{ needs.PRE_SETUP.outputs.NUKE_PRE_SETUP_NET_CONDUIT_TEST_CHECKOUT_FETCH_TAGS }}
         submodules: ${{ needs.PRE_SETUP.outputs.NUKE_PRE_SETUP_NET_CONDUIT_TEST_CHECKOUT_SUBMODULES }}
         persist-credentials: true
     - name: Cache Run
-      uses: actions/cache@v4
+      uses: actions/cache@v5
       with:
         path: ./.nuke/temp/cache
         key: ${{ needs.PRE_SETUP.outputs.NUKE_PRE_SETUP_NET_CONDUIT_TEST_CACHE_KEY }}
@@ -217,14 +217,14 @@ jobs:
       name: Run Nuke net_conduit_test
       run: ${{ needs.PRE_SETUP.outputs.NUKE_PRE_SETUP_NET_CONDUIT_TEST_RUN_SCRIPT }} Run --args "net_conduit_test"
     - name: Upload net_conduit pre_test artifacts
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@v7
       with:
         name: pre_test___net_conduit___NET_CONDUIT_TEST
         path: ./.nuke/temp/artifacts-upload/net_conduit/*
         if-no-files-found: error
         retention-days: 1
     - name: Upload common pre_test artifacts
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@v7
       with:
         name: pre_test___$common___NET_CONDUIT_TEST
         path: ./.nuke/temp/artifacts-upload/$common/*
@@ -239,14 +239,14 @@ jobs:
     name: Test NetConduit.Tcp
     runs-on: ${{ fromJson(needs.PRE_SETUP.outputs.NUKE_PRE_SETUP_NET_CONDUIT_TCP_TEST_RUNS_ON) }}
     steps:
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@v6
       with:
         fetch-depth: ${{ needs.PRE_SETUP.outputs.NUKE_PRE_SETUP_NET_CONDUIT_TCP_TEST_CHECKOUT_FETCH_DEPTH }}
         fetch-tags: ${{ needs.PRE_SETUP.outputs.NUKE_PRE_SETUP_NET_CONDUIT_TCP_TEST_CHECKOUT_FETCH_TAGS }}
         submodules: ${{ needs.PRE_SETUP.outputs.NUKE_PRE_SETUP_NET_CONDUIT_TCP_TEST_CHECKOUT_SUBMODULES }}
         persist-credentials: true
     - name: Cache Run
-      uses: actions/cache@v4
+      uses: actions/cache@v5
       with:
         path: ./.nuke/temp/cache
         key: ${{ needs.PRE_SETUP.outputs.NUKE_PRE_SETUP_NET_CONDUIT_TCP_TEST_CACHE_KEY }}
@@ -257,14 +257,14 @@ jobs:
       name: Run Nuke net_conduit_tcp_test
       run: ${{ needs.PRE_SETUP.outputs.NUKE_PRE_SETUP_NET_CONDUIT_TCP_TEST_RUN_SCRIPT }} Run --args "net_conduit_tcp_test"
     - name: Upload net_conduit_tcp pre_test artifacts
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@v7
       with:
         name: pre_test___net_conduit_tcp___NET_CONDUIT_TCP_TEST
         path: ./.nuke/temp/artifacts-upload/net_conduit_tcp/*
         if-no-files-found: error
         retention-days: 1
     - name: Upload common pre_test artifacts
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@v7
       with:
         name: pre_test___$common___NET_CONDUIT_TCP_TEST
         path: ./.nuke/temp/artifacts-upload/$common/*
@@ -279,14 +279,14 @@ jobs:
     name: Test NetConduit.WebSocket
     runs-on: ${{ fromJson(needs.PRE_SETUP.outputs.NUKE_PRE_SETUP_NET_CONDUIT_WEBSOCKET_TEST_RUNS_ON) }}
     steps:
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@v6
       with:
         fetch-depth: ${{ needs.PRE_SETUP.outputs.NUKE_PRE_SETUP_NET_CONDUIT_WEBSOCKET_TEST_CHECKOUT_FETCH_DEPTH }}
         fetch-tags: ${{ needs.PRE_SETUP.outputs.NUKE_PRE_SETUP_NET_CONDUIT_WEBSOCKET_TEST_CHECKOUT_FETCH_TAGS }}
         submodules: ${{ needs.PRE_SETUP.outputs.NUKE_PRE_SETUP_NET_CONDUIT_WEBSOCKET_TEST_CHECKOUT_SUBMODULES }}
         persist-credentials: true
     - name: Cache Run
-      uses: actions/cache@v4
+      uses: actions/cache@v5
       with:
         path: ./.nuke/temp/cache
         key: ${{ needs.PRE_SETUP.outputs.NUKE_PRE_SETUP_NET_CONDUIT_WEBSOCKET_TEST_CACHE_KEY }}
@@ -297,14 +297,14 @@ jobs:
       name: Run Nuke net_conduit_websocket_test
       run: ${{ needs.PRE_SETUP.outputs.NUKE_PRE_SETUP_NET_CONDUIT_WEBSOCKET_TEST_RUN_SCRIPT }} Run --args "net_conduit_websocket_test"
     - name: Upload net_conduit_websocket pre_test artifacts
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@v7
       with:
         name: pre_test___net_conduit_websocket___NET_CONDUIT_WEBSOCKET_TEST
         path: ./.nuke/temp/artifacts-upload/net_conduit_websocket/*
         if-no-files-found: error
         retention-days: 1
     - name: Upload common pre_test artifacts
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@v7
       with:
         name: pre_test___$common___NET_CONDUIT_WEBSOCKET_TEST
         path: ./.nuke/temp/artifacts-upload/$common/*
@@ -319,14 +319,14 @@ jobs:
     name: Test NetConduit.Udp
     runs-on: ${{ fromJson(needs.PRE_SETUP.outputs.NUKE_PRE_SETUP_NET_CONDUIT_UDP_TEST_RUNS_ON) }}
     steps:
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@v6
       with:
         fetch-depth: ${{ needs.PRE_SETUP.outputs.NUKE_PRE_SETUP_NET_CONDUIT_UDP_TEST_CHECKOUT_FETCH_DEPTH }}
         fetch-tags: ${{ needs.PRE_SETUP.outputs.NUKE_PRE_SETUP_NET_CONDUIT_UDP_TEST_CHECKOUT_FETCH_TAGS }}
         submodules: ${{ needs.PRE_SETUP.outputs.NUKE_PRE_SETUP_NET_CONDUIT_UDP_TEST_CHECKOUT_SUBMODULES }}
         persist-credentials: true
     - name: Cache Run
-      uses: actions/cache@v4
+      uses: actions/cache@v5
       with:
         path: ./.nuke/temp/cache
         key: ${{ needs.PRE_SETUP.outputs.NUKE_PRE_SETUP_NET_CONDUIT_UDP_TEST_CACHE_KEY }}
@@ -337,14 +337,14 @@ jobs:
       name: Run Nuke net_conduit_udp_test
       run: ${{ needs.PRE_SETUP.outputs.NUKE_PRE_SETUP_NET_CONDUIT_UDP_TEST_RUN_SCRIPT }} Run --args "net_conduit_udp_test"
     - name: Upload net_conduit_udp pre_test artifacts
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@v7
       with:
         name: pre_test___net_conduit_udp___NET_CONDUIT_UDP_TEST
         path: ./.nuke/temp/artifacts-upload/net_conduit_udp/*
         if-no-files-found: error
         retention-days: 1
     - name: Upload common pre_test artifacts
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@v7
       with:
         name: pre_test___$common___NET_CONDUIT_UDP_TEST
         path: ./.nuke/temp/artifacts-upload/$common/*
@@ -359,14 +359,14 @@ jobs:
     name: Test NetConduit.Ipc
     runs-on: ${{ fromJson(needs.PRE_SETUP.outputs.NUKE_PRE_SETUP_NET_CONDUIT_IPC_TEST_RUNS_ON) }}
     steps:
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@v6
       with:
         fetch-depth: ${{ needs.PRE_SETUP.outputs.NUKE_PRE_SETUP_NET_CONDUIT_IPC_TEST_CHECKOUT_FETCH_DEPTH }}
         fetch-tags: ${{ needs.PRE_SETUP.outputs.NUKE_PRE_SETUP_NET_CONDUIT_IPC_TEST_CHECKOUT_FETCH_TAGS }}
         submodules: ${{ needs.PRE_SETUP.outputs.NUKE_PRE_SETUP_NET_CONDUIT_IPC_TEST_CHECKOUT_SUBMODULES }}
         persist-credentials: true
     - name: Cache Run
-      uses: actions/cache@v4
+      uses: actions/cache@v5
       with:
         path: ./.nuke/temp/cache
         key: ${{ needs.PRE_SETUP.outputs.NUKE_PRE_SETUP_NET_CONDUIT_IPC_TEST_CACHE_KEY }}
@@ -377,14 +377,14 @@ jobs:
       name: Run Nuke net_conduit_ipc_test
       run: ${{ needs.PRE_SETUP.outputs.NUKE_PRE_SETUP_NET_CONDUIT_IPC_TEST_RUN_SCRIPT }} Run --args "net_conduit_ipc_test"
     - name: Upload net_conduit_ipc pre_test artifacts
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@v7
       with:
         name: pre_test___net_conduit_ipc___NET_CONDUIT_IPC_TEST
         path: ./.nuke/temp/artifacts-upload/net_conduit_ipc/*
         if-no-files-found: error
         retention-days: 1
     - name: Upload common pre_test artifacts
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@v7
       with:
         name: pre_test___$common___NET_CONDUIT_IPC_TEST
         path: ./.nuke/temp/artifacts-upload/$common/*
@@ -399,14 +399,14 @@ jobs:
     name: Test NetConduit.Quic
     runs-on: ${{ fromJson(needs.PRE_SETUP.outputs.NUKE_PRE_SETUP_NET_CONDUIT_QUIC_TEST_RUNS_ON) }}
     steps:
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@v6
       with:
         fetch-depth: ${{ needs.PRE_SETUP.outputs.NUKE_PRE_SETUP_NET_CONDUIT_QUIC_TEST_CHECKOUT_FETCH_DEPTH }}
         fetch-tags: ${{ needs.PRE_SETUP.outputs.NUKE_PRE_SETUP_NET_CONDUIT_QUIC_TEST_CHECKOUT_FETCH_TAGS }}
         submodules: ${{ needs.PRE_SETUP.outputs.NUKE_PRE_SETUP_NET_CONDUIT_QUIC_TEST_CHECKOUT_SUBMODULES }}
         persist-credentials: true
     - name: Cache Run
-      uses: actions/cache@v4
+      uses: actions/cache@v5
       with:
         path: ./.nuke/temp/cache
         key: ${{ needs.PRE_SETUP.outputs.NUKE_PRE_SETUP_NET_CONDUIT_QUIC_TEST_CACHE_KEY }}
@@ -417,14 +417,14 @@ jobs:
       name: Run Nuke net_conduit_quic_test
       run: ${{ needs.PRE_SETUP.outputs.NUKE_PRE_SETUP_NET_CONDUIT_QUIC_TEST_RUN_SCRIPT }} Run --args "net_conduit_quic_test"
     - name: Upload net_conduit_quic pre_test artifacts
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@v7
       with:
         name: pre_test___net_conduit_quic___NET_CONDUIT_QUIC_TEST
         path: ./.nuke/temp/artifacts-upload/net_conduit_quic/*
         if-no-files-found: error
         retention-days: 1
     - name: Upload common pre_test artifacts
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@v7
       with:
         name: pre_test___$common___NET_CONDUIT_QUIC_TEST
         path: ./.nuke/temp/artifacts-upload/$common/*
@@ -439,19 +439,19 @@ jobs:
     name: Build NetConduit
     runs-on: ${{ fromJson(needs.PRE_SETUP.outputs.NUKE_PRE_SETUP_NET_CONDUIT_BUILD_RUNS_ON) }}
     steps:
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@v6
       with:
         fetch-depth: ${{ needs.PRE_SETUP.outputs.NUKE_PRE_SETUP_NET_CONDUIT_BUILD_CHECKOUT_FETCH_DEPTH }}
         fetch-tags: ${{ needs.PRE_SETUP.outputs.NUKE_PRE_SETUP_NET_CONDUIT_BUILD_CHECKOUT_FETCH_TAGS }}
         submodules: ${{ needs.PRE_SETUP.outputs.NUKE_PRE_SETUP_NET_CONDUIT_BUILD_CHECKOUT_SUBMODULES }}
         persist-credentials: true
     - name: Download net_conduit pre_test artifacts
-      uses: actions/download-artifact@v4
+      uses: actions/download-artifact@v8
       with:
         path: ./.nuke/temp/artifacts-download
         pattern: pre_test___net_conduit___*
     - name: Cache Run
-      uses: actions/cache@v4
+      uses: actions/cache@v5
       with:
         path: ./.nuke/temp/cache
         key: ${{ needs.PRE_SETUP.outputs.NUKE_PRE_SETUP_NET_CONDUIT_BUILD_CACHE_KEY }}
@@ -462,14 +462,14 @@ jobs:
       name: Run Nuke net_conduit_build
       run: ${{ needs.PRE_SETUP.outputs.NUKE_PRE_SETUP_NET_CONDUIT_BUILD_RUN_SCRIPT }} Run --args "net_conduit_build"
     - name: Upload net_conduit build artifacts
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@v7
       with:
         name: build___net_conduit___NET_CONDUIT_BUILD
         path: ./.nuke/temp/artifacts-upload/net_conduit/*
         if-no-files-found: error
         retention-days: 1
     - name: Upload common build artifacts
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@v7
       with:
         name: build___$common___NET_CONDUIT_BUILD
         path: ./.nuke/temp/artifacts-upload/$common/*
@@ -485,19 +485,19 @@ jobs:
     name: Build NetConduit.Tcp
     runs-on: ${{ fromJson(needs.PRE_SETUP.outputs.NUKE_PRE_SETUP_NET_CONDUIT_TCP_BUILD_RUNS_ON) }}
     steps:
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@v6
       with:
         fetch-depth: ${{ needs.PRE_SETUP.outputs.NUKE_PRE_SETUP_NET_CONDUIT_TCP_BUILD_CHECKOUT_FETCH_DEPTH }}
         fetch-tags: ${{ needs.PRE_SETUP.outputs.NUKE_PRE_SETUP_NET_CONDUIT_TCP_BUILD_CHECKOUT_FETCH_TAGS }}
         submodules: ${{ needs.PRE_SETUP.outputs.NUKE_PRE_SETUP_NET_CONDUIT_TCP_BUILD_CHECKOUT_SUBMODULES }}
         persist-credentials: true
     - name: Download net_conduit_tcp pre_test artifacts
-      uses: actions/download-artifact@v4
+      uses: actions/download-artifact@v8
       with:
         path: ./.nuke/temp/artifacts-download
         pattern: pre_test___net_conduit_tcp___*
     - name: Cache Run
-      uses: actions/cache@v4
+      uses: actions/cache@v5
       with:
         path: ./.nuke/temp/cache
         key: ${{ needs.PRE_SETUP.outputs.NUKE_PRE_SETUP_NET_CONDUIT_TCP_BUILD_CACHE_KEY }}
@@ -508,14 +508,14 @@ jobs:
       name: Run Nuke net_conduit_tcp_build
       run: ${{ needs.PRE_SETUP.outputs.NUKE_PRE_SETUP_NET_CONDUIT_TCP_BUILD_RUN_SCRIPT }} Run --args "net_conduit_tcp_build"
     - name: Upload net_conduit_tcp build artifacts
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@v7
       with:
         name: build___net_conduit_tcp___NET_CONDUIT_TCP_BUILD
         path: ./.nuke/temp/artifacts-upload/net_conduit_tcp/*
         if-no-files-found: error
         retention-days: 1
     - name: Upload common build artifacts
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@v7
       with:
         name: build___$common___NET_CONDUIT_TCP_BUILD
         path: ./.nuke/temp/artifacts-upload/$common/*
@@ -531,19 +531,19 @@ jobs:
     name: Build NetConduit.WebSocket
     runs-on: ${{ fromJson(needs.PRE_SETUP.outputs.NUKE_PRE_SETUP_NET_CONDUIT_WEBSOCKET_BUILD_RUNS_ON) }}
     steps:
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@v6
       with:
         fetch-depth: ${{ needs.PRE_SETUP.outputs.NUKE_PRE_SETUP_NET_CONDUIT_WEBSOCKET_BUILD_CHECKOUT_FETCH_DEPTH }}
         fetch-tags: ${{ needs.PRE_SETUP.outputs.NUKE_PRE_SETUP_NET_CONDUIT_WEBSOCKET_BUILD_CHECKOUT_FETCH_TAGS }}
         submodules: ${{ needs.PRE_SETUP.outputs.NUKE_PRE_SETUP_NET_CONDUIT_WEBSOCKET_BUILD_CHECKOUT_SUBMODULES }}
         persist-credentials: true
     - name: Download net_conduit_websocket pre_test artifacts
-      uses: actions/download-artifact@v4
+      uses: actions/download-artifact@v8
       with:
         path: ./.nuke/temp/artifacts-download
         pattern: pre_test___net_conduit_websocket___*
     - name: Cache Run
-      uses: actions/cache@v4
+      uses: actions/cache@v5
       with:
         path: ./.nuke/temp/cache
         key: ${{ needs.PRE_SETUP.outputs.NUKE_PRE_SETUP_NET_CONDUIT_WEBSOCKET_BUILD_CACHE_KEY }}
@@ -554,14 +554,14 @@ jobs:
       name: Run Nuke net_conduit_websocket_build
       run: ${{ needs.PRE_SETUP.outputs.NUKE_PRE_SETUP_NET_CONDUIT_WEBSOCKET_BUILD_RUN_SCRIPT }} Run --args "net_conduit_websocket_build"
     - name: Upload net_conduit_websocket build artifacts
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@v7
       with:
         name: build___net_conduit_websocket___NET_CONDUIT_WEBSOCKET_BUILD
         path: ./.nuke/temp/artifacts-upload/net_conduit_websocket/*
         if-no-files-found: error
         retention-days: 1
     - name: Upload common build artifacts
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@v7
       with:
         name: build___$common___NET_CONDUIT_WEBSOCKET_BUILD
         path: ./.nuke/temp/artifacts-upload/$common/*
@@ -577,19 +577,19 @@ jobs:
     name: Build NetConduit.Udp
     runs-on: ${{ fromJson(needs.PRE_SETUP.outputs.NUKE_PRE_SETUP_NET_CONDUIT_UDP_BUILD_RUNS_ON) }}
     steps:
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@v6
       with:
         fetch-depth: ${{ needs.PRE_SETUP.outputs.NUKE_PRE_SETUP_NET_CONDUIT_UDP_BUILD_CHECKOUT_FETCH_DEPTH }}
         fetch-tags: ${{ needs.PRE_SETUP.outputs.NUKE_PRE_SETUP_NET_CONDUIT_UDP_BUILD_CHECKOUT_FETCH_TAGS }}
         submodules: ${{ needs.PRE_SETUP.outputs.NUKE_PRE_SETUP_NET_CONDUIT_UDP_BUILD_CHECKOUT_SUBMODULES }}
         persist-credentials: true
     - name: Download net_conduit_udp pre_test artifacts
-      uses: actions/download-artifact@v4
+      uses: actions/download-artifact@v8
       with:
         path: ./.nuke/temp/artifacts-download
         pattern: pre_test___net_conduit_udp___*
     - name: Cache Run
-      uses: actions/cache@v4
+      uses: actions/cache@v5
       with:
         path: ./.nuke/temp/cache
         key: ${{ needs.PRE_SETUP.outputs.NUKE_PRE_SETUP_NET_CONDUIT_UDP_BUILD_CACHE_KEY }}
@@ -600,14 +600,14 @@ jobs:
       name: Run Nuke net_conduit_udp_build
       run: ${{ needs.PRE_SETUP.outputs.NUKE_PRE_SETUP_NET_CONDUIT_UDP_BUILD_RUN_SCRIPT }} Run --args "net_conduit_udp_build"
     - name: Upload net_conduit_udp build artifacts
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@v7
       with:
         name: build___net_conduit_udp___NET_CONDUIT_UDP_BUILD
         path: ./.nuke/temp/artifacts-upload/net_conduit_udp/*
         if-no-files-found: error
         retention-days: 1
     - name: Upload common build artifacts
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@v7
       with:
         name: build___$common___NET_CONDUIT_UDP_BUILD
         path: ./.nuke/temp/artifacts-upload/$common/*
@@ -623,19 +623,19 @@ jobs:
     name: Build NetConduit.Ipc
     runs-on: ${{ fromJson(needs.PRE_SETUP.outputs.NUKE_PRE_SETUP_NET_CONDUIT_IPC_BUILD_RUNS_ON) }}
     steps:
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@v6
       with:
         fetch-depth: ${{ needs.PRE_SETUP.outputs.NUKE_PRE_SETUP_NET_CONDUIT_IPC_BUILD_CHECKOUT_FETCH_DEPTH }}
         fetch-tags: ${{ needs.PRE_SETUP.outputs.NUKE_PRE_SETUP_NET_CONDUIT_IPC_BUILD_CHECKOUT_FETCH_TAGS }}
         submodules: ${{ needs.PRE_SETUP.outputs.NUKE_PRE_SETUP_NET_CONDUIT_IPC_BUILD_CHECKOUT_SUBMODULES }}
         persist-credentials: true
     - name: Download net_conduit_ipc pre_test artifacts
-      uses: actions/download-artifact@v4
+      uses: actions/download-artifact@v8
       with:
         path: ./.nuke/temp/artifacts-download
         pattern: pre_test___net_conduit_ipc___*
     - name: Cache Run
-      uses: actions/cache@v4
+      uses: actions/cache@v5
       with:
         path: ./.nuke/temp/cache
         key: ${{ needs.PRE_SETUP.outputs.NUKE_PRE_SETUP_NET_CONDUIT_IPC_BUILD_CACHE_KEY }}
@@ -646,14 +646,14 @@ jobs:
       name: Run Nuke net_conduit_ipc_build
       run: ${{ needs.PRE_SETUP.outputs.NUKE_PRE_SETUP_NET_CONDUIT_IPC_BUILD_RUN_SCRIPT }} Run --args "net_conduit_ipc_build"
     - name: Upload net_conduit_ipc build artifacts
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@v7
       with:
         name: build___net_conduit_ipc___NET_CONDUIT_IPC_BUILD
         path: ./.nuke/temp/artifacts-upload/net_conduit_ipc/*
         if-no-files-found: error
         retention-days: 1
     - name: Upload common build artifacts
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@v7
       with:
         name: build___$common___NET_CONDUIT_IPC_BUILD
         path: ./.nuke/temp/artifacts-upload/$common/*
@@ -669,19 +669,19 @@ jobs:
     name: Build NetConduit.Quic
     runs-on: ${{ fromJson(needs.PRE_SETUP.outputs.NUKE_PRE_SETUP_NET_CONDUIT_QUIC_BUILD_RUNS_ON) }}
     steps:
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@v6
       with:
         fetch-depth: ${{ needs.PRE_SETUP.outputs.NUKE_PRE_SETUP_NET_CONDUIT_QUIC_BUILD_CHECKOUT_FETCH_DEPTH }}
         fetch-tags: ${{ needs.PRE_SETUP.outputs.NUKE_PRE_SETUP_NET_CONDUIT_QUIC_BUILD_CHECKOUT_FETCH_TAGS }}
         submodules: ${{ needs.PRE_SETUP.outputs.NUKE_PRE_SETUP_NET_CONDUIT_QUIC_BUILD_CHECKOUT_SUBMODULES }}
         persist-credentials: true
     - name: Download net_conduit_quic pre_test artifacts
-      uses: actions/download-artifact@v4
+      uses: actions/download-artifact@v8
       with:
         path: ./.nuke/temp/artifacts-download
         pattern: pre_test___net_conduit_quic___*
     - name: Cache Run
-      uses: actions/cache@v4
+      uses: actions/cache@v5
       with:
         path: ./.nuke/temp/cache
         key: ${{ needs.PRE_SETUP.outputs.NUKE_PRE_SETUP_NET_CONDUIT_QUIC_BUILD_CACHE_KEY }}
@@ -692,14 +692,14 @@ jobs:
       name: Run Nuke net_conduit_quic_build
       run: ${{ needs.PRE_SETUP.outputs.NUKE_PRE_SETUP_NET_CONDUIT_QUIC_BUILD_RUN_SCRIPT }} Run --args "net_conduit_quic_build"
     - name: Upload net_conduit_quic build artifacts
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@v7
       with:
         name: build___net_conduit_quic___NET_CONDUIT_QUIC_BUILD
         path: ./.nuke/temp/artifacts-upload/net_conduit_quic/*
         if-no-files-found: error
         retention-days: 1
     - name: Upload common build artifacts
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@v7
       with:
         name: build___$common___NET_CONDUIT_QUIC_BUILD
         path: ./.nuke/temp/artifacts-upload/$common/*
@@ -715,29 +715,29 @@ jobs:
     name: Publish NetConduit
     runs-on: ${{ fromJson(needs.PRE_SETUP.outputs.NUKE_PRE_SETUP_NET_CONDUIT_PUBLISH_RUNS_ON) }}
     steps:
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@v6
       with:
         fetch-depth: ${{ needs.PRE_SETUP.outputs.NUKE_PRE_SETUP_NET_CONDUIT_PUBLISH_CHECKOUT_FETCH_DEPTH }}
         fetch-tags: ${{ needs.PRE_SETUP.outputs.NUKE_PRE_SETUP_NET_CONDUIT_PUBLISH_CHECKOUT_FETCH_TAGS }}
         submodules: ${{ needs.PRE_SETUP.outputs.NUKE_PRE_SETUP_NET_CONDUIT_PUBLISH_CHECKOUT_SUBMODULES }}
         persist-credentials: true
     - name: Download net_conduit pre_test artifacts
-      uses: actions/download-artifact@v4
+      uses: actions/download-artifact@v8
       with:
         path: ./.nuke/temp/artifacts-download
         pattern: pre_test___net_conduit___*
     - name: Download net_conduit build artifacts
-      uses: actions/download-artifact@v4
+      uses: actions/download-artifact@v8
       with:
         path: ./.nuke/temp/artifacts-download
         pattern: build___net_conduit___*
     - name: Download net_conduit post_test artifacts
-      uses: actions/download-artifact@v4
+      uses: actions/download-artifact@v8
       with:
         path: ./.nuke/temp/artifacts-download
         pattern: post_test___net_conduit___*
     - name: Cache Run
-      uses: actions/cache@v4
+      uses: actions/cache@v5
       with:
         path: ./.nuke/temp/cache
         key: ${{ needs.PRE_SETUP.outputs.NUKE_PRE_SETUP_NET_CONDUIT_PUBLISH_CACHE_KEY }}
@@ -748,7 +748,7 @@ jobs:
       name: Run Nuke net_conduit_publish
       run: ${{ needs.PRE_SETUP.outputs.NUKE_PRE_SETUP_NET_CONDUIT_PUBLISH_RUN_SCRIPT }} Run --args "net_conduit_publish"
     - name: Upload common publish artifacts
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@v7
       with:
         name: publish___$common___NET_CONDUIT_PUBLISH
         path: ./.nuke/temp/artifacts-upload/$common/*
@@ -765,29 +765,29 @@ jobs:
     name: Publish NetConduit.Tcp
     runs-on: ${{ fromJson(needs.PRE_SETUP.outputs.NUKE_PRE_SETUP_NET_CONDUIT_TCP_PUBLISH_RUNS_ON) }}
     steps:
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@v6
       with:
         fetch-depth: ${{ needs.PRE_SETUP.outputs.NUKE_PRE_SETUP_NET_CONDUIT_TCP_PUBLISH_CHECKOUT_FETCH_DEPTH }}
         fetch-tags: ${{ needs.PRE_SETUP.outputs.NUKE_PRE_SETUP_NET_CONDUIT_TCP_PUBLISH_CHECKOUT_FETCH_TAGS }}
         submodules: ${{ needs.PRE_SETUP.outputs.NUKE_PRE_SETUP_NET_CONDUIT_TCP_PUBLISH_CHECKOUT_SUBMODULES }}
         persist-credentials: true
     - name: Download net_conduit_tcp pre_test artifacts
-      uses: actions/download-artifact@v4
+      uses: actions/download-artifact@v8
       with:
         path: ./.nuke/temp/artifacts-download
         pattern: pre_test___net_conduit_tcp___*
     - name: Download net_conduit_tcp build artifacts
-      uses: actions/download-artifact@v4
+      uses: actions/download-artifact@v8
       with:
         path: ./.nuke/temp/artifacts-download
         pattern: build___net_conduit_tcp___*
     - name: Download net_conduit_tcp post_test artifacts
-      uses: actions/download-artifact@v4
+      uses: actions/download-artifact@v8
       with:
         path: ./.nuke/temp/artifacts-download
         pattern: post_test___net_conduit_tcp___*
     - name: Cache Run
-      uses: actions/cache@v4
+      uses: actions/cache@v5
       with:
         path: ./.nuke/temp/cache
         key: ${{ needs.PRE_SETUP.outputs.NUKE_PRE_SETUP_NET_CONDUIT_TCP_PUBLISH_CACHE_KEY }}
@@ -798,7 +798,7 @@ jobs:
       name: Run Nuke net_conduit_tcp_publish
       run: ${{ needs.PRE_SETUP.outputs.NUKE_PRE_SETUP_NET_CONDUIT_TCP_PUBLISH_RUN_SCRIPT }} Run --args "net_conduit_tcp_publish"
     - name: Upload common publish artifacts
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@v7
       with:
         name: publish___$common___NET_CONDUIT_TCP_PUBLISH
         path: ./.nuke/temp/artifacts-upload/$common/*
@@ -815,29 +815,29 @@ jobs:
     name: Publish NetConduit.WebSocket
     runs-on: ${{ fromJson(needs.PRE_SETUP.outputs.NUKE_PRE_SETUP_NET_CONDUIT_WEBSOCKET_PUBLISH_RUNS_ON) }}
     steps:
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@v6
       with:
         fetch-depth: ${{ needs.PRE_SETUP.outputs.NUKE_PRE_SETUP_NET_CONDUIT_WEBSOCKET_PUBLISH_CHECKOUT_FETCH_DEPTH }}
         fetch-tags: ${{ needs.PRE_SETUP.outputs.NUKE_PRE_SETUP_NET_CONDUIT_WEBSOCKET_PUBLISH_CHECKOUT_FETCH_TAGS }}
         submodules: ${{ needs.PRE_SETUP.outputs.NUKE_PRE_SETUP_NET_CONDUIT_WEBSOCKET_PUBLISH_CHECKOUT_SUBMODULES }}
         persist-credentials: true
     - name: Download net_conduit_websocket pre_test artifacts
-      uses: actions/download-artifact@v4
+      uses: actions/download-artifact@v8
       with:
         path: ./.nuke/temp/artifacts-download
         pattern: pre_test___net_conduit_websocket___*
     - name: Download net_conduit_websocket build artifacts
-      uses: actions/download-artifact@v4
+      uses: actions/download-artifact@v8
       with:
         path: ./.nuke/temp/artifacts-download
         pattern: build___net_conduit_websocket___*
     - name: Download net_conduit_websocket post_test artifacts
-      uses: actions/download-artifact@v4
+      uses: actions/download-artifact@v8
       with:
         path: ./.nuke/temp/artifacts-download
         pattern: post_test___net_conduit_websocket___*
     - name: Cache Run
-      uses: actions/cache@v4
+      uses: actions/cache@v5
       with:
         path: ./.nuke/temp/cache
         key: ${{ needs.PRE_SETUP.outputs.NUKE_PRE_SETUP_NET_CONDUIT_WEBSOCKET_PUBLISH_CACHE_KEY }}
@@ -848,7 +848,7 @@ jobs:
       name: Run Nuke net_conduit_websocket_publish
       run: ${{ needs.PRE_SETUP.outputs.NUKE_PRE_SETUP_NET_CONDUIT_WEBSOCKET_PUBLISH_RUN_SCRIPT }} Run --args "net_conduit_websocket_publish"
     - name: Upload common publish artifacts
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@v7
       with:
         name: publish___$common___NET_CONDUIT_WEBSOCKET_PUBLISH
         path: ./.nuke/temp/artifacts-upload/$common/*
@@ -865,29 +865,29 @@ jobs:
     name: Publish NetConduit.Udp
     runs-on: ${{ fromJson(needs.PRE_SETUP.outputs.NUKE_PRE_SETUP_NET_CONDUIT_UDP_PUBLISH_RUNS_ON) }}
     steps:
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@v6
       with:
         fetch-depth: ${{ needs.PRE_SETUP.outputs.NUKE_PRE_SETUP_NET_CONDUIT_UDP_PUBLISH_CHECKOUT_FETCH_DEPTH }}
         fetch-tags: ${{ needs.PRE_SETUP.outputs.NUKE_PRE_SETUP_NET_CONDUIT_UDP_PUBLISH_CHECKOUT_FETCH_TAGS }}
         submodules: ${{ needs.PRE_SETUP.outputs.NUKE_PRE_SETUP_NET_CONDUIT_UDP_PUBLISH_CHECKOUT_SUBMODULES }}
         persist-credentials: true
     - name: Download net_conduit_udp pre_test artifacts
-      uses: actions/download-artifact@v4
+      uses: actions/download-artifact@v8
       with:
         path: ./.nuke/temp/artifacts-download
         pattern: pre_test___net_conduit_udp___*
     - name: Download net_conduit_udp build artifacts
-      uses: actions/download-artifact@v4
+      uses: actions/download-artifact@v8
       with:
         path: ./.nuke/temp/artifacts-download
         pattern: build___net_conduit_udp___*
     - name: Download net_conduit_udp post_test artifacts
-      uses: actions/download-artifact@v4
+      uses: actions/download-artifact@v8
       with:
         path: ./.nuke/temp/artifacts-download
         pattern: post_test___net_conduit_udp___*
     - name: Cache Run
-      uses: actions/cache@v4
+      uses: actions/cache@v5
       with:
         path: ./.nuke/temp/cache
         key: ${{ needs.PRE_SETUP.outputs.NUKE_PRE_SETUP_NET_CONDUIT_UDP_PUBLISH_CACHE_KEY }}
@@ -898,7 +898,7 @@ jobs:
       name: Run Nuke net_conduit_udp_publish
       run: ${{ needs.PRE_SETUP.outputs.NUKE_PRE_SETUP_NET_CONDUIT_UDP_PUBLISH_RUN_SCRIPT }} Run --args "net_conduit_udp_publish"
     - name: Upload common publish artifacts
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@v7
       with:
         name: publish___$common___NET_CONDUIT_UDP_PUBLISH
         path: ./.nuke/temp/artifacts-upload/$common/*
@@ -915,29 +915,29 @@ jobs:
     name: Publish NetConduit.Ipc
     runs-on: ${{ fromJson(needs.PRE_SETUP.outputs.NUKE_PRE_SETUP_NET_CONDUIT_IPC_PUBLISH_RUNS_ON) }}
     steps:
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@v6
       with:
         fetch-depth: ${{ needs.PRE_SETUP.outputs.NUKE_PRE_SETUP_NET_CONDUIT_IPC_PUBLISH_CHECKOUT_FETCH_DEPTH }}
         fetch-tags: ${{ needs.PRE_SETUP.outputs.NUKE_PRE_SETUP_NET_CONDUIT_IPC_PUBLISH_CHECKOUT_FETCH_TAGS }}
         submodules: ${{ needs.PRE_SETUP.outputs.NUKE_PRE_SETUP_NET_CONDUIT_IPC_PUBLISH_CHECKOUT_SUBMODULES }}
         persist-credentials: true
     - name: Download net_conduit_ipc pre_test artifacts
-      uses: actions/download-artifact@v4
+      uses: actions/download-artifact@v8
       with:
         path: ./.nuke/temp/artifacts-download
         pattern: pre_test___net_conduit_ipc___*
     - name: Download net_conduit_ipc build artifacts
-      uses: actions/download-artifact@v4
+      uses: actions/download-artifact@v8
       with:
         path: ./.nuke/temp/artifacts-download
         pattern: build___net_conduit_ipc___*
     - name: Download net_conduit_ipc post_test artifacts
-      uses: actions/download-artifact@v4
+      uses: actions/download-artifact@v8
       with:
         path: ./.nuke/temp/artifacts-download
         pattern: post_test___net_conduit_ipc___*
     - name: Cache Run
-      uses: actions/cache@v4
+      uses: actions/cache@v5
       with:
         path: ./.nuke/temp/cache
         key: ${{ needs.PRE_SETUP.outputs.NUKE_PRE_SETUP_NET_CONDUIT_IPC_PUBLISH_CACHE_KEY }}
@@ -948,7 +948,7 @@ jobs:
       name: Run Nuke net_conduit_ipc_publish
       run: ${{ needs.PRE_SETUP.outputs.NUKE_PRE_SETUP_NET_CONDUIT_IPC_PUBLISH_RUN_SCRIPT }} Run --args "net_conduit_ipc_publish"
     - name: Upload common publish artifacts
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@v7
       with:
         name: publish___$common___NET_CONDUIT_IPC_PUBLISH
         path: ./.nuke/temp/artifacts-upload/$common/*
@@ -965,29 +965,29 @@ jobs:
     name: Publish NetConduit.Quic
     runs-on: ${{ fromJson(needs.PRE_SETUP.outputs.NUKE_PRE_SETUP_NET_CONDUIT_QUIC_PUBLISH_RUNS_ON) }}
     steps:
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@v6
       with:
         fetch-depth: ${{ needs.PRE_SETUP.outputs.NUKE_PRE_SETUP_NET_CONDUIT_QUIC_PUBLISH_CHECKOUT_FETCH_DEPTH }}
         fetch-tags: ${{ needs.PRE_SETUP.outputs.NUKE_PRE_SETUP_NET_CONDUIT_QUIC_PUBLISH_CHECKOUT_FETCH_TAGS }}
         submodules: ${{ needs.PRE_SETUP.outputs.NUKE_PRE_SETUP_NET_CONDUIT_QUIC_PUBLISH_CHECKOUT_SUBMODULES }}
         persist-credentials: true
     - name: Download net_conduit_quic pre_test artifacts
-      uses: actions/download-artifact@v4
+      uses: actions/download-artifact@v8
       with:
         path: ./.nuke/temp/artifacts-download
         pattern: pre_test___net_conduit_quic___*
     - name: Download net_conduit_quic build artifacts
-      uses: actions/download-artifact@v4
+      uses: actions/download-artifact@v8
       with:
         path: ./.nuke/temp/artifacts-download
         pattern: build___net_conduit_quic___*
     - name: Download net_conduit_quic post_test artifacts
-      uses: actions/download-artifact@v4
+      uses: actions/download-artifact@v8
       with:
         path: ./.nuke/temp/artifacts-download
         pattern: post_test___net_conduit_quic___*
     - name: Cache Run
-      uses: actions/cache@v4
+      uses: actions/cache@v5
       with:
         path: ./.nuke/temp/cache
         key: ${{ needs.PRE_SETUP.outputs.NUKE_PRE_SETUP_NET_CONDUIT_QUIC_PUBLISH_CACHE_KEY }}
@@ -998,7 +998,7 @@ jobs:
       name: Run Nuke net_conduit_quic_publish
       run: ${{ needs.PRE_SETUP.outputs.NUKE_PRE_SETUP_NET_CONDUIT_QUIC_PUBLISH_RUN_SCRIPT }} Run --args "net_conduit_quic_publish"
     - name: Upload common publish artifacts
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@v7
       with:
         name: publish___$common___NET_CONDUIT_QUIC_PUBLISH
         path: ./.nuke/temp/artifacts-upload/$common/*
@@ -1016,14 +1016,14 @@ jobs:
     runs-on:
       labels: ubuntu-22.04
     steps:
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@v6
       with:
         fetch-depth: 0
         fetch-tags: true
         submodules: recursive
         persist-credentials: true
     - name: Download artifacts
-      uses: actions/download-artifact@v4
+      uses: actions/download-artifact@v8
       with:
         path: ./.nuke/temp/artifacts-download
         pattern: '*___*'
