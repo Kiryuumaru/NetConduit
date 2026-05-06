@@ -10,10 +10,16 @@
 		<EnablePreviewFeatures>true</EnablePreviewFeatures>
 		<NoWarn>CA2252</NoWarn>
 		<GenerateDocumentationFile>true</GenerateDocumentationFile>
+		<UseLocalNetConduit Condition="'$(UseLocalNetConduit)' == '' and '$(Configuration)' == 'Debug'">true</UseLocalNetConduit>
+		<UseLocalNetConduit Condition="'$(UseLocalNetConduit)' == '' and '$(Configuration)' != 'Debug'">false</UseLocalNetConduit>
 	</PropertyGroup>
 
-	<ItemGroup>
+	<ItemGroup Condition="'$(UseLocalNetConduit)' == 'true'">
 		<ProjectReference Include="..\NetConduit\NetConduit.csproj" />
+	</ItemGroup>
+
+	<ItemGroup Condition="'$(UseLocalNetConduit)' != 'true'">
+		<PackageReference Include="NetConduit" Version="2.2.1" />
 	</ItemGroup>
 
 </Project>
