@@ -1,5 +1,8 @@
 # NetConduit
 
+[![NuGet](https://img.shields.io/nuget/v/NetConduit.svg)](https://www.nuget.org/packages/NetConduit)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+
 **Transport-agnostic stream multiplexer for .NET** — Multiple virtual channels over a single bidirectional stream.
 
 ```
