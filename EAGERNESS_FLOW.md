@@ -18,30 +18,49 @@ Two problems:
 
 ## Design: Optimistic, Non-Blocking Channel Lifecycle
 
-Every operation returns a handle immediately. The caller opts in to waiting for progress via explicit signals. Naming is consistent across all three levels:
+Every operation returns a handle immediately. The caller opts in to waiting for progress via explicit signals. Two orthogonal state concepts exist at every level:
+
+- **Ready**: One-time latch. Becomes `true` once the initial establishment succeeds. Stays `true` forever, even through disconnects and reconnects.
+- **Connected**: Live toggle. Reflects whether the transport is actively working right now. Flips `false` on disconnect, `true` on reconnect.
 
 | Concept | Multiplexer | WriteChannel | ReadChannel |
 |---------|-------------|--------------|-------------|
-| Wait for ready | `WaitForReadyAsync(ct)` | `WaitForReadyAsync(ct)` | `WaitForReadyAsync(ct)` |
-| Ready event | `OnConnected` | `OnConnected` | `OnConnected` |
-| Poll readiness | `IsConnected` | `IsConnected` | `IsConnected` |
-| Channel event | `OnChannelOpened` (outbound) | — | — |
-| Channel event | `OnChannelAccepted` (inbound) | — | — |
+| Wait for first ready | `WaitForReadyAsync(ct)` | `WaitForReadyAsync(ct)` | `WaitForReadyAsync(ct)` |
+| Ready event (once) | `OnReady` | `OnReady` | `OnReady` |
+| Poll ready | `IsReady` | `IsReady` | `IsReady` |
+| Connected event | `OnConnected` | `OnConnected` | `OnConnected` |
+| Disconnected event | `OnDisconnected` | `OnDisconnected` | `OnDisconnected` |
+| Poll connected | `IsConnected` | `IsConnected` | `IsConnected` |
+| Channel event | `OnChannelOpened` / `OnChannelAccepted` | — | — |
 
 ---
 
 ### New Channel API Surface
 
 ```csharp
-// Both WriteChannel and ReadChannel share these readiness members:
+// Both WriteChannel and ReadChannel share these members:
+
+// --- Ready (one-time latch) ---
 
 /// Suspend until channel is confirmed ready (remote ACK for write, remote INIT for read).
+/// Completes immediately if already ready.
 Task WaitForReadyAsync(CancellationToken ct = default);
 
-/// Raised when the channel becomes ready.
+/// Raised once when the channel first becomes ready. Never fires again.
+event Action? OnReady;
+
+/// True after first establishment, stays true forever.
+bool IsReady { get; }
+
+// --- Connected (live toggle) ---
+
+/// Raised each time the channel's underlying transport connects (including reconnects).
 event Action? OnConnected;
 
-/// Whether the channel is currently in a ready/connected state.
+/// Raised each time the channel's underlying transport disconnects.
+event Action<DisconnectReason, Exception?>? OnDisconnected;
+
+/// True when transport is active right now. False during disconnects/reconnection.
 bool IsConnected { get; }
 ```
 
@@ -49,11 +68,11 @@ bool IsConnected { get; }
 
 ### Consistent Pattern
 
-| Operation | Returns | State | Readiness Signal |
-|-----------|---------|-------|-----------------|
-| `Start()` | `void` immediately | Mux running, transport pending | `await mux.WaitForReadyAsync()` / `mux.OnConnected` |
-| `OpenChannel(id)` | `WriteChannel` immediately | Channel pending, buffers writes | `await channel.WaitForReadyAsync()` / `channel.OnConnected` |
-| `AcceptChannel(id)` | `ReadChannel` immediately | Channel pending, reads block | `await channel.WaitForReadyAsync()` / `channel.OnConnected` |
+| Operation | Returns | Initial State | Ready Signal | Connected Signal |
+|-----------|---------|---------------|--------------|------------------|
+| `Start()` | `void` immediately | Mux running, transport pending | `await mux.WaitForReadyAsync()` / `mux.OnReady` | `mux.OnConnected` / `mux.OnDisconnected` |
+| `OpenChannel(id)` | `WriteChannel` immediately | Channel pending, buffers writes | `await channel.WaitForReadyAsync()` / `channel.OnReady` | `channel.OnConnected` / `channel.OnDisconnected` |
+| `AcceptChannel(id)` | `ReadChannel` immediately | Channel pending, reads block | `await channel.WaitForReadyAsync()` / `channel.OnReady` | `channel.OnConnected` / `channel.OnDisconnected` |
 
 All three follow the same contract: **return handle → use optimistically → observe readiness if needed**.
 
@@ -65,21 +84,31 @@ All three follow the same contract: **return handle → use optimistically → o
 Pending → Open → Closing → Closed
 ```
 
-- **Pending**: Handle exists, not yet confirmed by remote. Reads/writes block transparently.
-- **Open**: Remote confirmed. `OnConnected` fires, `WaitForReadyAsync` completes, `IsConnected` returns `true`.
-- **Closing / Closed**: FIN or error received.
+- **Pending**: Handle exists, not yet confirmed by remote. `IsReady = false`, `IsConnected = false`. Reads/writes block transparently.
+- **Open**: Remote confirmed. `OnReady` fires (once), `WaitForReadyAsync` completes, `IsReady = true`. `OnConnected` fires, `IsConnected = true`.
+- **Closing / Closed**: FIN or error received. `IsConnected = false`, but `IsReady` remains `true`.
 
 ### WriteChannel State Transitions
 
 1. `OpenChannel()` → channel in `Pending` state, INIT frame queued in slab
-2. Remote sends ACK → channel transitions to `Open`, `OnConnected` fires
-3. Writes during `Pending` buffer into slab (existing behavior, no change)
+2. Remote sends ACK → channel transitions to `Open`
+   - `OnReady` fires (once, never again)
+   - `OnConnected` fires
+   - `IsReady = true`, `IsConnected = true`
+3. Transport drops → `OnDisconnected` fires, `IsConnected = false` (but `IsReady` stays `true`)
+4. Reconnection succeeds → `OnConnected` fires again, `IsConnected = true`
+5. Writes during `Pending` or disconnected state buffer into slab (existing behavior)
 
 ### ReadChannel State Transitions
 
 1. `AcceptChannel()` → channel in `Pending` state, registered in channel registry
-2. Remote sends INIT → channel transitions to `Open`, `OnConnected` fires
-3. Reads during `Pending` block until data arrives (transparent)
+2. Remote sends INIT → channel transitions to `Open`
+   - `OnReady` fires (once, never again)
+   - `OnConnected` fires
+   - `IsReady = true`, `IsConnected = true`
+3. Transport drops → `OnDisconnected` fires, `IsConnected = false` (but `IsReady` stays `true`)
+4. Reconnection succeeds → `OnConnected` fires again, `IsConnected = true`
+5. Reads during `Pending` or disconnected state block until data arrives (transparent)
 
 ---
 
@@ -189,10 +218,14 @@ var mux = StreamMultiplexer.Create(options);
 mux.Start();
 
 var outbound = mux.OpenChannel("telemetry");
-outbound.OnConnected += () => Console.WriteLine("telemetry channel ready");
+outbound.OnReady += () => Console.WriteLine("telemetry channel established");
+outbound.OnConnected += () => Console.WriteLine("telemetry channel connected");
+outbound.OnDisconnected += (reason, ex) => Console.WriteLine("telemetry channel disconnected");
 
 var inbound = mux.AcceptChannel("commands");
-inbound.OnConnected += () => Console.WriteLine("commands channel ready");
+inbound.OnReady += () => Console.WriteLine("commands channel established");
+inbound.OnConnected += () => Console.WriteLine("commands channel connected");
+inbound.OnDisconnected += (reason, ex) => Console.WriteLine("commands channel disconnected");
 ```
 
 ---
@@ -202,4 +235,3 @@ inbound.OnConnected += () => Console.WriteLine("commands channel ready");
 1. Should `AcceptChannel` accept `ChannelOptions` (timeout, buffer size) like `OpenChannel` does?
 2. Should there be an `AcceptChannels()` (non-async IEnumerable) that yields pending channels as they are declared, or does `AcceptChannelsAsync` remain the only multi-channel accept?
 3. Should `WaitForReadyAsync` have a default timeout from `ChannelOptions`, or rely solely on the caller's `CancellationToken`?
-4. Should `OnConnected` fire again after a reconnection (channel resumes), or only on first open?
