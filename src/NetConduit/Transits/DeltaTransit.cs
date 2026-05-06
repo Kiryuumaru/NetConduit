@@ -19,8 +19,8 @@ namespace NetConduit.Transits;
 /// <typeparam name="T">The type of state to synchronize.</typeparam>
 public sealed class DeltaTransit<T> : IAsyncDisposable
 {
-    private readonly WriteChannel? _writeChannel;
-    private readonly ReadChannel? _readChannel;
+    private readonly IWriteChannel? _writeChannel;
+    private readonly IReadChannel? _readChannel;
     private readonly JsonTypeInfo<T>? _typeInfo;
     private readonly int _maxMessageSize;
     private readonly SemaphoreSlim _sendLock = new(1, 1);
@@ -36,8 +36,8 @@ public sealed class DeltaTransit<T> : IAsyncDisposable
     /// Creates a DeltaTransit for dynamic JSON types (JsonObject, JsonNode, JsonArray, JsonDocument).
     /// </summary>
     public DeltaTransit(
-        WriteChannel? writeChannel,
-        ReadChannel? readChannel,
+        IWriteChannel? writeChannel,
+        IReadChannel? readChannel,
         int maxMessageSize = 16 * 1024 * 1024)
         : this(writeChannel, readChannel, null, maxMessageSize)
     {
@@ -47,8 +47,8 @@ public sealed class DeltaTransit<T> : IAsyncDisposable
     /// Creates a DeltaTransit for POCOs with Native AOT support.
     /// </summary>
     public DeltaTransit(
-        WriteChannel? writeChannel,
-        ReadChannel? readChannel,
+        IWriteChannel? writeChannel,
+        IReadChannel? readChannel,
         JsonTypeInfo<T>? typeInfo,
         int maxMessageSize = 16 * 1024 * 1024)
     {

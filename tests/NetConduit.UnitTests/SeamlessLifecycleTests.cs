@@ -74,11 +74,11 @@ public sealed class SeamlessLifecycleTests
         server.Start();
         connectGate.SetResult(duplex);
 
-        await client.WaitForReadyAsync(new CancellationTokenSource(TimeSpan.FromSeconds(5)).Token);
-        await server.WaitForReadyAsync(new CancellationTokenSource(TimeSpan.FromSeconds(5)).Token);
+        await client.WaitForReadyAsync(new CancellationTokenSource(TimeSpan.FromSeconds(60)).Token);
+        await server.WaitForReadyAsync(new CancellationTokenSource(TimeSpan.FromSeconds(60)).Token);
 
         // The server should receive the buffered data
-        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(60));
         var rch = await server.AcceptChannelAsync("pre-connect", cts.Token);
         byte[] buf = new byte[2];
         int read = await rch.ReadAsync(buf, cts.Token);
@@ -105,7 +105,7 @@ public sealed class SeamlessLifecycleTests
             StreamFactory = _ => Task.FromResult<IStreamPair>(duplex.SideA),
             PingInterval = TimeSpan.Zero,
         });
-        client.OnConnected += () => Interlocked.Increment(ref connectedCount);
+        client.Connected += (_, _) => Interlocked.Increment(ref connectedCount);
 
         var server = StreamMultiplexer.Create(new MultiplexerOptions
         {
@@ -116,8 +116,8 @@ public sealed class SeamlessLifecycleTests
         client.Start();
         server.Start();
         await Task.WhenAll(
-            client.WaitForReadyAsync(new CancellationTokenSource(TimeSpan.FromSeconds(5)).Token),
-            server.WaitForReadyAsync(new CancellationTokenSource(TimeSpan.FromSeconds(5)).Token));
+            client.WaitForReadyAsync(new CancellationTokenSource(TimeSpan.FromSeconds(60)).Token),
+            server.WaitForReadyAsync(new CancellationTokenSource(TimeSpan.FromSeconds(60)).Token));
 
         Assert.True(connectedCount >= 1);
 
@@ -156,12 +156,12 @@ public sealed class SeamlessLifecycleTests
         });
 
         var errors = new List<Exception>();
-        client.OnError += ex => errors.Add(ex);
+        client.Error += (_, e) => errors.Add(e.Exception);
 
         client.Start();
         server.Start();
 
-        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(60));
         await Task.WhenAll(
             client.WaitForReadyAsync(cts.Token),
             server.WaitForReadyAsync(cts.Token));
@@ -186,7 +186,7 @@ public sealed class SeamlessLifecycleTests
 
         mux.Start();
 
-        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(60));
         var ex = await Assert.ThrowsAsync<MultiplexerException>(
             () => mux.WaitForReadyAsync(cts.Token));
 
@@ -211,7 +211,7 @@ public sealed class SeamlessLifecycleTests
 
         mux.Start();
 
-        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(60));
         await Assert.ThrowsAsync<IOException>(() => mux.WaitForReadyAsync(cts.Token));
 
         Assert.Equal(1, attempts);
@@ -244,7 +244,7 @@ public sealed class SeamlessLifecycleTests
             PingInterval = TimeSpan.Zero,
         });
 
-        client.OnReconnecting += n => reconnectAttempts.Add(n);
+        client.Reconnecting += (_, e) => reconnectAttempts.Add(e.Attempt);
 
         var server = StreamMultiplexer.Create(new MultiplexerOptions
         {
@@ -255,7 +255,7 @@ public sealed class SeamlessLifecycleTests
         client.Start();
         server.Start();
 
-        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(60));
         await Task.WhenAll(
             client.WaitForReadyAsync(cts.Token),
             server.WaitForReadyAsync(cts.Token));

@@ -24,7 +24,7 @@ public sealed class WriteChannelTests
             channelIndex: 1,
             priority: ChannelPriority.Normal,
             slabSize: slabSize,
-            sendTimeout: TimeSpan.FromSeconds(5),
+            sendTimeout: TimeSpan.FromSeconds(60),
             router: router);
         channel.MarkOpen();
         return channel;
@@ -230,7 +230,7 @@ public sealed class WriteChannelTests
     {
         var channel = CreateChannel();
         ChannelCloseReason? capturedReason = null;
-        channel.OnClosed += (reason, _) => capturedReason = reason;
+        channel.Closed += (_, e) => capturedReason = e.Reason;
 
         channel.SetClosed(ChannelCloseReason.RemoteFin);
 

@@ -233,7 +233,7 @@ static async Task HandleRelayConnectionAsync(
 
         // Open control channels
         var ctrlSend = mux.OpenChannel("ctrl<<");
-        ReadChannel? ctrlRecv = null;
+        IReadChannel? ctrlRecv = null;
 
         await foreach (var ch in mux.AcceptChannelsAsync(ct))
         {
@@ -384,13 +384,13 @@ static async Task<int> RunAgentAsync(string[] args, CancellationToken ct)
     // MaxAutoReconnectAttempts defaults to 0 (unlimited)
     await using var mux = StreamMultiplexer.Create(options);
 
-    mux.OnReconnecting += attempt =>
+    mux.Reconnecting += (_, e) =>
     {
-        if (attempt > 1)
-            Console.WriteLine($"[Agent] Reconnecting... (attempt {attempt})");
+        if (e.Attempt > 1)
+            Console.WriteLine($"[Agent] Reconnecting... (attempt {e.Attempt})");
     };
 
-    mux.OnConnected += () => Console.WriteLine("[Agent] Reconnected to relay");
+    mux.Connected += (_, _) => Console.WriteLine("[Agent] Reconnected to relay");
 
     mux.Start();
     await mux.WaitForReadyAsync(ct);
@@ -399,7 +399,7 @@ static async Task<int> RunAgentAsync(string[] args, CancellationToken ct)
     // Open control channel
     var ctrlSend = mux.OpenChannel("ctrl>>");
 
-    ReadChannel? ctrlRecv = null;
+    IReadChannel? ctrlRecv = null;
     await foreach (var ch in mux.AcceptChannelsAsync(ct))
     {
         if (ch.ChannelId == "ctrl<<")
@@ -534,13 +534,13 @@ static async Task<int> RunForwardAsync(string[] args, CancellationToken ct)
     // MaxAutoReconnectAttempts defaults to 0 (unlimited)
     await using var mux = StreamMultiplexer.Create(options);
 
-    mux.OnReconnecting += attempt =>
+    mux.Reconnecting += (_, e) =>
     {
-        if (attempt > 1)
-            Console.WriteLine($"[Forward] Reconnecting... (attempt {attempt})");
+        if (e.Attempt > 1)
+            Console.WriteLine($"[Forward] Reconnecting... (attempt {e.Attempt})");
     };
 
-    mux.OnConnected += () => Console.WriteLine("[Forward] Reconnected to relay");
+    mux.Connected += (_, _) => Console.WriteLine("[Forward] Reconnected to relay");
 
     mux.Start();
     await mux.WaitForReadyAsync(ct);
@@ -549,7 +549,7 @@ static async Task<int> RunForwardAsync(string[] args, CancellationToken ct)
     // Open control channel
     var ctrlSend = mux.OpenChannel("ctrl>>");
 
-    ReadChannel? ctrlRecv = null;
+    IReadChannel? ctrlRecv = null;
     var ctrlReceivedTcs = new TaskCompletionSource();
     
     // Accept task runs continuously to handle both control and tunnel channels
@@ -730,7 +730,7 @@ static async Task<int> RunListAsync(string[] args, CancellationToken ct)
     // Open control channel
     var ctrlSend = mux.OpenChannel("ctrl>>");
 
-    ReadChannel? ctrlRecv = null;
+    IReadChannel? ctrlRecv = null;
     using var acceptCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
     acceptCts.CancelAfter(TimeSpan.FromSeconds(5));
 

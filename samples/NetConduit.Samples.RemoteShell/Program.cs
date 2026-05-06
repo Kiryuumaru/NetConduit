@@ -116,8 +116,8 @@ async Task HandleClientAsync(TcpClient tcp, string endpoint, CancellationToken s
         await mux.WaitForReadyAsync(cts.Token);
 
         // Accept channels from client
-        ReadChannel? cmdCh = null;
-        ReadChannel? ctrlCh = null;
+        IReadChannel? cmdCh = null;
+        IReadChannel? ctrlCh = null;
         using var acceptCts = CancellationTokenSource.CreateLinkedTokenSource(cts.Token);
         acceptCts.CancelAfter(5000);
 
@@ -286,7 +286,7 @@ async Task RunClientAsync(string host, int port)
     var ctrlCh = mux.OpenChannel("ctrl");
 
     // Accept output channel
-    ReadChannel? outCh = null;
+    IReadChannel? outCh = null;
     using var acceptCts = CancellationTokenSource.CreateLinkedTokenSource(mainCts.Token);
     acceptCts.CancelAfter(5000);
 

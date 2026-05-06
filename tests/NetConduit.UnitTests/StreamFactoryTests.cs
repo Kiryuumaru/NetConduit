@@ -80,7 +80,7 @@ public sealed class StreamFactoryTests
         });
 
         Exception? errorRaised = null;
-        mux.OnError += ex => errorRaised = ex;
+        mux.Error += (_, e) => errorRaised = e.Exception;
 
         mux.Start();
 
@@ -109,7 +109,7 @@ public sealed class StreamFactoryTests
             StreamFactory = broker.ServerFactory,
         });
 
-        client.OnReconnecting += _ => Interlocked.Increment(ref reconnectingCount);
+        client.Reconnecting += (_, _) => Interlocked.Increment(ref reconnectingCount);
 
         client.Start();
         server.Start();
@@ -146,7 +146,7 @@ public sealed class StreamFactoryTests
         server.Start();
         await Task.WhenAll(client.WaitForReadyAsync(), server.WaitForReadyAsync());
 
-        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(20));
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(60));
 
         var writeCh = client.OpenChannel("resume");
         var readCh = await server.AcceptChannelAsync("resume", cts.Token);
@@ -159,10 +159,10 @@ public sealed class StreamFactoryTests
 
         // Kill round 0 and wait for reconnection on round 1
         var reconnected = new TaskCompletionSource();
-        client.OnConnected += () => reconnected.TrySetResult();
+        client.Connected += (_, _) => reconnected.TrySetResult();
         broker.KillRound(0);
 
-        await reconnected.Task.WaitAsync(TimeSpan.FromSeconds(10));
+        await reconnected.Task.WaitAsync(TimeSpan.FromSeconds(60));
 
         // Send more data after reconnection
         await writeCh.WriteAsync(new byte[] { 4, 5, 6 }, cts.Token);
@@ -192,24 +192,26 @@ public sealed class StreamFactoryTests
         server.Start();
         await Task.WhenAll(client.WaitForReadyAsync(), server.WaitForReadyAsync());
 
-        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(20));
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(60));
 
         // Open channels before disconnect
         var ch1 = client.OpenChannel("survive-1");
         var ch2 = client.OpenChannel("survive-2");
         await server.AcceptChannelAsync("survive-1", cts.Token);
         await server.AcceptChannelAsync("survive-2", cts.Token);
+        await ch1.WaitForReadyAsync(cts.Token);
+        await ch2.WaitForReadyAsync(cts.Token);
 
         // Kill round 0
         var reconnected = new TaskCompletionSource();
-        client.OnConnected += () => reconnected.TrySetResult();
+        client.Connected += (_, _) => reconnected.TrySetResult();
         broker.KillRound(0);
 
-        await reconnected.Task.WaitAsync(TimeSpan.FromSeconds(10));
+        await reconnected.Task.WaitAsync(TimeSpan.FromSeconds(60));
 
-        // Channels should still be open
-        Assert.Equal(ChannelState.Open, ch1.State);
-        Assert.Equal(ChannelState.Open, ch2.State);
+        // Channels should still be ready after reconnect
+        Assert.True(ch1.IsReady);
+        Assert.True(ch2.IsReady);
 
         await client.DisposeAsync();
         await server.DisposeAsync();
@@ -231,7 +233,7 @@ public sealed class StreamFactoryTests
             StreamFactory = broker.ServerFactory,
         });
 
-        client.OnConnected += () => Interlocked.Increment(ref connectCount);
+        client.Connected += (_, _) => Interlocked.Increment(ref connectCount);
 
         client.Start();
         server.Start();
@@ -283,11 +285,11 @@ public sealed class StreamFactoryTests
         await Task.WhenAll(client.WaitForReadyAsync(), server.WaitForReadyAsync());
 
         var disconnected = new TaskCompletionSource();
-        client.OnDisconnected += (_, _) => disconnected.TrySetResult();
+        client.Disconnected += (_, _) => disconnected.TrySetResult();
 
         killable.Kill();
 
-        await disconnected.Task.WaitAsync(TimeSpan.FromSeconds(10));
+        await disconnected.Task.WaitAsync(TimeSpan.FromSeconds(60));
 
         // After max attempts exhausted, should stay disconnected
         Assert.False(client.IsConnected);

@@ -9,14 +9,14 @@ namespace NetConduit.Transits;
 /// </summary>
 public sealed class StreamTransit : Stream, ITransit
 {
-    private readonly WriteChannel? _writeChannel;
-    private readonly ReadChannel? _readChannel;
+    private readonly IWriteChannel? _writeChannel;
+    private readonly IReadChannel? _readChannel;
     private volatile bool _disposed;
 
     /// <summary>
     /// Creates a write-only StreamTransit from a WriteChannel.
     /// </summary>
-    public StreamTransit(WriteChannel writeChannel)
+    public StreamTransit(IWriteChannel writeChannel)
     {
         _writeChannel = writeChannel ?? throw new ArgumentNullException(nameof(writeChannel));
     }
@@ -24,7 +24,7 @@ public sealed class StreamTransit : Stream, ITransit
     /// <summary>
     /// Creates a read-only StreamTransit from a ReadChannel.
     /// </summary>
-    public StreamTransit(ReadChannel readChannel)
+    public StreamTransit(IReadChannel readChannel)
     {
         _readChannel = readChannel ?? throw new ArgumentNullException(nameof(readChannel));
     }

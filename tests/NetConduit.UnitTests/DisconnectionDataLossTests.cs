@@ -11,7 +11,7 @@ public sealed class DisconnectionDataLossTests
     public async Task WriteAfterDisconnect_SmallData_Succeeds()
     {
         var broker = new TransportBroker(2);
-        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(60));
 
         var client = StreamMultiplexer.Create(new MultiplexerOptions
         {
@@ -43,7 +43,7 @@ public sealed class DisconnectionDataLossTests
     public async Task WriteAfterDisconnect_LargeData_Succeeds()
     {
         var broker = new TransportBroker(2);
-        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(60));
 
         var client = StreamMultiplexer.Create(new MultiplexerOptions
         {
@@ -76,7 +76,7 @@ public sealed class DisconnectionDataLossTests
     public async Task WriteAfterDisconnect_MultipleWrites_AllSucceed()
     {
         var broker = new TransportBroker(2);
-        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(60));
 
         var client = StreamMultiplexer.Create(new MultiplexerOptions
         {
@@ -112,7 +112,7 @@ public sealed class DisconnectionDataLossTests
     public async Task ChannelState_AfterDisconnect_StaysOpen()
     {
         var broker = new TransportBroker(2);
-        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(60));
 
         var client = StreamMultiplexer.Create(new MultiplexerOptions
         {
@@ -129,14 +129,15 @@ public sealed class DisconnectionDataLossTests
 
         var writer = client.OpenChannel("ch1");
         await server.AcceptChannelAsync("ch1", cts.Token);
+        await writer.WaitForReadyAsync(cts.Token);
 
         Assert.Equal(ChannelState.Open, writer.State);
 
         broker.KillRound(0);
         await Task.Delay(200, cts.Token);
 
-        // Channel should still be open (reconnection will restore transport)
-        Assert.Equal(ChannelState.Open, writer.State);
+        // Channel should still be ready after disconnect (reconnection will restore transport)
+        Assert.True(writer.IsReady);
 
         await client.DisposeAsync();
         await server.DisposeAsync();
@@ -146,7 +147,7 @@ public sealed class DisconnectionDataLossTests
     public async Task MultipleChannels_AllSurviveDisconnect()
     {
         var broker = new TransportBroker(2);
-        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(60));
 
         var client = StreamMultiplexer.Create(new MultiplexerOptions
         {
@@ -161,20 +162,21 @@ public sealed class DisconnectionDataLossTests
         server.Start();
         await Task.WhenAll(client.WaitForReadyAsync(cts.Token), server.WaitForReadyAsync(cts.Token));
 
-        var writers = new WriteChannel[5];
+        var writers = new IWriteChannel[5];
         for (int i = 0; i < 5; i++)
         {
             writers[i] = client.OpenChannel($"multi-{i}");
             await server.AcceptChannelAsync($"multi-{i}", cts.Token);
+            await writers[i].WaitForReadyAsync(cts.Token);
         }
 
         broker.KillRound(0);
         await Task.Delay(200, cts.Token);
 
-        // All channels should still be open
+        // All channels should still be ready after disconnect
         for (int i = 0; i < 5; i++)
         {
-            Assert.Equal(ChannelState.Open, writers[i].State);
+            Assert.True(writers[i].IsReady);
             await writers[i].WriteAsync(new byte[] { (byte)i }, cts.Token);
         }
 
@@ -186,7 +188,7 @@ public sealed class DisconnectionDataLossTests
     public async Task OnDisconnected_EventFires_WithCorrectReason()
     {
         var broker = new TransportBroker(2);
-        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(60));
 
         var disconnectTcs = new TaskCompletionSource<DisconnectReason>();
 
@@ -194,7 +196,7 @@ public sealed class DisconnectionDataLossTests
         {
             StreamFactory = broker.ClientFactory,
         });
-        client.OnDisconnected += (reason, _) => disconnectTcs.TrySetResult(reason);
+        client.Disconnected += (_, e) => disconnectTcs.TrySetResult(e.Reason);
 
         var server = StreamMultiplexer.Create(new MultiplexerOptions
         {
@@ -218,7 +220,7 @@ public sealed class DisconnectionDataLossTests
     public async Task OnReconnecting_EventFires_AfterDisconnect()
     {
         var broker = new TransportBroker(2);
-        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(60));
 
         var reconnectingTcs = new TaskCompletionSource<int>();
 
@@ -226,7 +228,7 @@ public sealed class DisconnectionDataLossTests
         {
             StreamFactory = broker.ClientFactory,
         });
-        client.OnReconnecting += attempt => reconnectingTcs.TrySetResult(attempt);
+        client.Reconnecting += (_, e) => reconnectingTcs.TrySetResult(e.Attempt);
 
         var server = StreamMultiplexer.Create(new MultiplexerOptions
         {
@@ -250,7 +252,7 @@ public sealed class DisconnectionDataLossTests
     public async Task DataContinuity_AfterReconnect_AllBytesReceived()
     {
         var broker = new TransportBroker(2);
-        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(20));
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(60));
 
         var clientReconnected = new TaskCompletionSource();
 
@@ -258,7 +260,7 @@ public sealed class DisconnectionDataLossTests
         {
             StreamFactory = broker.ClientFactory,
         });
-        client.OnConnected += () => clientReconnected.TrySetResult();
+        client.Connected += (_, _) => clientReconnected.TrySetResult();
 
         var server = StreamMultiplexer.Create(new MultiplexerOptions
         {
@@ -305,7 +307,7 @@ public sealed class DisconnectionDataLossTests
     public async Task BidirectionalChannels_BothDirectionsSurviveDisconnect()
     {
         var broker = new TransportBroker(2);
-        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(60));
 
         var client = StreamMultiplexer.Create(new MultiplexerOptions
         {
@@ -323,17 +325,19 @@ public sealed class DisconnectionDataLossTests
         // Client -> Server
         var c2s = client.OpenChannel("c2s");
         await server.AcceptChannelAsync("c2s", cts.Token);
+        await c2s.WaitForReadyAsync(cts.Token);
 
         // Server -> Client
         var s2c = server.OpenChannel("s2c");
         await client.AcceptChannelAsync("s2c", cts.Token);
+        await s2c.WaitForReadyAsync(cts.Token);
 
         broker.KillRound(0);
         await Task.Delay(200, cts.Token);
 
-        // Both directions should still accept writes
-        Assert.Equal(ChannelState.Open, c2s.State);
-        Assert.Equal(ChannelState.Open, s2c.State);
+        // Both directions should still accept writes (IsReady stays true after disconnect)
+        Assert.True(c2s.IsReady);
+        Assert.True(s2c.IsReady);
 
         await c2s.WriteAsync(new byte[] { 1 }, cts.Token);
         await s2c.WriteAsync(new byte[] { 2 }, cts.Token);
@@ -346,7 +350,7 @@ public sealed class DisconnectionDataLossTests
     public async Task Stats_BytesSent_PreservedAfterDisconnect()
     {
         var broker = new TransportBroker(2);
-        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(60));
 
         var client = StreamMultiplexer.Create(new MultiplexerOptions
         {

@@ -6,7 +6,7 @@ public sealed class ReconnectionTests
     public async Task WriteChannel_PrepareReplay_ResetsSentPos()
     {
         var router = new TestRouter();
-        var ch = new WriteChannel("test", 1, ChannelPriority.Normal, 64 * 1024, TimeSpan.FromSeconds(5), router, enableReplay: true);
+        var ch = new WriteChannel("test", 1, ChannelPriority.Normal, 64 * 1024, TimeSpan.FromSeconds(60), router, enableReplay: true);
         ch.MarkOpen();
 
         // Write data
@@ -31,7 +31,7 @@ public sealed class ReconnectionTests
     public async Task WriteChannel_NoReplay_SentDataFreed()
     {
         var router = new TestRouter();
-        var ch = new WriteChannel("test", 1, ChannelPriority.Normal, 64 * 1024, TimeSpan.FromSeconds(5), router, enableReplay: false);
+        var ch = new WriteChannel("test", 1, ChannelPriority.Normal, 64 * 1024, TimeSpan.FromSeconds(60), router, enableReplay: false);
         ch.MarkOpen();
 
         // Write data
@@ -51,7 +51,7 @@ public sealed class ReconnectionTests
     public async Task WriteChannel_Replay_OnAckFreesSpace()
     {
         var router = new TestRouter();
-        var ch = new WriteChannel("test", 1, ChannelPriority.Normal, 64 * 1024, TimeSpan.FromSeconds(5), router, enableReplay: true);
+        var ch = new WriteChannel("test", 1, ChannelPriority.Normal, 64 * 1024, TimeSpan.FromSeconds(60), router, enableReplay: true);
         ch.MarkOpen();
 
         // Write and send

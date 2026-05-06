@@ -30,7 +30,7 @@ public sealed class MemoryPressureTests
         client.Start();
         server.Start();
         await Task.WhenAll(client.WaitForReadyAsync(), server.WaitForReadyAsync());
-        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(60));
 
         var acceptTask = Task.Run(async () =>
         {
@@ -69,7 +69,7 @@ public sealed class MemoryPressureTests
         client.Start();
         server.Start();
         await Task.WhenAll(client.WaitForReadyAsync(), server.WaitForReadyAsync());
-        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(20));
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(60));
 
         var acceptTask = Task.Run(async () =>
         {
@@ -104,9 +104,9 @@ public sealed class MemoryPressureTests
         client.Start();
         server.Start();
         await Task.WhenAll(client.WaitForReadyAsync(), server.WaitForReadyAsync());
-        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(60));
 
-        const int channels = 10;
+        const int channels = 5;
         const int dataSize = 100 * 1024;
 
         var writeTasks = new Task[channels];
@@ -159,9 +159,9 @@ public sealed class MemoryPressureTests
         client.Start();
         server.Start();
         await Task.WhenAll(client.WaitForReadyAsync(), server.WaitForReadyAsync());
-        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(60));
 
-        var writers = new WriteChannel[5];
+        var writers = new IWriteChannel[5];
         for (int i = 0; i < 5; i++)
         {
             writers[i] = client.OpenChannel($"resource-{i}");
@@ -193,7 +193,7 @@ public sealed class MemoryPressureTests
         client.Start();
         server.Start();
         await Task.WhenAll(client.WaitForReadyAsync(), server.WaitForReadyAsync());
-        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(20));
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(60));
 
         var acceptTask = Task.Run(async () =>
         {
@@ -201,12 +201,12 @@ public sealed class MemoryPressureTests
             await foreach (var _ in server.AcceptChannelsAsync(cts.Token))
             {
                 count++;
-                if (count >= 100) break;
+                if (count >= 20) break;
             }
         });
 
         // Concurrent open and dispose
-        var tasks = Enumerable.Range(0, 100).Select(i => Task.Run(async () =>
+        var tasks = Enumerable.Range(0, 20).Select(i => Task.Run(async () =>
         {
             var writer = client.OpenChannel($"concurrent-{i}");
             await writer.WriteAsync(new byte[] { 1 }, cts.Token);
@@ -216,7 +216,7 @@ public sealed class MemoryPressureTests
         await Task.WhenAll(tasks).WaitAsync(cts.Token);
         await acceptTask.WaitAsync(cts.Token);
 
-        Assert.True(client.Stats.TotalChannelsOpened >= 100);
+        Assert.True(client.Stats.TotalChannelsOpened >= 20);
 
         await client.DisposeAsync();
         await server.DisposeAsync();

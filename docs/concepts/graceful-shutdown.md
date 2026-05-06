@@ -51,9 +51,9 @@ if (mux.IsShuttingDown)
 }
 
 // Disconnect event fires when shutdown completes
-mux.OnDisconnected += (reason, ex) =>
+mux.Disconnected += (sender, e) =>
 {
-    if (reason == DisconnectReason.GoAwayReceived)
+    if (e.Reason == DisconnectReason.GoAwayReceived)
         Console.WriteLine("Remote initiated shutdown");
 };
 ```

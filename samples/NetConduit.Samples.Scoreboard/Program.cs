@@ -77,11 +77,11 @@ async Task RunServerAsync(int serverPort, CancellationToken ct)
 
             await using var mux = StreamMultiplexer.Create(options);
 
-            mux.OnDisconnected += (reason, ex) =>
-                Console.WriteLine($"[Server] Player disconnected: {reason}");
-            mux.OnReconnecting += (attempt) =>
-                Console.WriteLine($"[Server] Awaiting reconnection (attempt {attempt})...");
-            mux.OnConnected += () =>
+            mux.Disconnected += (_, e) =>
+                Console.WriteLine($"[Server] Player disconnected: {e.Reason}");
+            mux.Reconnecting += (_, e) =>
+                Console.WriteLine($"[Server] Awaiting reconnection (attempt {e.Attempt})...");
+            mux.Connected += (_, _) =>
                 Console.WriteLine("[Server] Player reconnected — session restored");
 
             mux.Start();
@@ -183,11 +183,11 @@ async Task RunPlayerAsync(string playerHost, int playerPort, string name, Cancel
 
     await using var mux = StreamMultiplexer.Create(options);
 
-    mux.OnDisconnected += (reason, ex) =>
-        Console.WriteLine($"\n[{name}] Disconnected: {reason}");
-    mux.OnReconnecting += (attempt) =>
-        Console.WriteLine($"[{name}] Reconnecting (attempt {attempt})...");
-    mux.OnConnected += () =>
+    mux.Disconnected += (_, e) =>
+        Console.WriteLine($"\n[{name}] Disconnected: {e.Reason}");
+    mux.Reconnecting += (_, e) =>
+        Console.WriteLine($"[{name}] Reconnecting (attempt {e.Attempt})...");
+    mux.Connected += (_, _) =>
         Console.WriteLine($"[{name}] Reconnected — resuming session");
 
     mux.Start();

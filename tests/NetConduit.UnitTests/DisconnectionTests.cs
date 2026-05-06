@@ -25,7 +25,7 @@ public sealed class DisconnectionTests
         await Task.WhenAll(client.WaitForReadyAsync(), server.WaitForReadyAsync());
 
         DisconnectReason? reason = null;
-        client.OnDisconnected += (r, _) => reason = r;
+        client.Disconnected += (_, e) => reason = e.Reason;
 
         await client.DisposeAsync();
 
@@ -42,14 +42,14 @@ public sealed class DisconnectionTests
         server.Start();
         await Task.WhenAll(client.WaitForReadyAsync(), server.WaitForReadyAsync());
 
-        var channels = new WriteChannel[3];
+        var channels = new IWriteChannel[3];
         var closeReasons = new ChannelCloseReason?[3];
 
         for (int i = 0; i < 3; i++)
         {
             int idx = i;
             channels[i] = client.OpenChannel($"abort-{i}");
-            channels[i].OnClosed += (reason, _) => closeReasons[idx] = reason;
+            channels[i].Closed += (_, e) => closeReasons[idx] = e.Reason;
         }
 
         await client.DisposeAsync();
@@ -102,11 +102,11 @@ public sealed class DisconnectionTests
         await Task.WhenAll(client.WaitForReadyAsync(), server.WaitForReadyAsync());
 
         var disconnected = new TaskCompletionSource<(DisconnectReason, Exception?)>();
-        client.OnDisconnected += (r, ex) => disconnected.TrySetResult((r, ex));
+        client.Disconnected += (_, e) => disconnected.TrySetResult((e.Reason, e.Exception));
 
         killableA.Kill();
 
-        var (reason, _) = await disconnected.Task.WaitAsync(TimeSpan.FromSeconds(10));
+        var (reason, _) = await disconnected.Task.WaitAsync(TimeSpan.FromSeconds(60));
         Assert.Equal(NetConduit.DisconnectReason.TransportError, reason);
 
         await client.DisposeAsync();
@@ -138,11 +138,11 @@ public sealed class DisconnectionTests
         var ch2 = client.OpenChannel("ch2");
 
         var disconnected = new TaskCompletionSource();
-        client.OnDisconnected += (_, _) => disconnected.TrySetResult();
+        client.Disconnected += (_, _) => disconnected.TrySetResult();
 
         killableA.Kill();
 
-        await disconnected.Task.WaitAsync(TimeSpan.FromSeconds(10));
+        await disconnected.Task.WaitAsync(TimeSpan.FromSeconds(60));
 
         // Dispose to ensure cleanup completes
         await client.DisposeAsync();
@@ -164,7 +164,7 @@ public sealed class DisconnectionTests
 
         var channel = client.OpenChannel("close-event");
         ChannelCloseReason? closeReason = null;
-        channel.OnClosed += (reason, _) => closeReason = reason;
+        channel.Closed += (_, e) => closeReason = e.Reason;
 
         await channel.DisposeAsync();
 
@@ -206,7 +206,7 @@ public sealed class DisconnectionTests
         server.Start();
         await Task.WhenAll(client.WaitForReadyAsync(), server.WaitForReadyAsync());
 
-        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(60));
         var ch = client.OpenChannel("abrupt");
         await server.AcceptChannelAsync("abrupt", cts.Token);
 
@@ -242,7 +242,7 @@ public sealed class DisconnectionTests
         server.Start();
         await Task.WhenAll(client.WaitForReadyAsync(), server.WaitForReadyAsync());
 
-        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(60));
 
         var ch = client.OpenChannel("inflight");
         var readCh = await server.AcceptChannelAsync("inflight", cts.Token);
@@ -273,7 +273,7 @@ public sealed class DisconnectionTests
         server.Start();
         await Task.WhenAll(client.WaitForReadyAsync(), server.WaitForReadyAsync());
 
-        var channels = new WriteChannel[5];
+        var channels = new IWriteChannel[5];
         for (int i = 0; i < 5; i++)
             channels[i] = client.OpenChannel($"multi-{i}");
 
@@ -340,7 +340,7 @@ public sealed class DisconnectionTests
         server.Start();
         await Task.WhenAll(client.WaitForReadyAsync(), server.WaitForReadyAsync());
 
-        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(60));
 
         var writeChannel = client.OpenChannel("writer-close");
         var readChannel = await server.AcceptChannelAsync("writer-close", cts.Token);

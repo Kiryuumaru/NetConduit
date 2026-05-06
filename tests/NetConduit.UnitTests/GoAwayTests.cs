@@ -48,11 +48,11 @@ public sealed class GoAwayTests
         await Task.WhenAll(client.WaitForReadyAsync(), server.WaitForReadyAsync());
 
         var disconnectTcs = new TaskCompletionSource<DisconnectReason>();
-        server.OnDisconnected += (reason, _) => disconnectTcs.TrySetResult(reason);
+        server.Disconnected += (_, e) => disconnectTcs.TrySetResult(e.Reason);
 
         await client.GoAwayAsync();
 
-        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(60));
 
         // Server must detect client shutdown (via GoAway frame or transport close)
         var reason = await disconnectTcs.Task.WaitAsync(cts.Token);

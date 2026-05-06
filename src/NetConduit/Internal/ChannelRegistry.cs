@@ -10,6 +10,7 @@ internal sealed class ChannelRegistry
     private readonly ConcurrentDictionary<ushort, ReadChannel> _readChannels = new();
     private readonly ConcurrentDictionary<string, ushort> _idToIndex = new();
     private readonly ConcurrentDictionary<string, TaskCompletionSource<ReadChannel>> _pendingAccepts = new();
+    private readonly ConcurrentDictionary<string, ReadChannel> _pendingAcceptChannels = new();
     private readonly Channel<ReadChannel> _acceptQueue = Channel.CreateUnbounded<ReadChannel>();
 
     private int _nextChannelIndex;
@@ -87,9 +88,43 @@ internal sealed class ChannelRegistry
     internal IReadOnlyCollection<ReadChannel> GetAllReadChannels() => _readChannels.Values.ToArray();
 
     // Accept coordination
+    internal void RegisterPendingAcceptChannel(string channelId, ReadChannel channel)
+    {
+        _pendingAcceptChannels[channelId] = channel;
+    }
+
+    internal ReadChannel? GetPendingAcceptChannel(string channelId)
+    {
+        _pendingAcceptChannels.TryGetValue(channelId, out var channel);
+        return channel;
+    }
+
+    internal void RemovePendingAcceptChannel(string channelId)
+    {
+        _pendingAcceptChannels.TryRemove(channelId, out _);
+    }
+
     internal void EnqueueForAccept(ReadChannel channel)
     {
-        // Check if there's a specific accept waiting for this channel ID
+        // Check if there's a pre-created pending accept channel for this ID
+        if (_pendingAcceptChannels.TryRemove(channel.ChannelId, out var pendingChannel))
+        {
+            if (ReferenceEquals(pendingChannel, channel))
+            {
+                // DispatchToChannel already found and used the pending channel directly. Just clean up.
+                return;
+            }
+
+            // Race: DispatchToChannel created 'channel' but user holds 'pendingChannel' via AcceptChannel(sync).
+            // Replace the registration so future data flows to the pending channel.
+            _readChannels[channel.ChannelIndex] = pendingChannel;
+            pendingChannel.SetChannelIndex(channel.ChannelIndex);
+            pendingChannel.MarkOpen();
+            pendingChannel.MarkConnected();
+            return;
+        }
+
+        // Check if there's a specific async accept waiting for this channel ID
         if (_pendingAccepts.TryRemove(channel.ChannelId, out var tcs))
         {
             tcs.TrySetResult(channel);
@@ -147,5 +182,8 @@ internal sealed class ChannelRegistry
             channel.SetClosed(reason, exception);
         foreach (var channel in _readChannels.Values)
             channel.SetClosed(reason, exception);
+        foreach (var channel in _pendingAcceptChannels.Values)
+            channel.SetClosed(reason, exception);
+        _pendingAcceptChannels.Clear();
     }
 }

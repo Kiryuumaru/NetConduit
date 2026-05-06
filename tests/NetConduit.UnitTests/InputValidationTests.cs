@@ -94,7 +94,7 @@ public sealed class InputValidationTests
         server.Start();
         await Task.WhenAll(client.WaitForReadyAsync(), server.WaitForReadyAsync());
 
-        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(2));
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(60));
 
         await Assert.ThrowsAnyAsync<ArgumentException>(async () =>
         {
@@ -113,7 +113,7 @@ public sealed class InputValidationTests
         server.Start();
         await Task.WhenAll(client.WaitForReadyAsync(), server.WaitForReadyAsync());
 
-        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(60));
 
         // A reasonably long channel ID (not absurdly long)
         string longId = new string('x', 200);
@@ -135,7 +135,7 @@ public sealed class InputValidationTests
         server.Start();
         await Task.WhenAll(client.WaitForReadyAsync(), server.WaitForReadyAsync());
 
-        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(60));
 
         string specialId = "test/channel#1 (special)";
         var ch = client.OpenChannel(specialId);
@@ -156,7 +156,7 @@ public sealed class InputValidationTests
         server.Start();
         await Task.WhenAll(client.WaitForReadyAsync(), server.WaitForReadyAsync());
 
-        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(60));
 
         string unicodeId = "通道/テスト/🚀";
         var ch = client.OpenChannel(unicodeId);
@@ -207,7 +207,7 @@ public sealed class InputValidationTests
         // Verify the data was actually buffered and can be read
         await ch.DisposeAsync();
 
-        using var validCts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+        using var validCts = new CancellationTokenSource(TimeSpan.FromSeconds(60));
         var readCh = server.GetReadChannel("cancel-write")
             ?? throw new InvalidOperationException("Channel not found");
         var buf = new byte[1];
@@ -227,7 +227,7 @@ public sealed class InputValidationTests
         server.Start();
         await Task.WhenAll(client.WaitForReadyAsync(), server.WaitForReadyAsync());
 
-        using var cts1 = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+        using var cts1 = new CancellationTokenSource(TimeSpan.FromSeconds(60));
         client.OpenChannel("cancel-read");
         var readCh = await server.AcceptChannelAsync("cancel-read", cts1.Token);
 

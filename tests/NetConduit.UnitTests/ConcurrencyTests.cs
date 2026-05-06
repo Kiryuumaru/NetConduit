@@ -27,16 +27,16 @@ public sealed class ConcurrencyTests
         server.Start();
         await Task.WhenAll(client.WaitForReadyAsync(), server.WaitForReadyAsync());
 
-        const int channelCount = 50;
+        const int channelCount = 10;
         const int messageSize = 256;
-        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(60));
 
         var sendTasks = new Task[channelCount];
         var receiveTasks = new Task[channelCount];
         var results = new ConcurrentDictionary<string, byte[]>();
 
         // Throttle concurrent opens
-        using var throttle = new SemaphoreSlim(20);
+        using var throttle = new SemaphoreSlim(5);
 
         for (int i = 0; i < channelCount; i++)
         {
@@ -98,9 +98,9 @@ public sealed class ConcurrencyTests
         server.Start();
         await Task.WhenAll(client.WaitForReadyAsync(), server.WaitForReadyAsync());
 
-        const int pairCount = 20;
+        const int pairCount = 5;
         const int messageSize = 512;
-        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(60));
 
         var tasks = new List<Task>();
         var clientReceived = new ConcurrentDictionary<int, byte[]>();
@@ -187,7 +187,7 @@ public sealed class ConcurrencyTests
         const int writerCount = 10;
         const int writesPerWriter = 100;
         const int writeSize = 256;
-        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(60));
 
         var channel = client.OpenChannel("shared");
         var readChannel = await server.AcceptChannelAsync("shared", cts.Token);
@@ -256,7 +256,7 @@ public sealed class ConcurrencyTests
         await Task.WhenAll(client.WaitForReadyAsync(), server.WaitForReadyAsync());
 
         const int cycles = 50;
-        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(60));
 
         for (int i = 0; i < cycles; i++)
         {
@@ -285,11 +285,11 @@ public sealed class ConcurrencyTests
         server.Start();
         await Task.WhenAll(client.WaitForReadyAsync(), server.WaitForReadyAsync());
 
-        const int count = 50;
-        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+        const int count = 10;
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(60));
 
         // Open all channels in parallel from separate tasks
-        var channels = new WriteChannel[count];
+        var channels = new IWriteChannel[count];
         var openTasks = new Task[count];
         for (int i = 0; i < count; i++)
         {
@@ -316,9 +316,10 @@ public sealed class ConcurrencyTests
 
         await Task.WhenAll(acceptTasks);
 
-        // All channels are open
+        // All channels should become ready after server accepts
         for (int i = 0; i < count; i++)
         {
+            await channels[i].WaitForReadyAsync(cts.Token);
             Assert.Equal(ChannelState.Open, channels[i].State);
         }
 

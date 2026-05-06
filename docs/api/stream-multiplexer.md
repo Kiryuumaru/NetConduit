@@ -1,6 +1,6 @@
-# StreamMultiplexer
+# IStreamMultiplexer
 
-The core class that multiplexes multiple channels over a single bidirectional stream. Implements `IStreamMultiplexer` and `IAsyncDisposable`.
+The core interface that multiplexes multiple channels over a single bidirectional stream. Extends `IAsyncDisposable`. The concrete implementation is created via `StreamMultiplexer.Create()`.
 
 ## Creating a Multiplexer
 
@@ -92,7 +92,7 @@ var channel = mux.OpenChannel(new ChannelOptions
 });
 ```
 
-Returns a `WriteChannel` (which is a `Stream`).
+Returns an [`IWriteChannel`](write-channel.md).
 
 ### Accepting Channels
 
@@ -109,7 +109,7 @@ await foreach (var channel in mux.AcceptChannelsAsync(cancellationToken))
 }
 ```
 
-Returns `ReadChannel` instances (which are `Stream`s).
+Returns [`IReadChannel`](read-channel.md) instances.
 
 ### Looking Up Channels
 
@@ -126,6 +126,7 @@ var readChannel = mux.GetReadChannel("data");      // null if not found
 |----------|------|-------------|
 | `Options` | `MultiplexerOptions` | The configuration |
 | `Stats` | `MultiplexerStats` | Runtime statistics |
+| `IsReady` | `bool` | Whether mux has completed initial handshake (stays true forever) |
 | `IsConnected` | `bool` | Whether transport is connected |
 | `IsRunning` | `bool` | Whether mux is started and not disposed |
 | `IsShuttingDown` | `bool` | Whether GoAway is in progress |
@@ -139,11 +140,13 @@ var readChannel = mux.GetReadChannel("data");      // null if not found
 
 | Event | Signature | Description |
 |-------|-----------|-------------|
-| `OnConnected` | `Action` | Transport connected |
-| `OnDisconnected` | `Action<DisconnectReason, Exception?>` | Transport disconnected |
-| `OnReconnecting` | `Action<int>` | Reconnection attempt (param = attempt #) |
-| `OnChannelOpened` | `Action<string>` | Channel opened |
-| `OnChannelClosed` | `Action<string, Exception?>` | Channel closed |
-| `OnError` | `Action<Exception>` | Error occurred |
+| `Ready` | `EventHandler?` | First handshake complete (fires once) |
+| `Connected` | `EventHandler?` | Transport connected (initial or reconnect) |
+| `Disconnected` | `EventHandler<DisconnectedEventArgs>?` | Transport disconnected |
+| `Reconnecting` | `EventHandler<ReconnectingEventArgs>?` | Reconnection attempt starting |
+| `ChannelOpened` | `EventHandler<ChannelEventArgs>?` | Outbound channel opened locally |
+| `ChannelAccepted` | `EventHandler<ChannelEventArgs>?` | Inbound channel confirmed by remote |
+| `ChannelClosed` | `EventHandler<ChannelClosedEventArgs>?` | Channel closed |
+| `Error` | `EventHandler<ErrorEventArgs>?` | Error occurred |
 
 See [Events](../concepts/events.md) for details.

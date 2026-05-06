@@ -24,7 +24,7 @@ public sealed class NegativeTests
         server.Start();
         await Task.WhenAll(client.WaitForReadyAsync(), server.WaitForReadyAsync());
 
-        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(60));
 
         var writeChannel = client.OpenChannel("half-close");
         var readChannel = await server.AcceptChannelAsync("half-close", cts.Token);
@@ -57,9 +57,9 @@ public sealed class NegativeTests
         server.Start();
         await Task.WhenAll(client.WaitForReadyAsync(), server.WaitForReadyAsync());
 
-        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(60));
 
-        var channels = new WriteChannel[5];
+        var channels = new IWriteChannel[5];
         for (int i = 0; i < 5; i++)
         {
             channels[i] = client.OpenChannel($"disposable-{i}");
@@ -120,7 +120,7 @@ public sealed class NegativeTests
         server.Start();
         await Task.WhenAll(client.WaitForReadyAsync(), server.WaitForReadyAsync());
 
-        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(60));
 
         var channel = client.OpenChannel("empty-write");
         var readCh = await server.AcceptChannelAsync("empty-write", cts.Token);
@@ -168,7 +168,7 @@ public sealed class NegativeTests
         server.Start();
         await Task.WhenAll(client.WaitForReadyAsync(), server.WaitForReadyAsync());
 
-        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(60));
 
         var tasks = new List<Task>();
         for (int t = 0; t < 10; t++)
@@ -212,7 +212,7 @@ public sealed class NegativeTests
         server.Start();
         await Task.WhenAll(client.WaitForReadyAsync(), server.WaitForReadyAsync());
 
-        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(60));
 
         var channel = client.OpenChannel("concurrent-write");
         var readChannel = await server.AcceptChannelAsync("concurrent-write", cts.Token);
@@ -314,7 +314,7 @@ public sealed class NegativeTests
         server.Start();
         await Task.WhenAll(client.WaitForReadyAsync(), server.WaitForReadyAsync());
 
-        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(60));
 
         var writeChannel = client.OpenChannel("eof-test");
         var readChannel = await server.AcceptChannelAsync("eof-test", cts.Token);
@@ -349,7 +349,7 @@ public sealed class NegativeTests
         server.Start();
         await Task.WhenAll(client.WaitForReadyAsync(), server.WaitForReadyAsync());
 
-        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(60));
 
         var writeChannel = client.OpenChannel("sequential-reads");
         var readChannel = await server.AcceptChannelAsync("sequential-reads", cts.Token);

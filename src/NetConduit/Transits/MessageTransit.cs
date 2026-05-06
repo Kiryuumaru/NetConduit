@@ -17,8 +17,8 @@ namespace NetConduit.Transits;
 /// <typeparam name="TReceive">The type of messages to receive.</typeparam>
 public sealed class MessageTransit<TSend, TReceive> : IMessageTransit<TSend, TReceive>
 {
-    private readonly WriteChannel? _writeChannel;
-    private readonly ReadChannel? _readChannel;
+    private readonly IWriteChannel? _writeChannel;
+    private readonly IReadChannel? _readChannel;
     private readonly JsonTypeInfo<TSend>? _sendTypeInfo;
     private readonly JsonTypeInfo<TReceive>? _receiveTypeInfo;
     private readonly JsonSerializerOptions? _jsonOptions;
@@ -31,8 +31,8 @@ public sealed class MessageTransit<TSend, TReceive> : IMessageTransit<TSend, TRe
     /// Creates a new MessageTransit with both send and receive capabilities using AOT-safe JsonTypeInfo.
     /// </summary>
     public MessageTransit(
-        WriteChannel? writeChannel,
-        ReadChannel? readChannel,
+        IWriteChannel? writeChannel,
+        IReadChannel? readChannel,
         JsonTypeInfo<TSend>? sendTypeInfo,
         JsonTypeInfo<TReceive>? receiveTypeInfo,
         int maxMessageSize = 16 * 1024 * 1024)
@@ -51,8 +51,8 @@ public sealed class MessageTransit<TSend, TReceive> : IMessageTransit<TSend, TRe
     [RequiresUnreferencedCode("JSON serialization and deserialization might require types that cannot be statically analyzed. Use the overload that takes JsonTypeInfo for AOT compatibility.")]
     [RequiresDynamicCode("JSON serialization and deserialization might require types that cannot be statically analyzed. Use the overload that takes JsonTypeInfo for AOT compatibility.")]
     public MessageTransit(
-        WriteChannel? writeChannel,
-        ReadChannel? readChannel,
+        IWriteChannel? writeChannel,
+        IReadChannel? readChannel,
         JsonSerializerOptions? jsonOptions = null,
         int maxMessageSize = 16 * 1024 * 1024)
     {
@@ -205,7 +205,7 @@ public sealed class MessageTransit<TSend, TReceive> : IMessageTransit<TSend, TRe
         }
     }
 
-    private static async ValueTask<int> ReadExactAsync(ReadChannel channel, Memory<byte> buffer, CancellationToken cancellationToken)
+    private static async ValueTask<int> ReadExactAsync(IReadChannel channel, Memory<byte> buffer, CancellationToken cancellationToken)
     {
         var totalRead = 0;
         while (totalRead < buffer.Length)
