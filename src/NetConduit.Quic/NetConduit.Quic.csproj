@@ -39,7 +39,7 @@
 	</ItemGroup>
 
 	<ItemGroup Condition="'$(UseLocalNetConduit)' != 'true'">
-		<PackageReference Include="NetConduit" Version="2.2.1" />
+		<PackageReference Include="NetConduit" Version="2.2.3" />
 	</ItemGroup>
 
 </Project>
