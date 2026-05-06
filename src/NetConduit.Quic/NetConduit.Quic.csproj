@@ -14,6 +14,25 @@
 		<UseLocalNetConduit Condition="'$(UseLocalNetConduit)' == '' and '$(Configuration)' != 'Debug'">false</UseLocalNetConduit>
 	</PropertyGroup>
 
+	<!-- NuGet Package Metadata -->
+	<PropertyGroup>
+		<PackageId>NetConduit.Quic</PackageId>
+		<Authors>Kiryuumaru</Authors>
+		<Company>Kiryuumaru</Company>
+		<Copyright>Kiryuumaru</Copyright>
+		<Description>QUIC transport helper for NetConduit stream multiplexer (System.Net.Quic).</Description>
+		<PackageTags>multiplexer;stream;quic;networking;async;aot</PackageTags>
+		<PackageProjectUrl>https://github.com/Kiryuumaru/NetConduit</PackageProjectUrl>
+		<RepositoryUrl>https://github.com/Kiryuumaru/NetConduit.git</RepositoryUrl>
+		<RepositoryType>git</RepositoryType>
+		<PackageReadmeFile>README.md</PackageReadmeFile>
+		<PackageLicenseExpression>MIT</PackageLicenseExpression>
+	</PropertyGroup>
+
+	<ItemGroup>
+		<None Include="..\..\README.md" Pack="true" PackagePath="\" />
+	</ItemGroup>
+
 	<ItemGroup Condition="'$(UseLocalNetConduit)' == 'true'">
 		<ProjectReference Include="..\NetConduit\NetConduit.csproj" />
 	</ItemGroup>
