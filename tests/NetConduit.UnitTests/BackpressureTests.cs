@@ -264,8 +264,8 @@ public sealed class BackpressureTests
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(20));
 
         const int numChannels = 5;
-        var writers = new WriteChannel[numChannels];
-        var readers = new ReadChannel[numChannels];
+        var writers = new IWriteChannel[numChannels];
+        var readers = new IReadChannel[numChannels];
 
         for (int i = 0; i < numChannels; i++)
         {

@@ -34,7 +34,7 @@ public sealed class AfterReconnectionTests : IAsyncDisposable
             MaxAutoReconnectAttempts = 5,
             AutoReconnectDelay = TimeSpan.FromMilliseconds(10),
         });
-        client.OnConnected += () =>
+        client.Connected += (_, _) =>
         {
             var count = Interlocked.Increment(ref connectedCount);
             if (count >= 2) secondConnect.TrySetResult();
@@ -114,7 +114,7 @@ public sealed class AfterReconnectionTests : IAsyncDisposable
         // Now kill transport and wait for reconnect
         var reconnectedTcs = new TaskCompletionSource();
         int connCount = 0;
-        client.OnConnected += () =>
+        client.Connected += (_, _) =>
         {
             if (Interlocked.Increment(ref connCount) >= 1)
                 reconnectedTcs.TrySetResult();
@@ -185,12 +185,12 @@ public sealed class AfterReconnectionTests : IAsyncDisposable
         // Setup reconnect detection
         bool clientReconnected = false;
         bool serverReconnected = false;
-        client.OnConnected += () =>
+        client.Connected += (_, _) =>
         {
             clientReconnected = true;
             reconnectedClient.TrySetResult();
         };
-        server.OnConnected += () =>
+        server.Connected += (_, _) =>
         {
             serverReconnected = true;
             reconnectedServer.TrySetResult();
@@ -258,8 +258,8 @@ public sealed class AfterReconnectionTests : IAsyncDisposable
             server.WaitForReadyAsync(cts.Token));
 
         // Open 3 channels
-        var wChannels = new WriteChannel[3];
-        var rChannels = new ReadChannel[3];
+        var wChannels = new IWriteChannel[3];
+        var rChannels = new IReadChannel[3];
         for (int i = 0; i < 3; i++)
         {
             wChannels[i] = client.OpenChannel($"multi-{i}");
@@ -280,7 +280,7 @@ public sealed class AfterReconnectionTests : IAsyncDisposable
         }
 
         // Kill and reconnect
-        client.OnConnected += () => reconnectedClient.TrySetResult();
+        client.Connected += (_, _) => reconnectedClient.TrySetResult();
         _factory.KillCurrentTransport();
         await reconnectedClient.Task.WaitAsync(cts.Token);
 
@@ -327,7 +327,7 @@ public sealed class AfterReconnectionTests : IAsyncDisposable
             MaxAutoReconnectAttempts = 10,
             AutoReconnectDelay = TimeSpan.FromMilliseconds(10),
         });
-        client.OnConnected += () =>
+        client.Connected += (_, _) =>
         {
             var c = Interlocked.Increment(ref connectedCount);
             if (c >= 3) thirdConnect.TrySetResult();
@@ -350,7 +350,7 @@ public sealed class AfterReconnectionTests : IAsyncDisposable
 
         // First reconnect
         var secondConnect = new TaskCompletionSource();
-        client.OnConnected += () =>
+        client.Connected += (_, _) =>
         {
             if (Volatile.Read(ref connectedCount) >= 2) secondConnect.TrySetResult();
         };
@@ -387,7 +387,7 @@ public sealed class AfterReconnectionTests : IAsyncDisposable
             MaxAutoReconnectAttempts = 5,
             AutoReconnectDelay = TimeSpan.FromMilliseconds(10),
         });
-        client.OnReconnecting += attempt => { lock (attempts) { attempts.Add(attempt); } };
+        client.Reconnecting += (_, e) => { lock (attempts) { attempts.Add(e.Attempt); } };
 
         var server = StreamMultiplexer.Create(new MultiplexerOptions
         {
@@ -406,7 +406,7 @@ public sealed class AfterReconnectionTests : IAsyncDisposable
 
         // Register AFTER initial connect so TCS fires on reconnect only
         var reconnected = new TaskCompletionSource();
-        client.OnConnected += () => reconnected.TrySetResult();
+        client.Connected += (_, _) => reconnected.TrySetResult();
 
         // Kill transport — reconnect should fire
         _factory.KillCurrentTransport();
@@ -453,7 +453,7 @@ public sealed class AfterReconnectionTests : IAsyncDisposable
 
         // Register AFTER initial connect so TCS fires on reconnect only
         var reconnected = new TaskCompletionSource();
-        client.OnConnected += () => reconnected.TrySetResult();
+        client.Connected += (_, _) => reconnected.TrySetResult();
 
         _factory.KillCurrentTransport();
         await reconnected.Task.WaitAsync(cts.Token);

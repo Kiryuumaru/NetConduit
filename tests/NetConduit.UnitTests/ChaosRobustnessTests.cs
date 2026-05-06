@@ -55,7 +55,7 @@ public sealed class ChaosRobustnessTests
         });
 
         // Mix of short-lived and long-lived channels
-        var longLived = new List<WriteChannel>();
+        var longLived = new List<IWriteChannel>();
         for (int i = 0; i < 30; i++)
         {
             var ch = client.OpenChannel($"chaos-{i}");
@@ -97,7 +97,7 @@ public sealed class ChaosRobustnessTests
         // Client opens channels to server
         var clientSendTask = Task.Run(async () =>
         {
-            var writers = new WriteChannel[channelsPerSide];
+            var writers = new IWriteChannel[channelsPerSide];
             for (int i = 0; i < channelsPerSide; i++)
             {
                 writers[i] = client.OpenChannel($"c2s-{i}");
@@ -113,7 +113,7 @@ public sealed class ChaosRobustnessTests
         // Server opens channels to client
         var serverSendTask = Task.Run(async () =>
         {
-            var writers = new WriteChannel[channelsPerSide];
+            var writers = new IWriteChannel[channelsPerSide];
             for (int i = 0; i < channelsPerSide; i++)
             {
                 writers[i] = server.OpenChannel($"s2c-{i}");
@@ -514,7 +514,7 @@ public sealed class ChaosRobustnessTests
         });
 
         // Write single bytes in sequence to each channel
-        var writers = new WriteChannel[channels];
+        var writers = new IWriteChannel[channels];
         for (int i = 0; i < channels; i++)
             writers[i] = client.OpenChannel($"order-{i}");
 

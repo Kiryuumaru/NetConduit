@@ -289,7 +289,7 @@ public sealed class ConcurrencyTests
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
 
         // Open all channels in parallel from separate tasks
-        var channels = new WriteChannel[count];
+        var channels = new IWriteChannel[count];
         var openTasks = new Task[count];
         for (int i = 0; i < count; i++)
         {
@@ -316,9 +316,10 @@ public sealed class ConcurrencyTests
 
         await Task.WhenAll(acceptTasks);
 
-        // All channels are open
+        // All channels should become ready after server accepts
         for (int i = 0; i < count; i++)
         {
+            await channels[i].WaitForReadyAsync(cts.Token);
             Assert.Equal(ChannelState.Open, channels[i].State);
         }
 

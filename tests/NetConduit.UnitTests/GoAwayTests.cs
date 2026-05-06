@@ -48,7 +48,7 @@ public sealed class GoAwayTests
         await Task.WhenAll(client.WaitForReadyAsync(), server.WaitForReadyAsync());
 
         var disconnectTcs = new TaskCompletionSource<DisconnectReason>();
-        server.OnDisconnected += (reason, _) => disconnectTcs.TrySetResult(reason);
+        server.Disconnected += (_, e) => disconnectTcs.TrySetResult(e.Reason);
 
         await client.GoAwayAsync();
 

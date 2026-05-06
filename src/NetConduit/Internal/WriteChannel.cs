@@ -8,7 +8,7 @@ namespace NetConduit;
 /// The channel does ALL heavy lifting: header stamping, flow control, reconnection replay.
 /// The mux just picks up ready frames and sends them.
 /// </summary>
-public sealed class WriteChannel : Stream, IAsyncDisposable
+internal sealed class WriteChannel : Stream, IWriteChannel
 {
     private readonly byte[] _slab;
     private readonly Memory<byte> _slabMemory;
@@ -19,6 +19,7 @@ public sealed class WriteChannel : Stream, IAsyncDisposable
     private readonly int _slabSize;
     private readonly TimeSpan _sendTimeout;
     private readonly bool _enableReplay;
+    private readonly TaskCompletionSource _readyTcs = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
     // Position tracking — the slab is a linear buffer with compaction
     // All position fields are protected by _posLock
@@ -29,6 +30,8 @@ public sealed class WriteChannel : Stream, IAsyncDisposable
     private bool _routerReading; // true between TakeReady and MarkSent — blocks compaction
 
     private volatile ChannelState _state = ChannelState.Opening;
+    private volatile bool _isReady;
+    private volatile bool _isConnected;
     private ChannelCloseReason? _closeReason;
     private Exception? _closeException;
 
@@ -37,6 +40,12 @@ public sealed class WriteChannel : Stream, IAsyncDisposable
 
     /// <summary>Current lifecycle state.</summary>
     public ChannelState State => _state;
+
+    /// <summary>True after the channel has been confirmed by the remote side. Stays true forever.</summary>
+    public bool IsReady => _isReady;
+
+    /// <summary>True when the underlying transport is active. False during disconnects/reconnection.</summary>
+    public bool IsConnected => _isConnected;
 
     /// <summary>Priority level used by the writer thread for ordering.</summary>
     public ChannelPriority Priority { get; }
@@ -50,10 +59,23 @@ public sealed class WriteChannel : Stream, IAsyncDisposable
     /// <summary>Exception that caused the close, if applicable.</summary>
     public Exception? CloseException => _closeException;
 
+    /// <summary>Raised once when the channel first becomes ready. Never fires again.</summary>
+    public event EventHandler? Ready;
+
+    /// <summary>Raised each time the channel's underlying transport connects (including reconnects).</summary>
+    public event EventHandler? Connected;
+
+    /// <summary>Raised each time the channel's underlying transport disconnects.</summary>
+    public event EventHandler<DisconnectedEventArgs>? Disconnected;
+
     /// <summary>Raised when the channel is closed.</summary>
-    public event Action<ChannelCloseReason, Exception?>? OnClosed;
+    public event EventHandler<ChannelCloseEventArgs>? Closed;
 
     // Stream overrides
+
+    /// <inheritdoc />
+    public Stream AsStream() => this;
+
     /// <inheritdoc />
     public override bool CanRead => false;
     /// <inheritdoc />
@@ -90,7 +112,34 @@ public sealed class WriteChannel : Stream, IAsyncDisposable
         _slabMemory = _slab.AsMemory();
     }
 
-    internal void MarkOpen() => _state = ChannelState.Open;
+    /// <summary>Wait until the channel is confirmed ready by the remote side.</summary>
+    public Task WaitForReadyAsync(CancellationToken ct = default) => _readyTcs.Task.WaitAsync(ct);
+
+    internal void MarkOpen()
+    {
+        // Don't regress state if channel is already closing or closed
+        if (_state is ChannelState.Closing or ChannelState.Closed) return;
+
+        _state = ChannelState.Open;
+        if (!_isReady)
+        {
+            _isReady = true;
+            _readyTcs.TrySetResult();
+            Ready?.Invoke(this, EventArgs.Empty);
+        }
+    }
+
+    internal void MarkConnected()
+    {
+        _isConnected = true;
+        Connected?.Invoke(this, EventArgs.Empty);
+    }
+
+    internal void MarkDisconnected(DisconnectReason reason, Exception? exception = null)
+    {
+        _isConnected = false;
+        Disconnected?.Invoke(this, new DisconnectedEventArgs(reason, exception));
+    }
 
     /// <summary>
     /// Writes data to the channel. Builds a complete frame (header + payload) in the slab.
@@ -235,6 +284,9 @@ public sealed class WriteChannel : Stream, IAsyncDisposable
         {
             _ackedPos = ackedPosition;
         }
+        // First ACK from remote confirms channel is open
+        if (!_isReady)
+            MarkOpen();
         // Wake any blocked writer waiting for space
         TryReleaseSpaceSignal();
     }
@@ -275,9 +327,12 @@ public sealed class WriteChannel : Stream, IAsyncDisposable
         _state = ChannelState.Closed;
         _closeReason = reason;
         _closeException = exception;
+        _isConnected = false;
+        // Wake anyone waiting for ready (channel will never open)
+        _readyTcs.TrySetException(new ChannelClosedException(ChannelId, reason));
         // Wake any blocked writers
         TryReleaseSpaceSignal();
-        OnClosed?.Invoke(reason, exception);
+        Closed?.Invoke(this, new ChannelCloseEventArgs(reason, exception));
     }
 
     private void TryReleaseSpaceSignal()
@@ -330,6 +385,7 @@ public sealed class WriteChannel : Stream, IAsyncDisposable
         if (_state is not ChannelState.Closed)
         {
             await CloseAsync();
+            SetClosed(ChannelCloseReason.LocalClose);
         }
         _spaceAvailable.Dispose();
         await base.DisposeAsync();

@@ -12,6 +12,9 @@ public interface IStreamMultiplexer : IAsyncDisposable
     /// <summary>Session-level statistics.</summary>
     MultiplexerStats Stats { get; }
 
+    /// <summary>True after the first successful connection and handshake. Stays true forever.</summary>
+    bool IsReady { get; }
+
     /// <summary>Whether the transport is currently connected.</summary>
     bool IsConnected { get; }
 
@@ -36,23 +39,29 @@ public interface IStreamMultiplexer : IAsyncDisposable
     /// <summary>Reason for the last disconnection, if applicable.</summary>
     DisconnectReason? DisconnectReason { get; }
 
-    /// <summary>Raised when a channel is opened.</summary>
-    event Action<string>? OnChannelOpened;
+    /// <summary>Raised once when the multiplexer first becomes ready. Never fires again.</summary>
+    event EventHandler? Ready;
+
+    /// <summary>Raised when an outbound channel is opened locally.</summary>
+    event EventHandler<ChannelEventArgs>? ChannelOpened;
+
+    /// <summary>Raised when an inbound channel is confirmed by the remote side.</summary>
+    event EventHandler<ChannelEventArgs>? ChannelAccepted;
 
     /// <summary>Raised when a channel is closed.</summary>
-    event Action<string, Exception?>? OnChannelClosed;
+    event EventHandler<ChannelClosedEventArgs>? ChannelClosed;
 
     /// <summary>Raised when an error occurs.</summary>
-    event Action<Exception>? OnError;
+    event EventHandler<ErrorEventArgs>? Error;
 
     /// <summary>Raised when the transport is disconnected.</summary>
-    event Action<DisconnectReason, Exception?>? OnDisconnected;
+    event EventHandler<DisconnectedEventArgs>? Disconnected;
 
-    /// <summary>Raised when the transport is connected (initial or reconnect).</summary>
-    event Action? OnConnected;
+    /// <summary>Raised each time the transport connects (initial or reconnect).</summary>
+    event EventHandler? Connected;
 
-    /// <summary>Raised when a reconnection attempt begins. Parameter is the attempt number.</summary>
-    event Action<int>? OnReconnecting;
+    /// <summary>Raised when a reconnection attempt begins.</summary>
+    event EventHandler<ReconnectingEventArgs>? Reconnecting;
 
     /// <summary>Start the multiplexer (handshake, read/write loops).</summary>
     void Start();
@@ -60,23 +69,20 @@ public interface IStreamMultiplexer : IAsyncDisposable
     /// <summary>Wait until the multiplexer is ready to open/accept channels.</summary>
     Task WaitForReadyAsync(CancellationToken ct = default);
 
-    /// <summary>Open a new outbound channel with the given ID.</summary>
-    WriteChannel OpenChannel(string channelId);
+    /// <summary>Open a new outbound channel with the given options.</summary>
+    IWriteChannel OpenChannel(ChannelOptions options);
 
-    /// <summary>Open a new outbound channel with full options.</summary>
-    WriteChannel OpenChannel(ChannelOptions options);
-
-    /// <summary>Accept an inbound channel with the given ID.</summary>
-    ValueTask<ReadChannel> AcceptChannelAsync(string channelId, CancellationToken ct = default);
+    /// <summary>Accept an inbound channel with the given ID. Returns immediately in pending state.</summary>
+    IReadChannel AcceptChannel(string channelId);
 
     /// <summary>Accept all inbound channels as they arrive.</summary>
-    IAsyncEnumerable<ReadChannel> AcceptChannelsAsync(CancellationToken ct = default);
+    IAsyncEnumerable<IReadChannel> AcceptChannelsAsync(CancellationToken ct = default);
 
     /// <summary>Get an outbound channel by its ID, or null if not found.</summary>
-    WriteChannel? GetWriteChannel(string channelId);
+    IWriteChannel? GetWriteChannel(string channelId);
 
     /// <summary>Get an inbound channel by its ID, or null if it hasn't arrived yet.</summary>
-    ReadChannel? GetReadChannel(string channelId);
+    IReadChannel? GetReadChannel(string channelId);
 
     /// <summary>Initiate graceful shutdown (GoAway).</summary>
     ValueTask GoAwayAsync(CancellationToken ct = default);

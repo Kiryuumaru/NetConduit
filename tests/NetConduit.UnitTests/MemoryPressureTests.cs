@@ -161,7 +161,7 @@ public sealed class MemoryPressureTests
         await Task.WhenAll(client.WaitForReadyAsync(), server.WaitForReadyAsync());
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
 
-        var writers = new WriteChannel[5];
+        var writers = new IWriteChannel[5];
         for (int i = 0; i < 5; i++)
         {
             writers[i] = client.OpenChannel($"resource-{i}");

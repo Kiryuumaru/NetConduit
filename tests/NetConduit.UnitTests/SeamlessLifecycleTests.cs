@@ -105,7 +105,7 @@ public sealed class SeamlessLifecycleTests
             StreamFactory = _ => Task.FromResult<IStreamPair>(duplex.SideA),
             PingInterval = TimeSpan.Zero,
         });
-        client.OnConnected += () => Interlocked.Increment(ref connectedCount);
+        client.Connected += (_, _) => Interlocked.Increment(ref connectedCount);
 
         var server = StreamMultiplexer.Create(new MultiplexerOptions
         {
@@ -156,7 +156,7 @@ public sealed class SeamlessLifecycleTests
         });
 
         var errors = new List<Exception>();
-        client.OnError += ex => errors.Add(ex);
+        client.Error += (_, e) => errors.Add(e.Exception);
 
         client.Start();
         server.Start();
@@ -244,7 +244,7 @@ public sealed class SeamlessLifecycleTests
             PingInterval = TimeSpan.Zero,
         });
 
-        client.OnReconnecting += n => reconnectAttempts.Add(n);
+        client.Reconnecting += (_, e) => reconnectAttempts.Add(e.Attempt);
 
         var server = StreamMultiplexer.Create(new MultiplexerOptions
         {

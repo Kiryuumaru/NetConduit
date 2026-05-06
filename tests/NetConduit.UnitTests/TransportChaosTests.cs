@@ -20,7 +20,7 @@ public sealed class TransportChaosTests
             PingInterval = TimeSpan.Zero,
             MaxAutoReconnectAttempts = 0,
         });
-        client.OnDisconnected += (reason, _) => disconnectTcs.TrySetResult(reason);
+        client.Disconnected += (_, e) => disconnectTcs.TrySetResult(e.Reason);
 
         var server = StreamMultiplexer.Create(new MultiplexerOptions
         {
@@ -67,7 +67,7 @@ public sealed class TransportChaosTests
             MaxAutoReconnectAttempts = 5,
             AutoReconnectDelay = TimeSpan.FromMilliseconds(10),
         });
-        client.OnReconnecting += _ => Interlocked.Increment(ref reconnectAttempts);
+        client.Reconnecting += (_, _) => Interlocked.Increment(ref reconnectAttempts);
 
         var server = StreamMultiplexer.Create(new MultiplexerOptions
         {
@@ -153,7 +153,7 @@ public sealed class TransportChaosTests
             PingInterval = TimeSpan.Zero,
             MaxAutoReconnectAttempts = 0,
         });
-        client.OnError += ex => errorTcs.TrySetResult(ex);
+        client.Error += (_, e) => errorTcs.TrySetResult(e.Exception);
 
         var server = StreamMultiplexer.Create(new MultiplexerOptions
         {
@@ -206,7 +206,7 @@ public sealed class TransportChaosTests
             server.WaitForReadyAsync(cts.Token));
 
         // Open 5 channels and write different data to each
-        var channels = new WriteChannel[5];
+        var channels = new IWriteChannel[5];
         for (int i = 0; i < 5; i++)
         {
             channels[i] = client.OpenChannel($"ch-{i}");
@@ -268,7 +268,7 @@ public sealed class TransportChaosTests
 
         // Writing to channel slab should not throw even though transport is dead
         // The slab is independent of the transport
-        var writeException = Record.Exception(() => ch.Write(new byte[] { 1, 2, 3 }));
+        var writeException = Record.Exception(() => ch.AsStream().Write(new byte[] { 1, 2, 3 }));
 
         // Write may or may not throw depending on channel state after abort
         // The key assertion is: it doesn't deadlock or hang

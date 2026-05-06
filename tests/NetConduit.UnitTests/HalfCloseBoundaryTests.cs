@@ -229,7 +229,7 @@ public sealed class HalfCloseBoundaryTests
         });
 
         // Open channels, write varying amounts, close in random order
-        var writers = new WriteChannel[channelCount];
+        var writers = new IWriteChannel[channelCount];
         for (int i = 0; i < channelCount; i++)
         {
             writers[i] = client.OpenChannel($"interleave-{i}");

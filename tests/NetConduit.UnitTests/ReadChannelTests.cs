@@ -116,7 +116,7 @@ public sealed class ReadChannelTests
     {
         var channel = CreateChannel();
         ChannelCloseReason? reason = null;
-        channel.OnClosed += (r, _) => reason = r;
+        channel.Closed += (_, e) => reason = e.Reason;
 
         channel.ReceivePayload(FrameFlags.Fin, ReadOnlySpan<byte>.Empty);
 

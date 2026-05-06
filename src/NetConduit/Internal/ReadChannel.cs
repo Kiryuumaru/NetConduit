@@ -8,13 +8,16 @@ namespace NetConduit;
 /// Inbound channel that owns a receive slab and handles all receive logic.
 /// Supports direct delivery (user already waiting) and slab buffering (user reads later).
 /// </summary>
-public sealed class ReadChannel : Stream, IAsyncDisposable, IValueTaskSource<int>
+internal sealed class ReadChannel : Stream, IReadChannel, IValueTaskSource<int>
 {
     private readonly byte[] _slab;
     private readonly Memory<byte> _slabMemory;
-    private readonly ushort _channelIndex;
+    private ushort _channelIndex;
     private readonly int _slabSize;
     private readonly object _lock = new();
+    private readonly TaskCompletionSource _readyTcs = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+    internal ushort ChannelIndex => _channelIndex;
 
     private int _receivedPos;
     private int _consumedPos;
@@ -28,6 +31,8 @@ public sealed class ReadChannel : Stream, IAsyncDisposable, IValueTaskSource<int
     private WriteChannel? _ackChannel;
 
     private volatile ChannelState _state = ChannelState.Opening;
+    private volatile bool _isReady;
+    private volatile bool _isConnected;
     private ChannelCloseReason? _closeReason;
     private Exception? _closeException;
 
@@ -36,6 +41,12 @@ public sealed class ReadChannel : Stream, IAsyncDisposable, IValueTaskSource<int
 
     /// <summary>Current lifecycle state.</summary>
     public ChannelState State => _state;
+
+    /// <summary>True after the channel has been confirmed by the remote side. Stays true forever.</summary>
+    public bool IsReady => _isReady;
+
+    /// <summary>True when the underlying transport is active. False during disconnects/reconnection.</summary>
+    public bool IsConnected => _isConnected;
 
     /// <summary>Priority level of this channel.</summary>
     public ChannelPriority Priority { get; }
@@ -49,10 +60,23 @@ public sealed class ReadChannel : Stream, IAsyncDisposable, IValueTaskSource<int
     /// <summary>Exception that caused the close, if applicable.</summary>
     public Exception? CloseException => _closeException;
 
+    /// <summary>Raised once when the channel first becomes ready. Never fires again.</summary>
+    public event EventHandler? Ready;
+
+    /// <summary>Raised each time the channel's underlying transport connects (including reconnects).</summary>
+    public event EventHandler? Connected;
+
+    /// <summary>Raised each time the channel's underlying transport disconnects.</summary>
+    public event EventHandler<DisconnectedEventArgs>? Disconnected;
+
     /// <summary>Raised when the channel is closed.</summary>
-    public event Action<ChannelCloseReason, Exception?>? OnClosed;
+    public event EventHandler<ChannelCloseEventArgs>? Closed;
 
     // Stream overrides
+
+    /// <inheritdoc />
+    public Stream AsStream() => this;
+
     /// <inheritdoc />
     public override bool CanRead => _state is ChannelState.Open or ChannelState.Opening;
     /// <inheritdoc />
@@ -83,9 +107,35 @@ public sealed class ReadChannel : Stream, IAsyncDisposable, IValueTaskSource<int
         _slabMemory = _slab.AsMemory();
     }
 
-    internal void MarkOpen() => _state = ChannelState.Open;
+    /// <summary>Wait until the channel is confirmed ready by the remote side.</summary>
+    public Task WaitForReadyAsync(CancellationToken ct = default) => _readyTcs.Task.WaitAsync(ct);
+
+    internal void MarkOpen()
+    {
+        _state = ChannelState.Open;
+        if (!_isReady)
+        {
+            _isReady = true;
+            _readyTcs.TrySetResult();
+            Ready?.Invoke(this, EventArgs.Empty);
+        }
+    }
+
+    internal void MarkConnected()
+    {
+        _isConnected = true;
+        Connected?.Invoke(this, EventArgs.Empty);
+    }
+
+    internal void MarkDisconnected(DisconnectReason reason, Exception? exception = null)
+    {
+        _isConnected = false;
+        Disconnected?.Invoke(this, new DisconnectedEventArgs(reason, exception));
+    }
 
     internal void SetAckChannel(WriteChannel ackChannel) => _ackChannel = ackChannel;
+
+    internal void SetChannelIndex(ushort index) => _channelIndex = index;
 
     /// <summary>
     /// Reads data from the channel. Fast path: data already buffered → immediate return.
@@ -267,6 +317,10 @@ public sealed class ReadChannel : Stream, IAsyncDisposable, IValueTaskSource<int
             _state = ChannelState.Closed;
             _closeReason = reason;
             _closeException = exception;
+            _isConnected = false;
+
+            // Wake anyone waiting for ready (channel will never open)
+            _readyTcs.TrySetException(new ChannelClosedException(ChannelId, reason));
 
             // Wake any pending reader with EOF (0 bytes)
             if (_readCompletionActive)
@@ -276,7 +330,7 @@ public sealed class ReadChannel : Stream, IAsyncDisposable, IValueTaskSource<int
                 _readCompletion.Core.SetResult(0);
             }
         }
-        OnClosed?.Invoke(reason, exception);
+        Closed?.Invoke(this, new ChannelCloseEventArgs(reason, exception));
     }
 
     // IValueTaskSource<int> implementation — used by the slow-path ReadAsync

@@ -212,8 +212,8 @@ public sealed class DataIntegrityTests
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
 
         // Both sides open channels simultaneously
-        var clientChannels = new WriteChannel[channelsPerSide];
-        var serverChannels = new WriteChannel[channelsPerSide];
+        var clientChannels = new IWriteChannel[channelsPerSide];
+        var serverChannels = new IWriteChannel[channelsPerSide];
 
         for (int i = 0; i < channelsPerSide; i++)
         {
@@ -267,6 +267,7 @@ public sealed class DataIntegrityTests
         {
             var writeChannel = client.OpenChannel($"cycle-{i}");
             var readChannel = await server.AcceptChannelAsync($"cycle-{i}", cts.Token);
+            await writeChannel.WaitForReadyAsync(cts.Token);
 
             byte[] sent = [(byte)(i % 256), (byte)((i * 7) % 256)];
             await writeChannel.WriteAsync(sent, cts.Token);

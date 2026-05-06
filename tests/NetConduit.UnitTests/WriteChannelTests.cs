@@ -230,7 +230,7 @@ public sealed class WriteChannelTests
     {
         var channel = CreateChannel();
         ChannelCloseReason? capturedReason = null;
-        channel.OnClosed += (reason, _) => capturedReason = reason;
+        channel.Closed += (_, e) => capturedReason = e.Reason;
 
         channel.SetClosed(ChannelCloseReason.RemoteFin);
 

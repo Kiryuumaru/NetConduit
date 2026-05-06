@@ -32,6 +32,7 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IFrameRouter
     private WriteChannel? _controlChannel;
     private volatile bool _isRunning;
     private volatile bool _isConnected;
+    private volatile bool _isReady;
     private volatile bool _isShuttingDown;
     private volatile bool _disconnectedFired;
     private DisconnectReason? _disconnectReason;
@@ -44,6 +45,9 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IFrameRouter
 
     /// <inheritdoc />
     public MultiplexerStats Stats => _stats;
+
+    /// <inheritdoc />
+    public bool IsReady => _isReady;
 
     /// <inheritdoc />
     public bool IsConnected => _isConnected;
@@ -75,17 +79,21 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IFrameRouter
     public DisconnectReason? DisconnectReason => _disconnectReason;
 
     /// <inheritdoc />
-    public event Action<string>? OnChannelOpened;
+    public event EventHandler? Ready;
     /// <inheritdoc />
-    public event Action<string, Exception?>? OnChannelClosed;
+    public event EventHandler<ChannelEventArgs>? ChannelOpened;
     /// <inheritdoc />
-    public event Action<Exception>? OnError;
+    public event EventHandler<ChannelEventArgs>? ChannelAccepted;
     /// <inheritdoc />
-    public event Action<DisconnectReason, Exception?>? OnDisconnected;
+    public event EventHandler<ChannelClosedEventArgs>? ChannelClosed;
     /// <inheritdoc />
-    public event Action? OnConnected;
+    public event EventHandler<ErrorEventArgs>? Error;
     /// <inheritdoc />
-    public event Action<int>? OnReconnecting;
+    public event EventHandler<DisconnectedEventArgs>? Disconnected;
+    /// <inheritdoc />
+    public event EventHandler? Connected;
+    /// <inheritdoc />
+    public event EventHandler<ReconnectingEventArgs>? Reconnecting;
 
     private StreamMultiplexer(MultiplexerOptions options, bool useOddIndices)
     {
@@ -117,20 +125,7 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IFrameRouter
     public Task WaitForReadyAsync(CancellationToken ct = default) => _readyTcs.Task.WaitAsync(ct);
 
     /// <inheritdoc />
-    public WriteChannel OpenChannel(string channelId)
-    {
-        var defaults = _options.DefaultChannelOptions;
-        return OpenChannel(new ChannelOptions
-        {
-            ChannelId = channelId,
-            Priority = defaults.Priority,
-            SlabSize = defaults.SlabSize,
-            SendTimeout = defaults.SendTimeout,
-        });
-    }
-
-    /// <inheritdoc />
-    public WriteChannel OpenChannel(ChannelOptions options)
+    public IWriteChannel OpenChannel(ChannelOptions options)
     {
         if (!_isRunning)
             throw new InvalidOperationException("Multiplexer has not been started.");
@@ -151,32 +146,62 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IFrameRouter
         // Send INIT frame (channel does it itself — builds the frame in its slab)
         byte[] channelIdBytes = Encoding.UTF8.GetBytes(options.ChannelId);
         channel.WriteInitFrame(channelIdBytes);
-        channel.MarkOpen();
+        // Channel stays in Opening/Pending state until remote ACKs the INIT
+
+        if (_isConnected)
+            channel.MarkConnected();
 
         Interlocked.Increment(ref _stats._openChannels);
         Interlocked.Increment(ref _stats._totalChannelsOpened);
-        OnChannelOpened?.Invoke(options.ChannelId);
+        ChannelOpened?.Invoke(this, new ChannelEventArgs(options.ChannelId));
 
         return channel;
     }
 
     /// <inheritdoc />
-    public ValueTask<ReadChannel> AcceptChannelAsync(string channelId, CancellationToken ct = default)
+    public IReadChannel AcceptChannel(string channelId)
     {
-        return _registry.AcceptChannelAsync(channelId, ct);
+        if (!_isRunning)
+            throw new InvalidOperationException("Multiplexer has not been started.");
+
+        // Check if channel already arrived from remote
+        var existing = _registry.GetReadChannelById(channelId);
+        if (existing is not null) return existing;
+
+        // Create a pending ReadChannel that will be wired up when remote INIT arrives
+        var channel = new ReadChannel(
+            channelId,
+            0, // index assigned later when remote INIT arrives
+            _options.DefaultChannelOptions.Priority,
+            _options.DefaultChannelOptions.SlabSize);
+
+        _registry.RegisterPendingAcceptChannel(channelId, channel);
+
+        // Re-check: INIT may have arrived between first check and registration
+        existing = _registry.GetReadChannelById(channelId);
+        if (existing is not null)
+        {
+            _registry.RemovePendingAcceptChannel(channelId);
+            return existing;
+        }
+
+        if (_isConnected)
+            channel.MarkConnected();
+
+        return channel;
     }
 
     /// <inheritdoc />
-    public IAsyncEnumerable<ReadChannel> AcceptChannelsAsync(CancellationToken ct = default)
+    public IAsyncEnumerable<IReadChannel> AcceptChannelsAsync(CancellationToken ct = default)
     {
         return _registry.AcceptChannelsAsync(ct);
     }
 
     /// <inheritdoc />
-    public WriteChannel? GetWriteChannel(string channelId) => _registry.GetWriteChannelById(channelId);
+    public IWriteChannel? GetWriteChannel(string channelId) => _registry.GetWriteChannelById(channelId);
 
     /// <inheritdoc />
-    public ReadChannel? GetReadChannel(string channelId) => _registry.GetReadChannelById(channelId);
+    public IReadChannel? GetReadChannel(string channelId) => _registry.GetReadChannelById(channelId);
 
     /// <inheritdoc />
     public async ValueTask GoAwayAsync(CancellationToken ct = default)
@@ -272,11 +297,21 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IFrameRouter
                 if (_options.PingInterval > TimeSpan.Zero)
                     _keepaliveTask = Task.Run(() => RunKeepaliveLoopAsync(loopCt), loopCt);
 
-                OnConnected?.Invoke();
+                Connected?.Invoke(this, EventArgs.Empty);
 
                 if (!hasConnectedBefore)
+                {
+                    _isReady = true;
                     _readyTcs.TrySetResult();
+                    Ready?.Invoke(this, EventArgs.Empty);
+                }
                 hasConnectedBefore = true;
+
+                // Notify all channels that transport is connected
+                foreach (var ch in _registry.GetAllWriteChannels())
+                    ch.MarkConnected();
+                foreach (var ch in _registry.GetAllReadChannels())
+                    ch.MarkConnected();
 
                 // Block until any loop faults (transport died)
                 var faulted = await Task.WhenAny(
@@ -289,6 +324,12 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IFrameRouter
                 _isConnected = false;
                 _loopCts.Cancel();
 
+                // Notify all channels that transport is disconnected
+                foreach (var ch in _registry.GetAllWriteChannels())
+                    ch.MarkDisconnected(NetConduit.DisconnectReason.TransportError, null);
+                foreach (var ch in _registry.GetAllReadChannels())
+                    ch.MarkDisconnected(NetConduit.DisconnectReason.TransportError, null);
+
                 await WaitForLoopsAsync();
                 _loopCts.Dispose();
                 _loopCts = null;
@@ -296,7 +337,7 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IFrameRouter
                 // Capture the exception if any
                 Exception? transportEx = faulted.Exception?.InnerException;
                 if (transportEx is not null)
-                    OnError?.Invoke(transportEx);
+                    Error?.Invoke(this, new ErrorEventArgs(transportEx));
 
                 // Dispose old transport
                 await transport.DisposeAsync();
@@ -307,7 +348,7 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IFrameRouter
                     if (_disconnectReason == NetConduit.DisconnectReason.GoAwayReceived)
                     {
                         _disconnectedFired = true;
-                        OnDisconnected?.Invoke(NetConduit.DisconnectReason.GoAwayReceived, null);
+                        Disconnected?.Invoke(this, new DisconnectedEventArgs(NetConduit.DisconnectReason.GoAwayReceived, null));
                     }
                     break;
                 }
@@ -317,7 +358,7 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IFrameRouter
                     break;
 
                 _disconnectedFired = true;
-                OnDisconnected?.Invoke(NetConduit.DisconnectReason.TransportError, transportEx);
+                Disconnected?.Invoke(this, new DisconnectedEventArgs(NetConduit.DisconnectReason.TransportError, transportEx));
             }
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
@@ -349,7 +390,7 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IFrameRouter
             // Delay before retry (skip on first attempt of first connect)
             if (attempt > 1 || isReconnect)
             {
-                OnReconnecting?.Invoke(attempt);
+                Reconnecting?.Invoke(this, new ReconnectingEventArgs(attempt));
                 await Task.Delay(TimeSpan.FromMilliseconds(delay), ct);
                 delay = Math.Min(delay * _options.AutoReconnectBackoffMultiplier, maxDelay);
             }
@@ -380,7 +421,7 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IFrameRouter
             }
             catch (Exception ex)
             {
-                OnError?.Invoke(ex);
+                Error?.Invoke(this, new ErrorEventArgs(ex));
 
                 // If max attempts is 0 (no retry on initial) and not reconnecting, propagate immediately
                 if (!isReconnect && maxAttempts == 0)
@@ -571,20 +612,37 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IFrameRouter
             if (existing is not null)
                 return;
 
-            // Remote side is opening a channel — create a ReadChannel
             string channelId = Encoding.UTF8.GetString(payload);
-            var readChannel = new ReadChannel(
-                channelId,
-                header.ChannelIndex,
-                _options.DefaultChannelOptions.Priority,
-                _options.DefaultChannelOptions.SlabSize);
+
+            // Check if a pending accept channel was pre-created via AcceptChannel(sync)
+            var pendingChannel = _registry.GetPendingAcceptChannel(channelId);
+            ReadChannel readChannel;
+
+            if (pendingChannel is not null)
+            {
+                readChannel = pendingChannel;
+                // Re-register with the actual channel index from the remote
+                readChannel.SetChannelIndex(header.ChannelIndex);
+            }
+            else
+            {
+                readChannel = new ReadChannel(
+                    channelId,
+                    header.ChannelIndex,
+                    _options.DefaultChannelOptions.Priority,
+                    _options.DefaultChannelOptions.SlabSize);
+            }
 
             _registry.RegisterReadChannel(header.ChannelIndex, readChannel);
             readChannel.MarkOpen();
+            readChannel.MarkConnected();
+
+            // Send init-ack so the opener knows the channel is established
+            SendInitAck(header.ChannelIndex);
 
             Interlocked.Increment(ref _stats._openChannels);
             Interlocked.Increment(ref _stats._totalChannelsOpened);
-            OnChannelOpened?.Invoke(channelId);
+            ChannelAccepted?.Invoke(this, new ChannelEventArgs(channelId));
 
             _registry.EnqueueForAccept(readChannel);
             return;
@@ -611,7 +669,7 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IFrameRouter
         {
             Interlocked.Decrement(ref _stats._openChannels);
             Interlocked.Increment(ref _stats._totalChannelsClosed);
-            OnChannelClosed?.Invoke(channel.ChannelId, null);
+            ChannelClosed?.Invoke(this, new ChannelClosedEventArgs(channel.ChannelId, null));
         }
     }
 
@@ -712,6 +770,17 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IFrameRouter
         // Write through the control channel's slab so the writer thread picks it up
         // The control channel uses ChannelIndex 0, so frames are stamped with channel 0
         _controlChannel.WriteRawFrame(temp);
+    }
+
+    private void SendInitAck(ushort channelIndex)
+    {
+        if (_controlChannel is null) return;
+
+        // ACK frame on the opener's channel index with position 0 — signals channel established
+        byte[] frame = new byte[FrameHeader.Size + 4];
+        FrameHeader.WriteTo(frame, channelIndex, FrameFlags.Ack, 4);
+        BinaryPrimitives.WriteUInt32BigEndian(frame.AsSpan(FrameHeader.Size, 4), 0);
+        _controlChannel.WriteRawFrame(frame);
     }
 
     private async Task PerformHandshakeAsync(CancellationToken ct)
@@ -829,6 +898,6 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IFrameRouter
         _cts.Dispose();
 
         if (!_disconnectedFired && _disconnectReason.HasValue)
-            OnDisconnected?.Invoke(_disconnectReason.Value, null);
+            Disconnected?.Invoke(this, new DisconnectedEventArgs(_disconnectReason.Value, null));
     }
 }

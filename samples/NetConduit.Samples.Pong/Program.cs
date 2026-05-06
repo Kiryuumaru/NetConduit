@@ -144,7 +144,7 @@ async Task RunServer(int port)
                         mux.Start();
                         await mux.WaitForReadyAsync(cts.Token);
 
-                        ReadChannel? controlChannel = null;
+                        IReadChannel? controlChannel = null;
                         using var acceptCts = CancellationTokenSource.CreateLinkedTokenSource(cts.Token);
                         acceptCts.CancelAfter(TimeSpan.FromSeconds(10));
 
@@ -312,7 +312,7 @@ async Task RunClient(string host, int port)
 
         var controlChannel = mux.OpenChannel("control");
 
-        ReadChannel? stateChannel = null;
+        IReadChannel? stateChannel = null;
         using var acceptCts = CancellationTokenSource.CreateLinkedTokenSource(cts.Token);
         acceptCts.CancelAfter(TimeSpan.FromSeconds(10));
 

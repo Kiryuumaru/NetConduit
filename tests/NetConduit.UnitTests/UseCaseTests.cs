@@ -384,8 +384,8 @@ public sealed class UseCaseTests
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
 
         const int numSubscribers = 10;
-        var writers = new WriteChannel[numSubscribers];
-        var readers = new ReadChannel[numSubscribers];
+        var writers = new IWriteChannel[numSubscribers];
+        var readers = new IReadChannel[numSubscribers];
 
         for (int i = 0; i < numSubscribers; i++)
         {

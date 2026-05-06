@@ -204,7 +204,7 @@ async Task HandleNewTcpClientAsync(TcpClient tcpClient, ChatServer server, Cance
         mux.Start();
         await mux.WaitForReadyAsync(ct);
 
-        ReadChannel? chatChannel = null;
+        IReadChannel? chatChannel = null;
         using var acceptCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
         acceptCts.CancelAfter(TimeSpan.FromSeconds(10));
 
@@ -320,7 +320,7 @@ async Task HandleNewWebSocketClientAsync(System.Net.WebSockets.WebSocket webSock
         mux.Start();
         await mux.WaitForReadyAsync(ct);
 
-        ReadChannel? chatChannel = null;
+        IReadChannel? chatChannel = null;
         using var acceptCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
         acceptCts.CancelAfter(TimeSpan.FromSeconds(10));
 
@@ -520,7 +520,7 @@ async Task RunClientChatAsync(IStreamMultiplexer mux, string username, Cancellat
         ChatJsonContext.Default.ChatEvent);
     await chatChannel.WriteAsync(joinBytes, ct);
 
-    ReadChannel? broadcastChannel = null;
+    IReadChannel? broadcastChannel = null;
     using var acceptCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
     acceptCts.CancelAfter(TimeSpan.FromSeconds(10));
 
@@ -716,10 +716,10 @@ sealed class ClientState : IAsyncDisposable
 {
     public string Username { get; }
     public IStreamMultiplexer Mux { get; }
-    public WriteChannel BroadcastChannel { get; }
+    public IWriteChannel BroadcastChannel { get; }
     public MessageTransit<ChatEvent, ChatEvent> Transit { get; }
 
-    public ClientState(string username, IStreamMultiplexer mux, WriteChannel broadcastChannel, ReadChannel chatChannel)
+    public ClientState(string username, IStreamMultiplexer mux, IWriteChannel broadcastChannel, IReadChannel chatChannel)
     {
         Username = username;
         Mux = mux;

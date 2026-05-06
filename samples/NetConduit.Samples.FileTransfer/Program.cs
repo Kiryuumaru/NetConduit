@@ -122,23 +122,25 @@ async Task HandleClientAsync(StreamMultiplexer connection, string outputDir, Can
     }
 }
 
-async Task ReceiveFileAsync(ReadChannel channel, string outputDir, CancellationToken ct)
+async Task ReceiveFileAsync(IReadChannel channel, string outputDir, CancellationToken ct)
 {
     try
     {
+        var stream = channel.AsStream();
+
         // Read file header: [filename_len: 4B][filename: N bytes][file_size: 8B]
         var headerBuffer = new byte[4];
-        await channel.ReadExactlyAsync(headerBuffer, ct);
+        await stream.ReadExactlyAsync(headerBuffer, ct);
         var filenameLen = BinaryPrimitives.ReadInt32BigEndian(headerBuffer);
         if (filenameLen <= 0 || filenameLen > 4096)
             throw new InvalidDataException($"Invalid filename length: {filenameLen}");
         
         var filenameBytes = new byte[filenameLen];
-        await channel.ReadExactlyAsync(filenameBytes, ct);
+        await stream.ReadExactlyAsync(filenameBytes, ct);
         var filename = Encoding.UTF8.GetString(filenameBytes);
         
         var sizeBuffer = new byte[8];
-        await channel.ReadExactlyAsync(sizeBuffer, ct);
+        await stream.ReadExactlyAsync(sizeBuffer, ct);
         var fileSize = BinaryPrimitives.ReadInt64BigEndian(sizeBuffer);
         
         // Sanitize and create output path

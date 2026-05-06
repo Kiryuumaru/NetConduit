@@ -59,7 +59,7 @@ public sealed class NegativeTests
 
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
 
-        var channels = new WriteChannel[5];
+        var channels = new IWriteChannel[5];
         for (int i = 0; i < 5; i++)
         {
             channels[i] = client.OpenChannel($"disposable-{i}");

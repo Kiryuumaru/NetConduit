@@ -259,7 +259,7 @@ public sealed class PublicApiTests
         await Task.WhenAll(client.WaitForReadyAsync(), server.WaitForReadyAsync());
 
         string? openedId = null;
-        client.OnChannelOpened += id => openedId = id;
+        client.ChannelOpened += (_, e) => openedId = e.ChannelId;
 
         client.OpenChannel("event-channel");
 
@@ -284,7 +284,7 @@ public sealed class PublicApiTests
 
         // OnChannelClosed fires on the receiving side when FIN arrives
         var closedTcs = new TaskCompletionSource<string>();
-        server.OnChannelClosed += (id, _) => closedTcs.TrySetResult(id);
+        server.ChannelClosed += (_, e) => closedTcs.TrySetResult(e.ChannelId);
 
         await ch.DisposeAsync();
 
@@ -304,10 +304,11 @@ public sealed class PublicApiTests
         await Task.WhenAll(client.WaitForReadyAsync(), server.WaitForReadyAsync());
 
         var ch = client.OpenChannel("stream-props");
+        var stream = ch.AsStream();
 
-        Assert.True(ch.CanWrite);
-        Assert.False(ch.CanRead);
-        Assert.False(ch.CanSeek);
+        Assert.True(stream.CanWrite);
+        Assert.False(stream.CanRead);
+        Assert.False(stream.CanSeek);
 
         await client.DisposeAsync();
         await server.DisposeAsync();
@@ -324,10 +325,11 @@ public sealed class PublicApiTests
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
         client.OpenChannel("read-props");
         var readCh = await server.AcceptChannelAsync("read-props", cts.Token);
+        var stream = readCh.AsStream();
 
-        Assert.True(readCh.CanRead);
-        Assert.False(readCh.CanWrite);
-        Assert.False(readCh.CanSeek);
+        Assert.True(stream.CanRead);
+        Assert.False(stream.CanWrite);
+        Assert.False(stream.CanSeek);
 
         await client.DisposeAsync();
         await server.DisposeAsync();
@@ -346,6 +348,11 @@ public sealed class PublicApiTests
             ChannelId = "prop-check",
             Priority = ChannelPriority.High,
         });
+
+        // Accept on server side so the init-ack flows back
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+        await server.AcceptChannelAsync("prop-check", cts.Token);
+        await ch.WaitForReadyAsync(cts.Token);
 
         Assert.Equal("prop-check", ch.ChannelId);
         Assert.Equal(ChannelState.Open, ch.State);
@@ -385,6 +392,10 @@ public sealed class PublicApiTests
         await Task.WhenAll(client.WaitForReadyAsync(), server.WaitForReadyAsync());
 
         var ch = client.OpenChannel("state-check");
+        // Accept on server so init-ack flows back
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+        await server.AcceptChannelAsync("state-check", cts.Token);
+        await ch.WaitForReadyAsync(cts.Token);
         Assert.Equal(ChannelState.Open, ch.State);
 
         await ch.DisposeAsync();
@@ -405,7 +416,7 @@ public sealed class PublicApiTests
 
         var ch = client.OpenChannel("on-closed");
         ChannelCloseReason? reason = null;
-        ch.OnClosed += (r, _) => reason = r;
+        ch.Closed += (_, e) => reason = e.Reason;
 
         await ch.DisposeAsync();
 
@@ -428,7 +439,7 @@ public sealed class PublicApiTests
         var readCh = await server.AcceptChannelAsync("read-on-closed", cts.Token);
 
         var closedTcs = new TaskCompletionSource<ChannelCloseReason>();
-        readCh.OnClosed += (r, _) => closedTcs.TrySetResult(r);
+        readCh.Closed += (_, e) => closedTcs.TrySetResult(e.Reason);
 
         await writeCh.DisposeAsync();
 

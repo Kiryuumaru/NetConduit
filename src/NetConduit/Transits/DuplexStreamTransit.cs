@@ -8,14 +8,14 @@ namespace NetConduit.Transits;
 /// </summary>
 public sealed class DuplexStreamTransit : Stream, ITransit
 {
-    private readonly WriteChannel _writeChannel;
-    private readonly ReadChannel _readChannel;
+    private readonly IWriteChannel _writeChannel;
+    private readonly IReadChannel _readChannel;
     private volatile bool _disposed;
 
     /// <summary>
     /// Creates a new DuplexStreamTransit from a write channel and read channel pair.
     /// </summary>
-    public DuplexStreamTransit(WriteChannel writeChannel, ReadChannel readChannel)
+    public DuplexStreamTransit(IWriteChannel writeChannel, IReadChannel readChannel)
     {
         _writeChannel = writeChannel ?? throw new ArgumentNullException(nameof(writeChannel));
         _readChannel = readChannel ?? throw new ArgumentNullException(nameof(readChannel));

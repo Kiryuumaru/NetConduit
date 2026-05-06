@@ -50,11 +50,15 @@ public sealed class StreamMultiplexerTests
         var writeChannel = client.OpenChannel("ch1");
         Assert.NotNull(writeChannel);
         Assert.Equal("ch1", writeChannel.ChannelId);
-        Assert.Equal(ChannelState.Open, writeChannel.State);
 
         var readChannel = await server.AcceptChannelAsync("ch1", new CancellationTokenSource(TimeSpan.FromSeconds(5)).Token);
         Assert.NotNull(readChannel);
         Assert.Equal("ch1", readChannel.ChannelId);
+
+        // WriteChannel becomes Open after remote ACKs the INIT
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+        await writeChannel.WaitForReadyAsync(cts.Token);
+        Assert.Equal(ChannelState.Open, writeChannel.State);
 
         await client.DisposeAsync();
         await server.DisposeAsync();
