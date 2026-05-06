@@ -88,11 +88,11 @@ await foreach (var state in transit.ReceiveAllAsync(cancellationToken))
 
 ## Properties
 
-| Property | Type | Description |
-|----------|------|-------------|
-| `IsConnected` | `bool` | True if transit has open channels |
+| Property         | Type      | Description                                    |
+| ---------------- | --------- | ---------------------------------------------- |
+| `IsConnected`    | `bool`    | True if transit has open channels              |
 | `WriteChannelId` | `string?` | ID of the write channel (null if receive-only) |
-| `ReadChannelId` | `string?` | ID of the read channel (null if send-only) |
+| `ReadChannelId`  | `string?` | ID of the read channel (null if send-only)     |
 
 ## Bidirectional
 
@@ -157,13 +157,13 @@ var transit = await mux.OpenDeltaTransitAsync(
 
 Internally, DeltaTransit produces operations:
 
-| Operation | Description |
-|-----------|-------------|
-| `Set` | Property value changed |
-| `Remove` | Property removed |
-| `SetNull` | Property set to null |
-| `ArrayInsert` | Item inserted into array |
-| `ArrayRemove` | Item removed from array |
-| `ArrayReplace` | Item replaced in array |
+| Operation      | Description              |
+| -------------- | ------------------------ |
+| `Set`          | Property value changed   |
+| `Remove`       | Property removed         |
+| `SetNull`      | Property set to null     |
+| `ArrayInsert`  | Item inserted into array |
+| `ArrayRemove`  | Item removed from array  |
+| `ArrayReplace` | Item replaced in array   |
 
 The receiver automatically applies these operations to reconstruct the complete state object.

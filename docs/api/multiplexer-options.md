@@ -4,21 +4,21 @@ Configuration for a multiplexer session. See [StreamMultiplexer](stream-multiple
 
 ## Properties
 
-| Property | Type | Default | Description |
-|----------|------|---------|-------------|
-| `StreamFactory` | `StreamFactoryDelegate` | (required) | Factory that creates transport stream pairs |
-| `SessionId` | `Guid?` | auto-generated | Session identity |
-| `DefaultSlabSize` | `int` | 1,048,576 (1 MB) | Default slab size per channel |
-| `PingInterval` | `TimeSpan` | 30s | Interval between keepalive pings |
-| `PingTimeout` | `TimeSpan` | 10s | Time to wait for pong reply |
-| `MaxMissedPings` | `int` | 3 | Missed pings before disconnect |
-| `GoAwayTimeout` | `TimeSpan` | 30s | Time to wait during graceful shutdown |
-| `MaxAutoReconnectAttempts` | `int` | 0 (unlimited) | Max reconnect attempts |
-| `AutoReconnectDelay` | `TimeSpan` | 1s | Base delay between reconnect attempts |
-| `MaxAutoReconnectDelay` | `TimeSpan` | 30s | Maximum reconnect delay |
-| `AutoReconnectBackoffMultiplier` | `double` | 2.0 | Backoff multiplier |
-| `ConnectionTimeout` | `TimeSpan` | 30s | Timeout for StreamFactory calls |
-| `DefaultChannelOptions` | `DefaultChannelOptions` | (defaults) | Default options for new channels |
+| Property                         | Type                    | Default          | Description                                 |
+| -------------------------------- | ----------------------- | ---------------- | ------------------------------------------- |
+| `StreamFactory`                  | `StreamFactoryDelegate` | (required)       | Factory that creates transport stream pairs |
+| `SessionId`                      | `Guid?`                 | auto-generated   | Session identity                            |
+| `DefaultSlabSize`                | `int`                   | 1,048,576 (1 MB) | Default slab size per channel               |
+| `PingInterval`                   | `TimeSpan`              | 30s              | Interval between keepalive pings            |
+| `PingTimeout`                    | `TimeSpan`              | 10s              | Time to wait for pong reply                 |
+| `MaxMissedPings`                 | `int`                   | 3                | Missed pings before disconnect              |
+| `GoAwayTimeout`                  | `TimeSpan`              | 30s              | Time to wait during graceful shutdown       |
+| `MaxAutoReconnectAttempts`       | `int`                   | 0 (unlimited)    | Max reconnect attempts                      |
+| `AutoReconnectDelay`             | `TimeSpan`              | 1s               | Base delay between reconnect attempts       |
+| `MaxAutoReconnectDelay`          | `TimeSpan`              | 30s              | Maximum reconnect delay                     |
+| `AutoReconnectBackoffMultiplier` | `double`                | 2.0              | Backoff multiplier                          |
+| `ConnectionTimeout`              | `TimeSpan`              | 30s              | Timeout for StreamFactory calls             |
+| `DefaultChannelOptions`          | `DefaultChannelOptions` | (defaults)       | Default options for new channels            |
 
 ## StreamFactory
 
@@ -50,11 +50,11 @@ var options = new MultiplexerOptions
 
 Default options applied to channels that don't specify their own:
 
-| Property | Type | Default | Description |
-|----------|------|---------|-------------|
-| `Priority` | `ChannelPriority` | `Normal` | Default channel priority |
-| `SlabSize` | `int` | 1,048,576 (1 MB) | Default slab size |
-| `SendTimeout` | `TimeSpan` | 30s | Default send timeout |
+| Property      | Type              | Default          | Description              |
+| ------------- | ----------------- | ---------------- | ------------------------ |
+| `Priority`    | `ChannelPriority` | `Normal`         | Default channel priority |
+| `SlabSize`    | `int`             | 1,048,576 (1 MB) | Default slab size        |
+| `SendTimeout` | `TimeSpan`        | 30s              | Default send timeout     |
 
 ## Transport Helpers
 

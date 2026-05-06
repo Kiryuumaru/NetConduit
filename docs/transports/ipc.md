@@ -66,14 +66,14 @@ while (true)
 
 The endpoint string maps to platform-specific behavior:
 
-| Platform | Endpoint `"my-app"` resolves to |
-|----------|--------------------------------|
-| Windows | TCP loopback on a deterministic port (SHA256 hash of name → port 49152–65535) |
-| Linux/macOS | Unix domain socket at the endpoint path directly (e.g., `my-app`) |
+| Platform    | Endpoint `"my-app"` resolves to                                               |
+| ----------- | ----------------------------------------------------------------------------- |
+| Windows     | TCP loopback on a deterministic port (SHA256 hash of name → port 49152–65535) |
+| Linux/macOS | Unix domain socket at the endpoint path directly (e.g., `my-app`)             |
 
 ## API
 
-| Method | Signature | Description |
-|--------|-----------|-------------|
-| `CreateOptions` | `IpcMultiplexer.CreateOptions(string endpoint)` | Client options |
+| Method                | Signature                                             | Description    |
+| --------------------- | ----------------------------------------------------- | -------------- |
+| `CreateOptions`       | `IpcMultiplexer.CreateOptions(string endpoint)`       | Client options |
 | `CreateServerOptions` | `IpcMultiplexer.CreateServerOptions(string endpoint)` | Server options |

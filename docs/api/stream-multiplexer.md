@@ -122,31 +122,31 @@ var readChannel = mux.GetReadChannel("data");      // null if not found
 
 ## Properties
 
-| Property | Type | Description |
-|----------|------|-------------|
-| `Options` | `MultiplexerOptions` | The configuration |
-| `Stats` | `MultiplexerStats` | Runtime statistics |
-| `IsReady` | `bool` | Whether mux has completed initial handshake (stays true forever) |
-| `IsConnected` | `bool` | Whether transport is connected |
-| `IsRunning` | `bool` | Whether mux is started and not disposed |
-| `IsShuttingDown` | `bool` | Whether GoAway is in progress |
-| `SessionId` | `Guid` | Local session identity |
-| `RemoteSessionId` | `Guid` | Remote peer's session identity |
-| `ActiveChannelIds` | `IReadOnlyCollection<string>` | IDs of all active channels |
-| `ActiveChannelCount` | `int` | Number of active channels |
-| `DisconnectReason` | `DisconnectReason?` | Reason for last disconnection |
+| Property             | Type                          | Description                                                      |
+| -------------------- | ----------------------------- | ---------------------------------------------------------------- |
+| `Options`            | `MultiplexerOptions`          | The configuration                                                |
+| `Stats`              | `MultiplexerStats`            | Runtime statistics                                               |
+| `IsReady`            | `bool`                        | Whether mux has completed initial handshake (stays true forever) |
+| `IsConnected`        | `bool`                        | Whether transport is connected                                   |
+| `IsRunning`          | `bool`                        | Whether mux is started and not disposed                          |
+| `IsShuttingDown`     | `bool`                        | Whether GoAway is in progress                                    |
+| `SessionId`          | `Guid`                        | Local session identity                                           |
+| `RemoteSessionId`    | `Guid`                        | Remote peer's session identity                                   |
+| `ActiveChannelIds`   | `IReadOnlyCollection<string>` | IDs of all active channels                                       |
+| `ActiveChannelCount` | `int`                         | Number of active channels                                        |
+| `DisconnectReason`   | `DisconnectReason?`           | Reason for last disconnection                                    |
 
 ## Events
 
-| Event | Signature | Description |
-|-------|-----------|-------------|
-| `Ready` | `EventHandler?` | First handshake complete (fires once) |
-| `Connected` | `EventHandler?` | Transport connected (initial or reconnect) |
-| `Disconnected` | `EventHandler<DisconnectedEventArgs>?` | Transport disconnected |
-| `Reconnecting` | `EventHandler<ReconnectingEventArgs>?` | Reconnection attempt starting |
-| `ChannelOpened` | `EventHandler<ChannelEventArgs>?` | Outbound channel opened locally |
-| `ChannelAccepted` | `EventHandler<ChannelEventArgs>?` | Inbound channel confirmed by remote |
-| `ChannelClosed` | `EventHandler<ChannelClosedEventArgs>?` | Channel closed |
-| `Error` | `EventHandler<ErrorEventArgs>?` | Error occurred |
+| Event             | Signature                               | Description                                |
+| ----------------- | --------------------------------------- | ------------------------------------------ |
+| `Ready`           | `EventHandler?`                         | First handshake complete (fires once)      |
+| `Connected`       | `EventHandler?`                         | Transport connected (initial or reconnect) |
+| `Disconnected`    | `EventHandler<DisconnectedEventArgs>?`  | Transport disconnected                     |
+| `Reconnecting`    | `EventHandler<ReconnectingEventArgs>?`  | Reconnection attempt starting              |
+| `ChannelOpened`   | `EventHandler<ChannelEventArgs>?`       | Outbound channel opened locally            |
+| `ChannelAccepted` | `EventHandler<ChannelEventArgs>?`       | Inbound channel confirmed by remote        |
+| `ChannelClosed`   | `EventHandler<ChannelClosedEventArgs>?` | Channel closed                             |
+| `Error`           | `EventHandler<ErrorEventArgs>?`         | Error occurred                             |
 
 See [Events](../concepts/events.md) for details.

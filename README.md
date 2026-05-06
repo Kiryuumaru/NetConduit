@@ -59,40 +59,51 @@ await transit.SendAsync(new ChatMessage("Alice", "Hello!"));
 
 ## Packages
 
-| Package | Description |
-|---------|-------------|
-| `NetConduit` | Core multiplexer + transits |
-| `NetConduit.Tcp` | TCP transport |
-| `NetConduit.WebSocket` | WebSocket transport |
-| `NetConduit.Udp` | UDP with reliability layer |
-| `NetConduit.Ipc` | IPC (loopback/Unix sockets) |
-| `NetConduit.Quic` | QUIC transport |
+| Package                | Description                 |
+| ---------------------- | --------------------------- |
+| `NetConduit`           | Core multiplexer + transits |
+| `NetConduit.Tcp`       | TCP transport               |
+| `NetConduit.WebSocket` | WebSocket transport         |
+| `NetConduit.Udp`       | UDP with reliability layer  |
+| `NetConduit.Ipc`       | IPC (loopback/Unix sockets) |
+| `NetConduit.Quic`      | QUIC transport              |
 
 ## Architecture
 
 ```
-┌────────────────────────────────────────────────────────────────┐
-│  Application                                                   │
-├────────────────────────────────────────────────────────────────┤
-│  Transits: MessageTransit, DeltaTransit, DuplexStream, Stream  │
-├────────────────────────────────────────────────────────────────┤
-│  Core: Framing, Channels, Backpressure, Priority, Reconnect    │
-├────────────────────────────────────────────────────────────────┤
-│  Transports: TCP, WebSocket, UDP, IPC, QUIC                    │
-└────────────────────────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────────────────────────────┐
+│  Application                                                                 │
+├──────────────────────────────────────────────────────────────────────────────┤
+│  Transit Layer (Optional)                                                    │
+│  ┌──────────────┐  ┌──────────────┐  ┌───────────────────┐  ┌─────────────┐  │
+│  │MessageTransit│  │ DeltaTransit │  │DuplexStreamTransit│  │StreamTransit│  │
+│  └──────────────┘  └──────────────┘  └───────────────────┘  └─────────────┘  │
+├──────────────────────────────────────────────────────────────────────────────┤
+│  NetConduit Core                                                             │
+│  - Frame encoding/decoding                                                   │
+│  - Channel management                                                        │
+│  - Credit-based backpressure                                                 │
+│  - Priority queuing                                                          │
+│  - Auto-reconnection                                                         │
+├──────────────────────────────────────────────────────────────────────────────┤
+│  Transport Layer (Pluggable)                                                 │
+│  ┌─────┐  ┌─────────┐  ┌─────┐  ┌─────┐  ┌──────┐                            │
+│  │ TCP │  │WebSocket│  │ UDP │  │ IPC │  │ QUIC │                            │
+│  └─────┘  └─────────┘  └─────┘  └─────┘  └──────┘                            │
+└──────────────────────────────────────────────────────────────────────────────┘
 ```
 
 ## Samples
 
-| Sample | Description |
-|--------|-------------|
-| GroupChat | Multi-user chat (TCP + WebSocket) |
-| FileTransfer | Parallel file transfers with progress |
-| Pong | Multiplayer game with delta state sync |
-| RemoteShell | SSH-like remote command execution |
-| RpcFramework | Type-safe JSON-RPC pattern |
-| TcpTunnel | Port forwarding like ngrok |
-| Scoreboard | Live leaderboard with reconnection |
+| Sample       | Description                            |
+| ------------ | -------------------------------------- |
+| GroupChat    | Multi-user chat (TCP + WebSocket)      |
+| FileTransfer | Parallel file transfers with progress  |
+| Pong         | Multiplayer game with delta state sync |
+| RemoteShell  | SSH-like remote command execution      |
+| RpcFramework | Type-safe JSON-RPC pattern             |
+| TcpTunnel    | Port forwarding like ngrok             |
+| Scoreboard   | Live leaderboard with reconnection     |
 
 ```bash
 dotnet run --project samples/NetConduit.Samples.GroupChat -- server tcp 5000

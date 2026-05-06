@@ -4,14 +4,14 @@
 
 ## Quick Navigation
 
-| Section | Description |
-|---------|-------------|
-| [Getting Started](getting-started.md) | Installation, quick start, first multiplexer |
-| [Transports](transports/index.md) | TCP, WebSocket, UDP, IPC, QUIC |
-| [Transits](transits/index.md) | MessageTransit, DeltaTransit, DuplexStreamTransit, StreamTransit |
-| [Concepts](concepts/index.md) | Channels, backpressure, priority, reconnection, shutdown, heartbeat |
-| [API Reference](api/index.md) | Multiplexer, channels, options, statistics, errors |
-| [Samples](samples/index.md) | Complete example applications |
+| Section                               | Description                                                         |
+| ------------------------------------- | ------------------------------------------------------------------- |
+| [Getting Started](getting-started.md) | Installation, quick start, first multiplexer                        |
+| [Transports](transports/index.md)     | TCP, WebSocket, UDP, IPC, QUIC                                      |
+| [Transits](transits/index.md)         | MessageTransit, DeltaTransit, DuplexStreamTransit, StreamTransit    |
+| [Concepts](concepts/index.md)         | Channels, backpressure, priority, reconnection, shutdown, heartbeat |
+| [API Reference](api/index.md)         | Multiplexer, channels, options, statistics, errors                  |
+| [Samples](samples/index.md)           | Complete example applications                                       |
 
 ## Quick Example
 
@@ -56,27 +56,27 @@ N streams → 1 stream (mux) → N streams (demux)
 
 ## Key Features
 
-| Feature | Description |
-|---------|-------------|
-| **Multiple channels** | Many logical streams over one connection |
+| Feature                       | Description                                  |
+| ----------------------------- | -------------------------------------------- |
+| **Multiple channels**         | Many logical streams over one connection     |
 | **Credit-based backpressure** | Flow control prevents overwhelming receivers |
-| **Priority queuing** | Higher priority frames sent first |
-| **Auto-reconnection** | Channel state restored after disconnect |
-| **Native AOT** | No reflection in core library |
-| **Modern .NET** | Targets .NET 8, 9, and 10 |
+| **Priority queuing**          | Higher priority frames sent first            |
+| **Auto-reconnection**         | Channel state restored after disconnect      |
+| **Native AOT**                | No reflection in core library                |
+| **Modern .NET**               | Targets .NET 8, 9, and 10                    |
 
 ## Architecture Overview
 
 ```
 ┌──────────────────────────────────────────────────────────────────────────────┐
-│                              Application                                      │
+│  Application                                                                 │
 ├──────────────────────────────────────────────────────────────────────────────┤
 │  Transit Layer (Optional)                                                    │
-│  ┌──────────────┐  ┌──────────────┐  ┌───────────────────┐  ┌────────────┐ │
-│  │MessageTransit│  │ DeltaTransit │  │DuplexStreamTransit│  │StreamTransit│ │
-│  └──────────────┘  └──────────────┘  └───────────────────┘  └────────────┘ │
+│  ┌──────────────┐  ┌──────────────┐  ┌───────────────────┐  ┌─────────────┐  │
+│  │MessageTransit│  │ DeltaTransit │  │DuplexStreamTransit│  │StreamTransit│  │
+│  └──────────────┘  └──────────────┘  └───────────────────┘  └─────────────┘  │
 ├──────────────────────────────────────────────────────────────────────────────┤
-│                              NetConduit Core                                  │
+│  NetConduit Core                                                             │
 │  - Frame encoding/decoding                                                   │
 │  - Channel management                                                        │
 │  - Credit-based backpressure                                                 │
@@ -84,9 +84,9 @@ N streams → 1 stream (mux) → N streams (demux)
 │  - Auto-reconnection                                                         │
 ├──────────────────────────────────────────────────────────────────────────────┤
 │  Transport Layer (Pluggable)                                                 │
-│  ┌─────┐  ┌──────────┐  ┌─────┐  ┌─────┐  ┌──────┐                        │
-│  │ TCP │  │ WebSocket│  │ UDP │  │ IPC │  │ QUIC │                          │
-│  └─────┘  └──────────┘  └─────┘  └─────┘  └──────┘                        │
+│  ┌─────┐  ┌─────────┐  ┌─────┐  ┌─────┐  ┌──────┐                            │
+│  │ TCP │  │WebSocket│  │ UDP │  │ IPC │  │ QUIC │                            │
+│  └─────┘  └─────────┘  └─────┘  └─────┘  └──────┘                            │
 └──────────────────────────────────────────────────────────────────────────────┘
 ```
 

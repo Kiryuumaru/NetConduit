@@ -106,18 +106,18 @@ await mux.WaitForReadyAsync();
 
 ## API
 
-| Method | Signature | Description |
-|--------|-----------|-------------|
-| `CreateOptions` | `WebSocketMultiplexer.CreateOptions(Uri uri, Action<ClientWebSocketOptions>? clientOptions = null)` | Client options from URI |
-| `CreateOptions` | `WebSocketMultiplexer.CreateOptions(string url, Action<ClientWebSocketOptions>? clientOptions = null)` | Client options from URL string |
-| `CreateServerOptions` | `WebSocketMultiplexer.CreateServerOptions(WebSocket webSocket)` | Server options from existing WebSocket |
+| Method                | Signature                                                                                              | Description                            |
+| --------------------- | ------------------------------------------------------------------------------------------------------ | -------------------------------------- |
+| `CreateOptions`       | `WebSocketMultiplexer.CreateOptions(Uri uri, Action<ClientWebSocketOptions>? clientOptions = null)`    | Client options from URI                |
+| `CreateOptions`       | `WebSocketMultiplexer.CreateOptions(string url, Action<ClientWebSocketOptions>? clientOptions = null)` | Client options from URL string         |
+| `CreateServerOptions` | `WebSocketMultiplexer.CreateServerOptions(WebSocket webSocket)`                                        | Server options from existing WebSocket |
 
 ### WebSocketMuxListener
 
-| Member | Signature | Description |
-|--------|-----------|-------------|
-| Constructor | `WebSocketMuxListener(Func<MultiplexerOptions, MultiplexerOptions>? customize = null)` | Create listener with optional options customization |
-| `HandleAsync` | `Task HandleAsync(WebSocket webSocket, Guid? sessionId = null, CancellationToken ct = default)` | Handle incoming WebSocket |
-| `AcceptMuxesAsync` | `IAsyncEnumerable<IStreamMultiplexer> AcceptMuxesAsync(CancellationToken ct = default)` | Accept multiplexer sessions |
-| `RemoveSession` | `bool RemoveSession(Guid sessionId)` | Remove a session |
-| Static | `CreateReconnectableClientOptions(Uri baseUri, ...)` | Create reconnectable client config |
+| Member             | Signature                                                                                       | Description                                         |
+| ------------------ | ----------------------------------------------------------------------------------------------- | --------------------------------------------------- |
+| Constructor        | `WebSocketMuxListener(Func<MultiplexerOptions, MultiplexerOptions>? customize = null)`          | Create listener with optional options customization |
+| `HandleAsync`      | `Task HandleAsync(WebSocket webSocket, Guid? sessionId = null, CancellationToken ct = default)` | Handle incoming WebSocket                           |
+| `AcceptMuxesAsync` | `IAsyncEnumerable<IStreamMultiplexer> AcceptMuxesAsync(CancellationToken ct = default)`         | Accept multiplexer sessions                         |
+| `RemoveSession`    | `bool RemoveSession(Guid sessionId)`                                                            | Remove a session                                    |
+| Static             | `CreateReconnectableClientOptions(Uri baseUri, ...)`                                            | Create reconnectable client config                  |

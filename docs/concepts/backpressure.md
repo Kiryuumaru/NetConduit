@@ -14,7 +14,7 @@ Sender                          Receiver
   │                                │
   │    [credit exhausted, waits]   │
   │                                │
-  │◀─── Credit grant (ack) ───────│  (receiver processed data)
+  │◀─── Credit grant (ack) ────────│  (receiver processed data)
   │                                │
   │──── More data ────────────────▶│
 ```

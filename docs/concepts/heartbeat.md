@@ -10,7 +10,7 @@ The multiplexer periodically sends Ping frames. If the remote side doesn't respo
 Local                           Remote
   │                                │
   │──── Ping ─────────────────────▶│
-  │◀─── Pong ─────────────────────│
+  │◀─── Pong ──────────────────────│
   │                                │
   │   [PingInterval passes]        │
   │                                │

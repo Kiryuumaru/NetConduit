@@ -65,11 +65,11 @@ await foreach (var channel in mux.AcceptChannelsAsync())
 
 ## API
 
-| Method | Signature | Description |
-|--------|-----------|-------------|
-| `CreateOptions` | `QuicMultiplexer.CreateOptions(string host, int port, string? alpn = null, bool allowInsecure = false)` | Client options |
-| `ListenAsync` | `QuicMultiplexer.ListenAsync(IPEndPoint endPoint, X509Certificate2 certificate, string? alpn = null, CancellationToken ct = default)` | Create QUIC listener |
-| `CreateServerOptions` | `QuicMultiplexer.CreateServerOptions(QuicListener listener)` | Server options from listener |
+| Method                | Signature                                                                                                                             | Description                  |
+| --------------------- | ------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------- |
+| `CreateOptions`       | `QuicMultiplexer.CreateOptions(string host, int port, string? alpn = null, bool allowInsecure = false)`                               | Client options               |
+| `ListenAsync`         | `QuicMultiplexer.ListenAsync(IPEndPoint endPoint, X509Certificate2 certificate, string? alpn = null, CancellationToken ct = default)` | Create QUIC listener         |
+| `CreateServerOptions` | `QuicMultiplexer.CreateServerOptions(QuicListener listener)`                                                                          | Server options from listener |
 
 ## Platform Support
 

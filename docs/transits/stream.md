@@ -41,14 +41,14 @@ binary.Write("text");
 
 ## Properties
 
-| Property | Type | Description |
-|----------|------|-------------|
-| `IsConnected` | `bool` | True if underlying channel is open |
+| Property         | Type      | Description                                 |
+| ---------------- | --------- | ------------------------------------------- |
+| `IsConnected`    | `bool`    | True if underlying channel is open          |
 | `WriteChannelId` | `string?` | ID of the write channel (null if read-only) |
-| `ReadChannelId` | `string?` | ID of the read channel (null if write-only) |
-| `CanRead` | `bool` | True if constructed with a ReadChannel |
-| `CanWrite` | `bool` | True if constructed with a WriteChannel |
-| `CanSeek` | `bool` | Always false |
+| `ReadChannelId`  | `string?` | ID of the read channel (null if write-only) |
+| `CanRead`        | `bool`    | True if constructed with a ReadChannel      |
+| `CanWrite`       | `bool`    | True if constructed with a WriteChannel     |
+| `CanSeek`        | `bool`    | Always false                                |
 
 ## Direct Construction
 
@@ -64,8 +64,8 @@ var stream = new StreamTransit(readChannel);
 
 ## API (Extension Methods)
 
-| Method | Signature | Description |
-|--------|-----------|-------------|
-| `OpenStream` | `mux.OpenStream(string channelId)` | Create write-only stream |
-| `OpenStream` | `mux.OpenStream(ChannelOptions options)` | Create write-only stream with options |
-| `AcceptStreamAsync` | `await mux.AcceptStreamAsync(string channelId, CancellationToken ct)` | Accept read-only stream |
+| Method              | Signature                                                             | Description                           |
+| ------------------- | --------------------------------------------------------------------- | ------------------------------------- |
+| `OpenStream`        | `mux.OpenStream(string channelId)`                                    | Create write-only stream              |
+| `OpenStream`        | `mux.OpenStream(ChannelOptions options)`                              | Create write-only stream with options |
+| `AcceptStreamAsync` | `await mux.AcceptStreamAsync(string channelId, CancellationToken ct)` | Accept read-only stream               |

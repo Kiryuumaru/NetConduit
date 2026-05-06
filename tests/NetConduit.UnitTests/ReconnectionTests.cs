@@ -1,3 +1,5 @@
+using NetConduit.Internal;
+
 namespace NetConduit.UnitTests;
 
 public sealed class ReconnectionTests

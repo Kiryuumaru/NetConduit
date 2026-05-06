@@ -13,27 +13,27 @@ dotnet run -- --help
 
 ## Sample Overview
 
-| Sample | Features | Description |
-|--------|----------|-------------|
-| [GroupChat](../../samples/NetConduit.Samples.GroupChat) | [MessageTransit](../transits/message.md), [TCP](../transports/tcp.md), [WebSocket](../transports/websocket.md) | Multi-user chat with transport options |
-| [FileTransfer](../../samples/NetConduit.Samples.FileTransfer) | Concurrent [channels](../concepts/channels.md), streaming | Parallel file transfers with progress |
-| [Pong](../../samples/NetConduit.Samples.Pong) | [DeltaTransit](../transits/delta.md), real-time | Multiplayer game with efficient state sync |
-| [RemoteShell](../../samples/NetConduit.Samples.RemoteShell) | Bidirectional [channels](../concepts/channels.md) | SSH-like remote command execution |
-| [RpcFramework](../../samples/NetConduit.Samples.RpcFramework) | [MessageTransit](../transits/message.md), request/response | Type-safe JSON-RPC pattern |
-| [TcpTunnel](../../samples/NetConduit.Samples.TcpTunnel) | [DuplexStream](../transits/duplex-stream.md), relay | Port forwarding like ngrok |
-| [Scoreboard](../../samples/NetConduit.Samples.Scoreboard) | [MessageTransit](../transits/message.md), [DeltaTransit](../transits/delta.md), [Reconnection](../concepts/reconnection.md) | Live leaderboard with reconnection |
+| Sample                                                        | Features                                                                                                                    | Description                                |
+| ------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------ |
+| [GroupChat](../../samples/NetConduit.Samples.GroupChat)       | [MessageTransit](../transits/message.md), [TCP](../transports/tcp.md), [WebSocket](../transports/websocket.md)              | Multi-user chat with transport options     |
+| [FileTransfer](../../samples/NetConduit.Samples.FileTransfer) | Concurrent [channels](../concepts/channels.md), streaming                                                                   | Parallel file transfers with progress      |
+| [Pong](../../samples/NetConduit.Samples.Pong)                 | [DeltaTransit](../transits/delta.md), real-time                                                                             | Multiplayer game with efficient state sync |
+| [RemoteShell](../../samples/NetConduit.Samples.RemoteShell)   | Bidirectional [channels](../concepts/channels.md)                                                                           | SSH-like remote command execution          |
+| [RpcFramework](../../samples/NetConduit.Samples.RpcFramework) | [MessageTransit](../transits/message.md), request/response                                                                  | Type-safe JSON-RPC pattern                 |
+| [TcpTunnel](../../samples/NetConduit.Samples.TcpTunnel)       | [DuplexStream](../transits/duplex-stream.md), relay                                                                         | Port forwarding like ngrok                 |
+| [Scoreboard](../../samples/NetConduit.Samples.Scoreboard)     | [MessageTransit](../transits/message.md), [DeltaTransit](../transits/delta.md), [Reconnection](../concepts/reconnection.md) | Live leaderboard with reconnection         |
 
 ## Feature Matrix
 
-| Sample | Transport | Transit | Key Concept |
-|--------|-----------|---------|-------------|
-| GroupChat | TCP, WebSocket | MessageTransit | Multi-client server |
-| FileTransfer | TCP | Raw channels | Concurrent streaming |
-| Pong | TCP | DeltaTransit | Bandwidth-efficient state sync |
-| RemoteShell | TCP | MessageTransit | Multiple channel types |
-| RpcFramework | TCP | MessageTransit | Request/response pattern |
-| TcpTunnel | TCP | DuplexStream, Message | Relay architecture |
-| Scoreboard | TCP | MessageTransit, DeltaTransit | Reconnection, custom StreamFactory |
+| Sample       | Transport      | Transit                      | Key Concept                        |
+| ------------ | -------------- | ---------------------------- | ---------------------------------- |
+| GroupChat    | TCP, WebSocket | MessageTransit               | Multi-client server                |
+| FileTransfer | TCP            | Raw channels                 | Concurrent streaming               |
+| Pong         | TCP            | DeltaTransit                 | Bandwidth-efficient state sync     |
+| RemoteShell  | TCP            | MessageTransit               | Multiple channel types             |
+| RpcFramework | TCP            | MessageTransit               | Request/response pattern           |
+| TcpTunnel    | TCP            | DuplexStream, Message        | Relay architecture                 |
+| Scoreboard   | TCP            | MessageTransit, DeltaTransit | Reconnection, custom StreamFactory |
 
 ## Running Samples
 

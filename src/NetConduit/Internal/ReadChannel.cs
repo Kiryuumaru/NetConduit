@@ -1,8 +1,7 @@
 using System.Buffers.Binary;
 using System.Threading.Tasks.Sources;
-using NetConduit.Internal;
 
-namespace NetConduit;
+namespace NetConduit.Internal;
 
 /// <summary>
 /// Inbound channel that owns a receive slab and handles all receive logic.

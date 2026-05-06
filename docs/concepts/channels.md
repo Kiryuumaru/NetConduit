@@ -6,10 +6,10 @@ Channels are virtual one-way streams over a single physical connection. See [Con
 
 Channels are **simplex** (one-way):
 
-| Channel Type | Created By | Direction |
-|--------------|------------|-----------|
-| `IWriteChannel` | `OpenChannel()` | You → Remote |
-| `IReadChannel` | `AcceptChannelAsync()` | Remote → You |
+| Channel Type    | Created By             | Direction    |
+| --------------- | ---------------------- | ------------ |
+| `IWriteChannel` | `OpenChannel()`        | You → Remote |
+| `IReadChannel`  | `AcceptChannelAsync()` | Remote → You |
 
 ```csharp
 // Side A opens - gets WriteChannel
@@ -89,16 +89,16 @@ await foreach (var channel in mux.AcceptChannelsAsync(cancellationToken))
 
 ## Channel Properties
 
-| Property | Type | Description |
-|----------|------|-------------|
-| `ChannelId` | `string` | The channel identifier |
-| `State` | `ChannelState` | Current state: Opening, Open, Closing, Closed |
-| `IsReady` | `bool` | Whether channel is confirmed by remote (stays true forever) |
-| `IsConnected` | `bool` | Whether the underlying transport is active |
-| `Priority` | `ChannelPriority` | Priority level |
-| `Stats` | `ChannelStats` | Bytes/frames sent and received |
-| `CloseReason` | `ChannelCloseReason?` | Why the channel was closed |
-| `CloseException` | `Exception?` | Exception that caused closure (if any) |
+| Property         | Type                  | Description                                                 |
+| ---------------- | --------------------- | ----------------------------------------------------------- |
+| `ChannelId`      | `string`              | The channel identifier                                      |
+| `State`          | `ChannelState`        | Current state: Opening, Open, Closing, Closed               |
+| `IsReady`        | `bool`                | Whether channel is confirmed by remote (stays true forever) |
+| `IsConnected`    | `bool`                | Whether the underlying transport is active                  |
+| `Priority`       | `ChannelPriority`     | Priority level                                              |
+| `Stats`          | `ChannelStats`        | Bytes/frames sent and received                              |
+| `CloseReason`    | `ChannelCloseReason?` | Why the channel was closed                                  |
+| `CloseException` | `Exception?`          | Exception that caused closure (if any)                      |
 
 ## Channel Stats
 
@@ -132,13 +132,13 @@ channel.Closed += (sender, e) =>
 
 ## Close Reasons
 
-| Reason | Description |
-|--------|-------------|
-| `LocalClose` | You disposed the channel |
-| `RemoteFin` | Remote side closed gracefully |
-| `RemoteError` | Remote side sent an error |
+| Reason            | Description                       |
+| ----------------- | --------------------------------- |
+| `LocalClose`      | You disposed the channel          |
+| `RemoteFin`       | Remote side closed gracefully     |
+| `RemoteError`     | Remote side sent an error         |
 | `TransportFailed` | Underlying transport disconnected |
-| `MuxDisposed` | Multiplexer was disposed |
+| `MuxDisposed`     | Multiplexer was disposed          |
 
 ## Disposing Channels
 

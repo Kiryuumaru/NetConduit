@@ -4,12 +4,12 @@ Transits add semantic meaning to raw [channels](../concepts/channels.md), provid
 
 ## Overview
 
-| Transit | Use Case | Description |
-|---------|----------|-------------|
-| [MessageTransit](message.md) | RPC, events | Send/receive JSON-serialized objects |
-| [DeltaTransit](delta.md) | State sync | Send only changed properties |
-| [DuplexStreamTransit](duplex-stream.md) | Bidirectional data | Two-way stream abstraction |
-| [StreamTransit](stream.md) | One-way data | Simple stream wrapper |
+| Transit                                 | Use Case           | Description                          |
+| --------------------------------------- | ------------------ | ------------------------------------ |
+| [MessageTransit](message.md)            | RPC, events        | Send/receive JSON-serialized objects |
+| [DeltaTransit](delta.md)                | State sync         | Send only changed properties         |
+| [DuplexStreamTransit](duplex-stream.md) | Bidirectional data | Two-way stream abstraction           |
+| [StreamTransit](stream.md)              | One-way data       | Simple stream wrapper                |
 
 ## Quick Comparison
 
@@ -89,10 +89,10 @@ var transitB = await muxB.AcceptMessageTransitAsync("chat", ChatContext.Default.
 
 Transit extension methods automatically create paired channels:
 
-| Pattern | Write Channel | Read Channel |
-|---------|---------------|--------------|
-| `Open*("chat")` | `"chat>>"` | `"chat<<"` |
-| `Accept*("chat")` | `"chat<<"` | `"chat>>"` |
+| Pattern           | Write Channel | Read Channel |
+| ----------------- | ------------- | ------------ |
+| `Open*("chat")`   | `"chat>>"`    | `"chat<<"`   |
+| `Accept*("chat")` | `"chat<<"`    | `"chat>>"`   |
 
 The `>>` and `<<` suffixes are appended by the extension methods. You can also specify explicit channel IDs:
 

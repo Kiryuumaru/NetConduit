@@ -4,13 +4,13 @@ NetConduit is transport-agnostic. Choose the transport that fits your use case.
 
 ## Comparison
 
-| Transport | Package | Use Case | Pros | Cons |
-|-----------|---------|----------|------|------|
-| [TCP](tcp.md) | `NetConduit.Tcp` | General purpose | Reliable, simple, widely supported | Requires open port |
-| [WebSocket](websocket.md) | `NetConduit.WebSocket` | Web, firewalls | HTTP-friendly, browser support | Slightly higher overhead |
-| [UDP](udp.md) | `NetConduit.Udp` | Low latency | Fast, connectionless | Higher complexity |
-| [IPC](ipc.md) | `NetConduit.Ipc` | Same-machine | Fastest, no network | Single machine only |
-| [QUIC](quic.md) | `NetConduit.Quic` | Modern networks | 0-RTT, built-in mux | Requires .NET 8+, OS support |
+| Transport                 | Package                | Use Case        | Pros                               | Cons                         |
+| ------------------------- | ---------------------- | --------------- | ---------------------------------- | ---------------------------- |
+| [TCP](tcp.md)             | `NetConduit.Tcp`       | General purpose | Reliable, simple, widely supported | Requires open port           |
+| [WebSocket](websocket.md) | `NetConduit.WebSocket` | Web, firewalls  | HTTP-friendly, browser support     | Slightly higher overhead     |
+| [UDP](udp.md)             | `NetConduit.Udp`       | Low latency     | Fast, connectionless               | Higher complexity            |
+| [IPC](ipc.md)             | `NetConduit.Ipc`       | Same-machine    | Fastest, no network                | Single machine only          |
+| [QUIC](quic.md)           | `NetConduit.Quic`      | Modern networks | 0-RTT, built-in mux                | Requires .NET 8+, OS support |
 
 ## Quick Decision Guide
 

@@ -4,16 +4,16 @@ Multiplexer and channel lifecycle events for monitoring connection state. See [C
 
 ## Multiplexer Events
 
-| Event | Signature | When |
-|-------|-----------|------|
-| `Ready` | `EventHandler?` | First handshake complete (fires once) |
-| `Connected` | `EventHandler?` | Transport connected (initial or reconnect) |
-| `Disconnected` | `EventHandler<DisconnectedEventArgs>?` | Transport disconnected |
-| `Reconnecting` | `EventHandler<ReconnectingEventArgs>?` | Reconnection attempt starting |
-| `ChannelOpened` | `EventHandler<ChannelEventArgs>?` | Outbound channel opened locally |
-| `ChannelAccepted` | `EventHandler<ChannelEventArgs>?` | Inbound channel confirmed by remote |
-| `ChannelClosed` | `EventHandler<ChannelClosedEventArgs>?` | Channel closed |
-| `Error` | `EventHandler<ErrorEventArgs>?` | Error occurred |
+| Event             | Signature                               | When                                       |
+| ----------------- | --------------------------------------- | ------------------------------------------ |
+| `Ready`           | `EventHandler?`                         | First handshake complete (fires once)      |
+| `Connected`       | `EventHandler?`                         | Transport connected (initial or reconnect) |
+| `Disconnected`    | `EventHandler<DisconnectedEventArgs>?`  | Transport disconnected                     |
+| `Reconnecting`    | `EventHandler<ReconnectingEventArgs>?`  | Reconnection attempt starting              |
+| `ChannelOpened`   | `EventHandler<ChannelEventArgs>?`       | Outbound channel opened locally            |
+| `ChannelAccepted` | `EventHandler<ChannelEventArgs>?`       | Inbound channel confirmed by remote        |
+| `ChannelClosed`   | `EventHandler<ChannelClosedEventArgs>?` | Channel closed                             |
+| `Error`           | `EventHandler<ErrorEventArgs>?`         | Error occurred                             |
 
 ## Usage
 
@@ -49,14 +49,14 @@ mux.Start();
 
 ## Event Args Types
 
-| Type | Properties |
-|------|------------|
-| `ChannelEventArgs` | `ChannelId` (string) |
-| `ChannelClosedEventArgs` | `ChannelId` (string), `Exception` (Exception?) |
-| `ChannelCloseEventArgs` | `Reason` (ChannelCloseReason), `Exception` (Exception?) |
-| `DisconnectedEventArgs` | `Reason` (DisconnectReason), `Exception` (Exception?) |
-| `ErrorEventArgs` | `Exception` (Exception) |
-| `ReconnectingEventArgs` | `Attempt` (int) |
+| Type                     | Properties                                              |
+| ------------------------ | ------------------------------------------------------- |
+| `ChannelEventArgs`       | `ChannelId` (string)                                    |
+| `ChannelClosedEventArgs` | `ChannelId` (string), `Exception` (Exception?)          |
+| `ChannelCloseEventArgs`  | `Reason` (ChannelCloseReason), `Exception` (Exception?) |
+| `DisconnectedEventArgs`  | `Reason` (DisconnectReason), `Exception` (Exception?)   |
+| `ErrorEventArgs`         | `Exception` (Exception)                                 |
+| `ReconnectingEventArgs`  | `Attempt` (int)                                         |
 
 ## Event Ordering
 
@@ -80,12 +80,12 @@ Start()
 
 Individual channels have their own events:
 
-| Event | Signature | When |
-|-------|-----------|------|
-| `Ready` | `EventHandler?` | Channel confirmed by remote (fires once) |
-| `Connected` | `EventHandler?` | Transport connected (including reconnects) |
-| `Disconnected` | `EventHandler<DisconnectedEventArgs>?` | Transport disconnected |
-| `Closed` | `EventHandler<ChannelCloseEventArgs>?` | Channel closed |
+| Event          | Signature                              | When                                       |
+| -------------- | -------------------------------------- | ------------------------------------------ |
+| `Ready`        | `EventHandler?`                        | Channel confirmed by remote (fires once)   |
+| `Connected`    | `EventHandler?`                        | Transport connected (including reconnects) |
+| `Disconnected` | `EventHandler<DisconnectedEventArgs>?` | Transport disconnected                     |
+| `Closed`       | `EventHandler<ChannelCloseEventArgs>?` | Channel closed                             |
 
 ```csharp
 var channel = mux.OpenChannel("data");
@@ -99,11 +99,11 @@ See [Channels](channels.md) for close reasons.
 
 ## Disconnect Reasons
 
-| Reason | Description |
-|--------|-------------|
+| Reason           | Description                             |
+| ---------------- | --------------------------------------- |
 | `GoAwayReceived` | Remote side initiated graceful shutdown |
-| `TransportError` | Underlying transport failed |
-| `LocalDispose` | Local `DisposeAsync` was called |
+| `TransportError` | Underlying transport failed             |
+| `LocalDispose`   | Local `DisposeAsync` was called         |
 
 ## Thread Safety
 

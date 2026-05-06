@@ -60,8 +60,8 @@ mux.Disconnected += (sender, e) =>
 
 ## Disconnect Reasons
 
-| Reason | Description |
-|--------|-------------|
-| `GoAwayReceived` | Remote side sent GoAway |
-| `TransportError` | Transport failed |
-| `LocalDispose` | Local DisposeAsync called |
+| Reason           | Description               |
+| ---------------- | ------------------------- |
+| `GoAwayReceived` | Remote side sent GoAway   |
+| `TransportError` | Transport failed          |
+| `LocalDispose`   | Local DisposeAsync called |

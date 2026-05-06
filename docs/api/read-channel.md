@@ -52,35 +52,35 @@ while ((bytesRead = await channel.ReadAsync(buffer, ct)) > 0)
 
 ## Properties
 
-| Property | Type | Description |
-|----------|------|-------------|
-| `ChannelId` | `string` | The channel identifier |
-| `State` | `ChannelState` | Current state: Opening, Open, Closing, Closed |
-| `IsReady` | `bool` | Whether channel is confirmed by remote (stays true forever) |
-| `IsConnected` | `bool` | Whether the underlying transport is active |
-| `Priority` | `ChannelPriority` | Priority level |
-| `Stats` | `ChannelStats` | Bytes/frames received |
-| `CloseReason` | `ChannelCloseReason?` | Why the channel was closed |
-| `CloseException` | `Exception?` | Exception that caused closure |
+| Property         | Type                  | Description                                                 |
+| ---------------- | --------------------- | ----------------------------------------------------------- |
+| `ChannelId`      | `string`              | The channel identifier                                      |
+| `State`          | `ChannelState`        | Current state: Opening, Open, Closing, Closed               |
+| `IsReady`        | `bool`                | Whether channel is confirmed by remote (stays true forever) |
+| `IsConnected`    | `bool`                | Whether the underlying transport is active                  |
+| `Priority`       | `ChannelPriority`     | Priority level                                              |
+| `Stats`          | `ChannelStats`        | Bytes/frames received                                       |
+| `CloseReason`    | `ChannelCloseReason?` | Why the channel was closed                                  |
+| `CloseException` | `Exception?`          | Exception that caused closure                               |
 
 ## Methods
 
-| Method | Returns | Description |
-|--------|---------|-------------|
-| `ReadAsync(Memory<byte>, CancellationToken)` | `ValueTask<int>` | Read data (0 = EOF) |
-| `WaitForReadyAsync(CancellationToken)` | `Task` | Wait until confirmed by remote |
-| `CloseAsync(CancellationToken)` | `ValueTask` | Gracefully close the channel |
-| `AsStream()` | `Stream` | Get a Stream wrapper for interop |
-| `DisposeAsync()` | `ValueTask` | Close and dispose the channel |
+| Method                                       | Returns          | Description                      |
+| -------------------------------------------- | ---------------- | -------------------------------- |
+| `ReadAsync(Memory<byte>, CancellationToken)` | `ValueTask<int>` | Read data (0 = EOF)              |
+| `WaitForReadyAsync(CancellationToken)`       | `Task`           | Wait until confirmed by remote   |
+| `CloseAsync(CancellationToken)`              | `ValueTask`      | Gracefully close the channel     |
+| `AsStream()`                                 | `Stream`         | Get a Stream wrapper for interop |
+| `DisposeAsync()`                             | `ValueTask`      | Close and dispose the channel    |
 
 ## Events
 
-| Event | Signature | Description |
-|-------|-----------|-------------|
-| `Ready` | `EventHandler?` | Channel confirmed by remote (fires once) |
-| `Connected` | `EventHandler?` | Transport connected (including reconnects) |
-| `Disconnected` | `EventHandler<DisconnectedEventArgs>?` | Transport disconnected |
-| `Closed` | `EventHandler<ChannelCloseEventArgs>?` | Channel closed |
+| Event          | Signature                              | Description                                |
+| -------------- | -------------------------------------- | ------------------------------------------ |
+| `Ready`        | `EventHandler?`                        | Channel confirmed by remote (fires once)   |
+| `Connected`    | `EventHandler?`                        | Transport connected (including reconnects) |
+| `Disconnected` | `EventHandler<DisconnectedEventArgs>?` | Transport disconnected                     |
+| `Closed`       | `EventHandler<ChannelCloseEventArgs>?` | Channel closed                             |
 
 ```csharp
 channel.Closed += (sender, e) =>

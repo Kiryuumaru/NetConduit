@@ -57,15 +57,15 @@ var options = UdpMultiplexer.CreateOptions("localhost", 5000, udpOptions);
 
 ## API
 
-| Method | Signature | Description |
-|--------|-----------|-------------|
-| `CreateOptions` | `UdpMultiplexer.CreateOptions(string host, int port, ReliableUdpOptions? udpOptions = null)` | Client options |
-| `CreateServerOptions` | `UdpMultiplexer.CreateServerOptions(int listenPort, ReliableUdpOptions? udpOptions = null)` | Server options |
+| Method                | Signature                                                                                    | Description    |
+| --------------------- | -------------------------------------------------------------------------------------------- | -------------- |
+| `CreateOptions`       | `UdpMultiplexer.CreateOptions(string host, int port, ReliableUdpOptions? udpOptions = null)` | Client options |
+| `CreateServerOptions` | `UdpMultiplexer.CreateServerOptions(int listenPort, ReliableUdpOptions? udpOptions = null)`  | Server options |
 
 ### ReliableUdpOptions
 
-| Property | Type | Default | Description |
-|----------|------|---------|-------------|
-| `Mtu` | `int` | 1200 | Maximum transmission unit in bytes |
-| `RetransmitTimeout` | `TimeSpan` | 1s | Time before retransmitting a packet |
-| `MaxRetransmits` | `int` | 5 | Maximum retransmit attempts before failure |
+| Property            | Type       | Default | Description                                |
+| ------------------- | ---------- | ------- | ------------------------------------------ |
+| `Mtu`               | `int`      | 1200    | Maximum transmission unit in bytes         |
+| `RetransmitTimeout` | `TimeSpan` | 1s      | Time before retransmitting a packet        |
+| `MaxRetransmits`    | `int`      | 5       | Maximum retransmit attempts before failure |

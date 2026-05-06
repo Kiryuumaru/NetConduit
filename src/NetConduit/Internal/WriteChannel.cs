@@ -1,7 +1,6 @@
 using System.Buffers.Binary;
-using NetConduit.Internal;
 
-namespace NetConduit;
+namespace NetConduit.Internal;
 
 /// <summary>
 /// Outbound channel that owns a send slab and builds complete frames.

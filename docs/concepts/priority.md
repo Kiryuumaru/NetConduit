@@ -4,13 +4,13 @@ Channel priority determines the order in which frames are sent when multiple cha
 
 ## Priority Levels
 
-| Level | Value | Use Case |
-|-------|-------|----------|
-| `Highest` | 255 | Control messages, heartbeats |
-| `High` | 192 | Interactive UI, user input |
-| `Normal` | 128 | Default for all channels |
-| `Low` | 64 | Background transfers |
-| `Lowest` | 0 | Bulk data, logs |
+| Level     | Value | Use Case                     |
+| --------- | ----- | ---------------------------- |
+| `Highest` | 255   | Control messages, heartbeats |
+| `High`    | 192   | Interactive UI, user input   |
+| `Normal`  | 128   | Default for all channels     |
+| `Low`     | 64    | Background transfers         |
+| `Lowest`  | 0     | Bulk data, logs              |
 
 ## Usage
 

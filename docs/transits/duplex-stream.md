@@ -54,14 +54,14 @@ await Task.WhenAll(upload, download);
 
 ## Properties
 
-| Property | Type | Description |
-|----------|------|-------------|
-| `IsConnected` | `bool` | True if either channel is open |
-| `WriteChannelId` | `string?` | ID of the write channel |
-| `ReadChannelId` | `string?` | ID of the read channel |
-| `CanRead` | `bool` | Always true |
-| `CanWrite` | `bool` | Always true |
-| `CanSeek` | `bool` | Always false |
+| Property         | Type      | Description                    |
+| ---------------- | --------- | ------------------------------ |
+| `IsConnected`    | `bool`    | True if either channel is open |
+| `WriteChannelId` | `string?` | ID of the write channel        |
+| `ReadChannelId`  | `string?` | ID of the read channel         |
+| `CanRead`        | `bool`    | Always true                    |
+| `CanWrite`       | `bool`    | Always true                    |
+| `CanSeek`        | `bool`    | Always false                   |
 
 ## Custom Channel IDs
 
@@ -84,8 +84,8 @@ var duplex = new DuplexStreamTransit(writeChannel, readChannel);
 
 ## API (Extension Methods)
 
-| Method | Signature | Description |
-|--------|-----------|-------------|
-| `OpenDuplexStreamAsync` | `await mux.OpenDuplexStreamAsync(string channelId, CancellationToken ct)` | Open bidirectional stream |
-| `AcceptDuplexStreamAsync` | `await mux.AcceptDuplexStreamAsync(string channelId, CancellationToken ct)` | Accept bidirectional stream |
-| `OpenDuplexStreamAsync` | `await mux.OpenDuplexStreamAsync(string writeChannelId, string readChannelId, CancellationToken ct)` | Open with explicit IDs |
+| Method                    | Signature                                                                                            | Description                 |
+| ------------------------- | ---------------------------------------------------------------------------------------------------- | --------------------------- |
+| `OpenDuplexStreamAsync`   | `await mux.OpenDuplexStreamAsync(string channelId, CancellationToken ct)`                            | Open bidirectional stream   |
+| `AcceptDuplexStreamAsync` | `await mux.AcceptDuplexStreamAsync(string channelId, CancellationToken ct)`                          | Accept bidirectional stream |
+| `OpenDuplexStreamAsync`   | `await mux.OpenDuplexStreamAsync(string writeChannelId, string readChannelId, CancellationToken ct)` | Open with explicit IDs      |

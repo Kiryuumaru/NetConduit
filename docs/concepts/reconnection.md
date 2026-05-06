@@ -33,14 +33,14 @@ var options = new MultiplexerOptions
 
 With default settings (1s base, 2x multiplier, 30s max):
 
-| Attempt | Delay |
-|---------|-------|
-| 1 | 1s |
-| 2 | 2s |
-| 3 | 4s |
-| 4 | 8s |
-| 5 | 16s |
-| 6+ | 30s (capped) |
+| Attempt | Delay        |
+| ------- | ------------ |
+| 1       | 1s           |
+| 2       | 2s           |
+| 3       | 4s           |
+| 4       | 8s           |
+| 5       | 16s          |
+| 6+      | 30s (capped) |
 
 ## Events
 

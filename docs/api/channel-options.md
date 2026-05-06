@@ -4,12 +4,12 @@ Per-channel configuration. See [Channels](../concepts/channels.md) for concepts.
 
 ## Properties
 
-| Property | Type | Default | Description |
-|----------|------|---------|-------------|
-| `ChannelId` | `string` | (required) | Unique channel identifier |
-| `Priority` | `ChannelPriority` | `Normal` | Channel priority level |
-| `SlabSize` | `int` | 1,048,576 (1 MB) | Slab size in bytes |
-| `SendTimeout` | `TimeSpan` | 30s | Timeout for sends blocked on backpressure |
+| Property      | Type              | Default          | Description                               |
+| ------------- | ----------------- | ---------------- | ----------------------------------------- |
+| `ChannelId`   | `string`          | (required)       | Unique channel identifier                 |
+| `Priority`    | `ChannelPriority` | `Normal`         | Channel priority level                    |
+| `SlabSize`    | `int`             | 1,048,576 (1 MB) | Slab size in bytes                        |
+| `SendTimeout` | `TimeSpan`        | 30s              | Timeout for sends blocked on backpressure |
 
 ## Usage
 
@@ -25,13 +25,13 @@ var channel = mux.OpenChannel(new ChannelOptions
 
 ## Priority Levels
 
-| Level | Value | Use Case |
-|-------|-------|----------|
-| `Highest` | 255 | Control, heartbeats |
-| `High` | 192 | Interactive, user input |
-| `Normal` | 128 | Default |
-| `Low` | 64 | Background |
-| `Lowest` | 0 | Bulk data |
+| Level     | Value | Use Case                |
+| --------- | ----- | ----------------------- |
+| `Highest` | 255   | Control, heartbeats     |
+| `High`    | 192   | Interactive, user input |
+| `Normal`  | 128   | Default                 |
+| `Low`     | 64    | Background              |
+| `Lowest`  | 0     | Bulk data               |
 
 See [Priority](../concepts/priority.md) for details.
 

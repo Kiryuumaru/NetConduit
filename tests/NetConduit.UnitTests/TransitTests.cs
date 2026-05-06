@@ -1,8 +1,6 @@
 using System.Text.Json;
 using System.Text.Json.Nodes;
-using NetConduit.Enums;
 using NetConduit.Internal;
-using NetConduit.Models;
 using NetConduit.Transits;
 using Xunit;
 

@@ -20,10 +20,10 @@ catch (MultiplexerException ex)
 }
 ```
 
-| Property | Type | Description |
-|----------|------|-------------|
-| `ErrorCode` | `ErrorCode` | Specific error code |
-| `Message` | `string` | Human-readable description |
+| Property    | Type        | Description                |
+| ----------- | ----------- | -------------------------- |
+| `ErrorCode` | `ErrorCode` | Specific error code        |
+| `Message`   | `string`    | Human-readable description |
 
 ### ChannelClosedException
 
@@ -40,43 +40,43 @@ catch (ChannelClosedException ex)
 }
 ```
 
-| Property | Type | Description |
-|----------|------|-------------|
-| `ChannelId` | `string` | The channel that was closed |
-| `CloseReason` | `ChannelCloseReason` | Why it was closed |
+| Property      | Type                 | Description                 |
+| ------------- | -------------------- | --------------------------- |
+| `ChannelId`   | `string`             | The channel that was closed |
+| `CloseReason` | `ChannelCloseReason` | Why it was closed           |
 
 ## Error Codes
 
-| Code | Hex | Description |
-|------|-----|-------------|
-| `None` | 0x0000 | No error |
-| `UnknownChannel` | 0x0001 | Channel ID not recognized |
-| `ChannelExists` | 0x0002 | Channel ID already in use |
-| `ProtocolError` | 0x0003 | Wire protocol violation |
-| `FlowControlError` | 0x0004 | Credit window violation |
-| `Timeout` | 0x0005 | Operation timed out |
-| `Internal` | 0x0006 | Internal error |
-| `Refused` | 0x0007 | Connection refused |
-| `Cancel` | 0x0008 | Operation cancelled |
-| `SessionMismatch` | 0x0009 | Session ID doesn't match on reconnection |
+| Code               | Hex    | Description                              |
+| ------------------ | ------ | ---------------------------------------- |
+| `None`             | 0x0000 | No error                                 |
+| `UnknownChannel`   | 0x0001 | Channel ID not recognized                |
+| `ChannelExists`    | 0x0002 | Channel ID already in use                |
+| `ProtocolError`    | 0x0003 | Wire protocol violation                  |
+| `FlowControlError` | 0x0004 | Credit window violation                  |
+| `Timeout`          | 0x0005 | Operation timed out                      |
+| `Internal`         | 0x0006 | Internal error                           |
+| `Refused`          | 0x0007 | Connection refused                       |
+| `Cancel`           | 0x0008 | Operation cancelled                      |
+| `SessionMismatch`  | 0x0009 | Session ID doesn't match on reconnection |
 
 ## Channel Close Reasons
 
-| Reason | Description |
-|--------|-------------|
-| `LocalClose` | You disposed the channel |
-| `RemoteFin` | Remote side closed gracefully |
-| `RemoteError` | Remote side sent an error frame |
+| Reason            | Description                       |
+| ----------------- | --------------------------------- |
+| `LocalClose`      | You disposed the channel          |
+| `RemoteFin`       | Remote side closed gracefully     |
+| `RemoteError`     | Remote side sent an error frame   |
 | `TransportFailed` | Underlying transport disconnected |
-| `MuxDisposed` | Multiplexer was disposed |
+| `MuxDisposed`     | Multiplexer was disposed          |
 
 ## Disconnect Reasons
 
-| Reason | Description |
-|--------|-------------|
+| Reason           | Description                             |
+| ---------------- | --------------------------------------- |
 | `GoAwayReceived` | Remote side initiated graceful shutdown |
-| `TransportError` | Underlying transport failed |
-| `LocalDispose` | Local `DisposeAsync` was called |
+| `TransportError` | Underlying transport failed             |
+| `LocalDispose`   | Local `DisposeAsync` was called         |
 
 ## Common Patterns
 

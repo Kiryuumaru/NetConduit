@@ -16,14 +16,14 @@ Console.WriteLine($"Total closed: {stats.TotalChannelsClosed}");
 Console.WriteLine($"Uptime: {stats.Uptime}");
 ```
 
-| Property | Type | Description |
-|----------|------|-------------|
-| `BytesSent` | `long` | Total bytes sent across all channels |
-| `BytesReceived` | `long` | Total bytes received across all channels |
-| `OpenChannels` | `int` | Currently open channel count |
-| `TotalChannelsOpened` | `int` | Total channels opened since start |
-| `TotalChannelsClosed` | `int` | Total channels closed since start |
-| `Uptime` | `TimeSpan` | Time since multiplexer started |
+| Property              | Type       | Description                              |
+| --------------------- | ---------- | ---------------------------------------- |
+| `BytesSent`           | `long`     | Total bytes sent across all channels     |
+| `BytesReceived`       | `long`     | Total bytes received across all channels |
+| `OpenChannels`        | `int`      | Currently open channel count             |
+| `TotalChannelsOpened` | `int`      | Total channels opened since start        |
+| `TotalChannelsClosed` | `int`      | Total channels closed since start        |
+| `Uptime`              | `TimeSpan` | Time since multiplexer started           |
 
 ## ChannelStats
 
@@ -35,9 +35,9 @@ Console.WriteLine($"Sent: {stats.BytesSent} bytes ({stats.FramesSent} frames)");
 Console.WriteLine($"Received: {stats.BytesReceived} bytes ({stats.FramesReceived} frames)");
 ```
 
-| Property | Type | Description |
-|----------|------|-------------|
-| `BytesSent` | `long` | Bytes sent on this channel |
-| `BytesReceived` | `long` | Bytes received on this channel |
-| `FramesSent` | `long` | Frames sent on this channel |
+| Property         | Type   | Description                     |
+| ---------------- | ------ | ------------------------------- |
+| `BytesSent`      | `long` | Bytes sent on this channel      |
+| `BytesReceived`  | `long` | Bytes received on this channel  |
+| `FramesSent`     | `long` | Frames sent on this channel     |
 | `FramesReceived` | `long` | Frames received on this channel |

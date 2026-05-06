@@ -4,15 +4,15 @@ Core concepts for understanding how NetConduit works.
 
 ## Overview
 
-| Concept | Description |
-|---------|-------------|
-| [Channels](channels.md) | Virtual one-way streams over a single connection |
-| [Backpressure](backpressure.md) | Credit-based flow control |
-| [Priority](priority.md) | Channel priority levels |
-| [Reconnection](reconnection.md) | Auto-reconnection with state recovery |
-| [Graceful Shutdown](graceful-shutdown.md) | GoAway protocol |
-| [Heartbeat](heartbeat.md) | Keep-alive ping/pong |
-| [Events](events.md) | Multiplexer lifecycle events |
+| Concept                                   | Description                                      |
+| ----------------------------------------- | ------------------------------------------------ |
+| [Channels](channels.md)                   | Virtual one-way streams over a single connection |
+| [Backpressure](backpressure.md)           | Credit-based flow control                        |
+| [Priority](priority.md)                   | Channel priority levels                          |
+| [Reconnection](reconnection.md)           | Auto-reconnection with state recovery            |
+| [Graceful Shutdown](graceful-shutdown.md) | GoAway protocol                                  |
+| [Heartbeat](heartbeat.md)                 | Keep-alive ping/pong                             |
+| [Events](events.md)                       | Multiplexer lifecycle events                     |
 
 ## How It Works
 

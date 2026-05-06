@@ -93,8 +93,8 @@ while (true)
 
 ## API
 
-| Method | Signature | Description |
-|--------|-----------|-------------|
-| `CreateOptions` | `TcpMultiplexer.CreateOptions(string host, int port)` | Client options with host/port |
-| `CreateOptions` | `TcpMultiplexer.CreateOptions(IPEndPoint endpoint)` | Client options with endpoint |
-| `CreateServerOptions` | `TcpMultiplexer.CreateServerOptions(TcpListener listener)` | Server options from listener |
+| Method                | Signature                                                  | Description                   |
+| --------------------- | ---------------------------------------------------------- | ----------------------------- |
+| `CreateOptions`       | `TcpMultiplexer.CreateOptions(string host, int port)`      | Client options with host/port |
+| `CreateOptions`       | `TcpMultiplexer.CreateOptions(IPEndPoint endpoint)`        | Client options with endpoint  |
+| `CreateServerOptions` | `TcpMultiplexer.CreateServerOptions(TcpListener listener)` | Server options from listener  |

@@ -1,5 +1,3 @@
-using NetConduit.Enums;
-
 namespace NetConduit.Transits;
 
 /// <summary>
