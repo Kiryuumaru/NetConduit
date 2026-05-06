@@ -68,15 +68,15 @@ await transit.SendAsync(new ChatMessage("Alice", "Hello!"));
 ## Architecture
 
 ```
-┌─────────────────────────────────────────────────────────────┐
-│  Application                                                │
-├─────────────────────────────────────────────────────────────┤
-│  Transits: MessageTransit, DeltaTransit, DuplexStream, Stream│
-├─────────────────────────────────────────────────────────────┤
-│  Core: Framing, Channels, Backpressure, Priority, Reconnect │
-├─────────────────────────────────────────────────────────────┤
-│  Transports: TCP, WebSocket, UDP, IPC, QUIC                 │
-└─────────────────────────────────────────────────────────────┘
+┌────────────────────────────────────────────────────────────────┐
+│  Application                                                   │
+├────────────────────────────────────────────────────────────────┤
+│  Transits: MessageTransit, DeltaTransit, DuplexStream, Stream  │
+├────────────────────────────────────────────────────────────────┤
+│  Core: Framing, Channels, Backpressure, Priority, Reconnect    │
+├────────────────────────────────────────────────────────────────┤
+│  Transports: TCP, WebSocket, UDP, IPC, QUIC                    │
+└────────────────────────────────────────────────────────────────┘
 ```
 
 ## Samples
