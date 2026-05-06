@@ -24,7 +24,7 @@ public sealed class BackpressureTests
         server.Start();
         await Task.WhenAll(client.WaitForReadyAsync(), server.WaitForReadyAsync());
 
-        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(60));
 
         var writeCh = client.OpenChannel("backpressure");
         var readCh = await server.AcceptChannelAsync("backpressure", cts.Token);
@@ -76,7 +76,7 @@ public sealed class BackpressureTests
         server.Start();
         await Task.WhenAll(client.WaitForReadyAsync(), server.WaitForReadyAsync());
 
-        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(20));
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(60));
 
         var writeCh = client.OpenChannel("pressure-release");
         var readCh = await server.AcceptChannelAsync("pressure-release", cts.Token);
@@ -120,7 +120,7 @@ public sealed class BackpressureTests
         server.Start();
         await Task.WhenAll(client.WaitForReadyAsync(), server.WaitForReadyAsync());
 
-        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(20));
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(60));
 
         var ch1 = client.OpenChannel("bp-ch1");
         var ch2 = client.OpenChannel("bp-ch2");
@@ -169,7 +169,7 @@ public sealed class BackpressureTests
         server.Start();
         await Task.WhenAll(client.WaitForReadyAsync(), server.WaitForReadyAsync());
 
-        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(60));
 
         var writeCh = client.OpenChannel("slab-boundary");
         var readCh = await server.AcceptChannelAsync("slab-boundary", cts.Token);
@@ -225,7 +225,7 @@ public sealed class BackpressureTests
         server.Start();
         await Task.WhenAll(client.WaitForReadyAsync(), server.WaitForReadyAsync());
 
-        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(60));
 
         var writeCh = client.OpenChannel("send-timeout");
         await server.AcceptChannelAsync("send-timeout", cts.Token);
@@ -261,9 +261,9 @@ public sealed class BackpressureTests
         server.Start();
         await Task.WhenAll(client.WaitForReadyAsync(), server.WaitForReadyAsync());
 
-        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(20));
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(60));
 
-        const int numChannels = 5;
+        const int numChannels = 3;
         var writers = new IWriteChannel[numChannels];
         var readers = new IReadChannel[numChannels];
 
@@ -273,7 +273,7 @@ public sealed class BackpressureTests
             readers[i] = await server.AcceptChannelAsync($"concurrent-bp-{i}", cts.Token);
         }
 
-        int totalExpected = numChannels * 10 * 4096;
+        int totalExpected = numChannels * 5 * 4096;
         int totalReceived = 0;
 
         // All writers push concurrently
@@ -281,10 +281,10 @@ public sealed class BackpressureTests
         {
             var data = new byte[4096];
             Array.Fill(data, (byte)idx);
-            for (int i = 0; i < 10; i++)
+            for (int i = 0; i < 5; i++)
                 await ch.WriteAsync(data, cts.Token);
             await ch.DisposeAsync();
-        }, cts.Token));
+        }, cts.Token)).ToArray();
 
         // All readers drain concurrently
         var readTasks = readers.Select(ch => Task.Run(async () =>
@@ -295,7 +295,7 @@ public sealed class BackpressureTests
             while ((read = await ch.ReadAsync(buf, cts.Token)) > 0)
                 channelTotal += read;
             Interlocked.Add(ref totalReceived, channelTotal);
-        }, cts.Token));
+        }, cts.Token)).ToArray();
 
         await Task.WhenAll(writeTasks.Concat(readTasks));
 

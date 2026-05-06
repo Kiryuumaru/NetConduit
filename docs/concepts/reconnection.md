@@ -6,11 +6,11 @@ Automatic reconnection with channel state recovery. See [Concepts Overview](inde
 
 When the transport disconnects, the multiplexer:
 1. Detects the disconnection
-2. Fires `OnReconnecting` event with attempt number
+2. Fires `Reconnecting` event with attempt number
 3. Calls `StreamFactory` to establish a new connection
 4. Performs handshake with session ID matching
 5. Replays unacknowledged data from the ring buffer
-6. Fires `OnConnected` event
+6. Fires `Connected` event
 7. Channels resume operation transparently
 
 ## Configuration
@@ -45,19 +45,19 @@ With default settings (1s base, 2x multiplier, 30s max):
 ## Events
 
 ```csharp
-mux.OnReconnecting += (attempt) =>
+mux.Reconnecting += (sender, e) =>
 {
-    Console.WriteLine($"Reconnecting... attempt {attempt}");
+    Console.WriteLine($"Reconnecting... attempt {e.Attempt}");
 };
 
-mux.OnConnected += () =>
+mux.Connected += (sender, e) =>
 {
     Console.WriteLine("Connected!");
 };
 
-mux.OnDisconnected += (reason, exception) =>
+mux.Disconnected += (sender, e) =>
 {
-    Console.WriteLine($"Disconnected: {reason}");
+    Console.WriteLine($"Disconnected: {e.Reason}");
 };
 ```
 

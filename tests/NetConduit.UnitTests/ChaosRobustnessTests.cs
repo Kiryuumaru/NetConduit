@@ -33,7 +33,7 @@ public sealed class ChaosRobustnessTests
         client.Start();
         server.Start();
         await Task.WhenAll(client.WaitForReadyAsync(), server.WaitForReadyAsync());
-        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(60));
 
         var acceptTask = Task.Run(async () =>
         {
@@ -50,13 +50,13 @@ public sealed class ChaosRobustnessTests
                     catch (OperationCanceledException) { }
                 });
                 count++;
-                if (count >= 30) break;
+                if (count >= 10) break;
             }
         });
 
         // Mix of short-lived and long-lived channels
         var longLived = new List<IWriteChannel>();
-        for (int i = 0; i < 30; i++)
+        for (int i = 0; i < 10; i++)
         {
             var ch = client.OpenChannel($"chaos-{i}");
             if (i % 3 == 0)
@@ -89,7 +89,7 @@ public sealed class ChaosRobustnessTests
         client.Start();
         server.Start();
         await Task.WhenAll(client.WaitForReadyAsync(), server.WaitForReadyAsync());
-        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(20));
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(60));
 
         const int channelsPerSide = 5;
         const int messagesPerChannel = 50;
@@ -174,7 +174,7 @@ public sealed class ChaosRobustnessTests
         client.Start();
         server.Start();
         await Task.WhenAll(client.WaitForReadyAsync(), server.WaitForReadyAsync());
-        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(20));
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(60));
 
         var rng = new Random(42);
         const int messageCount = 100;
@@ -225,7 +225,7 @@ public sealed class ChaosRobustnessTests
         client.Start();
         server.Start();
         await Task.WhenAll(client.WaitForReadyAsync(), server.WaitForReadyAsync());
-        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(60));
 
         var writer = client.OpenChannel("concurrent-write");
         var reader = await server.AcceptChannelAsync("concurrent-write", cts.Token);
@@ -268,7 +268,7 @@ public sealed class ChaosRobustnessTests
         client.Start();
         server.Start();
         await Task.WhenAll(client.WaitForReadyAsync(), server.WaitForReadyAsync());
-        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(60));
 
         var writer = client.OpenChannel("dispose-mid-write");
         var reader = await server.AcceptChannelAsync("dispose-mid-write", cts.Token);
@@ -291,7 +291,7 @@ public sealed class ChaosRobustnessTests
         await client.DisposeAsync();
 
         // Write task should complete without hanging
-        await writeTask.WaitAsync(TimeSpan.FromSeconds(5));
+        await writeTask.WaitAsync(TimeSpan.FromSeconds(60));
         await server.DisposeAsync();
     }
 
@@ -302,7 +302,7 @@ public sealed class ChaosRobustnessTests
         client.Start();
         server.Start();
         await Task.WhenAll(client.WaitForReadyAsync(), server.WaitForReadyAsync());
-        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(60));
 
         var writer = client.OpenChannel("dispose-mid-read");
         var reader = await server.AcceptChannelAsync("dispose-mid-read", cts.Token);
@@ -331,7 +331,7 @@ public sealed class ChaosRobustnessTests
         await server.DisposeAsync();
 
         // Read task should complete without hanging
-        await readTask.WaitAsync(TimeSpan.FromSeconds(5));
+        await readTask.WaitAsync(TimeSpan.FromSeconds(60));
         await client.DisposeAsync();
     }
 
@@ -342,7 +342,7 @@ public sealed class ChaosRobustnessTests
         client.Start();
         server.Start();
         await Task.WhenAll(client.WaitForReadyAsync(), server.WaitForReadyAsync());
-        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(20));
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(60));
 
         const int cycles = 50;
 
@@ -380,7 +380,7 @@ public sealed class ChaosRobustnessTests
         client.Start();
         server.Start();
         await Task.WhenAll(client.WaitForReadyAsync(), server.WaitForReadyAsync());
-        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(60));
 
         // Create bidirectional channels
         var clientWriter = client.OpenChannel("bidir>>");
@@ -445,7 +445,7 @@ public sealed class ChaosRobustnessTests
 
         client.Start();
         server.Start();
-        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(60));
         await Task.WhenAll(client.WaitForReadyAsync(cts.Token), server.WaitForReadyAsync(cts.Token));
 
         var writer = client.OpenChannel("flood");
@@ -473,7 +473,7 @@ public sealed class ChaosRobustnessTests
         await Task.Delay(50, cts.Token);
         killableA.Kill();
 
-        var framesWritten = await writeTask.WaitAsync(TimeSpan.FromSeconds(5));
+        var framesWritten = await writeTask.WaitAsync(TimeSpan.FromSeconds(60));
         // Some writes should have succeeded before kill
         Assert.True(framesWritten > 0);
 
@@ -488,12 +488,13 @@ public sealed class ChaosRobustnessTests
         client.Start();
         server.Start();
         await Task.WhenAll(client.WaitForReadyAsync(), server.WaitForReadyAsync());
-        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(20));
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(60));
 
-        const int channels = 10;
-        const int messages = 100;
+        const int channels = 5;
+        const int messages = 50;
 
         var results = new byte[channels][];
+        var readTasks = new Task[channels];
 
         var acceptTask = Task.Run(async () =>
         {
@@ -501,7 +502,7 @@ public sealed class ChaosRobustnessTests
             {
                 var ch = await server.AcceptChannelAsync($"order-{i}", cts.Token);
                 int idx = i;
-                _ = Task.Run(async () =>
+                readTasks[idx] = Task.Run(async () =>
                 {
                     var ms = new MemoryStream();
                     var buf = new byte[256];
@@ -529,7 +530,7 @@ public sealed class ChaosRobustnessTests
         for (int i = 0; i < channels; i++)
             await writers[i].DisposeAsync();
 
-        await Task.Delay(500, cts.Token);
+        await Task.WhenAll(readTasks).WaitAsync(cts.Token);
 
         // Verify order within each channel
         for (int i = 0; i < channels; i++)

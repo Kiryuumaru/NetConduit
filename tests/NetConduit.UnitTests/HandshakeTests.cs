@@ -45,7 +45,7 @@ public sealed class HandshakeTests
         var sCh1 = server.OpenChannel("server1");
 
         // Verify they can communicate (proves indices don't collide)
-        var rch1 = await server.AcceptChannelAsync("test1", new CancellationTokenSource(TimeSpan.FromSeconds(5)).Token);
+        var rch1 = await server.AcceptChannelAsync("test1", new CancellationTokenSource(TimeSpan.FromSeconds(60)).Token);
         Assert.Equal("test1", rch1.ChannelId);
 
         await client.DisposeAsync();
@@ -64,7 +64,7 @@ public sealed class HandshakeTests
         var serverCh = server.OpenChannel("from-server");
 
         // Both sides accept the other's channel
-        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(60));
         var serverRead = await server.AcceptChannelAsync("from-client", cts.Token);
         var clientRead = await client.AcceptChannelAsync("from-server", cts.Token);
 

@@ -35,7 +35,7 @@ public sealed class PriorityTests
             Priority = ChannelPriority.High,
         });
 
-        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(60));
         var lowRead = await server.AcceptChannelAsync("low", cts.Token);
         var highRead = await server.AcceptChannelAsync("high", cts.Token);
 

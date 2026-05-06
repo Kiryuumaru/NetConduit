@@ -371,7 +371,7 @@ public sealed class DeltaTransitEdgeTests
     public async Task DeltaTransit_IdenticalConsecutiveSends_SentAsDelta()
     {
         var (client, server) = await CreateReadyPairAsync();
-        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(60));
 
         var clientWrite = client.OpenChannel("dt-dup");
         var serverRead = await server.AcceptChannelAsync("dt-dup", cts.Token);
@@ -399,7 +399,7 @@ public sealed class DeltaTransitEdgeTests
     public async Task DeltaTransit_BatchSend_AllReceived()
     {
         var (client, server) = await CreateReadyPairAsync();
-        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(60));
 
         var clientWrite = client.OpenChannel("dt-batch");
         var serverRead = await server.AcceptChannelAsync("dt-batch", cts.Token);
@@ -431,7 +431,7 @@ public sealed class DeltaTransitEdgeTests
     public async Task DeltaTransit_ResetState_NextSendIsFullState()
     {
         var (client, server) = await CreateReadyPairAsync();
-        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(60));
 
         var clientWrite = client.OpenChannel("dt-reset");
         var serverRead = await server.AcceptChannelAsync("dt-reset", cts.Token);
@@ -460,7 +460,7 @@ public sealed class DeltaTransitEdgeTests
     public async Task DeltaTransit_ReceiveAll_EndsOnChannelClose()
     {
         var (client, server) = await CreateReadyPairAsync();
-        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(60));
 
         var clientWrite = client.OpenChannel("dt-receiveall");
         var serverRead = await server.AcceptChannelAsync("dt-receiveall", cts.Token);

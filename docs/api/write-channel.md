@@ -1,6 +1,6 @@
-# WriteChannel
+# IWriteChannel
 
-Outbound channel for writing data to the remote side. Inherits from `Stream`. See [Channels](../concepts/channels.md) for concepts.
+Outbound channel interface for writing data to the remote side. Implements `IAsyncDisposable` and `IDisposable`. See [Channels](../concepts/channels.md) for concepts.
 
 ## Creating
 
@@ -14,6 +14,9 @@ var channel = mux.OpenChannel(new ChannelOptions
     ChannelId = "priority-data",
     Priority = ChannelPriority.High
 });
+
+// Open and wait for ready
+var channel = await mux.OpenChannelAsync("data", cancellationToken);
 ```
 
 ## Writing Data
@@ -22,12 +25,19 @@ var channel = mux.OpenChannel(new ChannelOptions
 // WriteAsync (primary method)
 await channel.WriteAsync(data, cancellationToken);
 
-// Stream compatibility
-using var writer = new StreamWriter(channel, leaveOpen: true);
-await writer.WriteLineAsync("Hello!");
+// Wait for channel confirmation first
+await channel.WaitForReadyAsync(cancellationToken);
+await channel.WriteAsync(data);
+```
 
-// CopyToAsync
-await sourceFile.CopyToAsync(channel);
+## Stream Interop
+
+Use `AsStream()` for APIs that require a `Stream`:
+
+```csharp
+var stream = channel.AsStream();
+using var writer = new StreamWriter(stream, leaveOpen: true);
+await writer.WriteLineAsync("Hello!");
 ```
 
 ## Properties
@@ -36,20 +46,36 @@ await sourceFile.CopyToAsync(channel);
 |----------|------|-------------|
 | `ChannelId` | `string` | The channel identifier |
 | `State` | `ChannelState` | Current state: Opening, Open, Closing, Closed |
+| `IsReady` | `bool` | Whether channel is confirmed by remote (stays true forever) |
+| `IsConnected` | `bool` | Whether the underlying transport is active |
 | `Priority` | `ChannelPriority` | Priority level |
 | `Stats` | `ChannelStats` | Bytes/frames sent |
 | `CloseReason` | `ChannelCloseReason?` | Why the channel was closed |
 | `CloseException` | `Exception?` | Exception that caused closure |
-| `CanRead` | `bool` | Always `false` |
-| `CanWrite` | `bool` | `true` when state is Open or Opening |
-| `CanSeek` | `bool` | Always `false` |
+
+## Methods
+
+| Method | Returns | Description |
+|--------|---------|-------------|
+| `WriteAsync(ReadOnlyMemory<byte>, CancellationToken)` | `ValueTask` | Write data to the channel |
+| `WaitForReadyAsync(CancellationToken)` | `Task` | Wait until confirmed by remote |
+| `CloseAsync(CancellationToken)` | `ValueTask` | Send FIN frame gracefully |
+| `AsStream()` | `Stream` | Get a Stream wrapper for interop |
+| `DisposeAsync()` | `ValueTask` | Close and dispose the channel |
 
 ## Events
 
+| Event | Signature | Description |
+|-------|-----------|-------------|
+| `Ready` | `EventHandler?` | Channel confirmed by remote (fires once) |
+| `Connected` | `EventHandler?` | Transport connected (including reconnects) |
+| `Disconnected` | `EventHandler<DisconnectedEventArgs>?` | Transport disconnected |
+| `Closed` | `EventHandler<ChannelCloseEventArgs>?` | Channel closed |
+
 ```csharp
-channel.OnClosed += (reason, exception) =>
+channel.Closed += (sender, e) =>
 {
-    Console.WriteLine($"Write channel closed: {reason}");
+    Console.WriteLine($"Write channel closed: {e.Reason}");
 };
 ```
 

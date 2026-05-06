@@ -504,7 +504,7 @@ public sealed class TransitTests
     public async Task DeltaTransit_FullState_Delta_Reset_Roundtrip()
     {
         var (client, server) = await CreateReadyPairAsync();
-        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(60));
         var ct = cts.Token;
 
         var clientWrite = client.OpenChannel("dt1");

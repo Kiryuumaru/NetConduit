@@ -6,10 +6,10 @@ Complete API documentation for NetConduit.
 
 | Type | Description |
 |------|-------------|
-| [StreamMultiplexer](stream-multiplexer.md) | Main multiplexer class |
+| [IStreamMultiplexer](stream-multiplexer.md) | Main multiplexer interface |
 | [MultiplexerOptions](multiplexer-options.md) | Multiplexer configuration |
-| [WriteChannel](write-channel.md) | Outbound channel (Stream) |
-| [ReadChannel](read-channel.md) | Inbound channel (Stream) |
+| [IWriteChannel](write-channel.md) | Outbound channel interface |
+| [IReadChannel](read-channel.md) | Inbound channel interface |
 | [ChannelOptions](channel-options.md) | Per-channel configuration |
 | [StreamPair](stream-pair.md) | Transport stream wrapper |
 | [Statistics](statistics.md) | Runtime statistics |

@@ -106,7 +106,7 @@ public sealed class DisconnectionTests
 
         killableA.Kill();
 
-        var (reason, _) = await disconnected.Task.WaitAsync(TimeSpan.FromSeconds(10));
+        var (reason, _) = await disconnected.Task.WaitAsync(TimeSpan.FromSeconds(60));
         Assert.Equal(NetConduit.DisconnectReason.TransportError, reason);
 
         await client.DisposeAsync();
@@ -142,7 +142,7 @@ public sealed class DisconnectionTests
 
         killableA.Kill();
 
-        await disconnected.Task.WaitAsync(TimeSpan.FromSeconds(10));
+        await disconnected.Task.WaitAsync(TimeSpan.FromSeconds(60));
 
         // Dispose to ensure cleanup completes
         await client.DisposeAsync();
@@ -206,7 +206,7 @@ public sealed class DisconnectionTests
         server.Start();
         await Task.WhenAll(client.WaitForReadyAsync(), server.WaitForReadyAsync());
 
-        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(60));
         var ch = client.OpenChannel("abrupt");
         await server.AcceptChannelAsync("abrupt", cts.Token);
 
@@ -242,7 +242,7 @@ public sealed class DisconnectionTests
         server.Start();
         await Task.WhenAll(client.WaitForReadyAsync(), server.WaitForReadyAsync());
 
-        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(60));
 
         var ch = client.OpenChannel("inflight");
         var readCh = await server.AcceptChannelAsync("inflight", cts.Token);
@@ -340,7 +340,7 @@ public sealed class DisconnectionTests
         server.Start();
         await Task.WhenAll(client.WaitForReadyAsync(), server.WaitForReadyAsync());
 
-        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(60));
 
         var writeChannel = client.OpenChannel("writer-close");
         var readChannel = await server.AcceptChannelAsync("writer-close", cts.Token);

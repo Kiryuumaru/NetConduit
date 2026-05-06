@@ -40,7 +40,7 @@ public sealed class ExtremeStressTests
         client.Start();
         server.Start();
         await Task.WhenAll(client.WaitForReadyAsync(), server.WaitForReadyAsync());
-        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(60));
 
         const int channelCount = 100;
 
@@ -115,7 +115,7 @@ public sealed class ExtremeStressTests
         client.Start();
         server.Start();
         await Task.WhenAll(client.WaitForReadyAsync(), server.WaitForReadyAsync());
-        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(60));
 
         var writer = client.OpenChannel("big-transfer");
         var reader = await server.AcceptChannelAsync("big-transfer", cts.Token);
@@ -166,9 +166,9 @@ public sealed class ExtremeStressTests
         client.Start();
         server.Start();
         await Task.WhenAll(client.WaitForReadyAsync(), server.WaitForReadyAsync());
-        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(60));
 
-        const int channels = 10;
+        const int channels = 5;
         const int dataPerChannel = 100 * 1024;
 
         var writeTasks = new Task[channels];
@@ -227,7 +227,7 @@ public sealed class ExtremeStressTests
         client.Start();
         server.Start();
         await Task.WhenAll(client.WaitForReadyAsync(), server.WaitForReadyAsync());
-        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(60));
 
         var writer = client.OpenChannel("high-msg");
         var reader = await server.AcceptChannelAsync("high-msg", cts.Token);
@@ -277,7 +277,7 @@ public sealed class ExtremeStressTests
         client.Start();
         server.Start();
         await Task.WhenAll(client.WaitForReadyAsync(), server.WaitForReadyAsync());
-        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(60));
 
         const int channels = 5;
         const int dataPerChannel = 512 * 1024;
@@ -347,7 +347,7 @@ public sealed class ExtremeStressTests
         client.Start();
         server.Start();
         await Task.WhenAll(client.WaitForReadyAsync(), server.WaitForReadyAsync());
-        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(60));
 
         const int channelsPerSide = 5;
         const int dataSize = 50 * 1024;

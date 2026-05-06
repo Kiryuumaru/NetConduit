@@ -58,4 +58,4 @@ var options = new MultiplexerOptions
 Heartbeat only **detects** dead connections. What happens next depends on reconnection configuration:
 
 - If `MaxAutoReconnectAttempts > 0` → triggers reconnection
-- If no reconnection configured → fires `OnDisconnected` and stops
+- If no reconnection configured → fires `Disconnected` and stops

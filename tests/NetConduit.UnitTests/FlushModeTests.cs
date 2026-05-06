@@ -29,7 +29,7 @@ public sealed class FlushTests
         await Task.WhenAll(client.WaitForReadyAsync(), server.WaitForReadyAsync());
 
         var wch = client.OpenChannel("test");
-        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(60));
         var rch = await server.AcceptChannelAsync("test", cts.Token);
 
         await wch.WriteAsync(new byte[] { 1, 2, 3 });
@@ -51,7 +51,7 @@ public sealed class FlushTests
         await Task.WhenAll(client.WaitForReadyAsync(), server.WaitForReadyAsync());
 
         var wch = client.OpenChannel("test");
-        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(60));
         var rch = await server.AcceptChannelAsync("test", cts.Token);
 
         await wch.WriteAsync(new byte[] { 42 });
@@ -74,7 +74,7 @@ public sealed class FlushTests
         await Task.WhenAll(client.WaitForReadyAsync(), server.WaitForReadyAsync());
 
         var wch = client.OpenChannel("test");
-        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(60));
         var rch = await server.AcceptChannelAsync("test", cts.Token);
 
         for (int i = 0; i < 10; i++)

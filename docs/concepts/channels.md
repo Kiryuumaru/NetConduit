@@ -8,8 +8,8 @@ Channels are **simplex** (one-way):
 
 | Channel Type | Created By | Direction |
 |--------------|------------|-----------|
-| `WriteChannel` | `OpenChannel()` | You → Remote |
-| `ReadChannel` | `AcceptChannelAsync()` | Remote → You |
+| `IWriteChannel` | `OpenChannel()` | You → Remote |
+| `IReadChannel` | `AcceptChannelAsync()` | Remote → You |
 
 ```csharp
 // Side A opens - gets WriteChannel
@@ -41,23 +41,20 @@ Each channel ID must be unique per direction:
 - You can have `OpenChannel("data")` and `AcceptChannelAsync("data")` (different directions)
 - You cannot have two `OpenChannel("data")` (same direction, same ID)
 
-## Channel as Stream
+## Stream Interop
 
-Channels inherit from `Stream`:
+Channels provide an `AsStream()` method for APIs that require a `Stream`:
 
 ```csharp
 var channel = mux.OpenChannel("text");
-
-// Standard Stream methods
-await channel.WriteAsync(data);
-await channel.FlushAsync();
+var stream = channel.AsStream();
 
 // Use with StreamWriter
-using var writer = new StreamWriter(channel, leaveOpen: true);
+using var writer = new StreamWriter(stream, leaveOpen: true);
 await writer.WriteLineAsync("Hello!");
 
 // Use with CopyToAsync
-await sourceStream.CopyToAsync(channel);
+await sourceStream.CopyToAsync(stream);
 ```
 
 ## Opening Channels
@@ -96,6 +93,8 @@ await foreach (var channel in mux.AcceptChannelsAsync(cancellationToken))
 |----------|------|-------------|
 | `ChannelId` | `string` | The channel identifier |
 | `State` | `ChannelState` | Current state: Opening, Open, Closing, Closed |
+| `IsReady` | `bool` | Whether channel is confirmed by remote (stays true forever) |
+| `IsConnected` | `bool` | Whether the underlying transport is active |
 | `Priority` | `ChannelPriority` | Priority level |
 | `Stats` | `ChannelStats` | Bytes/frames sent and received |
 | `CloseReason` | `ChannelCloseReason?` | Why the channel was closed |
@@ -123,11 +122,11 @@ Opening → Open → Closing → Closed
 ## Close Event
 
 ```csharp
-channel.OnClosed += (reason, exception) =>
+channel.Closed += (sender, e) =>
 {
-    Console.WriteLine($"Channel closed: {reason}");
-    if (exception is not null)
-        Console.WriteLine($"Error: {exception.Message}");
+    Console.WriteLine($"Channel closed: {e.Reason}");
+    if (e.Exception is not null)
+        Console.WriteLine($"Error: {e.Exception.Message}");
 };
 ```
 

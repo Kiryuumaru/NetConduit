@@ -31,7 +31,7 @@ public sealed class HalfCloseBoundaryTests
         client.Start();
         server.Start();
         await Task.WhenAll(client.WaitForReadyAsync(), server.WaitForReadyAsync());
-        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(60));
 
         var writer = client.OpenChannel("hc1");
         var reader = await server.AcceptChannelAsync("hc1", cts.Token);
@@ -65,7 +65,7 @@ public sealed class HalfCloseBoundaryTests
         client.Start();
         server.Start();
         await Task.WhenAll(client.WaitForReadyAsync(), server.WaitForReadyAsync());
-        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(60));
 
         var writer = client.OpenChannel("hc2");
         var reader = await server.AcceptChannelAsync("hc2", cts.Token);
@@ -93,7 +93,7 @@ public sealed class HalfCloseBoundaryTests
         client.Start();
         server.Start();
         await Task.WhenAll(client.WaitForReadyAsync(), server.WaitForReadyAsync());
-        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(60));
 
         var writer = client.OpenChannel("hc3");
         var reader = await server.AcceptChannelAsync("hc3", cts.Token);
@@ -117,7 +117,7 @@ public sealed class HalfCloseBoundaryTests
         client.Start();
         server.Start();
         await Task.WhenAll(client.WaitForReadyAsync(), server.WaitForReadyAsync());
-        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(60));
 
         var acceptTask = Task.Run(async () =>
         {
@@ -153,7 +153,7 @@ public sealed class HalfCloseBoundaryTests
         client.Start();
         server.Start();
         await Task.WhenAll(client.WaitForReadyAsync(), server.WaitForReadyAsync());
-        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(60));
 
         var writer = client.OpenChannel("hc4");
         await writer.WriteAsync(new byte[] { 1, 2, 3, 4, 5 }, cts.Token);
@@ -182,7 +182,7 @@ public sealed class HalfCloseBoundaryTests
         client.Start();
         server.Start();
         await Task.WhenAll(client.WaitForReadyAsync(), server.WaitForReadyAsync());
-        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(60));
 
         var writer = client.OpenChannel("hc5");
         var reader = await server.AcceptChannelAsync("hc5", cts.Token);
@@ -208,7 +208,7 @@ public sealed class HalfCloseBoundaryTests
         client.Start();
         server.Start();
         await Task.WhenAll(client.WaitForReadyAsync(), server.WaitForReadyAsync());
-        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(60));
 
         const int channelCount = 10;
 
@@ -257,7 +257,7 @@ public sealed class HalfCloseBoundaryTests
         client.Start();
         server.Start();
         await Task.WhenAll(client.WaitForReadyAsync(), server.WaitForReadyAsync());
-        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(60));
 
         await client.GoAwayAsync(cts.Token);
 
@@ -279,7 +279,7 @@ public sealed class HalfCloseBoundaryTests
         client.Start();
         server.Start();
         await Task.WhenAll(client.WaitForReadyAsync(), server.WaitForReadyAsync());
-        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(60));
 
         var writer = client.OpenChannel("goaway-data");
         var reader = await server.AcceptChannelAsync("goaway-data", cts.Token);

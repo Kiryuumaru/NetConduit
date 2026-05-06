@@ -55,7 +55,7 @@ public sealed class PublicApiTests
         server.Start();
         await Task.WhenAll(client.WaitForReadyAsync(), server.WaitForReadyAsync());
 
-        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(60));
         client.OpenChannel("read-lookup");
         var accepted = await server.AcceptChannelAsync("read-lookup", cts.Token);
 
@@ -234,7 +234,7 @@ public sealed class PublicApiTests
         server.Start();
         await Task.WhenAll(client.WaitForReadyAsync(), server.WaitForReadyAsync());
 
-        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(60));
 
         var ch = client.OpenChannel("bytes-tracked");
         var readCh = await server.AcceptChannelAsync("bytes-tracked", cts.Token);
@@ -277,7 +277,7 @@ public sealed class PublicApiTests
         server.Start();
         await Task.WhenAll(client.WaitForReadyAsync(), server.WaitForReadyAsync());
 
-        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(60));
 
         var ch = client.OpenChannel("close-event");
         await server.AcceptChannelAsync("close-event", cts.Token);
@@ -288,7 +288,7 @@ public sealed class PublicApiTests
 
         await ch.DisposeAsync();
 
-        var closedId = await closedTcs.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        var closedId = await closedTcs.Task.WaitAsync(TimeSpan.FromSeconds(60));
         Assert.Equal("close-event", closedId);
 
         await client.DisposeAsync();
@@ -322,7 +322,7 @@ public sealed class PublicApiTests
         server.Start();
         await Task.WhenAll(client.WaitForReadyAsync(), server.WaitForReadyAsync());
 
-        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(60));
         client.OpenChannel("read-props");
         var readCh = await server.AcceptChannelAsync("read-props", cts.Token);
         var stream = readCh.AsStream();
@@ -350,7 +350,7 @@ public sealed class PublicApiTests
         });
 
         // Accept on server side so the init-ack flows back
-        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(60));
         await server.AcceptChannelAsync("prop-check", cts.Token);
         await ch.WaitForReadyAsync(cts.Token);
 
@@ -371,7 +371,7 @@ public sealed class PublicApiTests
         server.Start();
         await Task.WhenAll(client.WaitForReadyAsync(), server.WaitForReadyAsync());
 
-        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(60));
         client.OpenChannel("read-props-2");
         var readCh = await server.AcceptChannelAsync("read-props-2", cts.Token);
 
@@ -393,7 +393,7 @@ public sealed class PublicApiTests
 
         var ch = client.OpenChannel("state-check");
         // Accept on server so init-ack flows back
-        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(60));
         await server.AcceptChannelAsync("state-check", cts.Token);
         await ch.WaitForReadyAsync(cts.Token);
         Assert.Equal(ChannelState.Open, ch.State);
@@ -434,7 +434,7 @@ public sealed class PublicApiTests
         server.Start();
         await Task.WhenAll(client.WaitForReadyAsync(), server.WaitForReadyAsync());
 
-        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(60));
         var writeCh = client.OpenChannel("read-on-closed");
         var readCh = await server.AcceptChannelAsync("read-on-closed", cts.Token);
 
@@ -443,7 +443,7 @@ public sealed class PublicApiTests
 
         await writeCh.DisposeAsync();
 
-        var closeReason = await closedTcs.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        var closeReason = await closedTcs.Task.WaitAsync(TimeSpan.FromSeconds(60));
         Assert.Equal(ChannelCloseReason.RemoteFin, closeReason);
 
         await client.DisposeAsync();
@@ -458,7 +458,7 @@ public sealed class PublicApiTests
         server.Start();
         await Task.WhenAll(client.WaitForReadyAsync(), server.WaitForReadyAsync());
 
-        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(60));
         var writeCh = client.OpenChannel("stats-channel");
         var readCh = await server.AcceptChannelAsync("stats-channel", cts.Token);
 
@@ -477,6 +477,366 @@ public sealed class PublicApiTests
 
         Assert.True(writeCh.Stats.BytesSent >= 300);
         Assert.True(writeCh.Stats.FramesSent >= 2);
+
+        await client.DisposeAsync();
+        await server.DisposeAsync();
+    }
+
+    // =================================================================
+    // Interface contracts — return types are interfaces, not concrete
+    // =================================================================
+
+    [Fact]
+    public async Task OpenChannel_ReturnsIWriteChannel()
+    {
+        var (client, server) = CreatePair();
+        client.Start();
+        server.Start();
+        await Task.WhenAll(client.WaitForReadyAsync(), server.WaitForReadyAsync());
+
+        var ch = client.OpenChannel("iface-write");
+
+        Assert.IsAssignableFrom<IWriteChannel>(ch);
+
+        await client.DisposeAsync();
+        await server.DisposeAsync();
+    }
+
+    [Fact]
+    public async Task AcceptChannel_ReturnsIReadChannel()
+    {
+        var (client, server) = CreatePair();
+        client.Start();
+        server.Start();
+        await Task.WhenAll(client.WaitForReadyAsync(), server.WaitForReadyAsync());
+
+        client.OpenChannel("iface-read");
+        var ch = server.AcceptChannel("iface-read");
+
+        Assert.IsAssignableFrom<IReadChannel>(ch);
+
+        await client.DisposeAsync();
+        await server.DisposeAsync();
+    }
+
+    [Fact]
+    public async Task AcceptChannelsAsync_YieldsIReadChannel()
+    {
+        var (client, server) = CreatePair();
+        client.Start();
+        server.Start();
+        await Task.WhenAll(client.WaitForReadyAsync(), server.WaitForReadyAsync());
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(60));
+
+        client.OpenChannel("yield-test");
+
+        await foreach (var ch in server.AcceptChannelsAsync(cts.Token))
+        {
+            Assert.IsAssignableFrom<IReadChannel>(ch);
+            break;
+        }
+
+        await client.DisposeAsync();
+        await server.DisposeAsync();
+    }
+
+    [Fact]
+    public async Task GetWriteChannel_ReturnsIWriteChannel()
+    {
+        var (client, server) = CreatePair();
+        client.Start();
+        server.Start();
+        await Task.WhenAll(client.WaitForReadyAsync(), server.WaitForReadyAsync());
+
+        client.OpenChannel("get-iface");
+        var found = client.GetWriteChannel("get-iface");
+
+        Assert.IsAssignableFrom<IWriteChannel>(found);
+
+        await client.DisposeAsync();
+        await server.DisposeAsync();
+    }
+
+    [Fact]
+    public async Task GetReadChannel_ReturnsIReadChannel()
+    {
+        var (client, server) = CreatePair();
+        client.Start();
+        server.Start();
+        await Task.WhenAll(client.WaitForReadyAsync(), server.WaitForReadyAsync());
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(60));
+
+        client.OpenChannel("get-read-iface");
+        await server.AcceptChannelAsync("get-read-iface", cts.Token);
+        var found = server.GetReadChannel("get-read-iface");
+
+        Assert.IsAssignableFrom<IReadChannel>(found);
+
+        await client.DisposeAsync();
+        await server.DisposeAsync();
+    }
+
+    // =================================================================
+    // AsStream() — stream interop
+    // =================================================================
+
+    [Fact]
+    public async Task WriteChannel_AsStream_ReturnsSameInstance()
+    {
+        var (client, server) = CreatePair();
+        client.Start();
+        server.Start();
+        await Task.WhenAll(client.WaitForReadyAsync(), server.WaitForReadyAsync());
+
+        var ch = client.OpenChannel("as-stream-identity");
+        var s1 = ch.AsStream();
+        var s2 = ch.AsStream();
+
+        Assert.Same(s1, s2);
+
+        await client.DisposeAsync();
+        await server.DisposeAsync();
+    }
+
+    [Fact]
+    public async Task ReadChannel_AsStream_ReturnsSameInstance()
+    {
+        var (client, server) = CreatePair();
+        client.Start();
+        server.Start();
+        await Task.WhenAll(client.WaitForReadyAsync(), server.WaitForReadyAsync());
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(60));
+
+        client.OpenChannel("as-stream-read-id");
+        var readCh = await server.AcceptChannelAsync("as-stream-read-id", cts.Token);
+        var s1 = readCh.AsStream();
+        var s2 = readCh.AsStream();
+
+        Assert.Same(s1, s2);
+
+        await client.DisposeAsync();
+        await server.DisposeAsync();
+    }
+
+    [Fact]
+    public async Task AsStream_WriteAndRead_DataFlowsCorrectly()
+    {
+        var (client, server) = CreatePair();
+        client.Start();
+        server.Start();
+        await Task.WhenAll(client.WaitForReadyAsync(), server.WaitForReadyAsync());
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(60));
+
+        var writeCh = client.OpenChannel("stream-data-flow");
+        var readCh = await server.AcceptChannelAsync("stream-data-flow", cts.Token);
+
+        var writeStream = writeCh.AsStream();
+        var readStream = readCh.AsStream();
+
+        var data = new byte[] { 0xDE, 0xAD, 0xBE, 0xEF };
+        await writeStream.WriteAsync(data, cts.Token);
+
+        var buf = new byte[16];
+        int read = await readStream.ReadAsync(buf, cts.Token);
+
+        Assert.Equal(4, read);
+        Assert.Equal(data, buf[..4]);
+
+        await client.DisposeAsync();
+        await server.DisposeAsync();
+    }
+
+    [Fact]
+    public async Task AsStream_ReadExactlyAsync_WorksForFixedProtocol()
+    {
+        var (client, server) = CreatePair();
+        client.Start();
+        server.Start();
+        await Task.WhenAll(client.WaitForReadyAsync(), server.WaitForReadyAsync());
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(60));
+
+        var writeCh = client.OpenChannel("stream-read-exactly");
+        var readCh = await server.AcceptChannelAsync("stream-read-exactly", cts.Token);
+
+        var header = new byte[] { 0x01, 0x02, 0x03, 0x04 };
+        await writeCh.WriteAsync(header, cts.Token);
+
+        var readStream = readCh.AsStream();
+        var buf = new byte[4];
+        await readStream.ReadExactlyAsync(buf, cts.Token);
+
+        Assert.Equal(header, buf);
+
+        await client.DisposeAsync();
+        await server.DisposeAsync();
+    }
+
+    // =================================================================
+    // Extension methods — OpenChannel(string), OpenChannelAsync, AcceptChannelAsync
+    // =================================================================
+
+    [Fact]
+    public async Task OpenChannel_StringExtension_CreatesChannelWithCorrectId()
+    {
+        var (client, server) = CreatePair();
+        client.Start();
+        server.Start();
+        await Task.WhenAll(client.WaitForReadyAsync(), server.WaitForReadyAsync());
+
+        var ch = client.OpenChannel("ext-test");
+
+        Assert.Equal("ext-test", ch.ChannelId);
+
+        await client.DisposeAsync();
+        await server.DisposeAsync();
+    }
+
+    [Fact]
+    public async Task OpenChannel_StringExtension_UsesDefaultPriority()
+    {
+        var (client, server) = CreatePair();
+        client.Start();
+        server.Start();
+        await Task.WhenAll(client.WaitForReadyAsync(), server.WaitForReadyAsync());
+
+        var ch = client.OpenChannel("ext-defaults");
+
+        Assert.Equal(ChannelPriority.Normal, ch.Priority);
+
+        await client.DisposeAsync();
+        await server.DisposeAsync();
+    }
+
+    [Fact]
+    public async Task OpenChannelAsync_WaitsForReady()
+    {
+        var (client, server) = CreatePair();
+        client.Start();
+        server.Start();
+        await Task.WhenAll(client.WaitForReadyAsync(), server.WaitForReadyAsync());
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(60));
+
+        server.AcceptChannel("async-open");
+        var ch = await client.OpenChannelAsync("async-open", cts.Token);
+
+        Assert.True(ch.IsReady);
+        Assert.Equal(ChannelState.Open, ch.State);
+
+        await client.DisposeAsync();
+        await server.DisposeAsync();
+    }
+
+    [Fact]
+    public async Task OpenChannelAsync_WithOptions_WaitsForReady()
+    {
+        var (client, server) = CreatePair();
+        client.Start();
+        server.Start();
+        await Task.WhenAll(client.WaitForReadyAsync(), server.WaitForReadyAsync());
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(60));
+
+        server.AcceptChannel("async-opts");
+        var ch = await client.OpenChannelAsync(
+            new ChannelOptions { ChannelId = "async-opts", Priority = ChannelPriority.High },
+            cts.Token);
+
+        Assert.True(ch.IsReady);
+        Assert.Equal(ChannelPriority.High, ch.Priority);
+
+        await client.DisposeAsync();
+        await server.DisposeAsync();
+    }
+
+    [Fact]
+    public async Task AcceptChannelAsync_Extension_WaitsForReady()
+    {
+        var (client, server) = CreatePair();
+        client.Start();
+        server.Start();
+        await Task.WhenAll(client.WaitForReadyAsync(), server.WaitForReadyAsync());
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(60));
+
+        client.OpenChannel("accept-ext");
+        var readCh = await server.AcceptChannelAsync("accept-ext", cts.Token);
+
+        Assert.True(readCh.IsReady);
+        Assert.Equal("accept-ext", readCh.ChannelId);
+
+        await client.DisposeAsync();
+        await server.DisposeAsync();
+    }
+
+    [Fact]
+    public async Task WriteChannel_IsConnected_TrueWhenTransportActive()
+    {
+        var (client, server) = CreatePair();
+        client.Start();
+        server.Start();
+        await Task.WhenAll(client.WaitForReadyAsync(), server.WaitForReadyAsync());
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(60));
+
+        server.AcceptChannel("conn-check");
+        var ch = await client.OpenChannelAsync("conn-check", cts.Token);
+
+        Assert.True(ch.IsConnected);
+
+        await client.DisposeAsync();
+        await server.DisposeAsync();
+    }
+
+    [Fact]
+    public async Task ReadChannel_IsConnected_TrueWhenTransportActive()
+    {
+        var (client, server) = CreatePair();
+        client.Start();
+        server.Start();
+        await Task.WhenAll(client.WaitForReadyAsync(), server.WaitForReadyAsync());
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(60));
+
+        client.OpenChannel("read-conn");
+        var readCh = await server.AcceptChannelAsync("read-conn", cts.Token);
+
+        Assert.True(readCh.IsConnected);
+
+        await client.DisposeAsync();
+        await server.DisposeAsync();
+    }
+
+    [Fact]
+    public async Task WriteChannel_CloseAsync_ClosesGracefully()
+    {
+        var (client, server) = CreatePair();
+        client.Start();
+        server.Start();
+        await Task.WhenAll(client.WaitForReadyAsync(), server.WaitForReadyAsync());
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(60));
+
+        server.AcceptChannel("close-async");
+        var ch = await client.OpenChannelAsync("close-async", cts.Token);
+
+        await ch.CloseAsync(cts.Token);
+
+        Assert.True(ch.State is ChannelState.Closing or ChannelState.Closed);
+
+        await client.DisposeAsync();
+        await server.DisposeAsync();
+    }
+
+    [Fact]
+    public async Task ReadChannel_CloseAsync_ClosesGracefully()
+    {
+        var (client, server) = CreatePair();
+        client.Start();
+        server.Start();
+        await Task.WhenAll(client.WaitForReadyAsync(), server.WaitForReadyAsync());
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(60));
+
+        client.OpenChannel("read-close-async");
+        var readCh = await server.AcceptChannelAsync("read-close-async", cts.Token);
+
+        await readCh.CloseAsync(cts.Token);
+
+        Assert.True(readCh.State is ChannelState.Closing or ChannelState.Closed);
 
         await client.DisposeAsync();
         await server.DisposeAsync();

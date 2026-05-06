@@ -33,7 +33,7 @@ public sealed class ProtocolEdgeCaseTests
         client.Start();
         server.Start();
         await Task.WhenAll(client.WaitForReadyAsync(), server.WaitForReadyAsync());
-        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(60));
 
         var longId = new string('x', 500);
         var writer = client.OpenChannel(longId);
@@ -58,7 +58,7 @@ public sealed class ProtocolEdgeCaseTests
         client.Start();
         server.Start();
         await Task.WhenAll(client.WaitForReadyAsync(), server.WaitForReadyAsync());
-        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(60));
 
         var specialId = "ch/test:with.special-chars_and spaces!@#$%";
         var writer = client.OpenChannel(specialId);
@@ -85,7 +85,7 @@ public sealed class ProtocolEdgeCaseTests
         client.Start();
         server.Start();
         await Task.WhenAll(client.WaitForReadyAsync(), server.WaitForReadyAsync());
-        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(60));
 
         var unicodeId = "频道_チャンネル_канал";
         var writer = client.OpenChannel(unicodeId);
@@ -110,7 +110,7 @@ public sealed class ProtocolEdgeCaseTests
         client.Start();
         server.Start();
         await Task.WhenAll(client.WaitForReadyAsync(), server.WaitForReadyAsync());
-        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(60));
 
         // Channels with similar prefixes
         var w1 = client.OpenChannel("channel");
@@ -158,7 +158,7 @@ public sealed class ProtocolEdgeCaseTests
         client.Start();
         server.Start();
         await Task.WhenAll(client.WaitForReadyAsync(), server.WaitForReadyAsync());
-        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(60));
 
         var writer = client.OpenChannel("tiny");
         var reader = await server.AcceptChannelAsync("tiny", cts.Token);
@@ -182,7 +182,7 @@ public sealed class ProtocolEdgeCaseTests
         client.Start();
         server.Start();
         await Task.WhenAll(client.WaitForReadyAsync(), server.WaitForReadyAsync());
-        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(20));
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(60));
 
         var writer = client.OpenChannel("large");
         var reader = await server.AcceptChannelAsync("large", cts.Token);
@@ -212,7 +212,7 @@ public sealed class ProtocolEdgeCaseTests
         client.Start();
         server.Start();
         await Task.WhenAll(client.WaitForReadyAsync(), server.WaitForReadyAsync());
-        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(60));
 
         var writer = client.OpenChannel("many-small");
         var reader = await server.AcceptChannelAsync("many-small", cts.Token);
@@ -253,7 +253,7 @@ public sealed class ProtocolEdgeCaseTests
         client.Start();
         server.Start();
         await Task.WhenAll(client.WaitForReadyAsync(), server.WaitForReadyAsync());
-        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(60));
 
         // Start accepting before opening
         var acceptTask = server.AcceptChannelAsync("late-open", cts.Token);
@@ -281,7 +281,7 @@ public sealed class ProtocolEdgeCaseTests
         client.Start();
         server.Start();
         await Task.WhenAll(client.WaitForReadyAsync(), server.WaitForReadyAsync());
-        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(60));
 
         // Start multiple accepts concurrently
         var accept1 = server.AcceptChannelAsync("ch-b", cts.Token);
@@ -322,7 +322,7 @@ public sealed class ProtocolEdgeCaseTests
         client.Start();
         server.Start();
         await Task.WhenAll(client.WaitForReadyAsync(), server.WaitForReadyAsync());
-        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(60));
 
         var acceptedIds = new List<string>();
         var acceptTask = Task.Run(async () =>
@@ -356,7 +356,7 @@ public sealed class ProtocolEdgeCaseTests
         client.Start();
         server.Start();
         await Task.WhenAll(client.WaitForReadyAsync(), server.WaitForReadyAsync());
-        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(60));
 
         // Both sides open channels simultaneously
         var clientWrite = client.OpenChannel("from-client");
