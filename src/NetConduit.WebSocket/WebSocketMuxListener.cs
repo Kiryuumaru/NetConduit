@@ -1,6 +1,8 @@
 using System.Collections.Concurrent;
 using System.Runtime.CompilerServices;
 using System.Threading.Channels;
+using NetConduit.Interfaces;
+using NetConduit.Models;
 
 namespace NetConduit.WebSocket;
 

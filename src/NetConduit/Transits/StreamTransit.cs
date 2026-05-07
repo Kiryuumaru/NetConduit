@@ -1,3 +1,6 @@
+using NetConduit.Events;
+using NetConduit.Interfaces;
+
 namespace NetConduit.Transits;
 
 /// <summary>
@@ -10,6 +13,8 @@ public sealed class StreamTransit : Stream, ITransit
     private readonly IWriteChannel? _writeChannel;
     private readonly IReadChannel? _readChannel;
     private volatile bool _disposed;
+    private volatile bool _readyFired;
+    private readonly object _readyLock = new();
 
     /// <summary>
     /// Creates a write-only StreamTransit from a WriteChannel.
@@ -17,6 +22,7 @@ public sealed class StreamTransit : Stream, ITransit
     public StreamTransit(IWriteChannel writeChannel)
     {
         _writeChannel = writeChannel ?? throw new ArgumentNullException(nameof(writeChannel));
+        SubscribeToChannelEvents();
     }
 
     /// <summary>
@@ -25,17 +31,69 @@ public sealed class StreamTransit : Stream, ITransit
     public StreamTransit(IReadChannel readChannel)
     {
         _readChannel = readChannel ?? throw new ArgumentNullException(nameof(readChannel));
+        SubscribeToChannelEvents();
     }
 
+    private void SubscribeToChannelEvents()
+    {
+        if (_writeChannel is not null)
+        {
+            _writeChannel.Ready += OnChannelReady;
+            _writeChannel.Connected += OnChannelConnected;
+            _writeChannel.Disconnected += OnChannelDisconnected;
+        }
+        if (_readChannel is not null)
+        {
+            _readChannel.Ready += OnChannelReady;
+            _readChannel.Connected += OnChannelConnected;
+            _readChannel.Disconnected += OnChannelDisconnected;
+        }
+    }
+
+    private void OnChannelReady(object? sender, EventArgs e)
+    {
+        lock (_readyLock)
+        {
+            if (_readyFired) return;
+            _readyFired = true;
+        }
+        Ready?.Invoke(this, EventArgs.Empty);
+    }
+
+    private void OnChannelConnected(object? sender, EventArgs e) => Connected?.Invoke(this, EventArgs.Empty);
+
+    private void OnChannelDisconnected(object? sender, DisconnectedEventArgs e) => Disconnected?.Invoke(this, e);
+
     /// <inheritdoc/>
-    public bool IsConnected => !_disposed &&
-        (_writeChannel?.State == ChannelState.Open || _readChannel?.State == ChannelState.Open);
+    public bool IsReady => !_disposed && (_writeChannel?.IsReady ?? _readChannel?.IsReady ?? false);
+
+    /// <inheritdoc/>
+    public bool IsConnected => !_disposed && (_writeChannel?.IsConnected ?? _readChannel?.IsConnected ?? false);
 
     /// <inheritdoc/>
     public string? WriteChannelId => _writeChannel?.ChannelId;
 
     /// <inheritdoc/>
     public string? ReadChannelId => _readChannel?.ChannelId;
+
+    /// <inheritdoc/>
+    public event EventHandler? Ready;
+
+    /// <inheritdoc/>
+    public event EventHandler? Connected;
+
+    /// <inheritdoc/>
+    public event EventHandler<DisconnectedEventArgs>? Disconnected;
+
+    /// <inheritdoc/>
+    public Task WaitForReadyAsync(CancellationToken ct = default)
+    {
+        if (_writeChannel is not null)
+            return _writeChannel.WaitForReadyAsync(ct);
+        if (_readChannel is not null)
+            return _readChannel.WaitForReadyAsync(ct);
+        return Task.CompletedTask;
+    }
 
     /// <inheritdoc/>
     public override bool CanRead => _readChannel is not null && !_disposed;
@@ -130,6 +188,7 @@ public sealed class StreamTransit : Stream, ITransit
 
         if (disposing)
         {
+            UnsubscribeFromChannelEvents();
             _writeChannel?.Dispose();
             _readChannel?.Dispose();
         }
@@ -145,6 +204,8 @@ public sealed class StreamTransit : Stream, ITransit
 
         _disposed = true;
 
+        UnsubscribeFromChannelEvents();
+
         if (_writeChannel is not null)
             await _writeChannel.DisposeAsync().ConfigureAwait(false);
 
@@ -152,5 +213,21 @@ public sealed class StreamTransit : Stream, ITransit
             await _readChannel.DisposeAsync().ConfigureAwait(false);
 
         await base.DisposeAsync().ConfigureAwait(false);
+    }
+
+    private void UnsubscribeFromChannelEvents()
+    {
+        if (_writeChannel is not null)
+        {
+            _writeChannel.Ready -= OnChannelReady;
+            _writeChannel.Connected -= OnChannelConnected;
+            _writeChannel.Disconnected -= OnChannelDisconnected;
+        }
+        if (_readChannel is not null)
+        {
+            _readChannel.Ready -= OnChannelReady;
+            _readChannel.Connected -= OnChannelConnected;
+            _readChannel.Disconnected -= OnChannelDisconnected;
+        }
     }
 }

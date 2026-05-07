@@ -1,4 +1,8 @@
-namespace NetConduit;
+using NetConduit.Enums;
+using NetConduit.Events;
+using NetConduit.Models;
+
+namespace NetConduit.Interfaces;
 
 /// <summary>
 /// An outbound (write-only) channel that sends data to the remote peer.

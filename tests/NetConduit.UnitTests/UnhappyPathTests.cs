@@ -684,7 +684,7 @@ public sealed class UnhappyPathTests
     [Fact]
     public async Task Error_Event_Fires_OnConnectionFailure()
     {
-        var errorFired = new TaskCompletionSource<ErrorEventArgs>();
+        var errorFired = new TaskCompletionSource<Events.ErrorEventArgs>();
         int connectCount = 0;
 
         var mux = StreamMultiplexer.Create(new MultiplexerOptions

@@ -1,4 +1,4 @@
-namespace NetConduit;
+namespace NetConduit.Events;
 
 /// <summary>
 /// Event data raised when a multiplexer error occurs.

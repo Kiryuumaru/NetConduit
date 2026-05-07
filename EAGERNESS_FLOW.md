@@ -141,6 +141,64 @@ mux.OnChannelClosed += (channelId, ex) => { ... };
 
 ---
 
+## Transit Eagerness
+
+Transits layer semantic meaning on top of channels. They follow the same eagerness pattern:
+
+| Transit | Non-Async (returns immediately) | Async (waits for ready) |
+|---------|--------------------------------|-------------------------|
+| StreamTransit | `OpenStream()`, `AcceptStream()` | `AcceptStreamAsync()` |
+| DuplexStreamTransit | `OpenDuplexStream()`, `AcceptDuplexStream()` | `OpenDuplexStreamAsync()`, `AcceptDuplexStreamAsync()` |
+| MessageTransit | `OpenMessageTransit()`, `AcceptMessageTransit()` | `OpenMessageTransitAsync()`, `AcceptMessageTransitAsync()` |
+| DeltaTransit | `OpenDeltaTransit()`, `AcceptDeltaTransit()` | `OpenDeltaTransitAsync()`, `AcceptDeltaTransitAsync()` |
+
+### Transit API Surface
+
+All transits implement `ITransit` which exposes the same eagerness concepts:
+
+```csharp
+public interface ITransit : IAsyncDisposable, IDisposable
+{
+    // --- Ready (one-time latch) ---
+    bool IsReady { get; }
+    event EventHandler? Ready;
+    Task WaitForReadyAsync(CancellationToken ct = default);
+
+    // --- Connected (live toggle) ---
+    bool IsConnected { get; }
+    event EventHandler? Connected;
+    event EventHandler<DisconnectedEventArgs>? Disconnected;
+
+    // Channel IDs
+    string? WriteChannelId { get; }
+    string? ReadChannelId { get; }
+}
+```
+
+### Transit Readiness
+
+- For single-channel transits (StreamTransit): ready when the underlying channel is ready
+- For duplex transits (DuplexStreamTransit, MessageTransit, DeltaTransit): ready when BOTH channels are ready
+
+### Transit Usage Examples
+
+```csharp
+// Optimistic (no awaits until I/O)
+var msgTransit = mux.OpenMessageTransit<Request, Response>("rpc", reqInfo, respInfo);
+msgTransit.Ready += () => Console.WriteLine("RPC channel ready");
+
+// Explicit readiness (wait before using)
+var msgTransit = mux.OpenMessageTransit<Request, Response>("rpc", reqInfo, respInfo);
+await msgTransit.WaitForReadyAsync(ct);
+await msgTransit.SendAsync(request, ct);
+
+// Convenience async (waits for ready)
+var msgTransit = await mux.OpenMessageTransitAsync<Request, Response>("rpc", reqInfo, respInfo, ct);
+await msgTransit.SendAsync(request, ct);
+```
+
+---
+
 ## Backward Compatibility (Extension Methods)
 
 Async convenience methods live in a static extension class, not on the interface:

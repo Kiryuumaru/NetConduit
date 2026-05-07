@@ -1,7 +1,12 @@
 using System.Buffers.Binary;
 using System.Text;
 using NetConduit.Constants;
+using NetConduit.Enums;
+using NetConduit.Events;
+using NetConduit.Exceptions;
+using NetConduit.Interfaces;
 using NetConduit.Internal;
+using NetConduit.Models;
 
 namespace NetConduit;
 
@@ -87,7 +92,7 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IFrameRouter
     /// <inheritdoc />
     public event EventHandler<ChannelClosedEventArgs>? ChannelClosed;
     /// <inheritdoc />
-    public event EventHandler<ErrorEventArgs>? Error;
+    public event EventHandler<Events.ErrorEventArgs>? Error;
     /// <inheritdoc />
     public event EventHandler<DisconnectedEventArgs>? Disconnected;
     /// <inheritdoc />
@@ -232,7 +237,7 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IFrameRouter
         }
         catch (OperationCanceledException) { /* timeout or caller cancel is fine */ }
 
-        _disconnectReason = NetConduit.DisconnectReason.LocalDispose;
+        _disconnectReason = Enums.DisconnectReason.LocalDispose;
         _cts.Cancel();
     }
 
@@ -335,9 +340,9 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IFrameRouter
 
                 // Notify all channels that transport is disconnected
                 foreach (var ch in _registry.GetAllWriteChannels())
-                    ch.MarkDisconnected(NetConduit.DisconnectReason.TransportError, null);
+                    ch.MarkDisconnected(Enums.DisconnectReason.TransportError, null);
                 foreach (var ch in _registry.GetAllReadChannels())
-                    ch.MarkDisconnected(NetConduit.DisconnectReason.TransportError, null);
+                    ch.MarkDisconnected(Enums.DisconnectReason.TransportError, null);
 
                 await WaitForLoopsAsync();
                 _loopCts.Dispose();
@@ -346,7 +351,7 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IFrameRouter
                 // Capture the exception if any
                 Exception? transportEx = faulted.Exception?.InnerException;
                 if (transportEx is not null)
-                    RaiseEvent(Error, new ErrorEventArgs(transportEx));
+                    RaiseEvent(Error, new Events.ErrorEventArgs(transportEx));
 
                 // Dispose old transport
                 await transport.DisposeAsync();
@@ -354,10 +359,10 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IFrameRouter
 
                 if (_isShuttingDown)
                 {
-                    if (_disconnectReason == NetConduit.DisconnectReason.GoAwayReceived)
+                    if (_disconnectReason == Enums.DisconnectReason.GoAwayReceived)
                     {
                         _disconnectedFired = true;
-                        RaiseEvent(Disconnected, new DisconnectedEventArgs(NetConduit.DisconnectReason.GoAwayReceived, null));
+                        RaiseEvent(Disconnected, new DisconnectedEventArgs(Enums.DisconnectReason.GoAwayReceived, null));
                     }
                     break;
                 }
@@ -367,7 +372,7 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IFrameRouter
                     break;
 
                 _disconnectedFired = true;
-                RaiseEvent(Disconnected, new DisconnectedEventArgs(NetConduit.DisconnectReason.TransportError, transportEx));
+                RaiseEvent(Disconnected, new DisconnectedEventArgs(Enums.DisconnectReason.TransportError, transportEx));
             }
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
@@ -430,7 +435,7 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IFrameRouter
             }
             catch (Exception ex)
             {
-                RaiseEvent(Error, new ErrorEventArgs(ex));
+                RaiseEvent(Error, new Events.ErrorEventArgs(ex));
 
                 // If max attempts is 0 (no retry on initial) and not reconnecting, propagate immediately
                 if (!isReconnect && maxAttempts == 0)
@@ -719,7 +724,7 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IFrameRouter
     private void HandleRemoteGoAway()
     {
         _isShuttingDown = true;
-        _disconnectReason = NetConduit.DisconnectReason.GoAwayReceived;
+        _disconnectReason = Enums.DisconnectReason.GoAwayReceived;
         _cts.Cancel();
     }
 
@@ -875,7 +880,7 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IFrameRouter
 
         _isRunning = false;
         _isConnected = false;
-        _disconnectReason ??= NetConduit.DisconnectReason.LocalDispose;
+        _disconnectReason ??= Enums.DisconnectReason.LocalDispose;
 
         _cts.Cancel();
 

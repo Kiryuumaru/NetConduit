@@ -1,5 +1,10 @@
 using System.Buffers.Binary;
 using System.Threading.Tasks.Sources;
+using NetConduit.Enums;
+using NetConduit.Events;
+using NetConduit.Exceptions;
+using NetConduit.Interfaces;
+using NetConduit.Models;
 
 namespace NetConduit.Internal;
 

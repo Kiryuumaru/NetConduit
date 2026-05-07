@@ -1,6 +1,11 @@
 using System.Collections.Concurrent;
 using System.Threading.Channels;
 using NetConduit.Constants;
+using NetConduit.Enums;
+using NetConduit.Events;
+using NetConduit.Exceptions;
+using NetConduit.Interfaces;
+using NetConduit.Models;
 
 namespace NetConduit.Internal;
 

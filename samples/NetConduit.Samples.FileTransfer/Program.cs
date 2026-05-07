@@ -3,6 +3,7 @@ using System.Net;
 using System.Net.Sockets;
 using System.Text;
 using NetConduit;
+using NetConduit.Interfaces;
 using NetConduit.Tcp;
 
 Console.WriteLine("═══════════════════════════════════════════════════════════════");

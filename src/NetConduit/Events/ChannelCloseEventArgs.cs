@@ -1,4 +1,6 @@
-namespace NetConduit;
+using NetConduit.Enums;
+
+namespace NetConduit.Events;
 
 /// <summary>
 /// Event data raised when the channel itself is closed.

@@ -1,3 +1,6 @@
+using NetConduit.Events;
+using NetConduit.Interfaces;
+
 namespace NetConduit.Transits;
 
 /// <summary>
@@ -9,6 +12,8 @@ public sealed class DuplexStreamTransit : Stream, ITransit
     private readonly IWriteChannel _writeChannel;
     private readonly IReadChannel _readChannel;
     private volatile bool _disposed;
+    private volatile bool _readyFired;
+    private readonly object _readyLock = new();
 
     /// <summary>
     /// Creates a new DuplexStreamTransit from a write channel and read channel pair.
@@ -17,17 +22,63 @@ public sealed class DuplexStreamTransit : Stream, ITransit
     {
         _writeChannel = writeChannel ?? throw new ArgumentNullException(nameof(writeChannel));
         _readChannel = readChannel ?? throw new ArgumentNullException(nameof(readChannel));
+        SubscribeToChannelEvents();
     }
 
+    private void SubscribeToChannelEvents()
+    {
+        _writeChannel.Ready += OnChannelReady;
+        _writeChannel.Connected += OnChannelConnected;
+        _writeChannel.Disconnected += OnChannelDisconnected;
+        _readChannel.Ready += OnChannelReady;
+        _readChannel.Connected += OnChannelConnected;
+        _readChannel.Disconnected += OnChannelDisconnected;
+    }
+
+    private void OnChannelReady(object? sender, EventArgs e)
+    {
+        // Fire Ready only when BOTH channels are ready
+        if (!_writeChannel.IsReady || !_readChannel.IsReady) return;
+        lock (_readyLock)
+        {
+            if (_readyFired) return;
+            _readyFired = true;
+        }
+        Ready?.Invoke(this, EventArgs.Empty);
+    }
+
+    private void OnChannelConnected(object? sender, EventArgs e) => Connected?.Invoke(this, EventArgs.Empty);
+
+    private void OnChannelDisconnected(object? sender, DisconnectedEventArgs e) => Disconnected?.Invoke(this, e);
+
     /// <inheritdoc/>
-    public bool IsConnected => !_disposed &&
-        (_writeChannel.State == ChannelState.Open || _readChannel.State == ChannelState.Open);
+    public bool IsReady => !_disposed && _writeChannel.IsReady && _readChannel.IsReady;
+
+    /// <inheritdoc/>
+    public bool IsConnected => !_disposed && (_writeChannel.IsConnected || _readChannel.IsConnected);
 
     /// <inheritdoc/>
     public string? WriteChannelId => _writeChannel.ChannelId;
 
     /// <inheritdoc/>
     public string? ReadChannelId => _readChannel.ChannelId;
+
+    /// <inheritdoc/>
+    public event EventHandler? Ready;
+
+    /// <inheritdoc/>
+    public event EventHandler? Connected;
+
+    /// <inheritdoc/>
+    public event EventHandler<DisconnectedEventArgs>? Disconnected;
+
+    /// <inheritdoc/>
+    public async Task WaitForReadyAsync(CancellationToken ct = default)
+    {
+        await Task.WhenAll(
+            _writeChannel.WaitForReadyAsync(ct),
+            _readChannel.WaitForReadyAsync(ct)).ConfigureAwait(false);
+    }
 
     /// <inheritdoc/>
     public override bool CanRead => !_disposed;
@@ -114,6 +165,7 @@ public sealed class DuplexStreamTransit : Stream, ITransit
 
         if (disposing)
         {
+            UnsubscribeFromChannelEvents();
             _writeChannel.Dispose();
             _readChannel.Dispose();
         }
@@ -129,9 +181,21 @@ public sealed class DuplexStreamTransit : Stream, ITransit
 
         _disposed = true;
 
+        UnsubscribeFromChannelEvents();
+
         await _writeChannel.DisposeAsync().ConfigureAwait(false);
         await _readChannel.DisposeAsync().ConfigureAwait(false);
 
         await base.DisposeAsync().ConfigureAwait(false);
+    }
+
+    private void UnsubscribeFromChannelEvents()
+    {
+        _writeChannel.Ready -= OnChannelReady;
+        _writeChannel.Connected -= OnChannelConnected;
+        _writeChannel.Disconnected -= OnChannelDisconnected;
+        _readChannel.Ready -= OnChannelReady;
+        _readChannel.Connected -= OnChannelConnected;
+        _readChannel.Disconnected -= OnChannelDisconnected;
     }
 }
