@@ -41,14 +41,16 @@ internal sealed class ChannelRegistry
     {
         if (!_writeChannels.TryAdd(index, channel))
             throw new MultiplexerException(ErrorCode.ChannelExists, $"Write channel with index {index} already exists.");
-        _idToIndex.TryAdd(channel.ChannelId, index);
+        if (!_idToIndex.TryAdd(channel.ChannelId, index))
+            throw new MultiplexerException(ErrorCode.ChannelExists, $"A channel with ID '{channel.ChannelId}' already exists.");
     }
 
     internal void RegisterReadChannel(ushort index, ReadChannel channel)
     {
         if (!_readChannels.TryAdd(index, channel))
             throw new MultiplexerException(ErrorCode.ChannelExists, $"Read channel with index {index} already exists.");
-        _idToIndex.TryAdd(channel.ChannelId, index);
+        if (!_idToIndex.TryAdd(channel.ChannelId, index))
+            throw new MultiplexerException(ErrorCode.ChannelExists, $"A channel with ID '{channel.ChannelId}' already exists.");
     }
 
     internal WriteChannel? GetWriteChannel(ushort index)
@@ -88,9 +90,9 @@ internal sealed class ChannelRegistry
     internal IReadOnlyCollection<ReadChannel> GetAllReadChannels() => _readChannels.Values.ToArray();
 
     // Accept coordination
-    internal void RegisterPendingAcceptChannel(string channelId, ReadChannel channel)
+    internal bool TryRegisterPendingAcceptChannel(string channelId, ReadChannel channel)
     {
-        _pendingAcceptChannels[channelId] = channel;
+        return _pendingAcceptChannels.TryAdd(channelId, channel);
     }
 
     internal ReadChannel? GetPendingAcceptChannel(string channelId)

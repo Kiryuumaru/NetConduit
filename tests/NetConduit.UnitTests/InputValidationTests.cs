@@ -68,19 +68,17 @@ public sealed class InputValidationTests
     }
 
     [Fact]
-    public async Task OpenChannel_DuplicateId_Allowed()
+    public async Task OpenChannel_DuplicateId_Throws()
     {
         var (client, server) = CreatePair();
         client.Start();
         server.Start();
         await Task.WhenAll(client.WaitForReadyAsync(), server.WaitForReadyAsync());
 
-        var ch1 = client.OpenChannel("dupe");
-        var ch2 = client.OpenChannel("dupe");
+        client.OpenChannel("dupe");
 
-        // API allows duplicate IDs (overwrite or parallel channels)
-        Assert.NotNull(ch1);
-        Assert.NotNull(ch2);
+        var ex = Assert.Throws<MultiplexerException>(() => client.OpenChannel("dupe"));
+        Assert.Equal(ErrorCode.ChannelExists, ex.ErrorCode);
 
         await client.DisposeAsync();
         await server.DisposeAsync();
