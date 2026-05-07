@@ -153,7 +153,7 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IFrameRouter
 
         Interlocked.Increment(ref _stats._openChannels);
         Interlocked.Increment(ref _stats._totalChannelsOpened);
-        ChannelOpened?.Invoke(this, new ChannelEventArgs(options.ChannelId));
+        RaiseEvent(ChannelOpened, new ChannelEventArgs(options.ChannelId));
 
         return channel;
     }
@@ -168,6 +168,10 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IFrameRouter
         var existing = _registry.GetReadChannelById(channelId);
         if (existing is not null) return existing;
 
+        // Check if a pending accept already exists for this ID
+        var pendingExisting = _registry.GetPendingAcceptChannel(channelId);
+        if (pendingExisting is not null) return pendingExisting;
+
         // Create a pending ReadChannel that will be wired up when remote INIT arrives
         var channel = new ReadChannel(
             channelId,
@@ -175,7 +179,12 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IFrameRouter
             _options.DefaultChannelOptions.Priority,
             _options.DefaultChannelOptions.SlabSize);
 
-        _registry.RegisterPendingAcceptChannel(channelId, channel);
+        if (!_registry.TryRegisterPendingAcceptChannel(channelId, channel))
+        {
+            // Another thread registered between our check and this call
+            return _registry.GetPendingAcceptChannel(channelId)
+                ?? throw new MultiplexerException(ErrorCode.ChannelExists, $"A channel with ID '{channelId}' is already being accepted.");
+        }
 
         // Re-check: INIT may have arrived between first check and registration
         existing = _registry.GetReadChannelById(channelId);
@@ -297,13 +306,13 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IFrameRouter
                 if (_options.PingInterval > TimeSpan.Zero)
                     _keepaliveTask = Task.Run(() => RunKeepaliveLoopAsync(loopCt), loopCt);
 
-                Connected?.Invoke(this, EventArgs.Empty);
+                RaiseEvent(Connected);
 
                 if (!hasConnectedBefore)
                 {
                     _isReady = true;
                     _readyTcs.TrySetResult();
-                    Ready?.Invoke(this, EventArgs.Empty);
+                    RaiseEvent(Ready);
                 }
                 hasConnectedBefore = true;
 
@@ -337,7 +346,7 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IFrameRouter
                 // Capture the exception if any
                 Exception? transportEx = faulted.Exception?.InnerException;
                 if (transportEx is not null)
-                    Error?.Invoke(this, new ErrorEventArgs(transportEx));
+                    RaiseEvent(Error, new ErrorEventArgs(transportEx));
 
                 // Dispose old transport
                 await transport.DisposeAsync();
@@ -348,7 +357,7 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IFrameRouter
                     if (_disconnectReason == NetConduit.DisconnectReason.GoAwayReceived)
                     {
                         _disconnectedFired = true;
-                        Disconnected?.Invoke(this, new DisconnectedEventArgs(NetConduit.DisconnectReason.GoAwayReceived, null));
+                        RaiseEvent(Disconnected, new DisconnectedEventArgs(NetConduit.DisconnectReason.GoAwayReceived, null));
                     }
                     break;
                 }
@@ -358,7 +367,7 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IFrameRouter
                     break;
 
                 _disconnectedFired = true;
-                Disconnected?.Invoke(this, new DisconnectedEventArgs(NetConduit.DisconnectReason.TransportError, transportEx));
+                RaiseEvent(Disconnected, new DisconnectedEventArgs(NetConduit.DisconnectReason.TransportError, transportEx));
             }
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
@@ -390,7 +399,7 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IFrameRouter
             // Delay before retry (skip on first attempt of first connect)
             if (attempt > 1 || isReconnect)
             {
-                Reconnecting?.Invoke(this, new ReconnectingEventArgs(attempt));
+                RaiseEvent(Reconnecting, new ReconnectingEventArgs(attempt));
                 await Task.Delay(TimeSpan.FromMilliseconds(delay), ct);
                 delay = Math.Min(delay * _options.AutoReconnectBackoffMultiplier, maxDelay);
             }
@@ -421,7 +430,7 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IFrameRouter
             }
             catch (Exception ex)
             {
-                Error?.Invoke(this, new ErrorEventArgs(ex));
+                RaiseEvent(Error, new ErrorEventArgs(ex));
 
                 // If max attempts is 0 (no retry on initial) and not reconnecting, propagate immediately
                 if (!isReconnect && maxAttempts == 0)
@@ -642,7 +651,7 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IFrameRouter
 
             Interlocked.Increment(ref _stats._openChannels);
             Interlocked.Increment(ref _stats._totalChannelsOpened);
-            ChannelAccepted?.Invoke(this, new ChannelEventArgs(channelId));
+            RaiseEvent(ChannelAccepted, new ChannelEventArgs(channelId));
 
             _registry.EnqueueForAccept(readChannel);
             return;
@@ -669,7 +678,7 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IFrameRouter
         {
             Interlocked.Decrement(ref _stats._openChannels);
             Interlocked.Increment(ref _stats._totalChannelsClosed);
-            ChannelClosed?.Invoke(this, new ChannelClosedEventArgs(channel.ChannelId, null));
+            RaiseEvent(ChannelClosed, new ChannelClosedEventArgs(channel.ChannelId, null));
         }
     }
 
@@ -898,6 +907,18 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IFrameRouter
         _cts.Dispose();
 
         if (!_disconnectedFired && _disconnectReason.HasValue)
-            Disconnected?.Invoke(this, new DisconnectedEventArgs(_disconnectReason.Value, null));
+            RaiseEvent(Disconnected, new DisconnectedEventArgs(_disconnectReason.Value, null));
+    }
+
+    private void RaiseEvent<T>(EventHandler<T>? handler, T args) where T : EventArgs
+    {
+        try { handler?.Invoke(this, args); }
+        catch { }
+    }
+
+    private void RaiseEvent(EventHandler? handler)
+    {
+        try { handler?.Invoke(this, EventArgs.Empty); }
+        catch { }
     }
 }
