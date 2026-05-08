@@ -1,4 +1,8 @@
-namespace NetConduit;
+using NetConduit.Enums;
+using NetConduit.Events;
+using NetConduit.Models;
+
+namespace NetConduit.Interfaces;
 
 /// <summary>
 /// A transport-agnostic stream multiplexer that creates multiple virtual channels
@@ -52,7 +56,7 @@ public interface IStreamMultiplexer : IAsyncDisposable
     event EventHandler<ChannelClosedEventArgs>? ChannelClosed;
 
     /// <summary>Raised when an error occurs.</summary>
-    event EventHandler<ErrorEventArgs>? Error;
+    event EventHandler<Events.ErrorEventArgs>? Error;
 
     /// <summary>Raised when the transport is disconnected.</summary>
     event EventHandler<DisconnectedEventArgs>? Disconnected;

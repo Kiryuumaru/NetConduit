@@ -29,7 +29,7 @@ public sealed class DisconnectionTests
 
         await client.DisposeAsync();
 
-        Assert.Equal(NetConduit.DisconnectReason.LocalDispose, reason);
+        Assert.Equal(DisconnectReason.LocalDispose, reason);
 
         await server.DisposeAsync();
     }
@@ -75,7 +75,7 @@ public sealed class DisconnectionTests
 
         await client.DisposeAsync();
 
-        Assert.Equal(NetConduit.DisconnectReason.LocalDispose, client.DisconnectReason);
+        Assert.Equal(DisconnectReason.LocalDispose, client.DisconnectReason);
 
         await server.DisposeAsync();
     }
@@ -107,7 +107,7 @@ public sealed class DisconnectionTests
         killableA.Kill();
 
         var (reason, _) = await disconnected.Task.WaitAsync(TimeSpan.FromSeconds(60));
-        Assert.Equal(NetConduit.DisconnectReason.TransportError, reason);
+        Assert.Equal(DisconnectReason.TransportError, reason);
 
         await client.DisposeAsync();
         await server.DisposeAsync();

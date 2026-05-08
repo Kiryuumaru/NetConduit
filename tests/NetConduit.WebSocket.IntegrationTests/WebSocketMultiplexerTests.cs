@@ -1,6 +1,7 @@
 using System.Net.WebSockets;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
+using NetConduit.Interfaces;
 using NetConduit.WebSocket;
 
 namespace NetConduit.WebSocket.IntegrationTests;

@@ -1,4 +1,9 @@
 using System.Buffers.Binary;
+using NetConduit.Enums;
+using NetConduit.Events;
+using NetConduit.Exceptions;
+using NetConduit.Interfaces;
+using NetConduit.Models;
 
 namespace NetConduit.Internal;
 

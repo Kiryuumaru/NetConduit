@@ -5,6 +5,8 @@ using System.Runtime.InteropServices;
 using System.Text;
 using System.Text.Json.Serialization;
 using NetConduit;
+using NetConduit.Interfaces;
+using NetConduit.Models;
 using NetConduit.Tcp;
 using NetConduit.Transits;
 

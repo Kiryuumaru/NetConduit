@@ -1,5 +1,7 @@
 using System.Net;
 using System.Net.Sockets;
+using NetConduit.Interfaces;
+using NetConduit.Models;
 
 namespace NetConduit.Tcp;
 

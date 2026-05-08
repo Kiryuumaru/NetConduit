@@ -1,4 +1,4 @@
-namespace NetConduit.Transits;
+namespace NetConduit.Interfaces;
 
 /// <summary>
 /// Interface for transits that send and receive discrete messages over channel pairs.

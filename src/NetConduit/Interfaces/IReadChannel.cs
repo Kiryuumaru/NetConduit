@@ -1,4 +1,8 @@
-namespace NetConduit;
+using NetConduit.Enums;
+using NetConduit.Events;
+using NetConduit.Models;
+
+namespace NetConduit.Interfaces;
 
 /// <summary>
 /// An inbound (read-only) channel that receives data from the remote peer.

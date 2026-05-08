@@ -1,4 +1,6 @@
 using System.Text.Json.Nodes;
+using NetConduit.Enums;
+using NetConduit.Models;
 
 namespace NetConduit.Internal;
 

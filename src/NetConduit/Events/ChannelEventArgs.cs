@@ -1,4 +1,4 @@
-namespace NetConduit;
+namespace NetConduit.Events;
 
 /// <summary>
 /// Event data for channel lifecycle events that identify a channel by its string ID.

@@ -1,4 +1,4 @@
-namespace NetConduit;
+namespace NetConduit.Interfaces;
 
 /// <summary>
 /// A bidirectional stream pair used as the transport for multiplexing.

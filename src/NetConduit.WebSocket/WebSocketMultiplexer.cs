@@ -1,4 +1,6 @@
 using System.Net.WebSockets;
+using NetConduit.Interfaces;
+using NetConduit.Models;
 
 namespace NetConduit.WebSocket;
 

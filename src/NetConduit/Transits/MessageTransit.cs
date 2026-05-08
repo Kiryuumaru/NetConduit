@@ -4,6 +4,8 @@ using System.Diagnostics.CodeAnalysis;
 using System.Runtime.CompilerServices;
 using System.Text.Json;
 using System.Text.Json.Serialization.Metadata;
+using NetConduit.Events;
+using NetConduit.Interfaces;
 
 namespace NetConduit.Transits;
 
@@ -25,6 +27,8 @@ public sealed class MessageTransit<TSend, TReceive> : IMessageTransit<TSend, TRe
     private readonly SemaphoreSlim _sendLock = new(1, 1);
     private readonly SemaphoreSlim _receiveLock = new(1, 1);
     private volatile bool _disposed;
+    private volatile bool _readyFired;
+    private readonly object _readyLock = new();
 
     /// <summary>
     /// Creates a new MessageTransit with both send and receive capabilities using AOT-safe JsonTypeInfo.
@@ -41,6 +45,7 @@ public sealed class MessageTransit<TSend, TReceive> : IMessageTransit<TSend, TRe
         _sendTypeInfo = sendTypeInfo;
         _receiveTypeInfo = receiveTypeInfo;
         _maxMessageSize = maxMessageSize;
+        SubscribeToChannelEvents();
     }
 
     /// <summary>
@@ -59,17 +64,85 @@ public sealed class MessageTransit<TSend, TReceive> : IMessageTransit<TSend, TRe
         _readChannel = readChannel;
         _jsonOptions = jsonOptions;
         _maxMessageSize = maxMessageSize;
+        SubscribeToChannelEvents();
+    }
+
+    private void SubscribeToChannelEvents()
+    {
+        if (_writeChannel is not null)
+        {
+            _writeChannel.Ready += OnChannelReady;
+            _writeChannel.Connected += OnChannelConnected;
+            _writeChannel.Disconnected += OnChannelDisconnected;
+        }
+        if (_readChannel is not null)
+        {
+            _readChannel.Ready += OnChannelReady;
+            _readChannel.Connected += OnChannelConnected;
+            _readChannel.Disconnected += OnChannelDisconnected;
+        }
+    }
+
+    private void OnChannelReady(object? sender, EventArgs e)
+    {
+        // Fire Ready only when all configured channels are ready
+        var writeReady = _writeChannel?.IsReady ?? true;
+        var readReady = _readChannel?.IsReady ?? true;
+        if (!writeReady || !readReady) return;
+        lock (_readyLock)
+        {
+            if (_readyFired) return;
+            _readyFired = true;
+        }
+        Ready?.Invoke(this, EventArgs.Empty);
+    }
+
+    private void OnChannelConnected(object? sender, EventArgs e) => Connected?.Invoke(this, EventArgs.Empty);
+
+    private void OnChannelDisconnected(object? sender, DisconnectedEventArgs e) => Disconnected?.Invoke(this, e);
+
+    /// <inheritdoc/>
+    public bool IsReady
+    {
+        get
+        {
+            if (_disposed) return false;
+            var writeReady = _writeChannel?.IsReady ?? true;
+            var readReady = _readChannel?.IsReady ?? true;
+            return writeReady && readReady;
+        }
     }
 
     /// <inheritdoc/>
     public bool IsConnected => !_disposed &&
-        (_writeChannel?.State == ChannelState.Open || _readChannel?.State == ChannelState.Open);
+        (_writeChannel?.IsConnected ?? false) || (_readChannel?.IsConnected ?? false);
 
     /// <inheritdoc/>
     public string? WriteChannelId => _writeChannel?.ChannelId;
 
     /// <inheritdoc/>
     public string? ReadChannelId => _readChannel?.ChannelId;
+
+    /// <inheritdoc/>
+    public event EventHandler? Ready;
+
+    /// <inheritdoc/>
+    public event EventHandler? Connected;
+
+    /// <inheritdoc/>
+    public event EventHandler<DisconnectedEventArgs>? Disconnected;
+
+    /// <inheritdoc/>
+    public async Task WaitForReadyAsync(CancellationToken ct = default)
+    {
+        var tasks = new List<Task>(2);
+        if (_writeChannel is not null)
+            tasks.Add(_writeChannel.WaitForReadyAsync(ct));
+        if (_readChannel is not null)
+            tasks.Add(_readChannel.WaitForReadyAsync(ct));
+        if (tasks.Count > 0)
+            await Task.WhenAll(tasks).ConfigureAwait(false);
+    }
 
     /// <inheritdoc/>
     [UnconditionalSuppressMessage("AOT", "IL2026:RequiresUnreferencedCode", Justification = "Only called when _sendTypeInfo is null, meaning the non-AOT constructor was used")]
@@ -226,6 +299,8 @@ public sealed class MessageTransit<TSend, TReceive> : IMessageTransit<TSend, TRe
 
         _disposed = true;
 
+        UnsubscribeFromChannelEvents();
+
         if (_writeChannel is not null)
             await _writeChannel.DisposeAsync().ConfigureAwait(false);
 
@@ -244,9 +319,26 @@ public sealed class MessageTransit<TSend, TReceive> : IMessageTransit<TSend, TRe
 
         _disposed = true;
 
+        UnsubscribeFromChannelEvents();
         _writeChannel?.Dispose();
         _readChannel?.Dispose();
         _sendLock.Dispose();
         _receiveLock.Dispose();
+    }
+
+    private void UnsubscribeFromChannelEvents()
+    {
+        if (_writeChannel is not null)
+        {
+            _writeChannel.Ready -= OnChannelReady;
+            _writeChannel.Connected -= OnChannelConnected;
+            _writeChannel.Disconnected -= OnChannelDisconnected;
+        }
+        if (_readChannel is not null)
+        {
+            _readChannel.Ready -= OnChannelReady;
+            _readChannel.Connected -= OnChannelConnected;
+            _readChannel.Disconnected -= OnChannelDisconnected;
+        }
     }
 }

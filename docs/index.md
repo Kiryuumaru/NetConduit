@@ -12,6 +12,7 @@
 | [Concepts](concepts/index.md)         | Channels, backpressure, priority, reconnection, shutdown, heartbeat |
 | [API Reference](api/index.md)         | Multiplexer, channels, options, statistics, errors                  |
 | [Samples](samples/index.md)           | Complete example applications                                       |
+| [Benchmarks](benchmarks.md)           | Performance comparisons against Go multiplexers                     |
 
 ## Quick Example
 
