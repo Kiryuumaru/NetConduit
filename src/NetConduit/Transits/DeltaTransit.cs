@@ -5,7 +5,11 @@ using System.Runtime.CompilerServices;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using System.Text.Json.Serialization.Metadata;
+using NetConduit.Enums;
+using NetConduit.Events;
+using NetConduit.Interfaces;
 using NetConduit.Internal;
+using NetConduit.Models;
 
 namespace NetConduit.Transits;
 
@@ -27,6 +31,8 @@ public sealed class DeltaTransit<T> : IAsyncDisposable
     private JsonNode? _lastSentState;
     private JsonNode? _lastReceivedState;
     private volatile bool _disposed;
+    private volatile bool _readyFired;
+    private readonly object _readyLock = new();
 
     private static readonly byte[] ResyncRequestHeader = [0x02];
 
@@ -60,17 +66,86 @@ public sealed class DeltaTransit<T> : IAsyncDisposable
             throw new ArgumentNullException(nameof(typeInfo),
                 "JsonTypeInfo required for POCO types. Use source-generated JsonSerializerContext for Native AOT compatibility.");
         }
+
+        SubscribeToChannelEvents();
+    }
+
+    private void SubscribeToChannelEvents()
+    {
+        if (_writeChannel is not null)
+        {
+            _writeChannel.Ready += OnChannelReady;
+            _writeChannel.Connected += OnChannelConnected;
+            _writeChannel.Disconnected += OnChannelDisconnected;
+        }
+        if (_readChannel is not null)
+        {
+            _readChannel.Ready += OnChannelReady;
+            _readChannel.Connected += OnChannelConnected;
+            _readChannel.Disconnected += OnChannelDisconnected;
+        }
+    }
+
+    private void OnChannelReady(object? sender, EventArgs e)
+    {
+        // Fire Ready only when all configured channels are ready
+        var writeReady = _writeChannel?.IsReady ?? true;
+        var readReady = _readChannel?.IsReady ?? true;
+        if (!writeReady || !readReady) return;
+        lock (_readyLock)
+        {
+            if (_readyFired) return;
+            _readyFired = true;
+        }
+        Ready?.Invoke(this, EventArgs.Empty);
+    }
+
+    private void OnChannelConnected(object? sender, EventArgs e) => Connected?.Invoke(this, EventArgs.Empty);
+
+    private void OnChannelDisconnected(object? sender, DisconnectedEventArgs e) => Disconnected?.Invoke(this, e);
+
+    /// <summary>Gets whether the transit is ready (all channels confirmed by remote).</summary>
+    public bool IsReady
+    {
+        get
+        {
+            if (_disposed) return false;
+            var writeReady = _writeChannel?.IsReady ?? true;
+            var readReady = _readChannel?.IsReady ?? true;
+            return writeReady && readReady;
+        }
     }
 
     /// <summary>Gets whether the transit is connected.</summary>
     public bool IsConnected => !_disposed &&
-        (_writeChannel?.State == ChannelState.Open || _readChannel?.State == ChannelState.Open);
+        ((_writeChannel?.IsConnected ?? false) || (_readChannel?.IsConnected ?? false));
 
     /// <summary>Gets the write channel ID.</summary>
     public string? WriteChannelId => _writeChannel?.ChannelId;
 
     /// <summary>Gets the read channel ID.</summary>
     public string? ReadChannelId => _readChannel?.ChannelId;
+
+    /// <summary>Raised once when all channels are confirmed ready. Never fires again.</summary>
+    public event EventHandler? Ready;
+
+    /// <summary>Raised each time the underlying transport connects.</summary>
+    public event EventHandler? Connected;
+
+    /// <summary>Raised each time the underlying transport disconnects.</summary>
+    public event EventHandler<DisconnectedEventArgs>? Disconnected;
+
+    /// <summary>Wait until the transit is confirmed ready (all channels acknowledged by remote).</summary>
+    public async Task WaitForReadyAsync(CancellationToken ct = default)
+    {
+        var tasks = new List<Task>(2);
+        if (_writeChannel is not null)
+            tasks.Add(_writeChannel.WaitForReadyAsync(ct));
+        if (_readChannel is not null)
+            tasks.Add(_readChannel.WaitForReadyAsync(ct));
+        if (tasks.Count > 0)
+            await Task.WhenAll(tasks).ConfigureAwait(false);
+    }
 
     /// <summary>
     /// Sends the current state. On first send, transmits full state.
@@ -557,6 +632,8 @@ public sealed class DeltaTransit<T> : IAsyncDisposable
         if (_disposed) return;
         _disposed = true;
 
+        UnsubscribeFromChannelEvents();
+
         _sendLock.Dispose();
         _receiveLock.Dispose();
 
@@ -565,5 +642,21 @@ public sealed class DeltaTransit<T> : IAsyncDisposable
 
         if (_readChannel is not null)
             await _readChannel.DisposeAsync().ConfigureAwait(false);
+    }
+
+    private void UnsubscribeFromChannelEvents()
+    {
+        if (_writeChannel is not null)
+        {
+            _writeChannel.Ready -= OnChannelReady;
+            _writeChannel.Connected -= OnChannelConnected;
+            _writeChannel.Disconnected -= OnChannelDisconnected;
+        }
+        if (_readChannel is not null)
+        {
+            _readChannel.Ready -= OnChannelReady;
+            _readChannel.Connected -= OnChannelConnected;
+            _readChannel.Disconnected -= OnChannelDisconnected;
+        }
     }
 }

@@ -1,4 +1,4 @@
-namespace NetConduit;
+namespace NetConduit.Enums;
 
 /// <summary>
 /// Frame type flags in the wire protocol header.

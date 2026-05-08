@@ -1,6 +1,7 @@
 using NetConduit.Constants;
+using NetConduit.Enums;
 
-namespace NetConduit;
+namespace NetConduit.Models;
 
 /// <summary>
 /// Options for opening a channel.

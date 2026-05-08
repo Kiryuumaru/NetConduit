@@ -1,3 +1,5 @@
+using NetConduit.Interfaces;
+
 namespace NetConduit.UnitTests;
 
 /// <summary>

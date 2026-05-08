@@ -1,6 +1,6 @@
 using NetConduit.Constants;
 
-namespace NetConduit;
+namespace NetConduit.Models;
 
 /// <summary>
 /// Configuration for a multiplexer session.

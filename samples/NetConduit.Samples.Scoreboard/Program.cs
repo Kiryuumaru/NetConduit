@@ -10,6 +10,9 @@ using System.Net.Sockets;
 using System.Text.Json.Nodes;
 using System.Text.Json.Serialization;
 using NetConduit;
+using NetConduit.Enums;
+using NetConduit.Interfaces;
+using NetConduit.Models;
 using NetConduit.Transits;
 
 var mode = args.Length > 0 ? args[0] : "help";

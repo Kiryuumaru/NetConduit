@@ -1,3 +1,6 @@
+using NetConduit.Interfaces;
+using NetConduit.Models;
+
 namespace NetConduit;
 
 /// <summary>

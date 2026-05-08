@@ -1,5 +1,6 @@
 using System.Buffers.Binary;
 using NetConduit.Constants;
+using NetConduit.Enums;
 
 namespace NetConduit.Internal;
 

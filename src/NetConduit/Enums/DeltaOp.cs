@@ -1,4 +1,4 @@
-namespace NetConduit;
+namespace NetConduit.Enums;
 
 /// <summary>
 /// Operations for delta encoding in state synchronization.

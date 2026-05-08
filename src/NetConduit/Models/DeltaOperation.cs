@@ -1,6 +1,7 @@
 using System.Text.Json.Nodes;
+using NetConduit.Enums;
 
-namespace NetConduit;
+namespace NetConduit.Models;
 
 /// <summary>
 /// Represents a single delta operation to apply to a JSON state.
