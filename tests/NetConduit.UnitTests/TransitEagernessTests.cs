@@ -890,7 +890,7 @@ public sealed class TransitEagernessTests
         await transit.DisposeAsync();
 
         await Assert.ThrowsAsync<ObjectDisposedException>(
-            async () => await transit.ReadAsync(new byte[10]));
+            async () => _ = await transit.ReadAsync(new byte[10], 0, 10));
 
         await client.DisposeAsync();
         await server.DisposeAsync();
@@ -933,7 +933,7 @@ public sealed class TransitEagernessTests
         await serverTransit.DisposeAsync();
 
         await Assert.ThrowsAsync<ObjectDisposedException>(
-            async () => await serverTransit.ReadAsync(new byte[10]));
+            async () => _ = await serverTransit.ReadAsync(new byte[10], 0, 10));
 
         await clientTransit.DisposeAsync();
         await client.DisposeAsync();
@@ -1020,7 +1020,7 @@ public sealed class TransitEagernessTests
 
         // StreamTransit throws InvalidOperationException when reading from a write-only transit
         await Assert.ThrowsAsync<InvalidOperationException>(
-            async () => await transit.ReadAsync(new byte[10]));
+            async () => _ = await transit.ReadAsync(new byte[10], 0, 10));
 
         await transit.DisposeAsync();
         await client.DisposeAsync();
@@ -1222,6 +1222,7 @@ public sealed class TransitEagernessTests
         {
             StreamFactory = _ => Task.FromResult<IStreamPair>(duplex.SideA),
         });
+        mux.Start();
         var ch = mux.AcceptChannel("test");
 
         Assert.Throws<ArgumentNullException>(() => new DuplexStreamTransit(null!, ch));
@@ -1237,6 +1238,7 @@ public sealed class TransitEagernessTests
         {
             StreamFactory = _ => Task.FromResult<IStreamPair>(duplex.SideA),
         });
+        mux.Start();
         var ch = mux.OpenChannel("test");
 
         Assert.Throws<ArgumentNullException>(() => new DuplexStreamTransit(ch, null!));
@@ -1251,9 +1253,15 @@ public sealed class TransitEagernessTests
     [Fact]
     public async Task StreamTransit_WaitForReadyAsync_ThrowsOperationCanceledException_WhenAlreadyCancelled()
     {
-        var (client, server) = await CreateReadyPairAsync();
+        // Use a mux without a counterpart so the channel never becomes ready
+        var duplex = new DuplexMemoryStream();
+        var mux = StreamMultiplexer.Create(new MultiplexerOptions
+        {
+            StreamFactory = _ => Task.FromResult<IStreamPair>(duplex.SideA),
+        });
+        mux.Start();
 
-        var transit = client.OpenStream("unhappy-cancelled-wait");
+        var transit = mux.OpenStream("unhappy-cancelled-wait");
 
         var cts = new CancellationTokenSource();
         cts.Cancel();
@@ -1262,16 +1270,20 @@ public sealed class TransitEagernessTests
             async () => await transit.WaitForReadyAsync(cts.Token));
 
         await transit.DisposeAsync();
-        await client.DisposeAsync();
-        await server.DisposeAsync();
+        await mux.DisposeAsync();
     }
 
     [Fact]
     public async Task DuplexStreamTransit_WaitForReadyAsync_ThrowsOperationCanceledException_WhenAlreadyCancelled()
     {
-        var (client, server) = await CreateReadyPairAsync();
+        var duplex = new DuplexMemoryStream();
+        var mux = StreamMultiplexer.Create(new MultiplexerOptions
+        {
+            StreamFactory = _ => Task.FromResult<IStreamPair>(duplex.SideA),
+        });
+        mux.Start();
 
-        var transit = client.OpenDuplexStream("unhappy-duplex-cancelled-wait");
+        var transit = mux.OpenDuplexStream("unhappy-duplex-cancelled-wait");
 
         var cts = new CancellationTokenSource();
         cts.Cancel();
@@ -1280,17 +1292,21 @@ public sealed class TransitEagernessTests
             async () => await transit.WaitForReadyAsync(cts.Token));
 
         await transit.DisposeAsync();
-        await client.DisposeAsync();
-        await server.DisposeAsync();
+        await mux.DisposeAsync();
     }
 
     [Fact]
     public async Task MessageTransit_WaitForReadyAsync_ThrowsOperationCanceledException_WhenAlreadyCancelled()
     {
-        var (client, server) = await CreateReadyPairAsync();
+        var duplex = new DuplexMemoryStream();
+        var mux = StreamMultiplexer.Create(new MultiplexerOptions
+        {
+            StreamFactory = _ => Task.FromResult<IStreamPair>(duplex.SideA),
+        });
+        mux.Start();
 
 #pragma warning disable IL2026, IL3050
-        var transit = client.OpenMessageTransit<TestMsg, TestMsg>("unhappy-msg-cancelled-wait");
+        var transit = mux.OpenMessageTransit<TestMsg, TestMsg>("unhappy-msg-cancelled-wait");
 #pragma warning restore IL2026, IL3050
 
         var cts = new CancellationTokenSource();
@@ -1300,8 +1316,7 @@ public sealed class TransitEagernessTests
             async () => await transit.WaitForReadyAsync(cts.Token));
 
         await transit.DisposeAsync();
-        await client.DisposeAsync();
-        await server.DisposeAsync();
+        await mux.DisposeAsync();
     }
 
     [Fact]
@@ -1311,9 +1326,10 @@ public sealed class TransitEagernessTests
 
 #pragma warning disable IL2026, IL3050
         var transit = client.OpenMessageTransit<TestMsg, TestMsg>("unhappy-msg-cancelled-send");
+        var serverTransit = server.AcceptMessageTransit<TestMsg, TestMsg>("unhappy-msg-cancelled-send");
 #pragma warning restore IL2026, IL3050
 
-        await transit.WaitForReadyAsync();
+        await Task.WhenAll(transit.WaitForReadyAsync(), serverTransit.WaitForReadyAsync());
 
         var cts = new CancellationTokenSource();
         cts.Cancel();
@@ -1322,6 +1338,7 @@ public sealed class TransitEagernessTests
             async () => await transit.SendAsync(new TestMsg { Name = "fail", Value = 0 }, cts.Token));
 
         await transit.DisposeAsync();
+        await serverTransit.DisposeAsync();
         await client.DisposeAsync();
         await server.DisposeAsync();
     }
@@ -1380,7 +1397,8 @@ public sealed class TransitEagernessTests
         var (client, server) = await CreateReadyPairAsync();
 
         var transit = client.OpenDuplexStream("unhappy-double-dispose-duplex");
-        await transit.WaitForReadyAsync();
+        var serverTransit = server.AcceptDuplexStream("unhappy-double-dispose-duplex");
+        await Task.WhenAll(transit.WaitForReadyAsync(), serverTransit.WaitForReadyAsync());
 
         await transit.DisposeAsync();
         await transit.DisposeAsync(); // Second dispose should not throw
@@ -1388,6 +1406,7 @@ public sealed class TransitEagernessTests
         Assert.False(transit.IsConnected);
         Assert.False(transit.IsReady);
 
+        await serverTransit.DisposeAsync();
         await client.DisposeAsync();
         await server.DisposeAsync();
     }
@@ -1399,9 +1418,10 @@ public sealed class TransitEagernessTests
 
 #pragma warning disable IL2026, IL3050
         var transit = client.OpenMessageTransit<TestMsg, TestMsg>("unhappy-double-dispose-msg");
+        var serverTransit = server.AcceptMessageTransit<TestMsg, TestMsg>("unhappy-double-dispose-msg");
 #pragma warning restore IL2026, IL3050
 
-        await transit.WaitForReadyAsync();
+        await Task.WhenAll(transit.WaitForReadyAsync(), serverTransit.WaitForReadyAsync());
 
         await transit.DisposeAsync();
         await transit.DisposeAsync(); // Second dispose should not throw
@@ -1409,6 +1429,7 @@ public sealed class TransitEagernessTests
         Assert.False(transit.IsConnected);
         Assert.False(transit.IsReady);
 
+        await serverTransit.DisposeAsync();
         await client.DisposeAsync();
         await server.DisposeAsync();
     }
@@ -1419,7 +1440,8 @@ public sealed class TransitEagernessTests
         var (client, server) = await CreateReadyPairAsync();
 
         var transit = client.OpenDeltaTransit("unhappy-double-dispose-delta", JsonContext.Default.JsonObject);
-        await transit.WaitForReadyAsync();
+        var serverTransit = server.AcceptDeltaTransit("unhappy-double-dispose-delta", JsonContext.Default.JsonObject);
+        await Task.WhenAll(transit.WaitForReadyAsync(), serverTransit.WaitForReadyAsync());
 
         await transit.DisposeAsync();
         await transit.DisposeAsync(); // Second dispose should not throw
@@ -1427,6 +1449,7 @@ public sealed class TransitEagernessTests
         Assert.False(transit.IsConnected);
         Assert.False(transit.IsReady);
 
+        await serverTransit.DisposeAsync();
         await client.DisposeAsync();
         await server.DisposeAsync();
     }
@@ -1465,7 +1488,8 @@ public sealed class TransitEagernessTests
         var (client, server) = await CreateReadyPairAsync();
 
         var transit = client.OpenDuplexStream("unhappy-duplex-state-after-dispose");
-        await transit.WaitForReadyAsync();
+        var serverTransit = server.AcceptDuplexStream("unhappy-duplex-state-after-dispose");
+        await Task.WhenAll(transit.WaitForReadyAsync(), serverTransit.WaitForReadyAsync());
 
         Assert.True(transit.IsReady);
         Assert.True(transit.IsConnected);
@@ -1482,6 +1506,7 @@ public sealed class TransitEagernessTests
         Assert.False(transit.CanWrite);
         Assert.False(transit.CanSeek);
 
+        await serverTransit.DisposeAsync();
         await client.DisposeAsync();
         await server.DisposeAsync();
     }
@@ -1507,10 +1532,10 @@ public sealed class TransitEagernessTests
         var exception = await Record.ExceptionAsync(
             async () => await transit.WriteAsync(new byte[] { 1, 2, 3 }, cts.Token));
 
-        // Should throw either ObjectDisposedException, InvalidOperationException, IOException, or OperationCanceledException
+        // Should throw because the mux is disposed and channels are closed
         Assert.True(
-            exception is ObjectDisposedException or InvalidOperationException or IOException or OperationCanceledException,
-            $"Expected ObjectDisposedException, InvalidOperationException, IOException, or OperationCanceledException but got {exception?.GetType().Name}");
+            exception is ObjectDisposedException or InvalidOperationException or IOException or OperationCanceledException or ChannelClosedException,
+            $"Expected ObjectDisposedException, InvalidOperationException, IOException, OperationCanceledException, or ChannelClosedException but got {exception?.GetType().Name}");
 
         await transit.DisposeAsync();
         await server.DisposeAsync();
@@ -1523,25 +1548,24 @@ public sealed class TransitEagernessTests
 
 #pragma warning disable IL2026, IL3050
         var transit = client.OpenMessageTransit<TestMsg, TestMsg>("unhappy-mux-disposed-msg");
+        var serverTransit = server.AcceptMessageTransit<TestMsg, TestMsg>("unhappy-mux-disposed-msg");
 #pragma warning restore IL2026, IL3050
 
-        await transit.WaitForReadyAsync();
+        await Task.WhenAll(transit.WaitForReadyAsync(), serverTransit.WaitForReadyAsync());
 
         // Dispose the multiplexer (not the transit)
         await client.DisposeAsync();
 
-        // Sending should either throw or complete (fail-fast behavior)
-        // Use timeout to prevent indefinite hang if implementation doesn't handle this
-        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+        // Sending should throw because the mux is disposed and channels are closed
         var exception = await Record.ExceptionAsync(
-            async () => await transit.SendAsync(new TestMsg { Name = "fail", Value = 0 }, cts.Token));
+            async () => await transit.SendAsync(new TestMsg { Name = "fail", Value = 0 }));
 
-        // Should throw either ObjectDisposedException, InvalidOperationException, IOException, or OperationCanceledException
         Assert.True(
-            exception is ObjectDisposedException or InvalidOperationException or IOException or OperationCanceledException,
-            $"Expected ObjectDisposedException, InvalidOperationException, IOException, or OperationCanceledException but got {exception?.GetType().Name}");
+            exception is ObjectDisposedException or InvalidOperationException or IOException or OperationCanceledException or ChannelClosedException,
+            $"Expected ObjectDisposedException, InvalidOperationException, IOException, OperationCanceledException, or ChannelClosedException but got {exception?.GetType().Name}");
 
         await transit.DisposeAsync();
+        await serverTransit.DisposeAsync();
         await server.DisposeAsync();
     }
 
