@@ -84,11 +84,11 @@ internal sealed class ChannelRegistry
         return null;
     }
 
-    internal void UnregisterChannel(ushort index, string channelId)
+    internal bool UnregisterChannel(ushort index, string channelId)
     {
-        _writeChannels.TryRemove(index, out _);
-        _readChannels.TryRemove(index, out _);
+        bool removed = _writeChannels.TryRemove(index, out _) || _readChannels.TryRemove(index, out _);
         _idToIndex.TryRemove(channelId, out _);
+        return removed;
     }
 
     internal IReadOnlyCollection<WriteChannel> GetAllWriteChannels() => _writeChannels.Values.ToArray();
@@ -191,6 +191,9 @@ internal sealed class ChannelRegistry
             channel.SetClosed(reason, exception);
         foreach (var channel in _pendingAcceptChannels.Values)
             channel.SetClosed(reason, exception);
+        _writeChannels.Clear();
+        _readChannels.Clear();
         _pendingAcceptChannels.Clear();
+        _idToIndex.Clear();
     }
 }

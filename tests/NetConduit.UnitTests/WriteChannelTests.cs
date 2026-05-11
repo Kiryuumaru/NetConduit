@@ -4,7 +4,7 @@ namespace NetConduit.UnitTests;
 
 public sealed class WriteChannelTests
 {
-    private sealed class TestRouter : IFrameRouter
+    private sealed class TestRouter : IChannelOwner
     {
         public int NotifyCount;
         public WriteChannel? LastNotified;
@@ -14,6 +14,8 @@ public sealed class WriteChannelTests
             LastNotified = channel;
             Interlocked.Increment(ref NotifyCount);
         }
+
+        public void NotifyChannelCompleted(ushort channelIndex, string channelId) { }
     }
 
     private static WriteChannel CreateChannel(TestRouter? router = null, int slabSize = 64 * 1024)
@@ -25,7 +27,7 @@ public sealed class WriteChannelTests
             priority: ChannelPriority.Normal,
             slabSize: slabSize,
             sendTimeout: TimeSpan.FromSeconds(60),
-            router: router);
+            owner: router);
         channel.MarkOpen();
         return channel;
     }

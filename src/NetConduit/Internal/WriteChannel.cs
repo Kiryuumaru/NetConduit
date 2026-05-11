@@ -17,7 +17,9 @@ internal sealed class WriteChannel : Stream, IWriteChannel
     private readonly byte[] _slab;
     private readonly Memory<byte> _slabMemory;
     private readonly ushort _channelIndex;
-    private readonly IFrameRouter _router;
+    private readonly IChannelOwner _owner;
+
+    internal ushort ChannelIndex => _channelIndex;
     private readonly SemaphoreSlim _spaceAvailable = new(0, 1);
     private readonly object _posLock = new();
     private readonly int _slabSize;
@@ -101,7 +103,7 @@ internal sealed class WriteChannel : Stream, IWriteChannel
         ChannelPriority priority,
         int slabSize,
         TimeSpan sendTimeout,
-        IFrameRouter router,
+        IChannelOwner owner,
         bool enableReplay = false)
     {
         ChannelId = channelId;
@@ -109,7 +111,7 @@ internal sealed class WriteChannel : Stream, IWriteChannel
         Priority = priority;
         _slabSize = slabSize;
         _sendTimeout = sendTimeout;
-        _router = router;
+        _owner = owner;
         _enableReplay = enableReplay;
 
         _slab = GC.AllocateArray<byte>(slabSize, pinned: true);
@@ -184,7 +186,7 @@ internal sealed class WriteChannel : Stream, IWriteChannel
         Interlocked.Add(ref Stats._bytesSent, payloadLength);
         Interlocked.Increment(ref Stats._framesSent);
 
-        _router.NotifyReady(this);
+        _owner.NotifyReady(this);
     }
 
     internal void WriteInitFrame(ReadOnlySpan<byte> channelIdUtf8)
@@ -202,7 +204,7 @@ internal sealed class WriteChannel : Stream, IWriteChannel
             _writePos = frameStart + frameSize;
             _pendingPos = _writePos;
         }
-        _router.NotifyReady(this);
+        _owner.NotifyReady(this);
     }
 
     internal void WriteAckFrame(uint receivedPosition)
@@ -220,7 +222,7 @@ internal sealed class WriteChannel : Stream, IWriteChannel
             _writePos = frameStart + frameSize;
             _pendingPos = _writePos;
         }
-        _router.NotifyReady(this);
+        _owner.NotifyReady(this);
     }
 
     internal void WriteFinFrame()
@@ -237,7 +239,7 @@ internal sealed class WriteChannel : Stream, IWriteChannel
             _writePos = frameStart + frameSize;
             _pendingPos = _writePos;
         }
-        _router.NotifyReady(this);
+        _owner.NotifyReady(this);
     }
 
     internal void WriteRawFrame(ReadOnlySpan<byte> frame)
@@ -252,7 +254,7 @@ internal sealed class WriteChannel : Stream, IWriteChannel
             _writePos += frame.Length;
             _pendingPos = _writePos;
         }
-        _router.NotifyReady(this);
+        _owner.NotifyReady(this);
     }
 
     // Called by mux writer thread — returns a Memory<byte> slice of ready-to-send frames
@@ -280,6 +282,12 @@ internal sealed class WriteChannel : Stream, IWriteChannel
         }
         // Wake any blocked writer waiting for space
         TryReleaseSpaceSignal();
+
+        // Self-unregister when lifecycle is complete (all frames sent after close)
+        if (_state == ChannelState.Closed && !HasPendingData())
+        {
+            _owner.NotifyChannelCompleted(_channelIndex, ChannelId);
+        }
     }
 
     internal void OnAck(int ackedPosition)
@@ -301,7 +309,7 @@ internal sealed class WriteChannel : Stream, IWriteChannel
         {
             _sentPos = _ackedPos;
         }
-        _router.NotifyReady(this);
+        _owner.NotifyReady(this);
     }
 
     internal bool HasPendingData()

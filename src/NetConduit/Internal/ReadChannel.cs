@@ -20,6 +20,7 @@ internal sealed class ReadChannel : Stream, IReadChannel, IValueTaskSource<int>
     private readonly int _slabSize;
     private readonly object _lock = new();
     private readonly TaskCompletionSource _readyTcs = new(TaskCreationOptions.RunContinuationsAsynchronously);
+    private readonly IChannelOwner? _owner;
 
     internal ushort ChannelIndex => _channelIndex;
 
@@ -100,12 +101,14 @@ internal sealed class ReadChannel : Stream, IReadChannel, IValueTaskSource<int>
         string channelId,
         ushort channelIndex,
         ChannelPriority priority,
-        int slabSize)
+        int slabSize,
+        IChannelOwner? owner = null)
     {
         ChannelId = channelId;
         _channelIndex = channelIndex;
         Priority = priority;
         _slabSize = slabSize;
+        _owner = owner;
 
         _slab = GC.AllocateArray<byte>(slabSize, pinned: true);
         _slabMemory = _slab.AsMemory();
@@ -367,15 +370,20 @@ internal sealed class ReadChannel : Stream, IReadChannel, IValueTaskSource<int>
         {
             SetClosed(ChannelCloseReason.LocalClose);
         }
+        _owner?.NotifyChannelCompleted(_channelIndex, ChannelId);
         await base.DisposeAsync();
     }
 
     /// <inheritdoc />
     protected override void Dispose(bool disposing)
     {
-        if (disposing && _state is not ChannelState.Closed)
+        if (disposing)
         {
-            SetClosed(ChannelCloseReason.LocalClose);
+            if (_state is not ChannelState.Closed)
+            {
+                SetClosed(ChannelCloseReason.LocalClose);
+            }
+            _owner?.NotifyChannelCompleted(_channelIndex, ChannelId);
         }
         base.Dispose(disposing);
     }
