@@ -1,3 +1,4 @@
+using System.Buffers;
 using System.Buffers.Binary;
 using System.Threading.Tasks.Sources;
 using NetConduit.Enums;
@@ -111,7 +112,7 @@ internal sealed class ReadChannel : Stream, IReadChannel, IValueTaskSource<int>
         _slabSize = slabSize;
         _owner = owner;
 
-        _slab = SlabPool.Rent(slabSize);
+        _slab = ArrayPool<byte>.Shared.Rent(slabSize);
         _slabMemory = _slab.AsMemory();
     }
 
@@ -345,7 +346,7 @@ internal sealed class ReadChannel : Stream, IReadChannel, IValueTaskSource<int>
     private void TryReturnSlab()
     {
         if (Interlocked.CompareExchange(ref _slabReturned, 1, 0) != 0) return;
-        SlabPool.Return(_slab);
+        ArrayPool<byte>.Shared.Return(_slab);
     }
 
     // IValueTaskSource<int> implementation — used by the slow-path ReadAsync

@@ -1,3 +1,4 @@
+using System.Buffers;
 using System.Buffers.Binary;
 using NetConduit.Enums;
 using NetConduit.Events;
@@ -116,7 +117,7 @@ internal sealed class WriteChannel : Stream, IWriteChannel
         _owner = owner;
         _enableReplay = enableReplay;
 
-        _slab = SlabPool.Rent(slabSize);
+        _slab = ArrayPool<byte>.Shared.Rent(slabSize);
         _slabMemory = _slab.AsMemory();
     }
 
@@ -357,7 +358,7 @@ internal sealed class WriteChannel : Stream, IWriteChannel
     private void TryReturnSlab()
     {
         if (Interlocked.CompareExchange(ref _slabReturned, 1, 0) != 0) return;
-        SlabPool.Return(_slab);
+        ArrayPool<byte>.Shared.Return(_slab);
     }
 
     private void TryNotifyCompleted()
