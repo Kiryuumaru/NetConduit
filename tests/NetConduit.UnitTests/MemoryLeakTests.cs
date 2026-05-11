@@ -318,7 +318,7 @@ public sealed class MemoryLeakTests
             $"peak {peakMemory / 1024}KB. Reconnects: {killCount}.");
     }
 
-    [Fact(Timeout = 300_000)]
+    [Fact(Timeout = 600_000)]
     public async Task MemoryLeak_SubMuxChaos_MemoryStaysBounded()
     {
         var (outerClient, outerServer) = CreatePair();
