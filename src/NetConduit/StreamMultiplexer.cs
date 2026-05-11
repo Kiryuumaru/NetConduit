@@ -15,7 +15,7 @@ namespace NetConduit;
 /// The mux just picks up ready frames from channels and sends them, and routes
 /// incoming frames to the correct channel by reading the 8-byte header.
 /// </summary>
-public sealed class StreamMultiplexer : IStreamMultiplexer, IFrameRouter
+public sealed class StreamMultiplexer : IStreamMultiplexer, IChannelOwner
 {
     private readonly MultiplexerOptions _options;
     private readonly ChannelRegistry _registry;
@@ -182,7 +182,8 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IFrameRouter
             channelId,
             0, // index assigned later when remote INIT arrives
             _options.DefaultChannelOptions.Priority,
-            _options.DefaultChannelOptions.SlabSize);
+            _options.DefaultChannelOptions.SlabSize,
+            this);
 
         if (!_registry.TryRegisterPendingAcceptChannel(channelId, channel))
         {
@@ -458,8 +459,8 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IFrameRouter
         }
     }
 
-    // IFrameRouter — channels call this to signal they have ready frames
-    void IFrameRouter.NotifyReady(WriteChannel channel)
+    // IChannelOwner — channels call back into the multiplexer for routing and lifecycle
+    void IChannelOwner.NotifyReady(WriteChannel channel)
     {
         lock (_readyLock)
         {
@@ -467,6 +468,21 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IFrameRouter
                 _readyChannels.Add(channel);
         }
         _readySignal.Signal();
+    }
+
+    void IChannelOwner.NotifyChannelCompleted(ushort channelIndex, string channelId)
+    {
+        // Write channels: stats decrement here (after FIN sent + no pending data).
+        // Read channels: stats already decremented at FIN receipt in DispatchToChannel.
+        bool isWriteChannel = _registry.GetWriteChannel(channelIndex) is not null;
+
+        _registry.UnregisterChannel(channelIndex, channelId);
+
+        if (isWriteChannel)
+        {
+            Interlocked.Decrement(ref _stats._openChannels);
+            Interlocked.Increment(ref _stats._totalChannelsClosed);
+        }
     }
 
     // =====================================================================
@@ -644,7 +660,8 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IFrameRouter
                     channelId,
                     header.ChannelIndex,
                     _options.DefaultChannelOptions.Priority,
-                    _options.DefaultChannelOptions.SlabSize);
+                    _options.DefaultChannelOptions.SlabSize,
+                    this);
             }
 
             _registry.RegisterReadChannel(header.ChannelIndex, readChannel);

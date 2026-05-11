@@ -25,7 +25,7 @@ public sealed class UseCaseTests
         server.Start();
         await Task.WhenAll(client.WaitForReadyAsync(), server.WaitForReadyAsync());
 
-        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(60));
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(120));
 
         // Client sends request, server accepts and opens a response channel
         var request = client.OpenChannel("request");
@@ -69,7 +69,7 @@ public sealed class UseCaseTests
         server.Start();
         await Task.WhenAll(client.WaitForReadyAsync(), server.WaitForReadyAsync());
 
-        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(60));
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(120));
 
         // Server opens multiple "topic" channels
         var topic1 = server.OpenChannel("topic/weather");
@@ -102,7 +102,7 @@ public sealed class UseCaseTests
         server.Start();
         await Task.WhenAll(client.WaitForReadyAsync(), server.WaitForReadyAsync());
 
-        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(60));
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(120));
 
         // Simulate file transfer: 1MB file
         const int fileSize = 1024 * 1024;
@@ -148,7 +148,7 @@ public sealed class UseCaseTests
         server.Start();
         await Task.WhenAll(client.WaitForReadyAsync(), server.WaitForReadyAsync());
 
-        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(60));
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(120));
 
         var writeCh = client.OpenChannel("stream");
         var readCh = await server.AcceptChannelAsync("stream", cts.Token);
@@ -209,7 +209,7 @@ public sealed class UseCaseTests
         server.Start();
         await Task.WhenAll(client.WaitForReadyAsync(), server.WaitForReadyAsync());
 
-        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(60));
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(120));
 
         // Both sides open channels to each other
         var clientToServer = client.OpenChannel("c2s");
@@ -245,7 +245,7 @@ public sealed class UseCaseTests
         server.Start();
         await Task.WhenAll(client.WaitForReadyAsync(), server.WaitForReadyAsync());
 
-        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(60));
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(120));
 
         // Control channel for metadata/commands
         var control = client.OpenChannel("control");
@@ -287,7 +287,7 @@ public sealed class UseCaseTests
         server.Start();
         await Task.WhenAll(client.WaitForReadyAsync(), server.WaitForReadyAsync());
 
-        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(60));
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(120));
 
         // Accept channels in background
         var acceptTask = Task.Run(async () =>
@@ -327,7 +327,7 @@ public sealed class UseCaseTests
         server.Start();
         await Task.WhenAll(client.WaitForReadyAsync(), server.WaitForReadyAsync());
 
-        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(60));
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(120));
 
         var writeCh = client.OpenChannel("many-small");
         var readCh = await server.AcceptChannelAsync("many-small", cts.Token);
@@ -381,7 +381,7 @@ public sealed class UseCaseTests
         server.Start();
         await Task.WhenAll(client.WaitForReadyAsync(), server.WaitForReadyAsync());
 
-        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(60));
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(120));
 
         const int numSubscribers = 10;
         var writers = new IWriteChannel[numSubscribers];

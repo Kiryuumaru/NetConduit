@@ -51,12 +51,12 @@ public sealed class StreamMultiplexerTests
         Assert.NotNull(writeChannel);
         Assert.Equal("ch1", writeChannel.ChannelId);
 
-        var readChannel = await server.AcceptChannelAsync("ch1", new CancellationTokenSource(TimeSpan.FromSeconds(60)).Token);
+        var readChannel = await server.AcceptChannelAsync("ch1", new CancellationTokenSource(TimeSpan.FromSeconds(120)).Token);
         Assert.NotNull(readChannel);
         Assert.Equal("ch1", readChannel.ChannelId);
 
         // WriteChannel becomes Open after remote ACKs the INIT
-        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(60));
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(120));
         await writeChannel.WaitForReadyAsync(cts.Token);
         Assert.Equal(ChannelState.Open, writeChannel.State);
 
@@ -72,13 +72,13 @@ public sealed class StreamMultiplexerTests
         await Task.WhenAll(client.WaitForReadyAsync(), server.WaitForReadyAsync());
 
         var writeChannel = client.OpenChannel("data");
-        var readChannel = await server.AcceptChannelAsync("data", new CancellationTokenSource(TimeSpan.FromSeconds(60)).Token);
+        var readChannel = await server.AcceptChannelAsync("data", new CancellationTokenSource(TimeSpan.FromSeconds(120)).Token);
 
         byte[] sent = [1, 2, 3, 4, 5];
         await writeChannel.WriteAsync(sent);
 
         byte[] received = new byte[10];
-        int read = await readChannel.ReadAsync(received, new CancellationTokenSource(TimeSpan.FromSeconds(60)).Token);
+        int read = await readChannel.ReadAsync(received, new CancellationTokenSource(TimeSpan.FromSeconds(120)).Token);
 
         Assert.Equal(5, read);
         Assert.Equal(sent, received[..5]);

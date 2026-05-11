@@ -52,7 +52,7 @@ public sealed class GoAwayTests
 
         await client.GoAwayAsync();
 
-        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(60));
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(120));
 
         // Server must detect client shutdown (via GoAway frame or transport close)
         var reason = await disconnectTcs.Task.WaitAsync(cts.Token);

@@ -3,6 +3,8 @@ using System.Net;
 using System.Net.Sockets;
 using System.Text.Json;
 using NetConduit;
+using NetConduit.Interfaces;
+using NetConduit.Models;
 
 const int Runs = 5;
 var results = new List<object>();
@@ -212,18 +214,17 @@ static async Task<double> RunThroughputMuxAsync(int channelCount, int dataSize, 
         server.Start(); client.Start();
         await Task.WhenAll(server.WaitForReadyAsync(cts.Token), client.WaitForReadyAsync(cts.Token));
 
-        var readChannels = new ReadChannel[channelCount];
+        var readChannels = new IReadChannel[channelCount];
         var acceptTask = Task.Run(async () =>
         {
             for (int i = 0; i < channelCount; i++)
                 readChannels[i] = await server.AcceptChannelAsync($"ch-{i}", cts.Token);
         }, cts.Token);
 
-        var writeChannels = new WriteChannel[channelCount];
+        var writeChannels = new IWriteChannel[channelCount];
         for (int i = 0; i < channelCount; i++)
-            writeChannels[i] = client.OpenChannel($"ch-{i}");
+            writeChannels[i] = await client.OpenChannelAsync($"ch-{i}", cts.Token);
         await acceptTask;
-        await Task.Delay(20, cts.Token);
 
         var sw = Stopwatch.StartNew();
 
@@ -396,18 +397,18 @@ static async Task<double> RunGameTickMuxAsync(int channelCount, int msgSize, int
             server.Start(); client.Start();
             await Task.WhenAll(server.WaitForReadyAsync(cts.Token), client.WaitForReadyAsync(cts.Token));
 
-            var readChannels = new ReadChannel[channelCount];
+            var readChannels = new IReadChannel[channelCount];
             var acceptTask = Task.Run(async () =>
             {
                 for (int i = 0; i < channelCount; i++)
                     readChannels[i] = await server.AcceptChannelAsync($"ch-{i}", cts.Token);
             }, cts.Token);
 
-            var writeChannels = new WriteChannel[channelCount];
+            var openTasks = new Task<IWriteChannel>[channelCount];
             for (int i = 0; i < channelCount; i++)
-                writeChannels[i] = client.OpenChannel($"ch-{i}");
+                openTasks[i] = client.OpenChannelAsync($"ch-{i}", cts.Token);
+            var writeChannels = await Task.WhenAll(openTasks);
             await acceptTask;
-            await Task.Delay(20, cts.Token);
 
             using var benchCts = new CancellationTokenSource(TimeSpan.FromSeconds(durationSec));
             long totalMessages = 0;

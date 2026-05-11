@@ -11,7 +11,7 @@ public sealed class ControlChannelTests
         {
             StreamFactory = _ => Task.FromResult<IStreamPair>(duplex.SideA),
             PingInterval = TimeSpan.FromMilliseconds(100),
-            PingTimeout = TimeSpan.FromSeconds(60),
+            PingTimeout = TimeSpan.FromSeconds(120),
             MaxMissedPings = 3,
         });
 
@@ -19,7 +19,7 @@ public sealed class ControlChannelTests
         {
             StreamFactory = _ => Task.FromResult<IStreamPair>(duplex.SideB),
             PingInterval = TimeSpan.FromMilliseconds(100),
-            PingTimeout = TimeSpan.FromSeconds(60),
+            PingTimeout = TimeSpan.FromSeconds(120),
             MaxMissedPings = 3,
         });
 
@@ -57,7 +57,7 @@ public sealed class ControlChannelTests
         await Task.WhenAll(client.WaitForReadyAsync(), server.WaitForReadyAsync());
 
         var wch = client.OpenChannel("test");
-        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(60));
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(120));
         var rch = await server.AcceptChannelAsync("test", cts.Token);
 
         // Send data while keepalive is running

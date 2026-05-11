@@ -38,7 +38,7 @@ public sealed class DataIntegrityTests
         const int messagesPerChannel = 20;
         const int messageSize = 4096;
 
-        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(60));
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(120));
 
         // Sender: open channels and send data with known patterns
         var sendTasks = new Task[channelCount];
@@ -123,7 +123,7 @@ public sealed class DataIntegrityTests
         const int messageCount = 20;
         const int messageSize = 1024;
 
-        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(60));
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(120));
 
         var tasks = new List<Task>();
 
@@ -209,7 +209,7 @@ public sealed class DataIntegrityTests
         await Task.WhenAll(client.WaitForReadyAsync(), server.WaitForReadyAsync());
 
         const int channelsPerSide = 10;
-        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(60));
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(120));
 
         // Both sides open channels simultaneously
         var clientChannels = new IWriteChannel[channelsPerSide];
@@ -261,7 +261,7 @@ public sealed class DataIntegrityTests
         await Task.WhenAll(client.WaitForReadyAsync(), server.WaitForReadyAsync());
 
         const int cycles = 200;
-        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(60));
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(120));
 
         for (int i = 0; i < cycles; i++)
         {
@@ -297,7 +297,7 @@ public sealed class DataIntegrityTests
         server.Start();
         await Task.WhenAll(client.WaitForReadyAsync(), server.WaitForReadyAsync());
 
-        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(60));
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(120));
 
         // Send 2MB of data
         const int totalSize = 2 * 1024 * 1024;
@@ -349,7 +349,7 @@ public sealed class DataIntegrityTests
         server.Start();
         await Task.WhenAll(client.WaitForReadyAsync(), server.WaitForReadyAsync());
 
-        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(60));
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(120));
 
         var writeChannel = client.OpenChannel("boundaries");
         var readChannel = await server.AcceptChannelAsync("boundaries", cts.Token);

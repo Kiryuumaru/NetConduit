@@ -73,9 +73,10 @@ public sealed class ReconnectionTests
         Assert.True(afterAck.IsEmpty);
     }
 
-    private sealed class TestRouter : NetConduit.Internal.IFrameRouter
+    private sealed class TestRouter : NetConduit.Internal.IChannelOwner
     {
         public int NotifyCount;
         public void NotifyReady(WriteChannel channel) => Interlocked.Increment(ref NotifyCount);
+        public void NotifyChannelCompleted(ushort channelIndex, string channelId) { }
     }
 }
