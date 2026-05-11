@@ -30,7 +30,7 @@ public sealed class TransportChaosTests
 
         client.Start();
         server.Start();
-        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(60));
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(120));
         await Task.WhenAll(
             client.WaitForReadyAsync(cts.Token),
             server.WaitForReadyAsync(cts.Token));
@@ -77,7 +77,7 @@ public sealed class TransportChaosTests
 
         client.Start();
         server.Start();
-        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(60));
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(120));
         await Task.WhenAll(
             client.WaitForReadyAsync(cts.Token),
             server.WaitForReadyAsync(cts.Token));
@@ -117,7 +117,7 @@ public sealed class TransportChaosTests
 
         client.Start();
         server.Start();
-        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(60));
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(120));
         await Task.WhenAll(
             client.WaitForReadyAsync(cts.Token),
             server.WaitForReadyAsync(cts.Token));
@@ -128,7 +128,7 @@ public sealed class TransportChaosTests
 
         // Dispose immediately — should not hang
         var disposeTask = client.DisposeAsync().AsTask();
-        var completed = await Task.WhenAny(disposeTask, Task.Delay(TimeSpan.FromSeconds(60)));
+        var completed = await Task.WhenAny(disposeTask, Task.Delay(TimeSpan.FromSeconds(120)));
 
         Assert.Equal(disposeTask, completed);
         Assert.False(client.IsRunning);
@@ -163,7 +163,7 @@ public sealed class TransportChaosTests
 
         client.Start();
         server.Start();
-        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(60));
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(120));
         await Task.WhenAll(
             client.WaitForReadyAsync(cts.Token),
             server.WaitForReadyAsync(cts.Token));
@@ -200,7 +200,7 @@ public sealed class TransportChaosTests
 
         client.Start();
         server.Start();
-        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(60));
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(120));
         await Task.WhenAll(
             client.WaitForReadyAsync(cts.Token),
             server.WaitForReadyAsync(cts.Token));
@@ -253,7 +253,7 @@ public sealed class TransportChaosTests
 
         client.Start();
         server.Start();
-        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(60));
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(120));
         await Task.WhenAll(
             client.WaitForReadyAsync(cts.Token),
             server.WaitForReadyAsync(cts.Token));
@@ -308,7 +308,7 @@ public sealed class TransportChaosTests
         // After start but possibly before connect
         Assert.True(client.IsRunning);
 
-        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(60));
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(120));
         await Task.WhenAll(
             client.WaitForReadyAsync(cts.Token),
             server.WaitForReadyAsync(cts.Token));

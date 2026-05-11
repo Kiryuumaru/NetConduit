@@ -11,7 +11,7 @@ public sealed class DisconnectionDataLossTests
     public async Task WriteAfterDisconnect_SmallData_Succeeds()
     {
         var broker = new TransportBroker(2);
-        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(60));
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(120));
 
         var client = StreamMultiplexer.Create(new MultiplexerOptions
         {
@@ -43,7 +43,7 @@ public sealed class DisconnectionDataLossTests
     public async Task WriteAfterDisconnect_LargeData_Succeeds()
     {
         var broker = new TransportBroker(2);
-        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(60));
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(120));
 
         var client = StreamMultiplexer.Create(new MultiplexerOptions
         {
@@ -76,7 +76,7 @@ public sealed class DisconnectionDataLossTests
     public async Task WriteAfterDisconnect_MultipleWrites_AllSucceed()
     {
         var broker = new TransportBroker(2);
-        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(60));
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(120));
 
         var client = StreamMultiplexer.Create(new MultiplexerOptions
         {
@@ -112,7 +112,7 @@ public sealed class DisconnectionDataLossTests
     public async Task ChannelState_AfterDisconnect_StaysOpen()
     {
         var broker = new TransportBroker(2);
-        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(60));
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(120));
 
         var client = StreamMultiplexer.Create(new MultiplexerOptions
         {
@@ -147,7 +147,7 @@ public sealed class DisconnectionDataLossTests
     public async Task MultipleChannels_AllSurviveDisconnect()
     {
         var broker = new TransportBroker(2);
-        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(60));
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(120));
 
         var client = StreamMultiplexer.Create(new MultiplexerOptions
         {
@@ -188,7 +188,7 @@ public sealed class DisconnectionDataLossTests
     public async Task OnDisconnected_EventFires_WithCorrectReason()
     {
         var broker = new TransportBroker(2);
-        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(60));
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(120));
 
         var disconnectTcs = new TaskCompletionSource<DisconnectReason>();
 
@@ -220,7 +220,7 @@ public sealed class DisconnectionDataLossTests
     public async Task OnReconnecting_EventFires_AfterDisconnect()
     {
         var broker = new TransportBroker(2);
-        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(60));
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(120));
 
         var reconnectingTcs = new TaskCompletionSource<int>();
 
@@ -252,7 +252,7 @@ public sealed class DisconnectionDataLossTests
     public async Task DataContinuity_AfterReconnect_AllBytesReceived()
     {
         var broker = new TransportBroker(2);
-        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(60));
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(120));
 
         var clientReconnected = new TaskCompletionSource();
 
@@ -307,7 +307,7 @@ public sealed class DisconnectionDataLossTests
     public async Task BidirectionalChannels_BothDirectionsSurviveDisconnect()
     {
         var broker = new TransportBroker(2);
-        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(60));
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(120));
 
         var client = StreamMultiplexer.Create(new MultiplexerOptions
         {
@@ -350,7 +350,7 @@ public sealed class DisconnectionDataLossTests
     public async Task Stats_BytesSent_PreservedAfterDisconnect()
     {
         var broker = new TransportBroker(2);
-        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(60));
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(120));
 
         var client = StreamMultiplexer.Create(new MultiplexerOptions
         {

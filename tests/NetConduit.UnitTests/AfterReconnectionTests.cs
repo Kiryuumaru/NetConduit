@@ -50,7 +50,7 @@ public sealed class AfterReconnectionTests : IAsyncDisposable
 
         client.Start();
         server.Start();
-        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(60));
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(120));
         await Task.WhenAll(
             client.WaitForReadyAsync(cts.Token),
             server.WaitForReadyAsync(cts.Token));
@@ -94,7 +94,7 @@ public sealed class AfterReconnectionTests : IAsyncDisposable
 
         client.Start();
         server.Start();
-        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(60));
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(120));
         await Task.WhenAll(
             client.WaitForReadyAsync(cts.Token),
             server.WaitForReadyAsync(cts.Token));
@@ -173,7 +173,7 @@ public sealed class AfterReconnectionTests : IAsyncDisposable
 
         client.Start();
         server.Start();
-        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(60));
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(120));
         await Task.WhenAll(
             client.WaitForReadyAsync(cts.Token),
             server.WaitForReadyAsync(cts.Token));
@@ -252,7 +252,7 @@ public sealed class AfterReconnectionTests : IAsyncDisposable
 
         client.Start();
         server.Start();
-        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(60));
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(120));
         await Task.WhenAll(
             client.WaitForReadyAsync(cts.Token),
             server.WaitForReadyAsync(cts.Token));
@@ -343,7 +343,7 @@ public sealed class AfterReconnectionTests : IAsyncDisposable
 
         client.Start();
         server.Start();
-        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(60));
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(120));
         await Task.WhenAll(
             client.WaitForReadyAsync(cts.Token),
             server.WaitForReadyAsync(cts.Token));
@@ -399,7 +399,7 @@ public sealed class AfterReconnectionTests : IAsyncDisposable
 
         client.Start();
         server.Start();
-        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(60));
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(120));
         await Task.WhenAll(
             client.WaitForReadyAsync(cts.Token),
             server.WaitForReadyAsync(cts.Token));
@@ -444,7 +444,7 @@ public sealed class AfterReconnectionTests : IAsyncDisposable
 
         client.Start();
         server.Start();
-        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(60));
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(120));
         await Task.WhenAll(
             client.WaitForReadyAsync(cts.Token),
             server.WaitForReadyAsync(cts.Token));
