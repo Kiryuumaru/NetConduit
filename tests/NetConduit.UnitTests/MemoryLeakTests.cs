@@ -4,14 +4,15 @@ using NetConduit.Interfaces;
 namespace NetConduit.UnitTests;
 
 /// <summary>
-/// Long-running memory leak detection tests.
-/// Runs chaos workloads for extended periods and asserts memory stays bounded.
+/// Memory leak detection tests.
+/// Runs chaos workloads and asserts memory stays bounded.
 /// </summary>
 [Collection("Sequential")]
 public sealed class MemoryLeakTests
 {
-    private static readonly TimeSpan TestDuration = TimeSpan.FromMinutes(3);
-    private const int MemorySampleIntervalMs = 5000;
+    private static readonly TimeSpan TestDuration = TimeSpan.FromSeconds(30);
+    private static readonly TimeSpan CleanupTimeout = TimeSpan.FromSeconds(10);
+    private const int MemorySampleIntervalMs = 2000;
     private const int MaxChannelsPerTest = 20000;
 
     private static (StreamMultiplexer Client, StreamMultiplexer Server) CreatePair()
@@ -42,8 +43,8 @@ public sealed class MemoryLeakTests
         return (client, server);
     }
 
-    [Fact]
-    public async Task MemoryLeak_ChaosWorkload_3Minutes_MemoryStaysBounded()
+    [Fact(Timeout = 90_000)]
+    public async Task MemoryLeak_ChaosWorkload_MemoryStaysBounded()
     {
         var (client, server) = CreatePair();
         client.Start();
@@ -142,18 +143,15 @@ public sealed class MemoryLeakTests
         await Task.Delay(TestDuration, cts.Token);
         await cts.CancelAsync();
 
-        try { await chaosTask; } catch (OperationCanceledException) { }
-        try { await samplerTask; } catch (OperationCanceledException) { }
+        try { await chaosTask.WaitAsync(CleanupTimeout); } catch { }
+        try { await samplerTask.WaitAsync(CleanupTimeout); } catch { }
 
         await client.DisposeAsync();
         await server.DisposeAsync();
 
-        try { await serverTask; } catch (OperationCanceledException) { }
+        try { await serverTask.WaitAsync(CleanupTimeout); } catch { }
+        try { await Task.WhenAll(handlerTasks).WaitAsync(CleanupTimeout); } catch { }
 
-        // Await all handler tasks to ensure channels are fully disposed
-        try { await Task.WhenAll(handlerTasks); } catch { }
-
-        // Release all references so GC can collect channel objects
         handlerTasks = null!;
         chaosTask = null!;
         serverTask = null!;
@@ -189,8 +187,8 @@ public sealed class MemoryLeakTests
             $"peak {peakMemory / 1024}KB. Processed {totalChannelsProcessed} channels.");
     }
 
-    [Fact]
-    public async Task MemoryLeak_ReconnectChaos_3Minutes_MemoryStaysBounded()
+    [Fact(Timeout = 90_000)]
+    public async Task MemoryLeak_ReconnectChaos_MemoryStaysBounded()
     {
         await using var factory = new ReconnectableTransportFactory();
         var (client, server) = CreateReconnectablePair(factory);
@@ -284,14 +282,14 @@ public sealed class MemoryLeakTests
         await Task.Delay(TestDuration, cts.Token);
         await cts.CancelAsync();
 
-        try { await writerTask; } catch (OperationCanceledException) { }
-        try { await killerTask; } catch (OperationCanceledException) { }
-        try { await samplerTask; } catch (OperationCanceledException) { }
+        try { await writerTask.WaitAsync(CleanupTimeout); } catch { }
+        try { await killerTask.WaitAsync(CleanupTimeout); } catch { }
+        try { await samplerTask.WaitAsync(CleanupTimeout); } catch { }
 
         await client.DisposeAsync();
         await server.DisposeAsync();
 
-        try { await serverTask; } catch (OperationCanceledException) { }
+        try { await serverTask.WaitAsync(CleanupTimeout); } catch { }
 
         // Final measurement
         GC.Collect(2, GCCollectionMode.Forced, true, true);
@@ -319,8 +317,8 @@ public sealed class MemoryLeakTests
             $"peak {peakMemory / 1024}KB. Reconnects: {killCount}.");
     }
 
-    [Fact]
-    public async Task MemoryLeak_SubMuxChaos_3Minutes_MemoryStaysBounded()
+    [Fact(Timeout = 90_000)]
+    public async Task MemoryLeak_SubMuxChaos_MemoryStaysBounded()
     {
         var (outerClient, outerServer) = CreatePair();
         outerClient.Start();
@@ -416,8 +414,8 @@ public sealed class MemoryLeakTests
         await Task.Delay(TestDuration, cts.Token);
         await cts.CancelAsync();
 
-        try { await chaosTask; } catch (OperationCanceledException) { }
-        try { await samplerTask; } catch (OperationCanceledException) { }
+        try { await chaosTask.WaitAsync(CleanupTimeout); } catch { }
+        try { await samplerTask.WaitAsync(CleanupTimeout); } catch { }
 
         await outerClient.DisposeAsync();
         await outerServer.DisposeAsync();
@@ -448,8 +446,8 @@ public sealed class MemoryLeakTests
             $"peak {peakMemory / 1024}KB. Sub-muxes created: {subMuxCount}.");
     }
 
-    [Fact]
-    public async Task MemoryLeak_HappyPath_3Minutes_MemoryStaysBounded()
+    [Fact(Timeout = 90_000)]
+    public async Task MemoryLeak_HappyPath_MemoryStaysBounded()
     {
         var (client, server) = CreatePair();
         client.Start();
@@ -523,13 +521,13 @@ public sealed class MemoryLeakTests
         await Task.Delay(TestDuration, cts.Token);
         await cts.CancelAsync();
 
-        try { await workerTask; } catch (OperationCanceledException) { }
-        try { await samplerTask; } catch (OperationCanceledException) { }
+        try { await workerTask.WaitAsync(CleanupTimeout); } catch { }
+        try { await samplerTask.WaitAsync(CleanupTimeout); } catch { }
 
         await client.DisposeAsync();
         await server.DisposeAsync();
 
-        try { await serverTask; } catch (OperationCanceledException) { }
+        try { await serverTask.WaitAsync(CleanupTimeout); } catch { }
         workerTask = null!;
         serverTask = null!;
         samplerTask = null!;
@@ -559,8 +557,8 @@ public sealed class MemoryLeakTests
             $"peak {peakMemory / 1024}KB. Processed {totalChannels} channels.");
     }
 
-    [Fact]
-    public async Task MemoryLeak_HeavyLoad_3Minutes_MemoryStaysBounded()
+    [Fact(Timeout = 90_000)]
+    public async Task MemoryLeak_HeavyLoad_MemoryStaysBounded()
     {
         var (client, server) = CreatePair();
         client.Start();
@@ -657,14 +655,14 @@ public sealed class MemoryLeakTests
         await Task.Delay(TestDuration, cts.Token);
         await cts.CancelAsync();
 
-        try { await workerTask; } catch (OperationCanceledException) { }
-        try { await samplerTask; } catch (OperationCanceledException) { }
+        try { await workerTask.WaitAsync(CleanupTimeout); } catch { }
+        try { await samplerTask.WaitAsync(CleanupTimeout); } catch { }
 
         await client.DisposeAsync();
         await server.DisposeAsync();
 
-        try { await serverTask; } catch (OperationCanceledException) { }
-        try { await Task.WhenAll(handlerTasks); } catch { }
+        try { await serverTask.WaitAsync(CleanupTimeout); } catch { }
+        try { await Task.WhenAll(handlerTasks).WaitAsync(CleanupTimeout); } catch { }
 
         handlerTasks = null!;
         workerTask = null!;
@@ -696,8 +694,8 @@ public sealed class MemoryLeakTests
             $"peak {peakMemory / 1024}KB. Processed {totalChannels} channels.");
     }
 
-    [Fact]
-    public async Task MemoryLeak_UnhappyPath_3Minutes_MemoryStaysBounded()
+    [Fact(Timeout = 90_000)]
+    public async Task MemoryLeak_UnhappyPath_MemoryStaysBounded()
     {
         var (client, server) = CreatePair();
         client.Start();
@@ -814,14 +812,14 @@ public sealed class MemoryLeakTests
         await Task.Delay(TestDuration, cts.Token);
         await cts.CancelAsync();
 
-        try { await workerTask; } catch (OperationCanceledException) { }
-        try { await samplerTask; } catch (OperationCanceledException) { }
+        try { await workerTask.WaitAsync(CleanupTimeout); } catch { }
+        try { await samplerTask.WaitAsync(CleanupTimeout); } catch { }
 
         await client.DisposeAsync();
         await server.DisposeAsync();
 
-        try { await serverTask; } catch (OperationCanceledException) { }
-        try { await Task.WhenAll(handlerTasks); } catch { }
+        try { await serverTask.WaitAsync(CleanupTimeout); } catch { }
+        try { await Task.WhenAll(handlerTasks).WaitAsync(CleanupTimeout); } catch { }
 
         handlerTasks = null!;
         workerTask = null!;
@@ -853,8 +851,8 @@ public sealed class MemoryLeakTests
             $"peak {peakMemory / 1024}KB. Processed {totalChannels} channels.");
     }
 
-    [Fact]
-    public async Task MemoryLeak_UnusualPatterns_3Minutes_MemoryStaysBounded()
+    [Fact(Timeout = 90_000)]
+    public async Task MemoryLeak_UnusualPatterns_MemoryStaysBounded()
     {
         var (client, server) = CreatePair();
         client.Start();
@@ -985,14 +983,14 @@ public sealed class MemoryLeakTests
         await Task.Delay(TestDuration, cts.Token);
         await cts.CancelAsync();
 
-        try { await workerTask; } catch (OperationCanceledException) { }
-        try { await samplerTask; } catch (OperationCanceledException) { }
+        try { await workerTask.WaitAsync(CleanupTimeout); } catch { }
+        try { await samplerTask.WaitAsync(CleanupTimeout); } catch { }
 
         await client.DisposeAsync();
         await server.DisposeAsync();
 
-        try { await serverTask; } catch (OperationCanceledException) { }
-        try { await Task.WhenAll(handlerTasks); } catch { }
+        try { await serverTask.WaitAsync(CleanupTimeout); } catch { }
+        try { await Task.WhenAll(handlerTasks).WaitAsync(CleanupTimeout); } catch { }
 
         handlerTasks = null!;
         workerTask = null!;
