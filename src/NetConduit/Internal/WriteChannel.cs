@@ -34,6 +34,8 @@ internal sealed class WriteChannel : Stream, IWriteChannel
     private int _pendingPos;
     private int _writePos;
     private bool _routerReading; // true between TakeReady and MarkSent — blocks compaction
+    private int _completionNotified; // CAS guard: ensures NotifyChannelCompleted fires exactly once
+    private int _slabReturned; // CAS guard: ensures slab is returned to pool exactly once
 
     private volatile ChannelState _state = ChannelState.Opening;
     private volatile bool _isReady;
@@ -114,7 +116,7 @@ internal sealed class WriteChannel : Stream, IWriteChannel
         _owner = owner;
         _enableReplay = enableReplay;
 
-        _slab = GC.AllocateArray<byte>(slabSize, pinned: true);
+        _slab = SlabPool.Rent(slabSize);
         _slabMemory = _slab.AsMemory();
     }
 
@@ -283,11 +285,9 @@ internal sealed class WriteChannel : Stream, IWriteChannel
         // Wake any blocked writer waiting for space
         TryReleaseSpaceSignal();
 
-        // Self-unregister when lifecycle is complete (all frames sent after close)
-        if (_state == ChannelState.Closed && !HasPendingData())
-        {
-            _owner.NotifyChannelCompleted(_channelIndex, ChannelId);
-        }
+        // Writer thread may drain FIN before SetClosed transitions state.
+        // Both MarkSent and SetClosed call TryNotifyCompleted — whichever runs last triggers unregistration.
+        TryNotifyCompleted();
     }
 
     internal void OnAck(int ackedPosition)
@@ -345,6 +345,28 @@ internal sealed class WriteChannel : Stream, IWriteChannel
         // Wake any blocked writers
         TryReleaseSpaceSignal();
         Closed?.Invoke(this, new ChannelCloseEventArgs(reason, exception));
+
+        // When closed by AbortAllChannels (MuxDisposed), the registry handles cleanup via Clear().
+        // Only self-unregister for graceful per-channel closes where MarkSent may have missed the window.
+        if (reason != ChannelCloseReason.MuxDisposed)
+            TryNotifyCompleted();
+        else if (!HasPendingData())
+            TryReturnSlab();
+    }
+
+    private void TryReturnSlab()
+    {
+        if (Interlocked.CompareExchange(ref _slabReturned, 1, 0) != 0) return;
+        SlabPool.Return(_slab);
+    }
+
+    private void TryNotifyCompleted()
+    {
+        if (ChannelId is null) return;
+        if (_state != ChannelState.Closed || HasPendingData()) return;
+        if (Interlocked.CompareExchange(ref _completionNotified, 1, 0) != 0) return;
+        TryReturnSlab();
+        _owner.NotifyChannelCompleted(_channelIndex, ChannelId);
     }
 
     private void TryReleaseSpaceSignal()

@@ -21,6 +21,7 @@ internal sealed class ReadChannel : Stream, IReadChannel, IValueTaskSource<int>
     private readonly object _lock = new();
     private readonly TaskCompletionSource _readyTcs = new(TaskCreationOptions.RunContinuationsAsynchronously);
     private readonly IChannelOwner? _owner;
+    private int _slabReturned; // CAS guard: ensures slab is returned to pool exactly once
 
     internal ushort ChannelIndex => _channelIndex;
 
@@ -110,7 +111,7 @@ internal sealed class ReadChannel : Stream, IReadChannel, IValueTaskSource<int>
         _slabSize = slabSize;
         _owner = owner;
 
-        _slab = GC.AllocateArray<byte>(slabSize, pinned: true);
+        _slab = SlabPool.Rent(slabSize);
         _slabMemory = _slab.AsMemory();
     }
 
@@ -208,6 +209,7 @@ internal sealed class ReadChannel : Stream, IReadChannel, IValueTaskSource<int>
                 Interlocked.Increment(ref Stats._framesReceived);
                 lock (_lock)
                 {
+                    if (_state == ChannelState.Closed) break;
                     if (!TryDirectDeliver(payload))
                         BufferInSlab(payload);
                 }
@@ -340,6 +342,12 @@ internal sealed class ReadChannel : Stream, IReadChannel, IValueTaskSource<int>
         Closed?.Invoke(this, new ChannelCloseEventArgs(reason, exception));
     }
 
+    private void TryReturnSlab()
+    {
+        if (Interlocked.CompareExchange(ref _slabReturned, 1, 0) != 0) return;
+        SlabPool.Return(_slab);
+    }
+
     // IValueTaskSource<int> implementation — used by the slow-path ReadAsync
     int IValueTaskSource<int>.GetResult(short token) => _readCompletion.Core.GetResult(token);
     ValueTaskSourceStatus IValueTaskSource<int>.GetStatus(short token) => _readCompletion.Core.GetStatus(token);
@@ -370,6 +378,7 @@ internal sealed class ReadChannel : Stream, IReadChannel, IValueTaskSource<int>
         {
             SetClosed(ChannelCloseReason.LocalClose);
         }
+        TryReturnSlab();
         _owner?.NotifyChannelCompleted(_channelIndex, ChannelId);
         await base.DisposeAsync();
     }
@@ -383,6 +392,7 @@ internal sealed class ReadChannel : Stream, IReadChannel, IValueTaskSource<int>
             {
                 SetClosed(ChannelCloseReason.LocalClose);
             }
+            TryReturnSlab();
             _owner?.NotifyChannelCompleted(_channelIndex, ChannelId);
         }
         base.Dispose(disposing);
