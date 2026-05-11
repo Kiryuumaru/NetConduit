@@ -34,6 +34,7 @@ internal sealed class WriteChannel : Stream, IWriteChannel
     private int _pendingPos;
     private int _writePos;
     private bool _routerReading; // true between TakeReady and MarkSent — blocks compaction
+    private int _completionNotified; // 0 = not yet, 1 = NotifyChannelCompleted called
 
     private volatile ChannelState _state = ChannelState.Opening;
     private volatile bool _isReady;
@@ -284,10 +285,7 @@ internal sealed class WriteChannel : Stream, IWriteChannel
         TryReleaseSpaceSignal();
 
         // Self-unregister when lifecycle is complete (all frames sent after close)
-        if (_state == ChannelState.Closed && !HasPendingData())
-        {
-            _owner.NotifyChannelCompleted(_channelIndex, ChannelId);
-        }
+        TryNotifyCompleted();
     }
 
     internal void OnAck(int ackedPosition)
@@ -345,6 +343,18 @@ internal sealed class WriteChannel : Stream, IWriteChannel
         // Wake any blocked writers
         TryReleaseSpaceSignal();
         Closed?.Invoke(this, new ChannelCloseEventArgs(reason, exception));
+        // Writer loop may have drained FIN before state reached Closed (race in MarkSent)
+        TryNotifyCompleted();
+    }
+
+    private void TryNotifyCompleted()
+    {
+        if (ChannelId is null) return;
+        if (_state == ChannelState.Closed && !HasPendingData())
+        {
+            if (Interlocked.CompareExchange(ref _completionNotified, 1, 0) == 0)
+                _owner.NotifyChannelCompleted(_channelIndex, ChannelId);
+        }
     }
 
     private void TryReleaseSpaceSignal()
