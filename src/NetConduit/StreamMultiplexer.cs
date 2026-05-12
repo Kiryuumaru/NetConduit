@@ -169,41 +169,34 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IChannelOwner
         if (!_isRunning)
             throw new InvalidOperationException("Multiplexer has not been started.");
 
-        // Check if channel already arrived from remote
-        var existing = _registry.GetReadChannelById(channelId);
-        if (existing is not null) return existing;
-
-        // Check if a pending accept already exists for this ID
-        var pendingExisting = _registry.GetPendingAcceptChannel(channelId);
-        if (pendingExisting is not null) return pendingExisting;
-
-        // Create a pending ReadChannel that will be wired up when remote INIT arrives
-        var channel = new ReadChannel(
-            channelId,
-            0, // index assigned later when remote INIT arrives
-            _options.DefaultChannelOptions.Priority,
-            _options.DefaultChannelOptions.SlabSize,
-            this);
-
-        if (!_registry.TryRegisterPendingAcceptChannel(channelId, channel))
+        // Atomically observe registry state and either return an existing channel
+        // or commit a new pending channel that the reader will adopt when INIT arrives.
+        lock (_registry.AcceptLock)
         {
-            // Another thread registered between our check and this call
-            return _registry.GetPendingAcceptChannel(channelId)
-                ?? throw new MultiplexerException(ErrorCode.ChannelExists, $"A channel with ID '{channelId}' is already being accepted.");
+            // Check if channel already arrived from remote
+            var existing = _registry.GetReadChannelById(channelId);
+            if (existing is not null) return existing;
+
+            // Check if a pending accept already exists for this ID
+            var pendingExisting = _registry.GetPendingAcceptChannel(channelId);
+            if (pendingExisting is not null) return pendingExisting;
+
+            // Create a pending ReadChannel that will be wired up when remote INIT arrives
+            var channel = new ReadChannel(
+                channelId,
+                0, // index assigned later when remote INIT arrives
+                _options.DefaultChannelOptions.Priority,
+                _options.DefaultChannelOptions.SlabSize,
+                this);
+
+            if (!_registry.TryRegisterPendingAcceptChannel(channelId, channel))
+                throw new MultiplexerException(ErrorCode.ChannelExists, $"A channel with ID '{channelId}' is already being accepted.");
+
+            if (_isConnected)
+                channel.MarkConnected();
+
+            return channel;
         }
-
-        // Re-check: INIT may have arrived between first check and registration
-        existing = _registry.GetReadChannelById(channelId);
-        if (existing is not null)
-        {
-            _registry.RemovePendingAcceptChannel(channelId);
-            return existing;
-        }
-
-        if (_isConnected)
-            channel.MarkConnected();
-
-        return channel;
     }
 
     /// <inheritdoc />
@@ -636,35 +629,45 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IChannelOwner
             if (payload.Length > ChannelConstants.MaxChannelIdLength)
                 return; // channel name too long — drop frame
 
-            // After reconnect, Init frames are replayed from the slab.
-            // If the channel already exists, skip re-registration.
-            var existing = _registry.GetReadChannel(header.ChannelIndex);
-            if (existing is not null)
-                return;
-
             string channelId = Encoding.UTF8.GetString(payload);
-
-            // Check if a pending accept channel was pre-created via AcceptChannel(sync)
-            var pendingChannel = _registry.GetPendingAcceptChannel(channelId);
             ReadChannel readChannel;
+            bool isNewlyAccepted;
 
-            if (pendingChannel is not null)
+            // Atomic registration: serialized with AcceptChannel so we cannot
+            // race between adopting a pending channel and the test grabbing
+            // a transient _readChannels entry.
+            lock (_registry.AcceptLock)
             {
-                readChannel = pendingChannel;
-                // Re-register with the actual channel index from the remote
-                readChannel.SetChannelIndex(header.ChannelIndex);
-            }
-            else
-            {
-                readChannel = new ReadChannel(
-                    channelId,
-                    header.ChannelIndex,
-                    _options.DefaultChannelOptions.Priority,
-                    _options.DefaultChannelOptions.SlabSize,
-                    this);
+                // After reconnect, Init frames are replayed from the slab.
+                // If the channel already exists, skip re-registration.
+                var existing = _registry.GetReadChannel(header.ChannelIndex);
+                if (existing is not null)
+                    return;
+
+                // Check if a pending accept channel was pre-created via AcceptChannel
+                var pendingChannel = _registry.GetPendingAcceptChannel(channelId);
+
+                if (pendingChannel is not null)
+                {
+                    readChannel = pendingChannel;
+                    readChannel.SetChannelIndex(header.ChannelIndex);
+                    _registry.RemovePendingAcceptChannel(channelId);
+                    isNewlyAccepted = true;
+                }
+                else
+                {
+                    readChannel = new ReadChannel(
+                        channelId,
+                        header.ChannelIndex,
+                        _options.DefaultChannelOptions.Priority,
+                        _options.DefaultChannelOptions.SlabSize,
+                        this);
+                    isNewlyAccepted = false;
+                }
+
+                _registry.RegisterReadChannel(header.ChannelIndex, readChannel);
             }
 
-            _registry.RegisterReadChannel(header.ChannelIndex, readChannel);
             readChannel.MarkOpen();
             readChannel.MarkConnected();
 
@@ -675,7 +678,9 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IChannelOwner
             Interlocked.Increment(ref _stats._totalChannelsOpened);
             RaiseEvent(ChannelAccepted, new ChannelEventArgs(channelId));
 
-            _registry.EnqueueForAccept(readChannel);
+            // Only enqueue for generic AcceptChannelsAsync if no specific accept claimed it.
+            if (!isNewlyAccepted)
+                _registry.EnqueueForAccept(readChannel);
             return;
         }
 
