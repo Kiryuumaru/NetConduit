@@ -499,7 +499,7 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IChannelOwner
         {
             while (!ct.IsCancellationRequested)
             {
-                _readySignal.Wait(ct);
+                await _readySignal.WaitAsync(ct);
 
                 // Snapshot and sort ready channels by priority (highest first)
                 WriteChannel[] snapshot;
