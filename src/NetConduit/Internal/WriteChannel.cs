@@ -355,6 +355,13 @@ internal sealed class WriteChannel : Stream, IWriteChannel
             TryReturnSlab();
     }
 
+    internal void Abort(ChannelCloseReason reason, Exception? exception = null)
+    {
+        SetClosed(reason, exception);
+        TryReturnSlab();
+        _spaceAvailable.Dispose();
+    }
+
     private void TryReturnSlab()
     {
         if (Interlocked.CompareExchange(ref _slabReturned, 1, 0) != 0) return;

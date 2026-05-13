@@ -930,7 +930,7 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IChannelOwner
 
         if (_controlChannel is not null)
         {
-            await _controlChannel.DisposeAsync();
+            _controlChannel.Abort(ChannelCloseReason.MuxDisposed);
             _controlChannel = null;
         }
 
