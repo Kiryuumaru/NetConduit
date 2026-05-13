@@ -2,6 +2,10 @@
   <Project Path="build/_build.csproj" />
   <Folder Name="/src/">
     <Project Path="src/NetConduit/NetConduit.csproj" />
+    <Project Path="src/NetConduit.Transit.Stream/NetConduit.Transit.Stream.csproj" />
+    <Project Path="src/NetConduit.Transit.DuplexStream/NetConduit.Transit.DuplexStream.csproj" />
+    <Project Path="src/NetConduit.Transit.Message/NetConduit.Transit.Message.csproj" />
+    <Project Path="src/NetConduit.Transit.DeltaMessage/NetConduit.Transit.DeltaMessage.csproj" />
     <Project Path="src/NetConduit.Transport.Tcp/NetConduit.Transport.Tcp.csproj" />
     <Project Path="src/NetConduit.Transport.WebSocket/NetConduit.Transport.WebSocket.csproj" />
     <Project Path="src/NetConduit.Transport.Udp/NetConduit.Transport.Udp.csproj" />

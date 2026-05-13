@@ -2,26 +2,23 @@ using System.Diagnostics.CodeAnalysis;
 using System.Text.Json;
 using System.Text.Json.Serialization.Metadata;
 using NetConduit.Interfaces;
-using NetConduit.Models;
 
-namespace NetConduit.Transits;
+namespace NetConduit.Transit.Message;
 
 /// <summary>
-/// Extension methods for creating transits from multiplexers.
+/// Extension methods on <see cref="IStreamMultiplexer"/> for creating <see cref="MessageTransit{TSend, TReceive}"/> instances.
 /// <para>
 /// Duplex transits use a naming convention where two simplex channels form a bidirectional pair.
 /// Given a base <c>channelId</c>, the outbound (write) channel is named <c>"{channelId}&gt;&gt;"</c>
-/// and the inbound (read) channel is named <c>"{channelId}&lt;&lt;"</c>.
-/// The counterpart (<see cref="AcceptDuplexStreamAsync(IStreamMultiplexer, string, CancellationToken)"/>)
+/// and the inbound (read) channel is named <c>"{channelId}&lt;&lt;"</c>. The counterpart
 /// reverses the roles: it reads from <c>"{channelId}&gt;&gt;"</c> and writes to <c>"{channelId}&lt;&lt;"</c>.
 /// </para>
 /// <para>
 /// The base <c>channelId</c> must not itself contain the suffix sequences <c>"&gt;&gt;"</c> or <c>"&lt;&lt;"</c>,
-/// as this would produce ambiguous composite channel names. Callers are responsible for choosing
-/// base channel IDs that do not contain these reserved sequences.
+/// as this would produce ambiguous composite channel names.
 /// </para>
 /// </summary>
-public static class TransitExtensions
+public static class MessageTransitExtensions
 {
     /// <summary>
     /// Suffix appended to channel ID for outbound (write) channels in duplex transits.
@@ -35,154 +32,7 @@ public static class TransitExtensions
     /// </summary>
     public const string InboundSuffix = "<<";
 
-    #region Stream Extensions
-
-    /// <summary>
-    /// Opens a channel and wraps it as a write-only Stream.
-    /// Returns immediately in pending state.
-    /// </summary>
-    public static StreamTransit OpenStream(
-        this IStreamMultiplexer mux,
-        string channelId)
-    {
-        var channel = mux.OpenChannel(channelId);
-        return new StreamTransit(channel);
-    }
-
-    /// <summary>
-    /// Opens a channel with custom options and wraps it as a write-only Stream.
-    /// Returns immediately in pending state.
-    /// </summary>
-    public static StreamTransit OpenStream(
-        this IStreamMultiplexer mux,
-        ChannelOptions options)
-    {
-        var channel = mux.OpenChannel(options);
-        return new StreamTransit(channel);
-    }
-
-    /// <summary>
-    /// Accepts a channel and wraps it as a read-only Stream.
-    /// Returns immediately in pending state. Use <see cref="ITransit.WaitForReadyAsync"/> to wait for readiness.
-    /// </summary>
-    public static StreamTransit AcceptStream(
-        this IStreamMultiplexer mux,
-        string channelId)
-    {
-        var channel = mux.AcceptChannel(channelId);
-        return new StreamTransit(channel);
-    }
-
-    /// <summary>
-    /// Accepts a channel and wraps it as a read-only Stream.
-    /// Waits until the channel is ready before returning.
-    /// </summary>
-    public static async Task<StreamTransit> AcceptStreamAsync(
-        this IStreamMultiplexer mux,
-        string channelId,
-        CancellationToken cancellationToken = default)
-    {
-        var transit = mux.AcceptStream(channelId);
-        await transit.WaitForReadyAsync(cancellationToken).ConfigureAwait(false);
-        return transit;
-    }
-
-    #endregion
-
-    #region Duplex Stream Extensions
-
-    /// <summary>
-    /// Opens a write channel and accepts a read channel, then wraps them as a bidirectional Stream.
-    /// Uses "{channelId}&gt;&gt;" for writing and "{channelId}&lt;&lt;" for reading.
-    /// Returns immediately in pending state. Use <see cref="ITransit.WaitForReadyAsync"/> to wait for readiness.
-    /// </summary>
-    public static DuplexStreamTransit OpenDuplexStream(
-        this IStreamMultiplexer mux,
-        string channelId)
-    {
-        var writeChannel = mux.OpenChannel(channelId + OutboundSuffix);
-        var readChannel = mux.AcceptChannel(channelId + InboundSuffix);
-        return new DuplexStreamTransit(writeChannel, readChannel);
-    }
-
-    /// <summary>
-    /// Opens a write channel and accepts a read channel, then wraps them as a bidirectional Stream.
-    /// Uses "{channelId}&gt;&gt;" for writing and "{channelId}&lt;&lt;" for reading.
-    /// Waits until both channels are ready before returning.
-    /// </summary>
-    public static async Task<DuplexStreamTransit> OpenDuplexStreamAsync(
-        this IStreamMultiplexer mux,
-        string channelId,
-        CancellationToken cancellationToken = default)
-    {
-        var transit = mux.OpenDuplexStream(channelId);
-        await transit.WaitForReadyAsync(cancellationToken).ConfigureAwait(false);
-        return transit;
-    }
-
-    /// <summary>
-    /// Accepts a read channel and opens a write channel, then wraps them as a bidirectional Stream.
-    /// This is the counterpart to <see cref="OpenDuplexStream(IStreamMultiplexer, string)"/>.
-    /// Returns immediately in pending state. Use <see cref="ITransit.WaitForReadyAsync"/> to wait for readiness.
-    /// </summary>
-    public static DuplexStreamTransit AcceptDuplexStream(
-        this IStreamMultiplexer mux,
-        string channelId)
-    {
-        var readChannel = mux.AcceptChannel(channelId + OutboundSuffix);
-        var writeChannel = mux.OpenChannel(channelId + InboundSuffix);
-        return new DuplexStreamTransit(writeChannel, readChannel);
-    }
-
-    /// <summary>
-    /// Accepts a read channel and opens a write channel, then wraps them as a bidirectional Stream.
-    /// This is the counterpart to <see cref="OpenDuplexStreamAsync(IStreamMultiplexer, string, CancellationToken)"/>.
-    /// Waits until both channels are ready before returning.
-    /// </summary>
-    public static async Task<DuplexStreamTransit> AcceptDuplexStreamAsync(
-        this IStreamMultiplexer mux,
-        string channelId,
-        CancellationToken cancellationToken = default)
-    {
-        var transit = mux.AcceptDuplexStream(channelId);
-        await transit.WaitForReadyAsync(cancellationToken).ConfigureAwait(false);
-        return transit;
-    }
-
-    /// <summary>
-    /// Opens a write channel and accepts a read channel with explicit channel IDs,
-    /// then wraps them as a bidirectional Stream.
-    /// Returns immediately in pending state. Use <see cref="ITransit.WaitForReadyAsync"/> to wait for readiness.
-    /// </summary>
-    public static DuplexStreamTransit OpenDuplexStream(
-        this IStreamMultiplexer mux,
-        string writeChannelId,
-        string readChannelId)
-    {
-        var writeChannel = mux.OpenChannel(writeChannelId);
-        var readChannel = mux.AcceptChannel(readChannelId);
-        return new DuplexStreamTransit(writeChannel, readChannel);
-    }
-
-    /// <summary>
-    /// Opens a write channel and accepts a read channel with explicit channel IDs,
-    /// then wraps them as a bidirectional Stream.
-    /// Waits until both channels are ready before returning.
-    /// </summary>
-    public static async Task<DuplexStreamTransit> OpenDuplexStreamAsync(
-        this IStreamMultiplexer mux,
-        string writeChannelId,
-        string readChannelId,
-        CancellationToken cancellationToken = default)
-    {
-        var transit = mux.OpenDuplexStream(writeChannelId, readChannelId);
-        await transit.WaitForReadyAsync(cancellationToken).ConfigureAwait(false);
-        return transit;
-    }
-
-    #endregion
-
-    #region Message Transit Extensions (AOT-safe)
+    #region AOT-safe (JsonTypeInfo)
 
     /// <summary>
     /// Opens a message transit by opening a write channel and accepting a read channel.
@@ -391,7 +241,7 @@ public static class TransitExtensions
 
     #endregion
 
-    #region Message Transit Extensions (Reflection)
+    #region Reflection-based (JsonSerializerOptions)
 
     /// <summary>
     /// Opens a message transit using reflection-based JSON serialization. Not AOT-compatible.
@@ -602,127 +452,6 @@ public static class TransitExtensions
         CancellationToken cancellationToken = default)
     {
         var transit = mux.AcceptReceiveOnlyMessageTransit<TReceive>(channelId, jsonOptions, maxMessageSize);
-        await transit.WaitForReadyAsync(cancellationToken).ConfigureAwait(false);
-        return transit;
-    }
-
-    #endregion
-
-    #region Delta Transit Extensions
-
-    /// <summary>
-    /// Opens a delta transit by opening a write channel and accepting a read channel.
-    /// Uses "{channelId}&gt;&gt;" for writing and "{channelId}&lt;&lt;" for reading.
-    /// Uses AOT-safe JsonTypeInfo for serialization.
-    /// Returns immediately in pending state.
-    /// </summary>
-    public static DeltaTransit<T> OpenDeltaTransit<T>(
-        this IStreamMultiplexer mux,
-        string channelId,
-        JsonTypeInfo<T> typeInfo,
-        int maxMessageSize = 16 * 1024 * 1024)
-    {
-        var writeChannel = mux.OpenChannel(channelId + OutboundSuffix);
-        var readChannel = mux.AcceptChannel(channelId + InboundSuffix);
-        return new DeltaTransit<T>(writeChannel, readChannel, typeInfo, maxMessageSize);
-    }
-
-    /// <summary>
-    /// Opens a delta transit by opening a write channel and accepting a read channel.
-    /// Uses "{channelId}&gt;&gt;" for writing and "{channelId}&lt;&lt;" for reading.
-    /// Uses AOT-safe JsonTypeInfo for serialization.
-    /// Waits until both channels are ready before returning.
-    /// </summary>
-    public static async Task<DeltaTransit<T>> OpenDeltaTransitAsync<T>(
-        this IStreamMultiplexer mux,
-        string channelId,
-        JsonTypeInfo<T> typeInfo,
-        int maxMessageSize = 16 * 1024 * 1024,
-        CancellationToken cancellationToken = default)
-    {
-        var transit = mux.OpenDeltaTransit(channelId, typeInfo, maxMessageSize);
-        await transit.WaitForReadyAsync(cancellationToken).ConfigureAwait(false);
-        return transit;
-    }
-
-    /// <summary>
-    /// Accepts a delta transit by accepting a read channel and opening a write channel.
-    /// This is the counterpart to OpenDeltaTransit.
-    /// Uses AOT-safe JsonTypeInfo for serialization.
-    /// Returns immediately in pending state.
-    /// </summary>
-    public static DeltaTransit<T> AcceptDeltaTransit<T>(
-        this IStreamMultiplexer mux,
-        string channelId,
-        JsonTypeInfo<T> typeInfo,
-        int maxMessageSize = 16 * 1024 * 1024)
-    {
-        var readChannel = mux.AcceptChannel(channelId + OutboundSuffix);
-        var writeChannel = mux.OpenChannel(channelId + InboundSuffix);
-        return new DeltaTransit<T>(writeChannel, readChannel, typeInfo, maxMessageSize);
-    }
-
-    /// <summary>
-    /// Accepts a delta transit by accepting a read channel and opening a write channel.
-    /// This is the counterpart to OpenDeltaTransitAsync.
-    /// Uses AOT-safe JsonTypeInfo for serialization.
-    /// Waits until both channels are ready before returning.
-    /// </summary>
-    public static async Task<DeltaTransit<T>> AcceptDeltaTransitAsync<T>(
-        this IStreamMultiplexer mux,
-        string channelId,
-        JsonTypeInfo<T> typeInfo,
-        int maxMessageSize = 16 * 1024 * 1024,
-        CancellationToken cancellationToken = default)
-    {
-        var transit = mux.AcceptDeltaTransit(channelId, typeInfo, maxMessageSize);
-        await transit.WaitForReadyAsync(cancellationToken).ConfigureAwait(false);
-        return transit;
-    }
-
-    /// <summary>
-    /// Opens a send-only delta transit for pushing state updates.
-    /// Uses AOT-safe JsonTypeInfo for serialization.
-    /// Returns immediately in pending state.
-    /// </summary>
-    public static DeltaTransit<T> OpenSendOnlyDeltaTransit<T>(
-        this IStreamMultiplexer mux,
-        string channelId,
-        JsonTypeInfo<T> typeInfo,
-        int maxMessageSize = 16 * 1024 * 1024)
-    {
-        var writeChannel = mux.OpenChannel(channelId);
-        return new DeltaTransit<T>(writeChannel, null, typeInfo, maxMessageSize);
-    }
-
-    /// <summary>
-    /// Accepts a receive-only delta transit for receiving state updates.
-    /// Uses AOT-safe JsonTypeInfo for serialization.
-    /// Returns immediately in pending state.
-    /// </summary>
-    public static DeltaTransit<T> AcceptReceiveOnlyDeltaTransit<T>(
-        this IStreamMultiplexer mux,
-        string channelId,
-        JsonTypeInfo<T> typeInfo,
-        int maxMessageSize = 16 * 1024 * 1024)
-    {
-        var readChannel = mux.AcceptChannel(channelId);
-        return new DeltaTransit<T>(null, readChannel, typeInfo, maxMessageSize);
-    }
-
-    /// <summary>
-    /// Accepts a receive-only delta transit for receiving state updates.
-    /// Uses AOT-safe JsonTypeInfo for serialization.
-    /// Waits until the channel is ready before returning.
-    /// </summary>
-    public static async Task<DeltaTransit<T>> AcceptReceiveOnlyDeltaTransitAsync<T>(
-        this IStreamMultiplexer mux,
-        string channelId,
-        JsonTypeInfo<T> typeInfo,
-        int maxMessageSize = 16 * 1024 * 1024,
-        CancellationToken cancellationToken = default)
-    {
-        var transit = mux.AcceptReceiveOnlyDeltaTransit(channelId, typeInfo, maxMessageSize);
         await transit.WaitForReadyAsync(cancellationToken).ConfigureAwait(false);
         return transit;
     }

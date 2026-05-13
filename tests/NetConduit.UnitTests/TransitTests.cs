@@ -1,7 +1,6 @@
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using NetConduit.Internal;
-using NetConduit.Transits;
 using Xunit;
 
 namespace NetConduit.UnitTests;
@@ -132,8 +131,8 @@ public sealed class DeltaDiffTests
             new(DeltaOp.ArrayInsert, ["items"], JsonValue.Create("new-item"), 2),
         };
 
-        var json = DeltaTransit<JsonObject>.SerializeDelta(ops);
-        var deserialized = DeltaTransit<JsonObject>.DeserializeDelta(System.Text.Encoding.UTF8.GetBytes(json));
+        var json = DeltaMessageTransit<JsonObject>.SerializeDelta(ops);
+        var deserialized = DeltaMessageTransit<JsonObject>.DeserializeDelta(System.Text.Encoding.UTF8.GetBytes(json));
 
         Assert.Equal(3, deserialized.Count);
 
@@ -508,8 +507,8 @@ public sealed class TransitTests
         var clientWrite = client.OpenChannel("dt1");
         var clientReadCh = await server.AcceptChannelAsync("dt1", ct);
 
-        var sender = new DeltaTransit<JsonObject>(clientWrite, null);
-        var receiver = new DeltaTransit<JsonObject>(null, clientReadCh);
+        var sender = new DeltaMessageTransit<JsonObject>(clientWrite, null);
+        var receiver = new DeltaMessageTransit<JsonObject>(null, clientReadCh);
 
         // Full state send
         var state1 = new JsonObject { ["name"] = "alice", ["score"] = 100 };
@@ -550,3 +549,4 @@ internal sealed class TestMessage
     public string Name { get; set; } = "";
     public int Value { get; set; }
 }
+

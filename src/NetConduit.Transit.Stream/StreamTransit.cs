@@ -1,14 +1,14 @@
 using NetConduit.Events;
 using NetConduit.Interfaces;
 
-namespace NetConduit.Transits;
+namespace NetConduit.Transit.Stream;
 
 /// <summary>
 /// A transit that wraps a single channel as a simplex (one-way) Stream.
 /// For write channels, this provides a write-only stream.
 /// For read channels, this provides a read-only stream.
 /// </summary>
-public sealed class StreamTransit : Stream, ITransit
+public sealed class StreamTransit : System.IO.Stream, ITransit
 {
     private readonly IWriteChannel? _writeChannel;
     private readonly IReadChannel? _readChannel;

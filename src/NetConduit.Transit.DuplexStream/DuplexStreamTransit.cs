@@ -1,7 +1,7 @@
 using NetConduit.Events;
 using NetConduit.Interfaces;
 
-namespace NetConduit.Transits;
+namespace NetConduit.Transit.DuplexStream;
 
 /// <summary>
 /// A transit that wraps a channel pair (WriteChannel + ReadChannel) as a bidirectional Stream.

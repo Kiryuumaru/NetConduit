@@ -13,7 +13,10 @@ using NetConduit;
 using NetConduit.Enums;
 using NetConduit.Interfaces;
 using NetConduit.Models;
-using NetConduit.Transits;
+using NetConduit.Transit.Stream;
+using NetConduit.Transit.DuplexStream;
+using NetConduit.Transit.Message;
+using NetConduit.Transit.DeltaMessage;
 
 var mode = args.Length > 0 ? args[0] : "help";
 var port = args.Length > 1 && int.TryParse(args[1], out var p) ? p : 5000;
@@ -124,7 +127,7 @@ async Task HandlePlayerSessionAsync(
         Priority = ChannelPriority.Normal
     });
 
-    var leaderboardTransit = new DeltaTransit<JsonObject>(leaderboardWriteChannel, null);
+    var leaderboardTransit = new DeltaMessageTransit<JsonObject>(leaderboardWriteChannel, null);
 
     // Send current leaderboard immediately
     await leaderboardTransit.SendAsync(ScoresToJson(scores), ct);
@@ -205,7 +208,7 @@ async Task RunPlayerAsync(string playerHost, int playerPort, string name, Cancel
 
     // Accept DeltaTransit to receive leaderboard updates (server -> player)
     var leaderboardReadChannel = await mux.AcceptChannelAsync("leaderboard", ct);
-    var leaderboardTransit = new DeltaTransit<JsonObject>(null, leaderboardReadChannel);
+    var leaderboardTransit = new DeltaMessageTransit<JsonObject>(null, leaderboardReadChannel);
 
     // Background task: watch leaderboard updates
     var watchTask = Task.Run(async () =>
@@ -254,3 +257,4 @@ record ScoreEvent(string Player, int Points, string Reason);
 
 [JsonSerializable(typeof(ScoreEvent))]
 partial class ScoreJsonContext : JsonSerializerContext;
+

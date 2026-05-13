@@ -1,7 +1,6 @@
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using NetConduit.Internal;
-using NetConduit.Transits;
 
 namespace NetConduit.UnitTests;
 
@@ -209,8 +208,8 @@ public sealed class DeltaTransitEdgeTests
     public void SerializeDelta_EmptyOps_ProducesEmptyArray()
     {
         var ops = new List<DeltaOperation>();
-        var json = DeltaTransit<JsonObject>.SerializeDelta(ops);
-        var deserialized = DeltaTransit<JsonObject>.DeserializeDelta(System.Text.Encoding.UTF8.GetBytes(json));
+        var json = DeltaMessageTransit<JsonObject>.SerializeDelta(ops);
+        var deserialized = DeltaMessageTransit<JsonObject>.DeserializeDelta(System.Text.Encoding.UTF8.GetBytes(json));
         Assert.Empty(deserialized);
     }
 
@@ -227,8 +226,8 @@ public sealed class DeltaTransitEdgeTests
             new(DeltaOp.ArrayReplace, ["items"], JsonNode.Parse("""["a","b"]"""), null),
         };
 
-        var json = DeltaTransit<JsonObject>.SerializeDelta(ops);
-        var deserialized = DeltaTransit<JsonObject>.DeserializeDelta(System.Text.Encoding.UTF8.GetBytes(json));
+        var json = DeltaMessageTransit<JsonObject>.SerializeDelta(ops);
+        var deserialized = DeltaMessageTransit<JsonObject>.DeserializeDelta(System.Text.Encoding.UTF8.GetBytes(json));
         Assert.Equal(6, deserialized.Count);
 
         Assert.Equal(DeltaOp.Set, deserialized[0].Op);
@@ -247,8 +246,8 @@ public sealed class DeltaTransitEdgeTests
             new(DeltaOp.Set, ["users", "profile", "avatar"], JsonValue.Create("url"), null),
         };
 
-        var json = DeltaTransit<JsonObject>.SerializeDelta(ops);
-        var deserialized = DeltaTransit<JsonObject>.DeserializeDelta(System.Text.Encoding.UTF8.GetBytes(json));
+        var json = DeltaMessageTransit<JsonObject>.SerializeDelta(ops);
+        var deserialized = DeltaMessageTransit<JsonObject>.DeserializeDelta(System.Text.Encoding.UTF8.GetBytes(json));
         Assert.Equal(3, deserialized[0].Path.Length);
     }
 
@@ -256,13 +255,13 @@ public sealed class DeltaTransitEdgeTests
     public void DeserializeDelta_MalformedJson_Throws()
     {
         var badJson = System.Text.Encoding.UTF8.GetBytes("not valid json");
-        Assert.ThrowsAny<Exception>(() => DeltaTransit<JsonObject>.DeserializeDelta(badJson));
+        Assert.ThrowsAny<Exception>(() => DeltaMessageTransit<JsonObject>.DeserializeDelta(badJson));
     }
 
     [Fact]
     public void DeserializeDelta_EmptyBytes_Throws()
     {
-        Assert.ThrowsAny<Exception>(() => DeltaTransit<JsonObject>.DeserializeDelta(ReadOnlySpan<byte>.Empty));
+        Assert.ThrowsAny<Exception>(() => DeltaMessageTransit<JsonObject>.DeserializeDelta(ReadOnlySpan<byte>.Empty));
     }
 
     #endregion
@@ -374,8 +373,8 @@ public sealed class DeltaTransitEdgeTests
         var clientWrite = client.OpenChannel("dt-dup");
         var serverRead = await server.AcceptChannelAsync("dt-dup", cts.Token);
 
-        var sender = new DeltaTransit<JsonObject>(clientWrite, null);
-        var receiver = new DeltaTransit<JsonObject>(null, serverRead);
+        var sender = new DeltaMessageTransit<JsonObject>(clientWrite, null);
+        var receiver = new DeltaMessageTransit<JsonObject>(null, serverRead);
 
         var state = new JsonObject { ["x"] = 1 };
         await sender.SendAsync(state, cts.Token);
@@ -402,8 +401,8 @@ public sealed class DeltaTransitEdgeTests
         var clientWrite = client.OpenChannel("dt-batch");
         var serverRead = await server.AcceptChannelAsync("dt-batch", cts.Token);
 
-        var sender = new DeltaTransit<JsonObject>(clientWrite, null);
-        var receiver = new DeltaTransit<JsonObject>(null, serverRead);
+        var sender = new DeltaMessageTransit<JsonObject>(clientWrite, null);
+        var receiver = new DeltaMessageTransit<JsonObject>(null, serverRead);
 
         // SendBatchAsync combines into: 1 full state + 1 combined delta
         var states = Enumerable.Range(1, 5).Select(i => new JsonObject { ["val"] = i });
@@ -434,8 +433,8 @@ public sealed class DeltaTransitEdgeTests
         var clientWrite = client.OpenChannel("dt-reset");
         var serverRead = await server.AcceptChannelAsync("dt-reset", cts.Token);
 
-        var sender = new DeltaTransit<JsonObject>(clientWrite, null);
-        var receiver = new DeltaTransit<JsonObject>(null, serverRead);
+        var sender = new DeltaMessageTransit<JsonObject>(clientWrite, null);
+        var receiver = new DeltaMessageTransit<JsonObject>(null, serverRead);
 
         await sender.SendAsync(new JsonObject { ["a"] = 1, ["b"] = 2 }, cts.Token);
         await receiver.ReceiveAsync(cts.Token);
@@ -463,8 +462,8 @@ public sealed class DeltaTransitEdgeTests
         var clientWrite = client.OpenChannel("dt-receiveall");
         var serverRead = await server.AcceptChannelAsync("dt-receiveall", cts.Token);
 
-        var sender = new DeltaTransit<JsonObject>(clientWrite, null);
-        var receiver = new DeltaTransit<JsonObject>(null, serverRead);
+        var sender = new DeltaMessageTransit<JsonObject>(clientWrite, null);
+        var receiver = new DeltaMessageTransit<JsonObject>(null, serverRead);
 
         await sender.SendAsync(new JsonObject { ["i"] = 1 }, cts.Token);
         await sender.SendAsync(new JsonObject { ["i"] = 2 }, cts.Token);
@@ -508,3 +507,4 @@ public sealed class DeltaTransitEdgeTests
         return (client, server);
     }
 }
+

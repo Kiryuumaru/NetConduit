@@ -7,7 +7,7 @@ using System.Text.Json.Serialization.Metadata;
 using NetConduit.Events;
 using NetConduit.Interfaces;
 
-namespace NetConduit.Transits;
+namespace NetConduit.Transit.Message;
 
 /// <summary>
 /// A transit that sends and receives discrete JSON-serialized messages over a channel pair.

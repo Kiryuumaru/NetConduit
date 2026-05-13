@@ -1,6 +1,5 @@
 using System.Text.Json;
 using NetConduit.Internal;
-using NetConduit.Transits;
 using Xunit;
 
 namespace NetConduit.UnitTests;
@@ -1006,3 +1005,4 @@ public sealed class UnhappyPathTests
 
     #endregion
 }
+

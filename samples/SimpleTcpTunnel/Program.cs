@@ -7,7 +7,10 @@ using NetConduit;
 using NetConduit.Interfaces;
 using NetConduit.Models;
 using NetConduit.Transport.Tcp;
-using NetConduit.Transits;
+using NetConduit.Transit.Stream;
+using NetConduit.Transit.DuplexStream;
+using NetConduit.Transit.Message;
+using NetConduit.Transit.DeltaMessage;
 using NetConduit.Transport.WebSocket;
 
 // ═══════════════════════════════════════════════════════════════
@@ -927,3 +930,4 @@ sealed class WebSocketStream(System.Net.WebSockets.WebSocket webSocket) : Stream
     public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();
     public override void SetLength(long value) => throw new NotSupportedException();
 }
+

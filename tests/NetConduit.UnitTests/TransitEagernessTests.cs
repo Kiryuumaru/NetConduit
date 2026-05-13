@@ -1,7 +1,6 @@
 using System.Text.Json.Nodes;
 using System.Text.Json.Serialization.Metadata;
 using NetConduit.Internal;
-using NetConduit.Transits;
 using Xunit;
 
 namespace NetConduit.UnitTests;
@@ -419,8 +418,8 @@ public sealed class TransitEagernessTests
     {
         var (client, server) = await CreateReadyPairAsync();
 
-        var clientTransit = client.OpenDeltaTransit("dt-ready1", JsonContext.Default.JsonObject);
-        var serverTransit = server.AcceptDeltaTransit("dt-ready1", JsonContext.Default.JsonObject);
+        var clientTransit = client.OpenDeltaMessageTransit("dt-ready1", JsonContext.Default.JsonObject);
+        var serverTransit = server.AcceptDeltaMessageTransit("dt-ready1", JsonContext.Default.JsonObject);
 
         await Task.WhenAll(
             clientTransit.WaitForReadyAsync(),
@@ -443,10 +442,10 @@ public sealed class TransitEagernessTests
         var clientReadyTcs = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var serverReadyTcs = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
 
-        var clientTransit = client.OpenDeltaTransit("dt-ready2", JsonContext.Default.JsonObject);
+        var clientTransit = client.OpenDeltaMessageTransit("dt-ready2", JsonContext.Default.JsonObject);
         clientTransit.Ready += (_, _) => clientReadyTcs.TrySetResult();
 
-        var serverTransit = server.AcceptDeltaTransit("dt-ready2", JsonContext.Default.JsonObject);
+        var serverTransit = server.AcceptDeltaMessageTransit("dt-ready2", JsonContext.Default.JsonObject);
         serverTransit.Ready += (_, _) => serverReadyTcs.TrySetResult();
 
         await Task.WhenAll(
@@ -473,8 +472,8 @@ public sealed class TransitEagernessTests
     {
         var (client, server) = await CreateReadyPairAsync();
 
-        var clientTransit = client.OpenDeltaTransit("dt-nonasync", JsonContext.Default.JsonObject);
-        var serverTransit = server.AcceptDeltaTransit("dt-nonasync", JsonContext.Default.JsonObject);
+        var clientTransit = client.OpenDeltaMessageTransit("dt-nonasync", JsonContext.Default.JsonObject);
+        var serverTransit = server.AcceptDeltaMessageTransit("dt-nonasync", JsonContext.Default.JsonObject);
 
         await Task.WhenAll(
             clientTransit.WaitForReadyAsync(),
@@ -499,8 +498,8 @@ public sealed class TransitEagernessTests
     {
         var (client, server) = await CreateReadyPairAsync();
 
-        var clientTransitTask = client.OpenDeltaTransitAsync("dt-async", JsonContext.Default.JsonObject);
-        var serverTransitTask = server.AcceptDeltaTransitAsync("dt-async", JsonContext.Default.JsonObject);
+        var clientTransitTask = client.OpenDeltaMessageTransitAsync("dt-async", JsonContext.Default.JsonObject);
+        var serverTransitTask = server.AcceptDeltaMessageTransitAsync("dt-async", JsonContext.Default.JsonObject);
 
         var clientTransit = await clientTransitTask;
         var serverTransit = await serverTransitTask;
@@ -519,7 +518,7 @@ public sealed class TransitEagernessTests
     {
         var (client, server) = await CreateReadyPairAsync();
 
-        var transit = client.OpenSendOnlyDeltaTransit("dt-sendonly", JsonContext.Default.JsonObject);
+        var transit = client.OpenSendOnlyDeltaMessageTransit("dt-sendonly", JsonContext.Default.JsonObject);
 
         await transit.WaitForReadyAsync();
         Assert.True(transit.IsReady);
@@ -536,7 +535,7 @@ public sealed class TransitEagernessTests
 
         var writeChannel = client.OpenChannel("dt-recvonly");
 
-        var transit = server.AcceptReceiveOnlyDeltaTransit("dt-recvonly", JsonContext.Default.JsonObject);
+        var transit = server.AcceptReceiveOnlyDeltaMessageTransit("dt-recvonly", JsonContext.Default.JsonObject);
 
         await transit.WaitForReadyAsync();
         Assert.True(transit.IsReady);
@@ -627,8 +626,8 @@ public sealed class TransitEagernessTests
     {
         var (client, server) = await CreateReadyPairAsync();
 
-        var clientTransit = client.OpenDeltaTransit("ext-delta1", JsonContext.Default.JsonObject);
-        var serverTransit = server.AcceptDeltaTransit("ext-delta1", JsonContext.Default.JsonObject);
+        var clientTransit = client.OpenDeltaMessageTransit("ext-delta1", JsonContext.Default.JsonObject);
+        var serverTransit = server.AcceptDeltaMessageTransit("ext-delta1", JsonContext.Default.JsonObject);
 
         Assert.NotNull(clientTransit);
         Assert.NotNull(serverTransit);
@@ -776,8 +775,8 @@ public sealed class TransitEagernessTests
     {
         var (client, server) = await CreateReadyPairAsync();
 
-        var transit = client.OpenDeltaTransit("disp4", JsonContext.Default.JsonObject);
-        var acceptTransit = server.AcceptDeltaTransit("disp4", JsonContext.Default.JsonObject);
+        var transit = client.OpenDeltaMessageTransit("disp4", JsonContext.Default.JsonObject);
+        var acceptTransit = server.AcceptDeltaMessageTransit("disp4", JsonContext.Default.JsonObject);
 
         await Task.WhenAll(
             transit.WaitForReadyAsync(),
@@ -1439,8 +1438,8 @@ public sealed class TransitEagernessTests
     {
         var (client, server) = await CreateReadyPairAsync();
 
-        var transit = client.OpenDeltaTransit("unhappy-double-dispose-delta", JsonContext.Default.JsonObject);
-        var serverTransit = server.AcceptDeltaTransit("unhappy-double-dispose-delta", JsonContext.Default.JsonObject);
+        var transit = client.OpenDeltaMessageTransit("unhappy-double-dispose-delta", JsonContext.Default.JsonObject);
+        var serverTransit = server.AcceptDeltaMessageTransit("unhappy-double-dispose-delta", JsonContext.Default.JsonObject);
         await Task.WhenAll(transit.WaitForReadyAsync(), serverTransit.WaitForReadyAsync());
 
         await transit.DisposeAsync();
@@ -1582,3 +1581,5 @@ internal sealed class TestMsg
 internal partial class JsonContext : System.Text.Json.Serialization.JsonSerializerContext
 {
 }
+
+

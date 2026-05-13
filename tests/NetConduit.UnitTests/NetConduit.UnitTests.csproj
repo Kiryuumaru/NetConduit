@@ -22,6 +22,10 @@
 
 	<ItemGroup>
 		<ProjectReference Include="..\..\src\NetConduit\NetConduit.csproj" />
+		<ProjectReference Include="..\..\src\NetConduit.Transit.Stream\NetConduit.Transit.Stream.csproj" />
+		<ProjectReference Include="..\..\src\NetConduit.Transit.DuplexStream\NetConduit.Transit.DuplexStream.csproj" />
+		<ProjectReference Include="..\..\src\NetConduit.Transit.Message\NetConduit.Transit.Message.csproj" />
+		<ProjectReference Include="..\..\src\NetConduit.Transit.DeltaMessage\NetConduit.Transit.DeltaMessage.csproj" />
 	</ItemGroup>
 
 	<ItemGroup>

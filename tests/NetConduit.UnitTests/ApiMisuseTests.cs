@@ -2,7 +2,6 @@ using System.Text.Json;
 using System.Text.Json.Nodes;
 using System.Text.Json.Serialization;
 using NetConduit.Internal;
-using NetConduit.Transits;
 using Xunit;
 
 namespace NetConduit.UnitTests;
@@ -242,7 +241,7 @@ public sealed class ApiMisuseTests
         var w = client.OpenChannel("delta");
         await w.WaitForReadyAsync();
 
-        var transit = new DeltaTransit<JsonObject>(w, null);
+        var transit = new DeltaMessageTransit<JsonObject>(w, null);
         await transit.DisposeAsync();
 
         await Assert.ThrowsAsync<ObjectDisposedException>(() =>
@@ -260,7 +259,7 @@ public sealed class ApiMisuseTests
         client.OpenChannel("delta");
         var r = await server.AcceptChannelAsync("delta");
 
-        var transit = new DeltaTransit<JsonObject>(null, r);
+        var transit = new DeltaMessageTransit<JsonObject>(null, r);
         await transit.DisposeAsync();
 
         await Assert.ThrowsAsync<ObjectDisposedException>(() =>
@@ -278,7 +277,7 @@ public sealed class ApiMisuseTests
         var r = await server.AcceptChannelAsync("delta");
 
         // Receive-only transit
-        var transit = new DeltaTransit<JsonObject>(null, r);
+        var transit = new DeltaMessageTransit<JsonObject>(null, r);
 
         await Assert.ThrowsAsync<InvalidOperationException>(() =>
             transit.SendAsync(new JsonObject { ["x"] = 1 }).AsTask());
@@ -297,7 +296,7 @@ public sealed class ApiMisuseTests
         await w.WaitForReadyAsync();
 
         // Write-only transit
-        var transit = new DeltaTransit<JsonObject>(w, null);
+        var transit = new DeltaMessageTransit<JsonObject>(w, null);
 
         await Assert.ThrowsAsync<InvalidOperationException>(() =>
             transit.ReceiveAsync().AsTask());
@@ -312,7 +311,7 @@ public sealed class ApiMisuseTests
     {
         // POCO types require JsonTypeInfo for AOT support
         Assert.Throws<ArgumentNullException>(() =>
-            new DeltaTransit<TestPoco>(null, null, null));
+            new DeltaMessageTransit<TestPoco>(null, null, null));
     }
 
     [Fact]
@@ -323,7 +322,7 @@ public sealed class ApiMisuseTests
         var w = client.OpenChannel("delta");
         await w.WaitForReadyAsync();
 
-        var transit = new DeltaTransit<JsonObject>(w, null);
+        var transit = new DeltaMessageTransit<JsonObject>(w, null);
         await transit.DisposeAsync();
         await transit.DisposeAsync();
         await transit.DisposeAsync();
@@ -340,7 +339,7 @@ public sealed class ApiMisuseTests
         var w = client.OpenChannel("delta");
         await w.WaitForReadyAsync();
 
-        var transit = new DeltaTransit<JsonObject>(w, null);
+        var transit = new DeltaMessageTransit<JsonObject>(w, null);
 
         // Empty batch should not throw
         await transit.SendBatchAsync(Enumerable.Empty<JsonObject>());
@@ -793,3 +792,4 @@ public sealed class ApiMisuseTests
 
     #endregion
 }
+

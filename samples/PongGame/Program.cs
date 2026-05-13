@@ -7,7 +7,10 @@ using NetConduit;
 using NetConduit.Interfaces;
 using NetConduit.Models;
 using NetConduit.Transport.Tcp;
-using NetConduit.Transits;
+using NetConduit.Transit.Stream;
+using NetConduit.Transit.DuplexStream;
+using NetConduit.Transit.Message;
+using NetConduit.Transit.DeltaMessage;
 
 // ═══════════════════════════════════════════════════════════════
 //   NetConduit Pong - Real-time Multiplayer using DeltaTransit
@@ -167,7 +170,7 @@ async Task RunServer(int port)
 
                         var stateChannel = mux.OpenChannel("state");
 
-                        var stateTransit = new DeltaTransit<GameState>(
+                        var stateTransit = new DeltaMessageTransit<GameState>(
                             stateChannel, null,
                             PongJsonContext.Default.GameState);
 
@@ -339,7 +342,7 @@ async Task RunClient(string host, int port)
             PongJsonContext.Default.PlayerInput,
             null);
 
-        var stateTransit = new DeltaTransit<GameState>(
+        var stateTransit = new DeltaMessageTransit<GameState>(
             null, stateChannel,
             PongJsonContext.Default.GameState);
 
@@ -581,12 +584,12 @@ public sealed class PlayerInput
 sealed class PlayerConnection(
     int playerNum,
     IStreamMultiplexer mux,
-    DeltaTransit<GameState> stateTransit,
+    DeltaMessageTransit<GameState> stateTransit,
     MessageTransit<object?, PlayerInput> inputTransit)
 {
     public int PlayerNum => playerNum;
     public IStreamMultiplexer Mux => mux;
-    public DeltaTransit<GameState> StateTransit => stateTransit;
+    public DeltaMessageTransit<GameState> StateTransit => stateTransit;
     public MessageTransit<object?, PlayerInput> InputTransit => inputTransit;
 }
 
@@ -604,3 +607,4 @@ static class GameConfig
     public const int WinScore = 5;
     public const int TickMs = 33;
 }
+

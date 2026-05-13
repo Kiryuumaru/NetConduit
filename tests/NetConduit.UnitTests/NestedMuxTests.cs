@@ -1,5 +1,4 @@
 using System.Security.Cryptography;
-using NetConduit.Transits;
 
 namespace NetConduit.UnitTests;
 
@@ -500,3 +499,4 @@ public sealed class NestedMuxTests
         public ValueTask DisposeAsync() => ValueTask.CompletedTask;
     }
 }
+

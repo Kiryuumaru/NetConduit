@@ -2,7 +2,7 @@ using System.Text.Json.Nodes;
 using NetConduit.Enums;
 using NetConduit.Models;
 
-namespace NetConduit.Internal;
+namespace NetConduit.Transit.DeltaMessage.Internal;
 
 internal static class DeltaApply
 {

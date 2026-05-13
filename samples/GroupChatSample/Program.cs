@@ -7,7 +7,10 @@ using NetConduit;
 using NetConduit.Interfaces;
 using NetConduit.Models;
 using NetConduit.Transport.Tcp;
-using NetConduit.Transits;
+using NetConduit.Transit.Stream;
+using NetConduit.Transit.DuplexStream;
+using NetConduit.Transit.Message;
+using NetConduit.Transit.DeltaMessage;
 using NetConduit.Transport.WebSocket;
 
 // ═══════════════════════════════════════════════════════════════
@@ -803,3 +806,4 @@ sealed class ChatServer
         }
     }
 }
+

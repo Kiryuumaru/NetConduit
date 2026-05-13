@@ -8,10 +8,10 @@ using System.Text.Json.Serialization.Metadata;
 using NetConduit.Enums;
 using NetConduit.Events;
 using NetConduit.Interfaces;
-using NetConduit.Internal;
 using NetConduit.Models;
+using NetConduit.Transit.DeltaMessage.Internal;
 
-namespace NetConduit.Transits;
+namespace NetConduit.Transit.DeltaMessage;
 
 /// <summary>
 /// A transit that sends and receives state changes as deltas, minimizing bandwidth.
@@ -19,7 +19,7 @@ namespace NetConduit.Transits;
 /// Thread-safe and optimized for high-frequency payloads.
 /// </summary>
 /// <typeparam name="T">The type of state to synchronize.</typeparam>
-public sealed class DeltaTransit<T> : IAsyncDisposable
+public sealed class DeltaMessageTransit<T> : IAsyncDisposable
 {
     private readonly IWriteChannel? _writeChannel;
     private readonly IReadChannel? _readChannel;
@@ -37,9 +37,9 @@ public sealed class DeltaTransit<T> : IAsyncDisposable
     private static readonly byte[] ResyncRequestHeader = [0x02];
 
     /// <summary>
-    /// Creates a DeltaTransit for dynamic JSON types (JsonObject, JsonNode, JsonArray, JsonDocument).
+    /// Creates a DeltaMessageTransit for dynamic JSON types (JsonObject, JsonNode, JsonArray, JsonDocument).
     /// </summary>
-    public DeltaTransit(
+    public DeltaMessageTransit(
         IWriteChannel? writeChannel,
         IReadChannel? readChannel,
         int maxMessageSize = 16 * 1024 * 1024)
@@ -48,9 +48,9 @@ public sealed class DeltaTransit<T> : IAsyncDisposable
     }
 
     /// <summary>
-    /// Creates a DeltaTransit for POCOs with Native AOT support.
+    /// Creates a DeltaMessageTransit for POCOs with Native AOT support.
     /// </summary>
-    public DeltaTransit(
+    public DeltaMessageTransit(
         IWriteChannel? writeChannel,
         IReadChannel? readChannel,
         JsonTypeInfo<T>? typeInfo,
