@@ -9,7 +9,7 @@ using System.Text.Json.Serialization;
 using NetConduit;
 using NetConduit.Interfaces;
 using NetConduit.Models;
-using NetConduit.Tcp;
+using NetConduit.Transport.Tcp;
 using NetConduit.Transits;
 
 var mode = args.Length > 0 ? args[0] : "server";

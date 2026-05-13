@@ -35,33 +35,33 @@ class Build : BaseNukeBuildHelpers
         },
         new DeploymentAppSpec
         {
-            AppId = "net_conduit_tcp",
-            ProjectName = "NetConduit.Tcp",
-            ProjectTestName = "NetConduit.Tcp.IntegrationTests"
+            AppId = "net_conduit_transport_tcp",
+            ProjectName = "NetConduit.Transport.Tcp",
+            ProjectTestName = "NetConduit.Transport.Tcp.IntegrationTests"
         },
         new DeploymentAppSpec
         {
-            AppId = "net_conduit_websocket",
-            ProjectName = "NetConduit.WebSocket",
-            ProjectTestName = "NetConduit.WebSocket.IntegrationTests"
+            AppId = "net_conduit_transport_websocket",
+            ProjectName = "NetConduit.Transport.WebSocket",
+            ProjectTestName = "NetConduit.Transport.WebSocket.IntegrationTests"
         },
         new DeploymentAppSpec
         {
-            AppId = "net_conduit_udp",
-            ProjectName = "NetConduit.Udp",
-            ProjectTestName = "NetConduit.Udp.IntegrationTests"
+            AppId = "net_conduit_transport_udp",
+            ProjectName = "NetConduit.Transport.Udp",
+            ProjectTestName = "NetConduit.Transport.Udp.IntegrationTests"
         },
         new DeploymentAppSpec
         {
-            AppId = "net_conduit_ipc",
-            ProjectName = "NetConduit.Ipc",
-            ProjectTestName = "NetConduit.Ipc.IntegrationTests"
+            AppId = "net_conduit_transport_ipc",
+            ProjectName = "NetConduit.Transport.Ipc",
+            ProjectTestName = "NetConduit.Transport.Ipc.IntegrationTests"
         },
         new DeploymentAppSpec
         {
-            AppId = "net_conduit_quic",
-            ProjectName = "NetConduit.Quic",
-            ProjectTestName = "NetConduit.Quic.IntegrationTests"
+            AppId = "net_conduit_transport_quic",
+            ProjectName = "NetConduit.Transport.Quic",
+            ProjectTestName = "NetConduit.Transport.Quic.IntegrationTests"
         }
     ];
 

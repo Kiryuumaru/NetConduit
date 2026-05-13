@@ -6,7 +6,7 @@ using System.Text.Json.Serialization;
 using NetConduit;
 using NetConduit.Interfaces;
 using NetConduit.Models;
-using NetConduit.Tcp;
+using NetConduit.Transport.Tcp;
 using NetConduit.Transits;
 
 // ═══════════════════════════════════════════════════════════════

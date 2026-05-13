@@ -4,7 +4,7 @@ using System.Net.Sockets;
 using System.Text;
 using NetConduit;
 using NetConduit.Interfaces;
-using NetConduit.Tcp;
+using NetConduit.Transport.Tcp;
 
 Console.WriteLine("═══════════════════════════════════════════════════════════════");
 Console.WriteLine("  NetConduit File Transfer Demo - Concurrent Multiplexed Transfers");
