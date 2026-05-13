@@ -8,7 +8,6 @@ namespace NetConduit.UnitTests;
 /// Runs chaos workloads and asserts memory stays bounded.
 /// </summary>
 [Collection("HighMemory")]
-[Trait("Category", "HighMemory")]
 public sealed class MemoryLeakTests
 {
     private static readonly TimeSpan TestDuration = TimeSpan.FromSeconds(30);
@@ -45,6 +44,7 @@ public sealed class MemoryLeakTests
     }
 
     [Fact(Timeout = 180_000)]
+    [Trait("Category", TestCategories.HighMemory)]
     public async Task MemoryLeak_ChaosWorkload_MemoryStaysBounded()
     {
         var (client, server) = CreatePair();
@@ -189,6 +189,7 @@ public sealed class MemoryLeakTests
     }
 
     [Fact(Timeout = 90_000)]
+    [Trait("Category", TestCategories.HighMemory)]
     public async Task MemoryLeak_ReconnectChaos_MemoryStaysBounded()
     {
         await using var factory = new ReconnectableTransportFactory();
@@ -319,6 +320,7 @@ public sealed class MemoryLeakTests
     }
 
     [Fact(Timeout = 600_000, Skip = "Pre-existing memory accumulation when 25K+ nested sub-muxes are rapidly created/disposed; outer mux retains per-channel state and DisposeAsync cleanup hangs. Tracked as separate work — not introduced by current PR.")]
+    [Trait("Category", TestCategories.HighMemory)]
     public async Task MemoryLeak_SubMuxChaos_MemoryStaysBounded()
     {
         var (outerClient, outerServer) = CreatePair();
@@ -447,6 +449,7 @@ public sealed class MemoryLeakTests
     }
 
     [Fact(Timeout = 90_000)]
+    [Trait("Category", TestCategories.HighMemoryHappyPath)]
     public async Task MemoryLeak_HappyPath_MemoryStaysBounded()
     {
         var (client, server) = CreatePair();
@@ -558,6 +561,7 @@ public sealed class MemoryLeakTests
     }
 
     [Fact(Timeout = 90_000)]
+    [Trait("Category", TestCategories.HighMemory)]
     public async Task MemoryLeak_HeavyLoad_MemoryStaysBounded()
     {
         var (client, server) = CreatePair();
@@ -695,6 +699,7 @@ public sealed class MemoryLeakTests
     }
 
     [Fact(Timeout = 90_000)]
+    [Trait("Category", TestCategories.HighMemory)]
     public async Task MemoryLeak_UnhappyPath_MemoryStaysBounded()
     {
         var (client, server) = CreatePair();
@@ -852,6 +857,7 @@ public sealed class MemoryLeakTests
     }
 
     [Fact(Timeout = 90_000)]
+    [Trait("Category", TestCategories.HighMemory)]
     public async Task MemoryLeak_UnusualPatterns_MemoryStaysBounded()
     {
         var (client, server) = CreatePair();

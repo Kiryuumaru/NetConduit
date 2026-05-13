@@ -68,6 +68,26 @@ Environments configured in `src/Domain/AppEnvironment/Constants/AppEnvironments.
 
 ---
 
+## Test Categorization
+
+- MUST use xUnit `Trait("Category", "Name")` for tests that require isolated or grouped CI execution
+- MUST leave normal fast tests uncategorized
+- MUST run uncategorized tests first with category exclusion filters
+- MUST run categorized tests after uncategorized tests
+- MUST run tests with the same category in the same batch
+- MUST assign a unique category to any test that must run alone
+- MUST discover category names dynamically from compiled test assemblies
+- MUST order categorized batches by discovered test count descending, then category name
+- NEVER add class-level `Category` traits when individual tests in the class need different batch isolation
+- NEVER hardcode category lists in build orchestration
+
+| Category | Purpose |
+|----------|---------|
+| `HighMemory` | Long-running or high-memory tests that can run together |
+| `HighMemory.HappyPath` | Isolated memory leak happy-path test |
+
+---
+
 ## Pre-Commit Verification
 
 Before every commit:
