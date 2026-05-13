@@ -294,7 +294,11 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IChannelOwner
 
                 _lastPongTicks = Environment.TickCount64;
 
-                _writerTask = Task.Run(() => RunWriterLoopAsync(loopCt), loopCt);
+                _writerTask = Task.Factory.StartNew(
+                    () => RunWriterLoop(loopCt),
+                    loopCt,
+                    TaskCreationOptions.LongRunning,
+                    TaskScheduler.Default);
                 _flusherTask = Task.Factory.StartNew(
                     () => RunFlusherLoop(loopCt),
                     loopCt,
@@ -482,8 +486,10 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IChannelOwner
     // Writer Thread — THE DUMB ROUTER (send side)
     // Picks ready channels, writes their pre-built frames to the stream.
     // Flush is handled by the separate flusher thread.
+    // Runs on a dedicated LongRunning thread; uses synchronous I/O so the
+    // hot path does not allocate Task continuations or hop ThreadPool threads.
     // =====================================================================
-    private async Task RunWriterLoopAsync(CancellationToken ct)
+    private void RunWriterLoop(CancellationToken ct)
     {
         var transport = _transport ?? throw new InvalidOperationException("Transport not initialized.");
         var writeStream = transport.WriteStream;
@@ -492,7 +498,7 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IChannelOwner
         {
             while (!ct.IsCancellationRequested)
             {
-                await _readySignal.WaitAsync(ct);
+                _readySignal.Wait(ct);
 
                 // Snapshot and sort ready channels by priority (highest first)
                 WriteChannel[] snapshot;
@@ -510,7 +516,7 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IChannelOwner
                     Memory<byte> frames = channel.TakeReady();
                     if (frames.IsEmpty) continue;
 
-                    await writeStream.WriteAsync(frames, ct);
+                    writeStream.Write(frames.Span);
                     channel.MarkSent(frames.Length);
                     Interlocked.Add(ref _stats._bytesSent, frames.Length);
                     anyWritten = true;
@@ -924,7 +930,7 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IChannelOwner
 
         if (_controlChannel is not null)
         {
-            await _controlChannel.DisposeAsync();
+            _controlChannel.Abort(ChannelCloseReason.MuxDisposed);
             _controlChannel = null;
         }
 

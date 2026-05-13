@@ -10,8 +10,12 @@ using NukeBuildHelpers.Entry.Extensions;
 using NukeBuildHelpers.Runner.Abstraction;
 using Serilog;
 using System;
+using System.IO;
 using System.Diagnostics;
 using System.Linq;
+using System.Reflection;
+using System.Runtime.Loader;
+using System.Xml.Linq;
 
 class Build : BaseNukeBuildHelpers
 {
@@ -91,38 +95,27 @@ class Build : BaseNukeBuildHelpers
                     "RunConfiguration.CollectSourceInformation=true ";
                 if (spec.ProjectTestName == "NetConduit.UnitTests")
                 {
-                    DotNetTasks.DotNetTest(_ => _
-                        .SetProcessAdditionalArguments(
-                            "--filter \"Category!=HighMemory\" " + baseArgs)
-                        .SetProjectFile(projectFile)
-                        .SetConfiguration("Release"));
-                    var proc = Process.Start(new ProcessStartInfo("dotnet",
-                        $"test \"{projectFile}\" -c Release --no-build --filter \"Category=HighMemory\" --list-tests")
+                    var categories = DiscoverTestCategories(projectFile);
+                    if (categories.Length == 0)
                     {
-                        RedirectStandardOutput = true,
-                        UseShellExecute = false
-                    }) ?? throw new InvalidOperationException("Failed to start dotnet test process");
-                    var listOutput = proc.StandardOutput.ReadToEnd();
-                    proc.WaitForExit();
-                    var highMemoryClasses = listOutput
-                        .Split('\n')
-                        .Where(l => l.StartsWith("    "))
-                        .Select(l => l.Trim().Split('.'))
-                        .Where(p => p.Length >= 2)
-                        .Select(p => p[^2])
-                        .Distinct()
-                        .OrderBy(n => n)
-                        .ToArray();
-                    Log.Information("Discovered {Count} HighMemory test classes: {Classes}",
-                        highMemoryClasses.Length, string.Join(", ", highMemoryClasses));
-                    foreach (var className in highMemoryClasses)
-                    {
-                        DotNetTasks.DotNetTest(_ => _
-                            .SetProcessAdditionalArguments(
-                                $"--filter \"FullyQualifiedName~{className}\" " + baseArgs)
-                            .SetProjectFile(projectFile)
-                            .SetConfiguration("Release"));
+                        RunDotNetTest(projectFile, null, baseArgs);
+                        return;
                     }
+
+                    RunDotNetTest(projectFile, BuildUncategorizedFilter(categories), baseArgs);
+
+                    var categoryRuns = categories
+                        .Select(category => new TestCategoryRun(category, CountTests(projectFile, $"Category={category}")))
+                        .Where(run => run.TestCount > 0)
+                        .OrderByDescending(run => run.TestCount)
+                        .ThenBy(run => run.Category, StringComparer.Ordinal)
+                        .ToArray();
+
+                    Log.Information("Discovered {Count} categorized unit test groups: {Groups}",
+                        categoryRuns.Length, string.Join(", ", categoryRuns.Select(run => $"{run.Category}={run.TestCount}")));
+
+                    foreach (var categoryRun in categoryRuns)
+                        RunDotNetTest(projectFile, $"Category={categoryRun.Category}", baseArgs);
                 }
                 else
                 {
@@ -212,6 +205,141 @@ class Build : BaseNukeBuildHelpers
             (RootDirectory / ".vs").DeleteDirectory();
         });
 
+    private static string BuildUncategorizedFilter(string[] categories) =>
+        string.Join("&", categories.Select(category => $"Category!={category}"));
+
+    private static string[] DiscoverTestCategories(AbsolutePath projectFile)
+    {
+        var assemblyPath = GetTestAssemblyPath(projectFile);
+        var assemblyDirectory = Path.GetDirectoryName(assemblyPath.ToString())
+            ?? throw new InvalidOperationException($"Could not determine assembly directory for {assemblyPath}");
+        var loadContext = new AssemblyLoadContext($"TestCategoryDiscovery-{Guid.NewGuid()}", isCollectible: true);
+        loadContext.Resolving += (_, assemblyName) =>
+        {
+            var candidate = Path.Combine(assemblyDirectory, assemblyName.Name + ".dll");
+            return File.Exists(candidate) ? loadContext.LoadFromAssemblyPath(candidate) : null;
+        };
+
+        try
+        {
+            var assembly = loadContext.LoadFromAssemblyPath(assemblyPath.ToString());
+            var categories = GetLoadableTypes(assembly)
+                .SelectMany(type => GetTraitCategories(type)
+                    .Concat(type.GetMethods(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)
+                        .SelectMany(GetTraitCategories)))
+                .Distinct(StringComparer.Ordinal)
+                .OrderBy(category => category, StringComparer.Ordinal)
+                .ToArray();
+
+            Log.Information("Discovered {Count} unit test categories: {Categories}",
+                categories.Length, string.Join(", ", categories));
+            return categories;
+        }
+        finally
+        {
+            loadContext.Unload();
+        }
+    }
+
+    private static AbsolutePath GetTestAssemblyPath(AbsolutePath projectFile)
+    {
+        var projectName = Path.GetFileNameWithoutExtension(projectFile.ToString());
+        var targetFramework = GetPrimaryTargetFramework(projectFile);
+        var assemblyPath = projectFile.Parent / "bin" / "Release" / targetFramework / (projectName + ".dll");
+        if (!assemblyPath.FileExists())
+            throw new InvalidOperationException($"Expected built test assembly at {assemblyPath}");
+
+        return assemblyPath;
+    }
+
+    private static string GetPrimaryTargetFramework(AbsolutePath projectFile)
+    {
+        var document = XDocument.Load(projectFile.ToString());
+        var targetFramework = document.Descendants("TargetFramework")
+            .Select(element => element.Value.Trim())
+            .FirstOrDefault(value => !string.IsNullOrWhiteSpace(value));
+        if (!string.IsNullOrWhiteSpace(targetFramework))
+            return targetFramework;
+
+        var targetFrameworks = document.Descendants("TargetFrameworks")
+            .Select(element => element.Value.Trim())
+            .FirstOrDefault(value => !string.IsNullOrWhiteSpace(value));
+        if (string.IsNullOrWhiteSpace(targetFrameworks))
+            throw new InvalidOperationException($"No TargetFramework or TargetFrameworks found in {projectFile}");
+
+        return targetFrameworks
+            .Split(';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .First();
+    }
+
+    private static Type[] GetLoadableTypes(Assembly assembly)
+    {
+        try
+        {
+            return assembly.GetTypes();
+        }
+        catch (ReflectionTypeLoadException ex)
+        {
+            return ex.Types
+                .Where(type => type is not null)
+                .Cast<Type>()
+                .ToArray();
+        }
+    }
+
+    private static string[] GetTraitCategories(MemberInfo member)
+    {
+        return member.GetCustomAttributesData()
+            .Where(attribute => attribute.AttributeType.FullName == "Xunit.TraitAttribute")
+            .Select(GetCategoryValue)
+            .Where(category => !string.IsNullOrWhiteSpace(category))
+            .Select(category => category.Trim())
+            .ToArray();
+    }
+
+    private static string GetCategoryValue(CustomAttributeData attribute)
+    {
+        if (attribute.ConstructorArguments.Count != 2)
+            return string.Empty;
+
+        var name = attribute.ConstructorArguments[0].Value as string;
+        if (!string.Equals(name, "Category", StringComparison.Ordinal))
+            return string.Empty;
+
+        return attribute.ConstructorArguments[1].Value as string ?? string.Empty;
+    }
+
+    private static int CountTests(AbsolutePath projectFile, string filter)
+    {
+        var proc = Process.Start(new ProcessStartInfo("dotnet",
+            $"test \"{projectFile}\" -c Release --no-build --filter \"{filter}\" --list-tests")
+        {
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            UseShellExecute = false
+        }) ?? throw new InvalidOperationException("Failed to start dotnet test process");
+
+        var listOutput = proc.StandardOutput.ReadToEnd();
+        var errorOutput = proc.StandardError.ReadToEnd();
+        proc.WaitForExit();
+
+        if (proc.ExitCode != 0)
+            throw new InvalidOperationException($"Failed to list tests for filter '{filter}': {errorOutput}");
+
+        return listOutput
+            .Split('\n')
+            .Count(line => line.StartsWith("    ", StringComparison.Ordinal));
+    }
+
+    private static void RunDotNetTest(AbsolutePath projectFile, string? filter, string baseArgs)
+    {
+        var filterArgs = string.IsNullOrWhiteSpace(filter) ? string.Empty : $"--filter \"{filter}\" ";
+        DotNetTasks.DotNetTest(_ => _
+            .SetProcessAdditionalArguments(filterArgs + baseArgs)
+            .SetProjectFile(projectFile)
+            .SetConfiguration("Release"));
+    }
+
     private string? NormalizeReleaseNotes(string? releaseNotes)
     {
         return releaseNotes?
@@ -226,4 +354,6 @@ class Build : BaseNukeBuildHelpers
         public required string ProjectName { get; set; }
         public required string ProjectTestName { get; set; }
     }
+
+    private sealed record TestCategoryRun(string Category, int TestCount);
 }

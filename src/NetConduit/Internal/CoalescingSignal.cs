@@ -2,46 +2,33 @@ namespace NetConduit.Internal;
 
 /// <summary>
 /// Coalescing signal: multiple Signal() calls before the consumer wakes collapse into one wakeup.
-/// Uses SemaphoreSlim(0,1) as an auto-reset binary semaphore.
-/// Signal() on an already-signaled gate is a no-op (caught SemaphoreFullException).
-/// Supports both synchronous Wait (for dedicated threads) and async WaitAsync (for ThreadPool tasks).
+/// ManualResetEventSlim spins briefly in user-mode before falling back to kernel wait.
+/// Signal() on an already-signaled gate is a volatile write (no lock, no syscall).
+/// Consumer must run on a dedicated thread (LongRunning) — Wait blocks the calling thread.
 /// </summary>
 internal sealed class CoalescingSignal : IDisposable
 {
-    private readonly SemaphoreSlim _gate = new(0, 1);
+    private readonly ManualResetEventSlim _gate = new(false);
 
     /// <summary>
     /// Signal the consumer that work is ready.
-    /// Idempotent — calling multiple times before Wait/WaitAsync returns is a no-op.
+    /// Idempotent — calling multiple times before Wait() returns is a no-op volatile write.
     /// </summary>
-    public void Signal()
-    {
-        try { _gate.Release(); }
-        catch (SemaphoreFullException) { }
-        catch (ObjectDisposedException) { }
-    }
+    public void Signal() => _gate.Set();
 
     /// <summary>
-    /// Block until signaled or cancelled. Auto-resets for the next cycle.
+    /// Block until signaled or cancelled. Resets the gate for the next cycle.
     /// Use only on dedicated (LongRunning) threads — blocks the calling thread.
     /// </summary>
     public void Wait(CancellationToken ct)
     {
         _gate.Wait(ct);
-    }
-
-    /// <summary>
-    /// Asynchronously wait until signaled or cancelled. Auto-resets for the next cycle.
-    /// Preferred over Wait for ThreadPool-hosted tasks to avoid thread starvation.
-    /// </summary>
-    public Task WaitAsync(CancellationToken ct)
-    {
-        return _gate.WaitAsync(ct);
+        _gate.Reset();
     }
 
     public void Dispose()
     {
-        Signal(); // unblock any waiter so it can observe cancellation
+        _gate.Set(); // unblock any waiter so it can observe cancellation
         _gate.Dispose();
     }
 }

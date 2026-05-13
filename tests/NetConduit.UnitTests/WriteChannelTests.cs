@@ -239,4 +239,16 @@ public sealed class WriteChannelTests
         Assert.Equal(ChannelCloseReason.RemoteFin, capturedReason);
         Assert.Equal(ChannelState.Closed, channel.State);
     }
+
+    [Fact]
+    public void Abort_ClosesWithoutFinWhenSlabHasNoSpace()
+    {
+        var channel = CreateChannel(slabSize: FrameHeader.Size + 4);
+        channel.WriteRawFrame(new byte[FrameHeader.Size + 4]);
+
+        channel.Abort(ChannelCloseReason.MuxDisposed);
+
+        Assert.Equal(ChannelState.Closed, channel.State);
+        Assert.Equal(ChannelCloseReason.MuxDisposed, channel.CloseReason);
+    }
 }
