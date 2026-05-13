@@ -1,8 +1,7 @@
 using System.Text.Json;
 using System.Text.Json.Nodes;
-using NetConduit.Internal;
 
-namespace NetConduit.UnitTests;
+namespace NetConduit.Transit.DeltaMessage.UnitTests;
 
 /// <summary>
 /// Edge-case tests for DeltaDiff, DeltaApply, and DeltaTransit serialization.

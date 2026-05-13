@@ -37,25 +37,25 @@ class Build : BaseNukeBuildHelpers
         {
             AppId = "net_conduit_transit_stream",
             ProjectName = "NetConduit.Transit.Stream",
-            ProjectTestName = "NetConduit.UnitTests"
+            ProjectTestName = "NetConduit.Transit.Stream.UnitTests"
         },
         new DeploymentAppSpec
         {
             AppId = "net_conduit_transit_duplex_stream",
             ProjectName = "NetConduit.Transit.DuplexStream",
-            ProjectTestName = "NetConduit.UnitTests"
+            ProjectTestName = "NetConduit.Transit.DuplexStream.UnitTests"
         },
         new DeploymentAppSpec
         {
             AppId = "net_conduit_transit_message",
             ProjectName = "NetConduit.Transit.Message",
-            ProjectTestName = "NetConduit.UnitTests"
+            ProjectTestName = "NetConduit.Transit.Message.UnitTests"
         },
         new DeploymentAppSpec
         {
             AppId = "net_conduit_transit_delta_message",
             ProjectName = "NetConduit.Transit.DeltaMessage",
-            ProjectTestName = "NetConduit.UnitTests"
+            ProjectTestName = "NetConduit.Transit.DeltaMessage.UnitTests"
         },
         new DeploymentAppSpec
         {

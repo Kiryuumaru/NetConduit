@@ -42,6 +42,7 @@
 
 	<ItemGroup>
 		<InternalsVisibleTo Include="NetConduit.UnitTests" />
+		<InternalsVisibleTo Include="NetConduit.Transit.DeltaMessage.UnitTests" />
 	</ItemGroup>
 
 </Project>

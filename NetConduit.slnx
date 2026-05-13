@@ -14,6 +14,10 @@
   </Folder>
   <Folder Name="/tests/">
     <Project Path="tests/NetConduit.UnitTests/NetConduit.UnitTests.csproj" />
+    <Project Path="tests/NetConduit.Transit.Stream.UnitTests/NetConduit.Transit.Stream.UnitTests.csproj" />
+    <Project Path="tests/NetConduit.Transit.DuplexStream.UnitTests/NetConduit.Transit.DuplexStream.UnitTests.csproj" />
+    <Project Path="tests/NetConduit.Transit.Message.UnitTests/NetConduit.Transit.Message.UnitTests.csproj" />
+    <Project Path="tests/NetConduit.Transit.DeltaMessage.UnitTests/NetConduit.Transit.DeltaMessage.UnitTests.csproj" />
     <Project Path="tests/NetConduit.Transport.Tcp.IntegrationTests/NetConduit.Transport.Tcp.IntegrationTests.csproj" />
     <Project Path="tests/NetConduit.Transport.WebSocket.IntegrationTests/NetConduit.Transport.WebSocket.IntegrationTests.csproj" />
     <Project Path="tests/NetConduit.Transport.Udp.IntegrationTests/NetConduit.Transport.Udp.IntegrationTests.csproj" />
