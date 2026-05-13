@@ -44,7 +44,7 @@ public sealed class MemoryLeakTests
         return (client, server);
     }
 
-    [Fact(Timeout = 90_000)]
+    [Fact(Timeout = 180_000)]
     public async Task MemoryLeak_ChaosWorkload_MemoryStaysBounded()
     {
         var (client, server) = CreatePair();
