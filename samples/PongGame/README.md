@@ -1,16 +1,16 @@
 # NetConduit Pong Sample
 
-Real-time multiplayer Pong game demonstrating DeltaTransit's bandwidth efficiency.
+Real-time multiplayer Pong game demonstrating DeltaMessageTransit's bandwidth efficiency.
 
 ## Features
 
 - **Real-time gameplay** - Smooth multiplayer action
-- **DeltaTransit** - Only changed values are sent (73-87% bandwidth savings)
+- **DeltaMessageTransit** - Only changed values are sent (73-87% bandwidth savings)
 - **Console UI** - Cross-platform terminal rendering
 
 ## Bandwidth Efficiency
 
-DeltaTransit sends only what changed:
+DeltaMessageTransit sends only what changed:
 
 | Update Type | Full State | Delta | Savings |
 |-------------|------------|-------|---------|
@@ -59,7 +59,7 @@ dotnet run -- client 5000 127.0.0.1
 ┌─────────────────┐                      ┌─────────────────┐
 │    Server       │                      │    Client       │
 │                 │                      │                 │
-│  Game Logic     │   DeltaTransit       │   Game Render   │
+│  Game Logic     │ DeltaMessageTransit  │   Game Render   │
 │  ┌───────────┐  │   (state deltas)     │  ┌───────────┐  │
 │  │ GameState │──┼─────────────────────▶│  │ GameState │  │
 │  └───────────┘  │                      │  └───────────┘  │
@@ -72,7 +72,7 @@ dotnet run -- client 5000 127.0.0.1
 
 ## Protocol
 
-The server sends game state via DeltaTransit:
+The server sends game state via DeltaMessageTransit:
 
 ```json
 // Full state (first send)
@@ -95,7 +95,7 @@ Clients send input via MessageTransit:
 
 | Feature | Usage |
 |---------|-------|
-| `DeltaTransit` | Efficient state synchronization |
+| `DeltaMessageTransit` | Efficient state synchronization |
 | `MessageTransit` | Player input commands |
 | `SendAsync` | Server broadcasts state at 60fps |
 | `ReceiveAllAsync` | Client receives state updates |
