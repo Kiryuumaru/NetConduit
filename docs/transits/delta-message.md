@@ -1,10 +1,10 @@
-# DeltaTransit
+# DeltaMessageTransit
 
 Send only changed properties between state updates. Ideal for real-time synchronization where bandwidth efficiency matters. See [Transit Overview](index.md) for alternatives.
 
 ## How It Works
 
-DeltaTransit compares the current state to the previously sent state and transmits only the differences:
+DeltaMessageTransit compares the current state to the previously sent state and transmits only the differences:
 
 ```
 First send:  Full JSON object (baseline)
@@ -19,7 +19,7 @@ Subsequent:  Only changed properties (delta patch)
 ## Basic Usage
 
 ```csharp
-using NetConduit.Transits;
+using NetConduit.Transit.Message;
 using System.Text.Json.Serialization;
 
 public class GameState
@@ -34,13 +34,13 @@ public class GameState
 public partial class GameContext : JsonSerializerContext { }
 
 // Sender
-var sender = mux.OpenSendOnlyDeltaTransit("state", GameContext.Default.GameState);
+var sender = mux.OpenSendOnlyDeltaMessageTransit("state", GameContext.Default.GameState);
 await sender.SendAsync(new GameState { Score = 0, X = 5, Y = 10, Health = 100 });  // Full
 await sender.SendAsync(new GameState { Score = 0, X = 6, Y = 10, Health = 100 });  // Only X changed
 await sender.SendAsync(new GameState { Score = 10, X = 6, Y = 10, Health = 100 }); // Only Score changed
 
 // Receiver
-await using var receiver = await mux.AcceptReceiveOnlyDeltaTransitAsync("state", GameContext.Default.GameState);
+await using var receiver = await mux.AcceptReceiveOnlyDeltaMessageTransitAsync("state", GameContext.Default.GameState);
 await foreach (var state in receiver.ReceiveAllAsync(ct))
 {
     // Always receives complete reconstructed state
@@ -100,12 +100,12 @@ For two-way state synchronization:
 
 ```csharp
 // Side A
-await using var transitA = await mux.OpenDeltaTransitAsync("game", GameContext.Default.GameState);
+await using var transitA = await mux.OpenDeltaMessageTransitAsync("game", GameContext.Default.GameState);
 await transitA.SendAsync(myState);
 var theirState = await transitA.ReceiveAsync();
 
 // Side B
-await using var transitB = await mux.AcceptDeltaTransitAsync("game", GameContext.Default.GameState);
+await using var transitB = await mux.AcceptDeltaMessageTransitAsync("game", GameContext.Default.GameState);
 var theirState = await transitB.ReceiveAsync();
 await transitB.SendAsync(myState);
 ```
@@ -116,11 +116,11 @@ Most common pattern — one side publishes state, the other consumes:
 
 ```csharp
 // Publisher (no receive channel needed)
-var publisher = mux.OpenSendOnlyDeltaTransit("state", GameContext.Default.GameState);
+var publisher = mux.OpenSendOnlyDeltaMessageTransit("state", GameContext.Default.GameState);
 await publisher.SendAsync(state);
 
 // Subscriber (no write channel needed)
-await using var subscriber = await mux.AcceptReceiveOnlyDeltaTransitAsync("state", GameContext.Default.GameState);
+await using var subscriber = await mux.AcceptReceiveOnlyDeltaMessageTransitAsync("state", GameContext.Default.GameState);
 await foreach (var state in subscriber.ReceiveAllAsync(ct))
     Render(state);
 ```
@@ -134,12 +134,12 @@ var writeChannel = mux.OpenChannel("state");
 var readChannel = await mux.AcceptChannelAsync("state");
 
 // AOT-safe with JsonTypeInfo (required for POCO types)
-var transit = new DeltaTransit<GameState>(
+var transit = new DeltaMessageTransit<GameState>(
     writeChannel, readChannel,
     GameContext.Default.GameState);
 
 // Dynamic JSON types only (JsonObject, JsonNode, etc.)
-var transit = new DeltaTransit<JsonObject>(writeChannel, readChannel);
+var transit = new DeltaMessageTransit<JsonObject>(writeChannel, readChannel);
 ```
 
 ## Configuration
@@ -147,7 +147,7 @@ var transit = new DeltaTransit<JsonObject>(writeChannel, readChannel);
 ### Max Message Size
 
 ```csharp
-var transit = await mux.OpenDeltaTransitAsync(
+var transit = await mux.OpenDeltaMessageTransitAsync(
     "state",
     GameContext.Default.GameState,
     maxMessageSize: 1024 * 1024);  // 1MB max
@@ -155,7 +155,7 @@ var transit = await mux.OpenDeltaTransitAsync(
 
 ## Delta Operations
 
-Internally, DeltaTransit produces operations:
+Internally, DeltaMessageTransit produces operations:
 
 | Operation      | Description              |
 | -------------- | ------------------------ |

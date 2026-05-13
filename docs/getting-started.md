@@ -7,11 +7,11 @@
 dotnet add package NetConduit
 
 # Choose your transport(s):
-dotnet add package NetConduit.Tcp        # TCP sockets
-dotnet add package NetConduit.WebSocket  # WebSocket (client + ASP.NET Core)
-dotnet add package NetConduit.Udp        # UDP with reliability layer
-dotnet add package NetConduit.Ipc        # TCP loopback (Windows) / Unix sockets
-dotnet add package NetConduit.Quic       # QUIC (requires OS support)
+dotnet add package NetConduit.Transport.Tcp        # TCP sockets
+dotnet add package NetConduit.Transport.WebSocket  # WebSocket (client + ASP.NET Core)
+dotnet add package NetConduit.Transport.Udp        # UDP with reliability layer
+dotnet add package NetConduit.Transport.Ipc        # TCP loopback (Windows) / Unix sockets
+dotnet add package NetConduit.Transport.Quic       # QUIC (requires OS support)
 ```
 
 See [Transports](transports/index.md) for details on each transport.
@@ -24,7 +24,7 @@ Create a [TCP](transports/tcp.md) server and client that communicate over [chann
 
 ```csharp
 using NetConduit;
-using NetConduit.Tcp;
+using NetConduit.Transport.Tcp;
 using System.Net;
 using System.Net.Sockets;
 using System.Text;
@@ -48,7 +48,7 @@ await foreach (var channel in mux.AcceptChannelsAsync())
 
 ```csharp
 using NetConduit;
-using NetConduit.Tcp;
+using NetConduit.Transport.Tcp;
 using System.Text;
 
 var mux = StreamMultiplexer.Create(TcpMultiplexer.CreateOptions("localhost", 5000));
@@ -67,7 +67,7 @@ await channel.DisposeAsync();
 ### MessageTransit
 
 ```csharp
-using NetConduit.Transits;
+using NetConduit.Transit.Message;
 using System.Text.Json.Serialization;
 
 public record ChatMessage(string User, string Text);
@@ -85,7 +85,7 @@ await using var transit = await mux.OpenMessageTransitAsync("chat", ChatContext.
 await transit.SendAsync(new ChatMessage("Alice", "Hello!"));
 ```
 
-### DeltaTransit
+### DeltaMessageTransit
 
 For state synchronization — only changed fields are sent:
 
@@ -96,12 +96,12 @@ public record GameState(int Score, int Health);
 public partial class GameContext : JsonSerializerContext { }
 
 // Sender
-var sender = mux.OpenSendOnlyDeltaTransit("state", GameContext.Default.GameState);
+var sender = mux.OpenSendOnlyDeltaMessageTransit("state", GameContext.Default.GameState);
 await sender.SendAsync(new GameState(100, 50));
 await sender.SendAsync(new GameState(150, 50));  // Only sends Score change
 
 // Receiver
-await using var receiver = await mux.AcceptReceiveOnlyDeltaTransitAsync("state", GameContext.Default.GameState);
+await using var receiver = await mux.AcceptReceiveOnlyDeltaMessageTransitAsync("state", GameContext.Default.GameState);
 await foreach (var state in receiver.ReceiveAllAsync(ct))
     UpdateUI(state);
 ```

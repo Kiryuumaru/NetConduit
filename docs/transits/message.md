@@ -5,7 +5,7 @@ Send and receive JSON-serialized messages. Ideal for RPC, events, and command pa
 ## Basic Usage
 
 ```csharp
-using NetConduit.Transits;
+using NetConduit.Transit.Message;
 using System.Text.Json.Serialization;
 
 // Define message type

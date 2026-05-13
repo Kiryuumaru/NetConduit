@@ -8,7 +8,7 @@
 | ------------------------------------- | ------------------------------------------------------------------- |
 | [Getting Started](getting-started.md) | Installation, quick start, first multiplexer                        |
 | [Transports](transports/index.md)     | TCP, WebSocket, UDP, IPC, QUIC                                      |
-| [Transits](transits/index.md)         | MessageTransit, DeltaTransit, DuplexStreamTransit, StreamTransit    |
+| [Transits](transits/index.md)         | MessageTransit, DeltaMessageTransit, DuplexStreamTransit, StreamTransit    |
 | [Concepts](concepts/index.md)         | Channels, backpressure, priority, reconnection, shutdown, heartbeat |
 | [API Reference](api/index.md)         | Multiplexer, channels, options, statistics, errors                  |
 | [Samples](samples/index.md)           | Complete example applications                                       |
@@ -18,8 +18,8 @@
 
 ```csharp
 using NetConduit;
-using NetConduit.Tcp;
-using NetConduit.Transits;
+using NetConduit.Transport.Tcp;
+using NetConduit.Transit.Message;
 using System.Text.Json.Serialization;
 
 // Define message type
@@ -74,7 +74,7 @@ N streams → 1 stream (mux) → N streams (demux)
 ├──────────────────────────────────────────────────────────────────────────────┤
 │  Transit Layer (Optional)                                                    │
 │  ┌──────────────┐  ┌──────────────┐  ┌───────────────────┐  ┌─────────────┐  │
-│  │MessageTransit│  │ DeltaTransit │  │DuplexStreamTransit│  │StreamTransit│  │
+│  │MessageTransit│  │ DeltaMessageTransit │  │DuplexStreamTransit│  │StreamTransit│  │
 │  └──────────────┘  └──────────────┘  └───────────────────┘  └─────────────┘  │
 ├──────────────────────────────────────────────────────────────────────────────┤
 │  NetConduit Core                                                             │

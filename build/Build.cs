@@ -35,6 +35,30 @@ class Build : BaseNukeBuildHelpers
         },
         new DeploymentAppSpec
         {
+            AppId = "net_conduit_transit_stream",
+            ProjectName = "NetConduit.Transit.Stream",
+            ProjectTestName = "NetConduit.UnitTests"
+        },
+        new DeploymentAppSpec
+        {
+            AppId = "net_conduit_transit_duplex_stream",
+            ProjectName = "NetConduit.Transit.DuplexStream",
+            ProjectTestName = "NetConduit.UnitTests"
+        },
+        new DeploymentAppSpec
+        {
+            AppId = "net_conduit_transit_message",
+            ProjectName = "NetConduit.Transit.Message",
+            ProjectTestName = "NetConduit.UnitTests"
+        },
+        new DeploymentAppSpec
+        {
+            AppId = "net_conduit_transit_delta_message",
+            ProjectName = "NetConduit.Transit.DeltaMessage",
+            ProjectTestName = "NetConduit.UnitTests"
+        },
+        new DeploymentAppSpec
+        {
             AppId = "net_conduit_transport_tcp",
             ProjectName = "NetConduit.Transport.Tcp",
             ProjectTestName = "NetConduit.Transport.Tcp.IntegrationTests"

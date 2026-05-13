@@ -23,13 +23,14 @@ N streams → 1 stream (mux) → N streams (demux)
 
 ```bash
 dotnet add package NetConduit
-dotnet add package NetConduit.Tcp
+dotnet add package NetConduit.Transport.Tcp
+dotnet add package NetConduit.Transit.Message
 ```
 
 ```csharp
 using NetConduit;
-using NetConduit.Tcp;
-using NetConduit.Transits;
+using NetConduit.Transport.Tcp;
+using NetConduit.Transit.Message;
 using System.Text.Json.Serialization;
 
 public record ChatMessage(string User, string Text);
@@ -59,14 +60,18 @@ await transit.SendAsync(new ChatMessage("Alice", "Hello!"));
 
 ## Packages
 
-| Package                | Description                 |
-| ---------------------- | --------------------------- |
-| `NetConduit`           | Core multiplexer + transits |
-| `NetConduit.Tcp`       | TCP transport               |
-| `NetConduit.WebSocket` | WebSocket transport         |
-| `NetConduit.Udp`       | UDP with reliability layer  |
-| `NetConduit.Ipc`       | IPC (loopback/Unix sockets) |
-| `NetConduit.Quic`      | QUIC transport              |
+| Package                                | Description                                |
+| -------------------------------------- | ------------------------------------------ |
+| `NetConduit`                           | Core multiplexer + base interfaces         |
+| `NetConduit.Transit.Stream`            | Single-channel `Stream` wrapper            |
+| `NetConduit.Transit.DuplexStream`      | Bidirectional `Stream` over two channels   |
+| `NetConduit.Transit.Message`           | Typed JSON message framing                 |
+| `NetConduit.Transit.DeltaMessage`      | State-sync via JSON delta diffs            |
+| `NetConduit.Transport.Tcp`             | TCP transport                              |
+| `NetConduit.Transport.WebSocket`       | WebSocket transport                        |
+| `NetConduit.Transport.Udp`             | UDP with reliability layer                 |
+| `NetConduit.Transport.Ipc`             | IPC (loopback/Unix sockets)                |
+| `NetConduit.Transport.Quic`            | QUIC transport                             |
 
 ## Architecture
 
@@ -76,7 +81,7 @@ await transit.SendAsync(new ChatMessage("Alice", "Hello!"));
 ├──────────────────────────────────────────────────────────────────────────────┤
 │  Transit Layer (Optional)                                                    │
 │  ┌──────────────┐  ┌──────────────┐  ┌───────────────────┐  ┌─────────────┐  │
-│  │MessageTransit│  │ DeltaTransit │  │DuplexStreamTransit│  │StreamTransit│  │
+│  │MessageTransit│  │ DeltaMessageTransit │  │DuplexStreamTransit│  │StreamTransit│  │
 │  └──────────────┘  └──────────────┘  └───────────────────┘  └─────────────┘  │
 ├──────────────────────────────────────────────────────────────────────────────┤
 │  NetConduit Core                                                             │
@@ -106,8 +111,8 @@ await transit.SendAsync(new ChatMessage("Alice", "Hello!"));
 | Scoreboard   | Live leaderboard with reconnection     |
 
 ```bash
-dotnet run --project samples/NetConduit.Samples.GroupChat -- server tcp 5000
-dotnet run --project samples/NetConduit.Samples.GroupChat -- client tcp 5000 127.0.0.1 Alice
+dotnet run --project samples/GroupChatSample -- server tcp 5000
+dotnet run --project samples/GroupChatSample -- client tcp 5000 127.0.0.1 Alice
 ```
 
 ## Documentation
@@ -116,7 +121,7 @@ Full documentation at [`docs/`](docs/index.md):
 
 - [Getting Started](docs/getting-started.md)
 - [Transports](docs/transports/index.md) — TCP, WebSocket, UDP, IPC, QUIC
-- [Transits](docs/transits/index.md) — MessageTransit, DeltaTransit, DuplexStream, Stream
+- [Transits](docs/transits/index.md) — MessageTransit, DeltaMessageTransit, DuplexStream, Stream
 - [Concepts](docs/concepts/index.md) — Channels, backpressure, priority, reconnection
 - [API Reference](docs/api/index.md)
 
