@@ -19,7 +19,7 @@ Subsequent:  Only changed properties (delta patch)
 ## Basic Usage
 
 ```csharp
-using NetConduit.Transit.Message;
+using NetConduit.Transit.DeltaMessage;
 using System.Text.Json.Serialization;
 
 public class GameState

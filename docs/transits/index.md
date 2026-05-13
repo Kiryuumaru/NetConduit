@@ -7,7 +7,7 @@ Transits add semantic meaning to raw [channels](../concepts/channels.md), provid
 | Transit                                 | Use Case           | Description                          |
 | --------------------------------------- | ------------------ | ------------------------------------ |
 | [MessageTransit](message.md)            | RPC, events        | Send/receive JSON-serialized objects |
-| [DeltaMessageTransit](delta.md)                | State sync         | Send only changed properties         |
+| [DeltaMessageTransit](delta-message.md)        | State sync         | Send only changed properties         |
 | [DuplexStreamTransit](duplex-stream.md) | Bidirectional data | Two-way stream abstraction           |
 | [StreamTransit](stream.md)              | One-way data       | Simple stream wrapper                |
 
