@@ -18,6 +18,17 @@ internal sealed class ChannelRegistry
     private readonly ConcurrentDictionary<string, ReadChannel> _pendingAcceptChannels = new();
     private readonly Channel<ReadChannel> _acceptQueue = Channel.CreateUnbounded<ReadChannel>();
 
+    /// <summary>
+    /// Serializes the compound "register pending + read existing" sequences in
+    /// AcceptChannel against the reader's "adopt pending + register read channel"
+    /// sequence in DispatchToChannel(Init). Without this lock, the test can
+    /// observe a transient registry state where _readChannels holds the reader's
+    /// transient channel while _pendingAcceptChannels holds the caller's pending
+    /// channel, causing the two sides to end up with different ReadChannel
+    /// instances for the same channel id.
+    /// </summary>
+    internal readonly object AcceptLock = new();
+
     private int _nextChannelIndex;
     private readonly int _indexStep = 2;
 
@@ -113,24 +124,6 @@ internal sealed class ChannelRegistry
 
     internal void EnqueueForAccept(ReadChannel channel)
     {
-        // Check if there's a pre-created pending accept channel for this ID
-        if (_pendingAcceptChannels.TryRemove(channel.ChannelId, out var pendingChannel))
-        {
-            if (ReferenceEquals(pendingChannel, channel))
-            {
-                // DispatchToChannel already found and used the pending channel directly. Just clean up.
-                return;
-            }
-
-            // Race: DispatchToChannel created 'channel' but user holds 'pendingChannel' via AcceptChannel(sync).
-            // Replace the registration so future data flows to the pending channel.
-            _readChannels[channel.ChannelIndex] = pendingChannel;
-            pendingChannel.SetChannelIndex(channel.ChannelIndex);
-            pendingChannel.MarkOpen();
-            pendingChannel.MarkConnected();
-            return;
-        }
-
         // Check if there's a specific async accept waiting for this channel ID
         if (_pendingAccepts.TryRemove(channel.ChannelId, out var tcs))
         {
