@@ -7,11 +7,12 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <IsPackable>false</IsPackable>
+    <RootNamespace>FileTransferSample</RootNamespace>
+    <AssemblyName>FileTransferSample</AssemblyName>
   </PropertyGroup>
 
   <ItemGroup>
     <ProjectReference Include="..\..\src\NetConduit.Transport.Tcp\NetConduit.Transport.Tcp.csproj" />
-    <ProjectReference Include="..\..\src\NetConduit.Transport.WebSocket\NetConduit.Transport.WebSocket.csproj" />
   </ItemGroup>
 
 </Project>

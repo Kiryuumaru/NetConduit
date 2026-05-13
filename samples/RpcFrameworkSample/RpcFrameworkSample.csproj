@@ -7,6 +7,8 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <IsPackable>false</IsPackable>
+    <RootNamespace>RpcFrameworkSample</RootNamespace>
+    <AssemblyName>RpcFrameworkSample</AssemblyName>
   </PropertyGroup>
 
   <ItemGroup>

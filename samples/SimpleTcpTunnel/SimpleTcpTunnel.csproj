@@ -1,14 +1,19 @@
-﻿<Project Sdk="Microsoft.NET.Sdk">
+<Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
     <OutputType>Exe</OutputType>
     <TargetFramework>net10.0</TargetFramework>
+    <LangVersion>preview</LangVersion>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
+    <IsPackable>false</IsPackable>
+    <RootNamespace>SimpleTcpTunnel</RootNamespace>
+    <AssemblyName>SimpleTcpTunnel</AssemblyName>
   </PropertyGroup>
 
   <ItemGroup>
     <ProjectReference Include="..\..\src\NetConduit.Transport.Tcp\NetConduit.Transport.Tcp.csproj" />
+    <ProjectReference Include="..\..\src\NetConduit.Transport.WebSocket\NetConduit.Transport.WebSocket.csproj" />
   </ItemGroup>
 
 </Project>

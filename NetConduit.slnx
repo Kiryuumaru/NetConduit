@@ -17,12 +17,12 @@
     <Project Path="tests/NetConduit.Transport.Quic.IntegrationTests/NetConduit.Transport.Quic.IntegrationTests.csproj" />
   </Folder>
   <Folder Name="/samples/">
-    <Project Path="samples/NetConduit.Samples.FileTransfer/NetConduit.Samples.FileTransfer.csproj" />
-    <Project Path="samples/NetConduit.Samples.GroupChat/NetConduit.Samples.GroupChat.csproj" />
-    <Project Path="samples/NetConduit.Samples.Pong/NetConduit.Samples.Pong.csproj" />
-    <Project Path="samples/NetConduit.Samples.RemoteShell/NetConduit.Samples.RemoteShell.csproj" />
-    <Project Path="samples/NetConduit.Samples.RpcFramework/NetConduit.Samples.RpcFramework.csproj" />
-    <Project Path="samples/NetConduit.Samples.Scoreboard/NetConduit.Samples.Scoreboard.csproj" />
-    <Project Path="samples/NetConduit.Samples.TcpTunnel/NetConduit.Samples.TcpTunnel.csproj" />
+    <Project Path="samples/FileTransferSample/FileTransferSample.csproj" />
+    <Project Path="samples/GroupChatSample/GroupChatSample.csproj" />
+    <Project Path="samples/PongGame/PongGame.csproj" />
+    <Project Path="samples/RemoteShellSample/RemoteShellSample.csproj" />
+    <Project Path="samples/RpcFrameworkSample/RpcFrameworkSample.csproj" />
+    <Project Path="samples/ScoreboardSample/ScoreboardSample.csproj" />
+    <Project Path="samples/SimpleTcpTunnel/SimpleTcpTunnel.csproj" />
   </Folder>
 </Solution>
