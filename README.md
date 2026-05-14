@@ -40,7 +40,6 @@ N streams → 1 stream (mux) → N streams (demux)
 ## Quick Start
 
 ```bash
-dotnet add package NetConduit
 dotnet add package NetConduit.Transport.Tcp
 dotnet add package NetConduit.Transit.Message
 ```

@@ -2,10 +2,9 @@
 
 ## Installation
 
-```bash
-# Core package (required)
-dotnet add package NetConduit
+Each transport package depends on the core `NetConduit` package, so installing a transport pulls in the core automatically.
 
+```bash
 # Choose your transport(s):
 dotnet add package NetConduit.Transport.Tcp        # TCP sockets
 dotnet add package NetConduit.Transport.WebSocket  # WebSocket (client + ASP.NET Core)
