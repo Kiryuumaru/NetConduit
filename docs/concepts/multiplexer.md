@@ -33,15 +33,15 @@ Each multiplexer has a `SessionId` (`Guid`) and learns its peer's `RemoteSession
 ## Opening and accepting channels
 
 ```csharp
-IWriteChannel out = mux.OpenChannel("requests");
-IReadChannel  in  = mux.AcceptChannel("requests");
+IWriteChannel writer = mux.OpenChannel("requests");
+IReadChannel  reader = mux.AcceptChannel("requests");
 ```
 
 Both return immediately in `Opening` state. They become `Open` once the peer's matching call completes the rendezvous. Use `await channel.WaitForReadyAsync()` to wait, or use the async shortcuts:
 
 ```csharp
-await using var out = await mux.OpenChannelAsync("requests");
-await using var in  = await mux.AcceptChannelAsync("requests");
+await using var writer = await mux.OpenChannelAsync("requests");
+await using var reader = await mux.AcceptChannelAsync("requests");
 ```
 
 `AcceptChannelsAsync()` returns an `IAsyncEnumerable<IReadChannel>` that yields every inbound channel as the remote opens them:

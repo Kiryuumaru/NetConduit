@@ -41,7 +41,7 @@ Effective dead-connection detection latency is roughly `MaxMissedPings * PingTim
 
 - **Faster failure detection** — lower `PingTimeout` and/or `MaxMissedPings`. Be mindful of jittery networks; very low values can produce false positives.
 - **Less wire chatter** — raise `PingInterval`.
-- **No heartbeat at all** — set `PingInterval = Timeout.InfiniteTimeSpan`. Use only if your transport already has its own keepalive (some QUIC stacks, IPC).
+- **No heartbeat at all** — set `PingInterval = TimeSpan.Zero` (or any non-positive value). The keepalive loop is skipped entirely. Use only if your transport already has its own keepalive (some QUIC stacks, IPC).
 
 ## What happens after a missed-ping disconnect
 

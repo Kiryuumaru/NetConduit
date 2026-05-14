@@ -1,53 +1,65 @@
 # Benchmarks
 
-NetConduit ships a BenchmarkDotNet project at [`benchmarks/NetConduit.Benchmarks`](../benchmarks/NetConduit.Benchmarks/) measuring throughput, scalability, and cross-transport behavior.
+NetConduit ships a comparison benchmark suite that pits NetConduit's TCP multiplexer against raw TCP (.NET) and an equivalent Go reference implementation.
 
-## Benchmark classes
+## What is benchmarked
 
-| Class | Measures |
+The project at [`benchmarks/docker/netconduit-comparison`](../benchmarks/docker/netconduit-comparison/) runs two workloads:
+
+| Workload | Measures |
 | --- | --- |
-| `ThroughputBenchmark` | Raw bytes/sec for a single channel, varying payload size. |
-| `ChannelTransitBenchmark` | `StreamTransit` and `MessageTransit` overhead vs raw channels. |
-| `IpcThroughputBenchmark` | IPC transport throughput (named pipe / Unix socket). |
-| `TcpVsMuxBenchmark` | Bare `TcpClient` vs `TcpMultiplexer` overhead. |
-| `AllTransportsMuxBenchmark` | Same workload across TCP / WebSocket / UDP / IPC / QUIC. |
-| `ScalabilityBenchmark` | Throughput as the channel count grows. |
+| `throughput` | Sustained MB/sec moving data across 1 / 10 / 100 channels at 1 KiB / 100 KiB / 1 MiB payloads. |
+| `game-tick` | Messages/sec under a tight tick loop across 1 / 10 / 50 / 1000 channels at 64 / 256 byte payloads. |
 
-Generated reports live under [`BenchmarkDotNet.Artifacts/results/`](../BenchmarkDotNet.Artifacts/results/) in CSV, HTML, and markdown form.
+Each measurement is the median of 5 runs.
 
-## Running locally
+Two implementations are exercised per workload:
 
-```powershell
-dotnet run --project benchmarks/NetConduit.Benchmarks -c Release
+- **Raw TCP (.NET)** — bare `TcpClient` / `TcpListener`, no multiplexing.
+- **NetConduit Mux TCP** — `StreamMultiplexer` over `NetConduit.Transport.Tcp`.
+
+The Go side (`benchmarks/docker/go-comparison`) provides an apples-to-apples reference.
+
+## Running
+
+The full suite runs in a controlled Docker environment with CPU affinity and `GOMAXPROCS` pinned:
+
+```bash
+./benchmarks/docker/run-docker.sh
 ```
 
-Filter to a single benchmark class:
+A faster local run that skips Docker:
 
-```powershell
-dotnet run --project benchmarks/NetConduit.Benchmarks -c Release -- --filter *ThroughputBenchmark*
+```bash
+./benchmarks/docker/run-quick.sh
 ```
 
-Run a single method:
+Or run the .NET side directly:
 
-```powershell
-dotnet run --project benchmarks/NetConduit.Benchmarks -c Release -- --filter *AllTransports*Tcp*
+```bash
+dotnet run --project benchmarks/docker/netconduit-comparison -c Release -- throughput
+dotnet run --project benchmarks/docker/netconduit-comparison -c Release -- game-tick
 ```
 
-## Running in Docker
+Without arguments both workloads run.
 
-The cross-language reference benchmarks (Go, Node) live under [`benchmarks/docker/`](../benchmarks/docker/). See the Dockerfiles for invocation.
+## Reports
+
+`run-benchmarks.sh` writes JSON output to `benchmarks/docker/results/` and invokes `report.py` to produce the comparison table.
+
+Legacy BenchmarkDotNet artifacts from older runs are kept under [`BenchmarkDotNet.Artifacts/results/`](../BenchmarkDotNet.Artifacts/results/) for reference.
 
 ## Interpreting results
 
-- BenchmarkDotNet reports include mean, error, and standard deviation. Look at **Mean** plus the error column to judge variance.
-- Channel throughput is bounded by the **slab size** (`ChannelOptions.SlabSize`); benchmarks vary this parameter.
-- The framing overhead floor is ~8 bytes per frame plus protocol traffic (`PING`/`PONG`/`ACK`). Payloads >= 64 KiB amortize this to near zero.
+- Numbers are reported as **MB/s** (throughput) and **msg/s** (game-tick).
+- The multiplexer's overhead vs raw TCP is the cost of framing, flow control, and channel scheduling — it is bounded and amortizes to near zero on payloads >= 64 KiB.
+- Channel scalability shows up most clearly in the `game-tick` 1000-channel rows.
 
-## Tuning hints from the data
+## Tuning hints
 
 | Goal | Knob |
 | --- | --- |
-| Maximum single-channel throughput | `ChannelOptions.SlabSize = 4..16 MiB`. |
-| Many small messages | `ChannelOptions.Priority` to surface critical channels first. |
-| Low latency | Disable Nagle on TCP transports (`TcpClient.NoDelay = true` in custom factories). |
-| High channel count | Default slab size keeps memory bounded at `count * 1 MiB`. |
+| Maximum single-channel throughput | `ChannelOptions.SlabSize = 4..16 MiB` |
+| Critical small messages | Raise `ChannelOptions.Priority` |
+| Low latency | `TcpClient.NoDelay = true` in a custom `StreamFactory` |
+| High channel count | Default 1 MiB slab keeps memory bounded at `count * 1 MiB` |

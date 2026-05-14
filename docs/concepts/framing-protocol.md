@@ -19,7 +19,7 @@ Every frame starts with an 8-byte fixed header followed by an optional payload:
 
 Numeric fields are big-endian. Payload length is the number of bytes that follow the header.
 
-Limits (from `NetConduit.Constants.FrameConstants`):
+Limits (internal `FrameConstants` in `NetConduit.Constants`):
 
 | Constant | Value | Meaning |
 | --- | --- | --- |

@@ -132,10 +132,10 @@ var reply = await t.ReceiveAsync();
 
 ```csharp
 // Server
-await using var t = await mux.AcceptMessageTransitAsync<Request, Response>(
+await using var t = await mux.AcceptMessageTransitAsync<Response, Request>(
     "rpc",
-    RpcJson.Default.Request,
-    RpcJson.Default.Response);
+    RpcJson.Default.Response,
+    RpcJson.Default.Request);
 
 await foreach (var req in t.ReceiveAllAsync())
 {

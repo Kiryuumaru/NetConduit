@@ -62,7 +62,7 @@ public sealed class StreamMultiplexer : IStreamMultiplexer
 }
 ```
 
-The constructor is private — always use `Create`. Transport packages wrap this with role-specific factories (`TcpMultiplexer.CreateClient`, `TcpMultiplexer.CreateServer`, etc.).
+The constructor is private — always use `Create`. Transport packages wrap this with role-specific factories (`TcpMultiplexer.CreateOptions`, `TcpMultiplexer.CreateServerOptions`, etc.).
 
 ## Lifecycle methods
 

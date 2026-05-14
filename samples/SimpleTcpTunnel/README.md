@@ -32,19 +32,16 @@ A three-role TCP tunnel: **relay** + **agent** + **forward**. Lets a TCP service
 ## Run
 
 ```powershell
-# Relay on port 5000 (TCP) — listens for agents and forwarders
-dotnet run --project samples/SimpleTcpTunnel -- relay 5000
+# Relay listens on TCP :5000 AND WebSocket :5001/relay simultaneously
+dotnet run --project samples/SimpleTcpTunnel -- relay 5000 5001/relay
 
-# WebSocket relay on port 5001 at path "/relay"
-dotnet run --project samples/SimpleTcpTunnel -- relay 5001/relay
-
-# Agent: connect to relay at localhost:5000, expose tunnel name "web" pointing at local port 8080
+# Agent: connect to relay over TCP, expose tunnel name "web" pointing at local port 8080
 dotnet run --project samples/SimpleTcpTunnel -- agent localhost 5000 web 8080
 
-# Forwarder: connect to relay, request tunnel "web", listen locally on port 4000
+# Forwarder: connect to relay over TCP, request tunnel "web", listen locally on port 4000
 dotnet run --project samples/SimpleTcpTunnel -- forward localhost 5000 web 4000
 
-# Mixed: agent talking to a WebSocket relay
+# Mixed: agent talking to the same relay via its WebSocket port
 dotnet run --project samples/SimpleTcpTunnel -- agent relay.example.com 5001/relay myapp 3000
 
 # List tunnels registered on a relay

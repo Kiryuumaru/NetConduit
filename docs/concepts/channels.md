@@ -15,10 +15,12 @@ Both sides know the channel ID in advance. One side opens, the other accepts:
 
 ```csharp
 // Side A
-IWriteChannel ch = mux.OpenChannel("control");
+IWriteChannel writer = mux.OpenChannel("control");
+```
 
+```csharp
 // Side B
-IReadChannel ch = mux.AcceptChannel("control");
+IReadChannel reader = mux.AcceptChannel("control");
 ```
 
 Order does not matter. `AcceptChannel` returns a pending channel immediately; when the remote `OpenChannel` for the same ID arrives, the pending channel is wired up and becomes `Open`.
