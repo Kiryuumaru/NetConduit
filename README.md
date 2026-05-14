@@ -1,9 +1,27 @@
 # NetConduit
 
-[![NuGet](https://img.shields.io/nuget/v/NetConduit.svg)](https://www.nuget.org/packages/NetConduit)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
 **Transport-agnostic stream multiplexer for .NET** — Multiple virtual channels over a single bidirectional stream.
+
+| Core | NuGet | Description |
+| --- | --- | --- |
+| [`NetConduit`](https://www.nuget.org/packages/NetConduit) | [![NuGet](https://img.shields.io/nuget/v/NetConduit.svg?label=)](https://www.nuget.org/packages/NetConduit) | Core multiplexer + base interfaces |
+
+| Transits | NuGet | Description |
+| --- | --- | --- |
+| [`NetConduit.Transit.Stream`](https://www.nuget.org/packages/NetConduit.Transit.Stream) | [![NuGet](https://img.shields.io/nuget/v/NetConduit.Transit.Stream.svg?label=)](https://www.nuget.org/packages/NetConduit.Transit.Stream) | Single-channel `Stream` wrapper |
+| [`NetConduit.Transit.DuplexStream`](https://www.nuget.org/packages/NetConduit.Transit.DuplexStream) | [![NuGet](https://img.shields.io/nuget/v/NetConduit.Transit.DuplexStream.svg?label=)](https://www.nuget.org/packages/NetConduit.Transit.DuplexStream) | Bidirectional `Stream` over two channels |
+| [`NetConduit.Transit.Message`](https://www.nuget.org/packages/NetConduit.Transit.Message) | [![NuGet](https://img.shields.io/nuget/v/NetConduit.Transit.Message.svg?label=)](https://www.nuget.org/packages/NetConduit.Transit.Message) | Typed JSON message framing |
+| [`NetConduit.Transit.DeltaMessage`](https://www.nuget.org/packages/NetConduit.Transit.DeltaMessage) | [![NuGet](https://img.shields.io/nuget/v/NetConduit.Transit.DeltaMessage.svg?label=)](https://www.nuget.org/packages/NetConduit.Transit.DeltaMessage) | State-sync via JSON delta diffs |
+
+| Transports | NuGet | Description |
+| --- | --- | --- |
+| [`NetConduit.Transport.Tcp`](https://www.nuget.org/packages/NetConduit.Transport.Tcp) | [![NuGet](https://img.shields.io/nuget/v/NetConduit.Transport.Tcp.svg?label=)](https://www.nuget.org/packages/NetConduit.Transport.Tcp) | TCP transport |
+| [`NetConduit.Transport.WebSocket`](https://www.nuget.org/packages/NetConduit.Transport.WebSocket) | [![NuGet](https://img.shields.io/nuget/v/NetConduit.Transport.WebSocket.svg?label=)](https://www.nuget.org/packages/NetConduit.Transport.WebSocket) | WebSocket transport |
+| [`NetConduit.Transport.Udp`](https://www.nuget.org/packages/NetConduit.Transport.Udp) | [![NuGet](https://img.shields.io/nuget/v/NetConduit.Transport.Udp.svg?label=)](https://www.nuget.org/packages/NetConduit.Transport.Udp) | UDP with reliability layer |
+| [`NetConduit.Transport.Ipc`](https://www.nuget.org/packages/NetConduit.Transport.Ipc) | [![NuGet](https://img.shields.io/nuget/v/NetConduit.Transport.Ipc.svg?label=)](https://www.nuget.org/packages/NetConduit.Transport.Ipc) | IPC (loopback/Unix sockets) |
+| [`NetConduit.Transport.Quic`](https://www.nuget.org/packages/NetConduit.Transport.Quic) | [![NuGet](https://img.shields.io/nuget/v/NetConduit.Transport.Quic.svg?label=)](https://www.nuget.org/packages/NetConduit.Transport.Quic) | QUIC transport |
 
 ```
 N streams → 1 stream (mux) → N streams (demux)
@@ -57,21 +75,6 @@ await client.WaitForReadyAsync();
 await using var transit = await client.OpenMessageTransitAsync("chat", ChatContext.Default.ChatMessage);
 await transit.SendAsync(new ChatMessage("Alice", "Hello!"));
 ```
-
-## Packages
-
-| Package                                | Description                                |
-| -------------------------------------- | ------------------------------------------ |
-| `NetConduit`                           | Core multiplexer + base interfaces         |
-| `NetConduit.Transit.Stream`            | Single-channel `Stream` wrapper            |
-| `NetConduit.Transit.DuplexStream`      | Bidirectional `Stream` over two channels   |
-| `NetConduit.Transit.Message`           | Typed JSON message framing                 |
-| `NetConduit.Transit.DeltaMessage`      | State-sync via JSON delta diffs            |
-| `NetConduit.Transport.Tcp`             | TCP transport                              |
-| `NetConduit.Transport.WebSocket`       | WebSocket transport                        |
-| `NetConduit.Transport.Udp`             | UDP with reliability layer                 |
-| `NetConduit.Transport.Ipc`             | IPC (loopback/Unix sockets)                |
-| `NetConduit.Transport.Quic`            | QUIC transport                             |
 
 ## Architecture
 
