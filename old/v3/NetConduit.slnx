@@ -1,0 +1,28 @@
+<Solution>
+  <Project Path="build/_build.csproj" />
+  <Folder Name="/src/">
+    <Project Path="src/NetConduit/NetConduit.csproj" />
+    <Project Path="src/NetConduit.Tcp/NetConduit.Tcp.csproj" />
+    <Project Path="src/NetConduit.WebSocket/NetConduit.WebSocket.csproj" />
+    <Project Path="src/NetConduit.Udp/NetConduit.Udp.csproj" />
+    <Project Path="src/NetConduit.Ipc/NetConduit.Ipc.csproj" />
+    <Project Path="src/NetConduit.Quic/NetConduit.Quic.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/NetConduit.UnitTests/NetConduit.UnitTests.csproj" />
+    <Project Path="tests/NetConduit.Tcp.IntegrationTests/NetConduit.Tcp.IntegrationTests.csproj" />
+    <Project Path="tests/NetConduit.WebSocket.IntegrationTests/NetConduit.WebSocket.IntegrationTests.csproj" />
+    <Project Path="tests/NetConduit.Udp.IntegrationTests/NetConduit.Udp.IntegrationTests.csproj" />
+    <Project Path="tests/NetConduit.Ipc.IntegrationTests/NetConduit.Ipc.IntegrationTests.csproj" />
+    <Project Path="tests/NetConduit.Quic.IntegrationTests/NetConduit.Quic.IntegrationTests.csproj" />
+  </Folder>
+  <Folder Name="/samples/">
+    <Project Path="samples/NetConduit.Samples.FileTransfer/NetConduit.Samples.FileTransfer.csproj" />
+    <Project Path="samples/NetConduit.Samples.GroupChat/NetConduit.Samples.GroupChat.csproj" />
+    <Project Path="samples/NetConduit.Samples.Pong/NetConduit.Samples.Pong.csproj" />
+    <Project Path="samples/NetConduit.Samples.RemoteShell/NetConduit.Samples.RemoteShell.csproj" />
+    <Project Path="samples/NetConduit.Samples.RpcFramework/NetConduit.Samples.RpcFramework.csproj" />
+    <Project Path="samples/NetConduit.Samples.Scoreboard/NetConduit.Samples.Scoreboard.csproj" />
+    <Project Path="samples/NetConduit.Samples.TcpTunnel/NetConduit.Samples.TcpTunnel.csproj" />
+  </Folder>
+</Solution>
