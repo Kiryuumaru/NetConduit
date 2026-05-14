@@ -8,10 +8,10 @@ GOMAXPROCS=2, `--network=none` (loopback only), identical Docker isolation.
 
 | Implementation | Language | Description |
 |---------------|----------|-------------|
-| **NetConduit** | C# | 1 TCP connection, N multiplexed channels — credit-based flow control, priority queuing, adaptive windowing |
-| **FRP/Yamux** | Go | HashiCorp Yamux — stream multiplexer used by FRP, Consul, Nomad |
+| **NetConduit** | C# | 1 TCP connection, N multiplexed channels â€” credit-based flow control, priority queuing, adaptive windowing |
+| **FRP/Yamux** | Go | HashiCorp Yamux â€” stream multiplexer used by FRP, Consul, Nomad |
 | **Smux** | Go | Popular Go stream multiplexer (xtaci/smux) |
-| Raw TCP | C# / Go | Baseline — N separate TCP connections (not a mux, shown for context) |
+| Raw TCP | C# / Go | Baseline â€” N separate TCP connections (not a mux, shown for context) |
 
 ---
 
@@ -57,7 +57,7 @@ Each channel sends many small messages (simulates game state updates). Higher = 
 
 **Bulk throughput:** NetConduit wins 10/18 comparisons against Go multiplexers.
 Credit-based flow control adds per-transfer overhead most visible in large bulk scenarios.
-NetConduit is competitive or faster for small-to-medium payloads (1KB–100KB).
+NetConduit is competitive or faster for small-to-medium payloads (1KBâ€“100KB).
 
 **Game-tick messaging:** NetConduit wins 16/16 comparisons against Go multiplexers.
 When per-message overhead dominates (not raw throughput), the credit system's cost
@@ -72,7 +72,7 @@ overhead but provide production safety guarantees that simpler muxes don't offer
 
 ## Raw TCP Baselines
 
-Raw TCP uses N separate connections (one per channel) — no multiplexing overhead.
+Raw TCP uses N separate connections (one per channel) â€” no multiplexing overhead.
 This is the theoretical ceiling, not a practical alternative (connection limits,
 no flow control, no channel management).
 
@@ -96,11 +96,11 @@ no flow control, no channel management).
 |----------|----------|----------:|----------:|----------:|----------:|----------:|
 | 1 | 64B | 647,800 | 246,015 | 326,407 | 2,622,336 | 1,140,551 |
 | 1 | 256B | 1,235,674 | 212,599 | 336,030 | 2,436,740 | 1,147,881 |
-| 10 | 64B | 3,614,933 | 237,982 | 287,982 | — | 1,242,974 |
-| 10 | 256B | 3,296,033 | 246,564 | 286,267 | — | 1,176,395 |
+| 10 | 64B | 3,614,933 | 237,982 | 287,982 | â€” | 1,242,974 |
+| 10 | 256B | 3,296,033 | 246,564 | 286,267 | â€” | 1,176,395 |
 | 50 | 64B | 3,916,126 | 273,151 | 293,880 | 4,663,568 | 1,546,152 |
 | 50 | 256B | 3,455,165 | 262,566 | 280,286 | 4,345,537 | 1,232,333 |
-| 1000 | 64B | 3,813,299 | 264,416 | 239,971 | — | 4,759,378 |
+| 1000 | 64B | 3,813,299 | 264,416 | 239,971 | â€” | 4,759,378 |
 | 1000 | 256B | 7,651,200 | 370,360 | 246,764 | 4,255,481 | 2,686,055 |
 
 ---
@@ -108,7 +108,7 @@ no flow control, no channel management).
 ## Multiplexer Overhead vs Raw TCP
 
 How much does multiplexing cost compared to raw connections?
-All multiplexers share this overhead — it's inherent to running N streams over 1 connection.
+All multiplexers share this overhead â€” it's inherent to running N streams over 1 connection.
 
 ### Throughput Overhead
 

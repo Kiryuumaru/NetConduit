@@ -1,61 +1,48 @@
 # Heartbeat
 
-Keep-alive ping/pong mechanism to detect dead connections. See [Concepts Overview](index.md) for related concepts.
+The multiplexer sends keepalive **pings** on a control channel and tears down the connection if pongs stop arriving. This detects half-open TCP, transparent proxies that silently drop idle links, and crashed peers.
 
-## How It Works
-
-The multiplexer periodically sends Ping frames. If the remote side doesn't respond with Pong within the timeout, the connection is considered dead:
+## How it works
 
 ```
-Local                           Remote
-  │                                │
-  │──── Ping ─────────────────────▶│
-  │◀─── Pong ──────────────────────│
-  │                                │
-  │   [PingInterval passes]        │
-  │                                │
-  │──── Ping ─────────────────────▶│
-  │                                │
-  │   [PingTimeout passes, no Pong]│
-  │                                │
-  │   Connection declared dead     │
+local                                 remote
+  |                                     |
+  |  ----- Ping (timestamp) ---------->|
+  |  <---- Pong (timestamp) -----------|
+  |                                     |
+  | <wait PingInterval>                 |
+  |                                     |
+  |  ----- Ping --------------------- >|
+  |  <---- Pong ------------------- ---|
+  |                                     |
+  | <PingTimeout elapses with no Pong>  |
+  |                                     |
+  | [missed += 1; resend Ping]          |
+  |                                     |
+  | [missed == MaxMissedPings ->        |
+  |  disconnect, fire Disconnected]     |
 ```
 
-## Configuration
+A `Pong` resets the missed-ping counter.
 
-```csharp
-var options = new MultiplexerOptions
-{
-    StreamFactory = ...,
-    PingInterval = TimeSpan.FromSeconds(30),  // Time between pings (default: 30s)
-    PingTimeout = TimeSpan.FromSeconds(10),   // Time to wait for pong (default: 10s)
-    MaxMissedPings = 3                        // Missed pings before disconnect (default: 3)
-};
-```
+## Options
 
-## Default Behavior
+All three live on `MultiplexerOptions`:
 
-With defaults:
-- Ping sent every 30 seconds
-- If pong not received within 10 seconds, it counts as a miss
-- After 3 consecutive misses, the connection is declared dead
-- Total detection time: ~120 seconds worst case (30s interval × 3 misses + 10s timeout)
+| Option | Default | Meaning |
+| --- | --- | --- |
+| `PingInterval` | 30 s | Time between successful pings. |
+| `PingTimeout` | 10 s | How long to wait for a `Pong` before counting a miss. |
+| `MaxMissedPings` | 3 | Consecutive misses that trigger disconnect. |
 
-## Disabling Heartbeat
+Effective dead-connection detection latency is roughly `MaxMissedPings * PingTimeout` (≈30 s with defaults).
 
-Set `PingInterval` to `Timeout.InfiniteTimeSpan`:
+## Tuning
 
-```csharp
-var options = new MultiplexerOptions
-{
-    StreamFactory = ...,
-    PingInterval = Timeout.InfiniteTimeSpan
-};
-```
+- **Faster failure detection** — lower `PingTimeout` and/or `MaxMissedPings`. Be mindful of jittery networks; very low values can produce false positives.
+- **Less wire chatter** — raise `PingInterval`.
+- **No heartbeat at all** — set `PingInterval = TimeSpan.Zero` (or any non-positive value). The keepalive loop is skipped entirely. Use only if your transport already has its own keepalive (some QUIC stacks, IPC).
 
-## Detection vs Reconnection
+## What happens after a missed-ping disconnect
 
-Heartbeat only **detects** dead connections. What happens next depends on reconnection configuration:
-
-- If `MaxAutoReconnectAttempts > 0` → triggers reconnection
-- If no reconnection configured → fires `Disconnected` and stops
+The transport disconnect fires `Disconnected` with `DisconnectReason.TransportError`. If reconnection is configured, the multiplexer immediately tries to reconnect. See [Reconnection](reconnection.md).

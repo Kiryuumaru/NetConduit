@@ -1,79 +1,60 @@
-# IPC Transport
+# IPC transport
 
-Inter-Process Communication using TCP loopback (Windows) or Unix domain sockets (Linux/macOS). Fastest option for same-machine communication. See [Transport Comparison](index.md) for alternatives.
+Package: [`NetConduit.Transport.Ipc`](https://www.nuget.org/packages/NetConduit.Transport.Ipc).
 
-## Installation
+Same-machine inter-process communication. The implementation chooses the best mechanism per platform:
 
-```bash
-dotnet add package NetConduit.Transport.Ipc
-```
-
-## Client
-
-```csharp
-using NetConduit;
-using NetConduit.Transport.Ipc;
-
-var options = IpcMultiplexer.CreateOptions("my-app-ipc");
-var mux = StreamMultiplexer.Create(options);
-mux.Start();
-await mux.WaitForReadyAsync();
-
-var channel = mux.OpenChannel("rpc");
-await channel.WriteAsync(requestData);
-```
-
-## Server
-
-```csharp
-using NetConduit;
-using NetConduit.Transport.Ipc;
-
-var options = IpcMultiplexer.CreateServerOptions("my-app-ipc");
-var mux = StreamMultiplexer.Create(options);
-mux.Start();
-await mux.WaitForReadyAsync();
-
-await foreach (var channel in mux.AcceptChannelsAsync())
-{
-    _ = HandleChannelAsync(channel);
-}
-```
-
-## Multi-Client Server
-
-For multiple concurrent IPC clients, create a multiplexer per connection:
-
-```csharp
-while (true)
-{
-    var options = IpcMultiplexer.CreateServerOptions("my-app-ipc");
-    var mux = StreamMultiplexer.Create(options);
-    mux.Start();
-    await mux.WaitForReadyAsync();
-
-    _ = Task.Run(async () =>
-    {
-        await foreach (var channel in mux.AcceptChannelsAsync())
-        {
-            _ = HandleChannelAsync(channel);
-        }
-    });
-}
-```
-
-## Endpoint Names
-
-The endpoint string maps to platform-specific behavior:
-
-| Platform    | Endpoint `"my-app"` resolves to                                               |
-| ----------- | ----------------------------------------------------------------------------- |
-| Windows     | TCP loopback on a deterministic port (SHA256 hash of name → port 49152–65535) |
-| Linux/macOS | Unix domain socket at the endpoint path directly (e.g., `my-app`)             |
+| Platform | Underlying mechanism |
+| --- | --- |
+| Windows | TCP loopback (`127.0.0.1`) on a deterministic port derived from the endpoint name. |
+| Linux / macOS | Unix domain socket. The endpoint name is the socket file path. |
 
 ## API
 
-| Method                | Signature                                             | Description    |
-| --------------------- | ----------------------------------------------------- | -------------- |
-| `CreateOptions`       | `IpcMultiplexer.CreateOptions(string endpoint)`       | Client options |
-| `CreateServerOptions` | `IpcMultiplexer.CreateServerOptions(string endpoint)` | Server options |
+```csharp
+public static class IpcMultiplexer
+{
+    public static MultiplexerOptions CreateOptions(string endpoint);
+    public static MultiplexerOptions CreateServerOptions(string endpoint);
+}
+```
+
+| Helper | Behavior |
+| --- | --- |
+| `CreateOptions(endpoint)` | Client. Each factory call connects fresh. Reconnect-friendly. |
+| `CreateServerOptions(endpoint)` | Server. Binds and accepts one connection. On Unix, removes any stale socket file at the path; cleans up on dispose. |
+
+## Endpoint names
+
+- Pass any UTF-8 string. The same string must be used by client and server.
+- On Unix, the string is **treated as a file path** — pass a path you have permission to create at (e.g. `/tmp/my-app.sock` or `Path.Combine(Path.GetTempPath(), "my-app.sock")`).
+- On Windows, the string is **hashed (SHA-256)** to derive a port in the ephemeral range `49152..65535`. The same name always maps to the same port. No file is created.
+
+## Example
+
+```csharp
+using NetConduit;
+using NetConduit.Transport.Ipc;
+
+// Server
+await using var server = StreamMultiplexer.Create(IpcMultiplexer.CreateServerOptions("my-app"));
+server.Start();
+await server.WaitForReadyAsync();
+
+// Client (other process)
+await using var client = StreamMultiplexer.Create(IpcMultiplexer.CreateOptions("my-app"));
+client.Start();
+await client.WaitForReadyAsync();
+```
+
+## Why use it
+
+- **Latency.** No network stack.
+- **No network exposure.** Useful for daemons that only need to talk to a CLI on the same box.
+- **Cross-platform path.** One package, three operating systems.
+
+## Caveats
+
+- On Windows, two processes with the same endpoint name compete for the same loopback port. Pick distinct names per logical service.
+- On Unix, the socket file persists if the server crashes uncleanly. The next `CreateServerOptions` call removes it before binding.
+- Only same-machine traffic. For cross-host use TCP/WebSocket/QUIC.

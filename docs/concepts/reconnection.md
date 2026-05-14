@@ -1,125 +1,95 @@
 # Reconnection
 
-Automatic reconnection with channel state recovery. See [Concepts Overview](index.md) for related concepts.
+If the transport drops, the multiplexer can rebuild the connection and resume traffic on existing channels. Whether and how this happens depends on three options.
 
-## How It Works
+## Behavior summary
 
-When the transport disconnects, the multiplexer:
-1. Detects the disconnection
-2. Fires `Reconnecting` event with attempt number
-3. Calls `StreamFactory` to establish a new connection
-4. Performs handshake with session ID matching
-5. Replays unacknowledged data from the ring buffer
-6. Fires `Connected` event
-7. Channels resume operation transparently
+| `MaxAutoReconnectAttempts` | Behavior |
+| --- | --- |
+| `0` (default) | Unlimited reconnect attempts. **No replay buffer** is allocated for new channels. Open channels are torn down on disconnect with `ChannelCloseReason.TransportFailed`. |
+| `> 0` | Up to N reconnect attempts. **Replay buffer enabled**: open channels survive disconnects; unacked bytes are replayed after the reconnect handshake. |
 
-## Configuration
+Set `MaxAutoReconnectAttempts > 0` if you want existing channels to survive transport drops.
 
 ```csharp
-var options = new MultiplexerOptions
+new MultiplexerOptions
 {
-    StreamFactory = ...,
-
-    // Reconnection settings
-    MaxAutoReconnectAttempts = 10,              // 0 = unlimited
-    AutoReconnectDelay = TimeSpan.FromSeconds(1),
-    MaxAutoReconnectDelay = TimeSpan.FromSeconds(30),
+    StreamFactory                  = TcpMultiplexer.CreateOptions("relay.example.com", 5000).StreamFactory,
+    MaxAutoReconnectAttempts       = 5,
+    AutoReconnectDelay             = TimeSpan.FromSeconds(2),
+    MaxAutoReconnectDelay          = TimeSpan.FromSeconds(30),
     AutoReconnectBackoffMultiplier = 2.0,
-    ConnectionTimeout = TimeSpan.FromSeconds(30)
-};
+}
 ```
 
-### Backoff Schedule
+## Backoff
 
-With default settings (1s base, 2x multiplier, 30s max):
+Reconnect delay starts at `AutoReconnectDelay` and is multiplied by `AutoReconnectBackoffMultiplier` after every failed attempt, capped at `MaxAutoReconnectDelay`.
 
-| Attempt | Delay        |
-| ------- | ------------ |
-| 1       | 1s           |
-| 2       | 2s           |
-| 3       | 4s           |
-| 4       | 8s           |
-| 5       | 16s          |
-| 6+      | 30s (capped) |
+With the defaults (1 s → ×2 → cap 30 s), the sequence is **1, 2, 4, 8, 16, 30, 30, …** seconds.
 
-## Events
+| Option | Default |
+| --- | --- |
+| `AutoReconnectDelay` | 1 s |
+| `MaxAutoReconnectDelay` | 30 s |
+| `AutoReconnectBackoffMultiplier` | 2.0 |
 
-```csharp
-mux.Reconnecting += (sender, e) =>
-{
-    Console.WriteLine($"Reconnecting... attempt {e.Attempt}");
-};
+`ConnectionTimeout` (default 30 s) caps a single connect attempt.
 
-mux.Connected += (sender, e) =>
-{
-    Console.WriteLine("Connected!");
-};
+## Events during reconnect
 
-mux.Disconnected += (sender, e) =>
-{
-    Console.WriteLine($"Disconnected: {e.Reason}");
-};
+```
+Disconnected (DisconnectReason.TransportError)
+   |
+   | wait AutoReconnectDelay
+   v
+Reconnecting (Attempt = 1)
+   |
+   | factory call (within ConnectionTimeout)
+   v
+Connected     (transport up; handshake done)
 ```
 
-## StreamFactory for Reconnection
+`Reconnecting` fires with a 1-based attempt number. `Connected` (the event) fires on every successful reconnect; `Ready` does **not** fire again (it's once-per-multiplexer).
 
-The `StreamFactory` delegate is called for each connection attempt:
+Per-channel events mirror this: each open channel fires `Disconnected` then `Connected` as it survives the transport drop.
+
+## What "replay" means
+
+When `MaxAutoReconnectAttempts > 0`, each open channel keeps a tail of recently sent bytes in its slab. On reconnect:
+
+1. Both peers exchange `Ctrl/Reconnect` frames carrying their last-acked positions per channel.
+2. Each side replays anything the other side hasn't acked.
+3. Channels resume from the exact byte where they left off — your `ReadAsync` and `WriteAsync` calls just continue.
+
+Channels that were not yet `Open` at the moment of disconnect are reopened on the new connection.
+
+## When reconnect won't succeed
+
+`Reconnecting` keeps firing until either:
+
+- A reconnect succeeds → state is restored.
+- `MaxAutoReconnectAttempts` is exceeded → the multiplexer gives up and disposes the channels with `ChannelCloseReason.TransportFailed`.
+- `SessionMismatch` is returned by the peer (a different multiplexer is now answering) → reconnect fails, channels fail.
+
+## Server-side reconnection
+
+The provided `*Multiplexer.CreateServerOptions(...)` factories accept **one** connection and refuse subsequent calls. For a server that survives client churn, build your own factory that re-accepts from the listener:
 
 ```csharp
-var options = new MultiplexerOptions
+var listener = new TcpListener(IPAddress.Any, 5000);
+listener.Start();
+
+var opts = new MultiplexerOptions
 {
-    StreamFactory = async (ct) =>
+    StreamFactory = async ct =>
     {
-        var tcp = new TcpClient();
-        await tcp.ConnectAsync("server.example.com", 5000, ct);
-        return new StreamPair(tcp.GetStream(), tcp);
+        var client = await listener.AcceptTcpClientAsync(ct);
+        client.NoDelay = true;
+        return new StreamPair(client.GetStream(), client);
     },
-    MaxAutoReconnectAttempts = 0  // Unlimited retries
+    MaxAutoReconnectAttempts = int.MaxValue,
 };
 ```
 
-## Session Identity
-
-Each multiplexer has a `SessionId`. During reconnection, the session ID is sent in the handshake to resume the correct session:
-
-```csharp
-Console.WriteLine($"Local: {mux.SessionId}");
-Console.WriteLine($"Remote: {mux.RemoteSessionId}");
-```
-
-## Channel Behavior During Disconnection
-
-- **Writes** block until reconnection succeeds (subject to `SendTimeout`)
-- **Reads** block until reconnection succeeds or channel is closed
-- **No data is lost** — unacknowledged frames are replayed from the ring buffer
-- **Channel state is preserved** — channels remain in their pre-disconnect state
-
-## Disabling Reconnection
-
-For single-shot connections (no reconnection):
-
-```csharp
-var options = new MultiplexerOptions
-{
-    StreamFactory = async (ct) =>
-    {
-        // Fail on second call to prevent reconnection
-        throw new InvalidOperationException("No reconnection");
-    }
-};
-```
-
-Or use a flag:
-
-```csharp
-var connected = false;
-var options = new MultiplexerOptions
-{
-    StreamFactory = async (ct) =>
-    {
-        if (connected) throw new InvalidOperationException("No reconnection");
-        connected = true;
-        return new StreamPair(stream, owner);
-    }
-};
-```
+The [Scoreboard sample](../../samples/ScoreboardSample/README.md) does this and persists state across player reconnects.

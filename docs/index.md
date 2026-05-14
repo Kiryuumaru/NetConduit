@@ -1,96 +1,31 @@
-# NetConduit Documentation
+# Documentation
 
-**Transport-agnostic stream multiplexer for .NET** — Create multiple virtual channels over a single bidirectional stream.
+NetConduit is a transport-agnostic stream multiplexer for .NET. It carries any number of independent virtual channels over a single bidirectional stream and ships with transports (TCP, WebSocket, UDP, IPC, QUIC) and transits (Stream, DuplexStream, Message, DeltaMessage) you can mix and match.
 
-## Quick Navigation
+## Start here
 
-| Section                               | Description                                                         |
-| ------------------------------------- | ------------------------------------------------------------------- |
-| [Getting Started](getting-started.md) | Installation, quick start, first multiplexer                        |
-| [Transports](transports/index.md)     | TCP, WebSocket, UDP, IPC, QUIC                                      |
-| [Transits](transits/index.md)         | MessageTransit, DeltaMessageTransit, DuplexStreamTransit, StreamTransit    |
-| [Concepts](concepts/index.md)         | Channels, backpressure, priority, reconnection, shutdown, heartbeat |
-| [API Reference](api/index.md)         | Multiplexer, channels, options, statistics, errors                  |
-| [Samples](samples/index.md)           | Complete example applications                                       |
-| [Benchmarks](benchmarks.md)           | Performance comparisons against Go multiplexers                     |
+- [Getting started](getting-started.md) — install, write your first server and client.
+- [Packages](packages.md) — what each NuGet package contains and depends on.
 
-## Quick Example
+## Learn the model
 
-```csharp
-using NetConduit;
-using NetConduit.Transport.Tcp;
-using NetConduit.Transit.Message;
-using System.Text.Json.Serialization;
+- [Concepts](concepts/index.md) — multiplexer lifecycle, channels, transports, transits, framing, backpressure, reconnection, events, AOT.
 
-// Define message type
-public record ChatMessage(string User, string Text);
+## Pick a transport
 
-[JsonSerializable(typeof(ChatMessage))]
-public partial class ChatContext : JsonSerializerContext { }
+- [Transports overview](transports/index.md) — comparison table and selection guide.
+- [TCP](transports/tcp.md), [WebSocket](transports/websocket.md), [UDP](transports/udp.md), [IPC](transports/ipc.md), [QUIC](transports/quic.md).
 
-// Server: receive all messages
-await using var transit = await mux.AcceptMessageTransitAsync("chat", ChatContext.Default.ChatMessage);
+## Pick a transit
 
-await foreach (var msg in transit.ReceiveAllAsync(cancellationToken))
-{
-    Console.WriteLine($"[{msg.User}] {msg.Text}");
-}
+- [Transits overview](transits/index.md) — when each one is useful.
+- [Stream](transits/stream.md), [DuplexStream](transits/duplex-stream.md), [Message](transits/message.md), [DeltaMessage](transits/delta-message.md).
 
-// Client: send messages
-await using var transit = await mux.OpenMessageTransitAsync("chat", ChatContext.Default.ChatMessage);
-await transit.SendAsync(new ChatMessage("Alice", "Hello!"));
-```
+## API
 
-## What is NetConduit?
+- [API reference](api/index.md) — every public type, member, and option.
 
-NetConduit multiplexes multiple logical streams over a single physical connection:
+## Examples and numbers
 
-```
-N streams → 1 stream (mux) → N streams (demux)
-```
-
-**Use cases:**
-- Multiple RPC channels over one WebSocket
-- Game state + chat + voice over single TCP connection
-- Microservice communication with channel isolation
-- Tunneling services through firewalls/NAT
-
-## Key Features
-
-| Feature                       | Description                                  |
-| ----------------------------- | -------------------------------------------- |
-| **Multiple channels**         | Many logical streams over one connection     |
-| **Credit-based backpressure** | Flow control prevents overwhelming receivers |
-| **Priority queuing**          | Higher priority frames sent first            |
-| **Auto-reconnection**         | Channel state restored after disconnect      |
-| **Native AOT**                | No reflection in core library                |
-| **Modern .NET**               | Targets .NET 8, 9, and 10                    |
-
-## Architecture Overview
-
-```
-┌──────────────────────────────────────────────────────────────────────────────┐
-│  Application                                                                 │
-├──────────────────────────────────────────────────────────────────────────────┤
-│  Transit Layer (Optional)                                                    │
-│  ┌──────────────┐  ┌──────────────┐  ┌───────────────────┐  ┌─────────────┐  │
-│  │MessageTransit│  │ DeltaMessageTransit │  │DuplexStreamTransit│  │StreamTransit│  │
-│  └──────────────┘  └──────────────┘  └───────────────────┘  └─────────────┘  │
-├──────────────────────────────────────────────────────────────────────────────┤
-│  NetConduit Core                                                             │
-│  - Frame encoding/decoding                                                   │
-│  - Channel management                                                        │
-│  - Credit-based backpressure                                                 │
-│  - Priority queuing                                                          │
-│  - Auto-reconnection                                                         │
-├──────────────────────────────────────────────────────────────────────────────┤
-│  Transport Layer (Pluggable)                                                 │
-│  ┌─────┐  ┌─────────┐  ┌─────┐  ┌─────┐  ┌──────┐                            │
-│  │ TCP │  │WebSocket│  │ UDP │  │ IPC │  │ QUIC │                            │
-│  └─────┘  └─────────┘  └─────┘  └─────┘  └──────┘                            │
-└──────────────────────────────────────────────────────────────────────────────┘
-```
-
-## Dependencies
-
-No external runtime dependencies. The core library uses only BCL types (`System.Threading.Channels`, `System.Text.Json`, `System.Buffers.Binary`).
+- [Samples](samples/index.md) — what the runnable samples in `samples/` demonstrate.
+- [Benchmarks](benchmarks.md) — how to run the benchmark suite.

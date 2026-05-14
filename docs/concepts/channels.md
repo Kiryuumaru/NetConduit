@@ -1,153 +1,140 @@
 # Channels
 
-Channels are virtual one-way streams over a single physical connection. See [Concepts Overview](index.md) for related concepts.
+A **channel** is a virtual byte pipe routed over the multiplexer's single transport stream. Each channel has a string ID, a priority, its own buffer, and an independent lifecycle.
 
-## Simplex Design
+Channels are unidirectional:
 
-Channels are **simplex** (one-way):
+- `IWriteChannel` — local writes only.
+- `IReadChannel` — local reads only.
 
-| Channel Type    | Created By             | Direction    |
-| --------------- | ---------------------- | ------------ |
-| `IWriteChannel` | `OpenChannel()`        | You → Remote |
-| `IReadChannel`  | `AcceptChannelAsync()` | Remote → You |
+A "duplex" conversation uses two channels, one each direction. The `DuplexStreamTransit` automates this; see [DuplexStream transit](../transits/duplex-stream.md).
+
+## Open and accept
+
+Both sides know the channel ID in advance. One side opens, the other accepts:
 
 ```csharp
-// Side A opens - gets WriteChannel
-var send = mux.OpenChannel("data");
-
-// Side B accepts - gets ReadChannel
-var receive = await mux.AcceptChannelAsync("data");
-
-// A writes, B reads
-await send.WriteAsync(data);
-var n = await receive.ReadAsync(buffer);
+// Side A
+IWriteChannel writer = mux.OpenChannel("control");
 ```
+
+```csharp
+// Side B
+IReadChannel reader = mux.AcceptChannel("control");
+```
+
+Order does not matter. `AcceptChannel` returns a pending channel immediately; when the remote `OpenChannel` for the same ID arrives, the pending channel is wired up and becomes `Open`.
+
+Either side may be the opener. There is no client/server asymmetry at the channel level — the asymmetry, if any, lives in your transport (server accepts connections; client connects).
+
+## State machine
+
+```
+                 OpenChannel / AcceptChannel
+                              |
+                              v
+                       +-------------+
+                       |   Opening   |   (INIT sent, awaiting remote ACK)
+                       +-------------+
+                              |
+                  remote ACK  |
+                              v
+                       +-------------+
+                       |    Open     |   (IsReady = true; data flows)
+                       +-------------+
+                              |
+                 CloseAsync   |   remote FIN / RemoteError / TransportFailed / MuxDisposed
+                              v
+                       +-------------+
+                       |   Closing   |   (FIN sent, draining)
+                       +-------------+
+                              |
+                              v
+                       +-------------+
+                       |   Closed    |   (no more reads or writes)
+                       +-------------+
+```
+
+`State` reflects the current node. `IsReady` flips to `true` on `Opening → Open` and stays `true` for the lifetime of the channel.
 
 ## Channel IDs
 
-Channel IDs are strings:
+The ID is any non-empty UTF-8 string (up to 1024 bytes encoded). Pick stable, descriptive names: `"chat"`, `"control"`, `"file/42"`. They are not interpreted by NetConduit.
+
+Two reserved suffixes are used by duplex transits — see [DuplexStream transit](../transits/duplex-stream.md):
+
+| Suffix | Meaning |
+| --- | --- |
+| `>>` | The "outbound" half of a duplex pair |
+| `<<` | The "inbound" half of a duplex pair |
+
+If you use duplex transits, do not include `>>` or `<<` in your base IDs.
+
+## Per-channel options
 
 ```csharp
-// Simple names
-var ch1 = mux.OpenChannel("control");
-var ch2 = mux.OpenChannel("data");
-
-// Structured names
-var ch3 = mux.OpenChannel("user/123/messages");
-var ch4 = mux.OpenChannel($"file-{Guid.NewGuid()}");
-```
-
-Each channel ID must be unique per direction:
-- You can have `OpenChannel("data")` and `AcceptChannelAsync("data")` (different directions)
-- You cannot have two `OpenChannel("data")` (same direction, same ID)
-
-## Stream Interop
-
-Channels provide an `AsStream()` method for APIs that require a `Stream`:
-
-```csharp
-var channel = mux.OpenChannel("text");
-var stream = channel.AsStream();
-
-// Use with StreamWriter
-using var writer = new StreamWriter(stream, leaveOpen: true);
-await writer.WriteLineAsync("Hello!");
-
-// Use with CopyToAsync
-await sourceStream.CopyToAsync(stream);
-```
-
-## Opening Channels
-
-```csharp
-// Basic open
-var channel = mux.OpenChannel("data");
-
-// With options
-var channel = mux.OpenChannel(new ChannelOptions
+var ch = mux.OpenChannel(new ChannelOptions
 {
-    ChannelId = "priority-data",
-    Priority = ChannelPriority.High,
-    SlabSize = 4 * 1024 * 1024,          // 4MB slab
-    SendTimeout = TimeSpan.FromSeconds(30)
+    ChannelId   = "uploads",
+    Priority    = ChannelPriority.Low,
+    SlabSize    = 4 * 1024 * 1024,   // 4 MiB buffer
+    SendTimeout = TimeSpan.FromSeconds(60),
 });
 ```
 
-## Accepting Channels
+| Option | Default | Effect |
+| --- | --- | --- |
+| `ChannelId` | required | The string ID. |
+| `Priority` | `Normal` (128) | Higher priorities ship before lower when both are ready to send. See [Priority](priority.md). |
+| `SlabSize` | 1 MiB | Per-channel ring buffer in bytes. Larger slab = more in-flight data. See [Backpressure](backpressure.md). |
+| `SendTimeout` | 30 s | How long `WriteAsync` will wait for slab space before throwing. |
+
+Defaults come from `MultiplexerOptions.DefaultChannelOptions`. If you pass a single `string` (e.g. `mux.OpenChannel("foo")`) the defaults are used for the rest.
+
+## Writing and reading
 
 ```csharp
-// Accept specific channel by ID
-var channel = await mux.AcceptChannelAsync("data", cancellationToken);
+// Writer
+await ch.WriteAsync(buffer, ct);     // Memory<byte>; framed and queued
+await ch.CloseAsync(ct);             // FIN; flushes pending data first
 
-// Accept all channels as they arrive
-await foreach (var channel in mux.AcceptChannelsAsync(cancellationToken))
-{
-    Console.WriteLine($"Got channel: {channel.ChannelId}");
-    _ = HandleChannelAsync(channel);
-}
+// Reader
+var buf = new byte[8192];
+int n = await ch.ReadAsync(buf, ct); // 0 = EOF (channel closed remotely)
 ```
 
-## Channel Properties
+A read of 0 bytes means the channel is closed (remote FIN, remote error, or transport drop). Inspect `CloseReason` and `CloseException` for details.
 
-| Property         | Type                  | Description                                                 |
-| ---------------- | --------------------- | ----------------------------------------------------------- |
-| `ChannelId`      | `string`              | The channel identifier                                      |
-| `State`          | `ChannelState`        | Current state: Opening, Open, Closing, Closed               |
-| `IsReady`        | `bool`                | Whether channel is confirmed by remote (stays true forever) |
-| `IsConnected`    | `bool`                | Whether the underlying transport is active                  |
-| `Priority`       | `ChannelPriority`     | Priority level                                              |
-| `Stats`          | `ChannelStats`        | Bytes/frames sent and received                              |
-| `CloseReason`    | `ChannelCloseReason?` | Why the channel was closed                                  |
-| `CloseException` | `Exception?`          | Exception that caused closure (if any)                      |
-
-## Channel Stats
+## Channel as `Stream`
 
 ```csharp
-var stats = channel.Stats;
-Console.WriteLine($"Sent: {stats.BytesSent} bytes ({stats.FramesSent} frames)");
-Console.WriteLine($"Received: {stats.BytesReceived} bytes ({stats.FramesReceived} frames)");
+Stream s = ch.AsStream();
 ```
 
-## Channel Lifecycle
+`AsStream()` returns a thin wrapper that exposes the channel through the `System.IO.Stream` API. The wrapper is read-only on `IReadChannel` and write-only on `IWriteChannel`. For a bidirectional `Stream`, use [DuplexStream transit](../transits/duplex-stream.md).
 
-```
-Opening → Open → Closing → Closed
-```
+## Closing a channel
 
-- **Opening** — Channel negotiation in progress
-- **Open** — Ready for read/write
-- **Closing** — Close initiated, draining
-- **Closed** — Fully closed
+| Action | Effect |
+| --- | --- |
+| `await ch.CloseAsync()` | Flushes pending writes, sends FIN, transitions to `Closing` then `Closed`. |
+| `ch.Dispose()` / `await ch.DisposeAsync()` | Equivalent to close. Safe to call multiple times. |
 
-## Close Event
+After close, `CloseReason` is set:
 
-```csharp
-channel.Closed += (sender, e) =>
-{
-    Console.WriteLine($"Channel closed: {e.Reason}");
-    if (e.Exception is not null)
-        Console.WriteLine($"Error: {e.Exception.Message}");
-};
-```
+| `ChannelCloseReason` | When |
+| --- | --- |
+| `LocalClose` | You called `CloseAsync` / `Dispose`. |
+| `RemoteFin` | Peer closed cleanly. |
+| `RemoteError` | Peer sent an ERR frame. `CloseException` describes it. |
+| `TransportFailed` | Underlying transport dropped and could not be recovered. |
+| `MuxDisposed` | The multiplexer was disposed. |
 
-## Close Reasons
+## Channel events
 
-| Reason            | Description                       |
-| ----------------- | --------------------------------- |
-| `LocalClose`      | You disposed the channel          |
-| `RemoteFin`       | Remote side closed gracefully     |
-| `RemoteError`     | Remote side sent an error         |
-| `TransportFailed` | Underlying transport disconnected |
-| `MuxDisposed`     | Multiplexer was disposed          |
-
-## Disposing Channels
-
-```csharp
-// Explicit dispose
-await channel.DisposeAsync();
-
-// Or use await using
-await using var channel = mux.OpenChannel("data");
-await channel.WriteAsync(data);
-// Automatically closed at end of scope
-```
+| Event | When |
+| --- | --- |
+| `Ready` | The channel first becomes `Open`. Fires once. |
+| `Connected` | The transport is up and this channel is active (initial + every reconnect, when replay is enabled). |
+| `Disconnected` | The transport dropped. |
+| `Closed` | The channel transitioned to `Closed`. |

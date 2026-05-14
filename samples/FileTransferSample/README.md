@@ -1,68 +1,65 @@
-# NetConduit FileTransfer Sample
+# FileTransferSample
 
-Concurrent file transfers over multiplexed channels with progress reporting.
+Parallel multi-file transfer over a single TCP connection. One NetConduit channel per file lets transfers proceed concurrently and independently — slow files don't block fast ones.
 
-## Features
+## What it shows
 
-- **Concurrent transfers** - Multiple files sent in parallel over separate channels
-- **Progress reporting** - Real-time transfer speed and progress
-- **Size verification** - Automatic integrity checking
+- One `TcpMultiplexer` connection, **N concurrent channels**.
+- `MessageTransit` for file metadata (name + size) on a control channel.
+- `StreamTransit` for raw file bytes on a data channel per file.
+- Backpressure: large files don't starve small ones.
 
-## Usage
-
-### Start the Server
-
-```bash
-dotnet run -- server [port] [output-dir]
-```
-
-Default port: 5001, default output: `./received`
-
-### Send Files
-
-```bash
-dotnet run -- send [port] [host] <file1> <file2> ...
-```
-
-## Examples
-
-```bash
-# Terminal 1: Start server
-dotnet run -- server 5001 ./downloads
-
-# Terminal 2: Send files
-dotnet run -- send 5001 127.0.0.1 document.pdf image.png video.mp4
-```
-
-## Architecture
+## Topology
 
 ```
-Sender                              Server
-┌──────────────────┐               ┌──────────────────┐
-│ NetConduit Mux   │               │ NetConduit Mux   │
-│                  │               │                  │
-│ [file1 channel]──┼──────────────▶│──AcceptChannels()│
-│ [file2 channel]──┼──────────────▶│     │            │
-│ [file3 channel]──┼──────────────▶│     ▼            │
-│                  │               │  Concurrent      │
-│                  │               │  File Writers    │
-└──────────────────┘               └──────────────────┘
++-------------+        TCP        +-------------+
+|   sender    |<----------------->|   server    |
+|             |  meta   (msg)     |             |
+|             |  file1  (stream)  |             |
+|             |  file2  (stream)  |             |
+|             |  ...              |             |
++-------------+                   +-------------+
 ```
 
-## Protocol
+## Run
 
-Each file transfer channel sends:
-1. Filename length (4 bytes, big-endian)
-2. Filename (UTF-8 bytes)
-3. File size (8 bytes, big-endian)
-4. File content (streamed)
+Server:
 
-## NetConduit Features Demonstrated
+```powershell
+dotnet run --project samples/FileTransferSample -- server 5001 ./downloads
+```
 
-| Feature | Usage |
-|---------|-------|
-| `TcpMultiplexer.CreateOptions` | Client connection setup |
-| `TcpMultiplexer.CreateServerOptions` | Server listener setup |
-| `OpenChannelAsync` | One channel per file (parallel transfers) |
-| `AcceptChannelsAsync` | Accept all incoming file channels |
-| Channel as Stream | Use `WriteAsync`/`ReadAsync` for binary data |
+Sender:
+
+```powershell
+dotnet run --project samples/FileTransferSample -- send 5001 127.0.0.1 file1.bin file2.zip
+```
+
+Arguments:
+
+| Position | Server | Sender |
+| --- | --- | --- |
+| 1 | mode `server` | mode `send` |
+| 2 | port | port |
+| 3 | output directory | host |
+| 4..N | — | one or more file paths |
+
+## Key code shape
+
+```csharp
+// Sender side, per file
+var meta = await mux.OpenMessageTransitAsync(...);
+await meta.SendAsync(new FileMeta(name, size));
+
+var s = mux.OpenStream($"file:{name}");
+await s.WaitForReadyAsync();
+await using var fs = File.OpenRead(path);
+await fs.CopyToAsync(s);
+```
+
+```csharp
+// Server side, per inbound metadata
+var s = await mux.AcceptStreamAsync($"file:{meta.Name}");
+await using var fs = File.Create(Path.Combine(outputDir, meta.Name));
+await s.CopyToAsync(fs);
+```

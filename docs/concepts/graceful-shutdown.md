@@ -1,67 +1,56 @@
-# Graceful Shutdown
+# Graceful shutdown
 
-The GoAway protocol for clean multiplexer shutdown. See [Concepts Overview](index.md) for related concepts.
+Two operations terminate a multiplexer. Choose based on whether you want to drain channels first.
 
-## How It Works
-
-`GoAwayAsync` signals the remote side that no new channels will be opened:
-
-1. Local side sends GoAway frame
-2. Remote side receives GoAway, stops accepting new channels
-3. Existing channels continue until they close naturally or timeout
-4. After all channels close (or `GoAwayTimeout` expires), the multiplexer shuts down
-
-## Usage
+## `GoAwayAsync(ct)` — drain then close
 
 ```csharp
-// Initiate graceful shutdown
-await mux.GoAwayAsync(cancellationToken);
-
-// Then dispose
-await mux.DisposeAsync();
+await mux.GoAwayAsync(ct);
 ```
 
-Or just dispose (sends GoAway automatically):
+1. Sets `IsShuttingDown = true`.
+2. Sends a `Ctrl/GoAway` frame to the remote.
+3. Stops accepting new outbound opens.
+4. Waits up to `GoAwayTimeout` (default 30 s) for all open channels to finish their work and close.
+5. Tears down the transport. The next `await using` or `DisposeAsync()` completes immediately.
+
+If a channel hasn't closed by the timeout, it's forcibly aborted with `ChannelCloseReason.MuxDisposed`.
+
+## `DisposeAsync()` — immediate
 
 ```csharp
 await mux.DisposeAsync();
 ```
 
-## GoAway Timeout
+1. Cancels every internal loop.
+2. Aborts all channels with `ChannelCloseReason.MuxDisposed`.
+3. Disposes the transport.
 
-Configure how long to wait for channels to drain:
+In-flight writes may be lost. Use this for forced shutdown, error recovery, or `await using` after a previous `GoAwayAsync`.
 
-```csharp
-var options = new MultiplexerOptions
-{
-    StreamFactory = ...,
-    GoAwayTimeout = TimeSpan.FromSeconds(30)  // Default: 30s
-};
-```
-
-After the timeout, remaining channels are forcefully closed.
-
-## Detecting Shutdown
+## Typical pattern
 
 ```csharp
-// Check if shutdown is in progress
-if (mux.IsShuttingDown)
-{
-    // Don't try to open new channels
-}
+await using var mux = StreamMultiplexer.Create(opts);
+mux.Start();
+await mux.WaitForReadyAsync(ct);
 
-// Disconnect event fires when shutdown completes
-mux.Disconnected += (sender, e) =>
-{
-    if (e.Reason == DisconnectReason.GoAwayReceived)
-        Console.WriteLine("Remote initiated shutdown");
-};
+// ... use mux ...
+
+await mux.GoAwayAsync(ct);   // best-effort drain
+// mux disposes at end of using block — fast because GoAway already tore everything down
 ```
 
-## Disconnect Reasons
+## What channels do during GoAway
 
-| Reason           | Description               |
-| ---------------- | ------------------------- |
-| `GoAwayReceived` | Remote side sent GoAway   |
-| `TransportError` | Transport failed          |
-| `LocalDispose`   | Local DisposeAsync called |
+While `IsShuttingDown` is `true`:
+
+- Existing channels accept the last writes you queued, finish flushing, and close.
+- `mux.OpenChannel` still works (a remote could legitimately need to accept a final response), but new opens are not recommended.
+- Inbound channels (`AcceptChannelsAsync`) stop yielding.
+
+The remote sees a `Ctrl/GoAway`, raises its own `Disconnected` once the close completes, and learns the reason as `DisconnectReason.GoAwayReceived`.
+
+## Cancelling a GoAway
+
+The `CancellationToken` you pass to `GoAwayAsync` cancels the **drain wait**, not the shutdown — once started, shutdown always completes. If you cancel, channels still drain in the background; you just stop waiting.

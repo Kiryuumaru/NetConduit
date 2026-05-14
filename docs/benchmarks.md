@@ -1,154 +1,108 @@
 # Benchmarks
 
-Performance comparison of NetConduit against popular Go multiplexer libraries,
-measured under identical Docker-isolated conditions.
+NetConduit ships a comparison benchmark suite that pits NetConduit's TCP multiplexer against raw TCP and two reference Go multiplexers — **FRP/Yamux** (HashiCorp, used by FRP/Consul/Nomad) and **Smux** (xtaci/smux).
 
-## Test Environment
+Full report with methodology: [`benchmarks/docker/results/comparison-report.md`](../benchmarks/docker/results/comparison-report.md).
 
-| Parameter      | Value                                               |
-| -------------- | --------------------------------------------------- |
-| Isolation      | Docker containers (`--network=none`, loopback only) |
-| CPU pinning    | `--cpuset-cpus=0,1` (2 cores, kernel-enforced)      |
-| Go parallelism | `GOMAXPROCS=2` (matches pinned core count)          |
-| Runs           | 5 per scenario (median reported)                    |
-| Runtime        | .NET 10.0, Go 1.23                                  |
+Raw JSON: `benchmarks/docker/results/{dotnet,go}-{throughput,gametick}.json`.
 
-## Implementations Compared
+## Headline results
 
-| Implementation | Language | Description                                                                                                     |
-| -------------- | -------- | --------------------------------------------------------------------------------------------------------------- |
-| **NetConduit** | C#       | Single TCP connection, N multiplexed channels — credit-based flow control, priority queuing, adaptive windowing |
-| **FRP/Yamux**  | Go       | HashiCorp Yamux — stream multiplexer used by FRP, Consul, Nomad                                                 |
-| **Smux**       | Go       | Popular Go stream multiplexer (xtaci/smux)                                                                      |
+Each measurement is the median of 5 runs. Containers pinned to 2 CPU cores, `GOMAXPROCS=2`, loopback only.
 
-Raw TCP baselines (N separate connections, no multiplexing) are shown for context
-but are not a practical alternative due to connection limits, lack of flow control,
-and no channel management.
+### Game-tick (msg/s — higher is better)
 
----
+Small-message workload typical of game state and real-time control. **NetConduit wins all 16 comparisons against Go multiplexers.**
 
-## Game-Tick Messaging (msg/s)
+| Channels | Msg | NetConduit | FRP/Yamux | Smux | NC vs FRP | NC vs Smux |
+| ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| 1 | 64 B | 1,140,551 | 246,015 | 326,407 | **4.64x** | **3.49x** |
+| 1 | 256 B | 1,147,881 | 212,599 | 336,030 | **5.40x** | **3.42x** |
+| 10 | 64 B | 1,242,974 | 237,982 | 287,982 | **5.22x** | **4.32x** |
+| 10 | 256 B | 1,176,395 | 246,564 | 286,267 | **4.77x** | **4.11x** |
+| 50 | 64 B | 1,546,152 | 273,151 | 293,880 | **5.66x** | **5.26x** |
+| 50 | 256 B | 1,232,333 | 262,566 | 280,286 | **4.69x** | **4.40x** |
+| 1000 | 64 B | 4,759,378 | 264,416 | 239,971 | **18.00x** | **19.83x** |
+| 1000 | 256 B | 2,686,055 | 370,360 | 246,764 | **7.25x** | **10.89x** |
 
-Simulates real-time workloads (game state updates, telemetry, chat) where many
-small messages flow across multiplexed channels. Higher is better.
+### Bulk throughput (MB/s — higher is better)
 
-| Channels | Msg Size | NetConduit | FRP/Yamux |    Smux |  NC vs FRP | NC vs Smux |
-| -------- | -------- | ---------: | --------: | ------: | ---------: | ---------: |
-| 1        | 64B      |  1,140,551 |   246,015 | 326,407 |  **4.64x** |  **3.49x** |
-| 1        | 256B     |  1,147,881 |   212,599 | 336,030 |  **5.40x** |  **3.42x** |
-| 10       | 64B      |  1,242,974 |   237,982 | 287,982 |  **5.22x** |  **4.32x** |
-| 10       | 256B     |  1,176,395 |   246,564 | 286,267 |  **4.77x** |  **4.11x** |
-| 50       | 64B      |  1,546,152 |   273,151 | 293,880 |  **5.66x** |  **5.26x** |
-| 50       | 256B     |  1,232,333 |   262,566 | 280,286 |  **4.69x** |  **4.40x** |
-| 1000     | 64B      |  4,759,378 |   264,416 | 239,971 | **18.00x** | **19.83x** |
-| 1000     | 256B     |  2,686,055 |   370,360 | 246,764 |  **7.25x** | **10.89x** |
+Single large payload per channel. NetConduit wins 10/18 comparisons against Go multiplexers. The credit-based flow control has more visible per-transfer cost at the largest payloads.
 
-**Result: NetConduit wins 16/16 game-tick comparisons** (3.4x–19.8x faster).
+| Channels | Data | NetConduit | FRP/Yamux | Smux | NC vs FRP | NC vs Smux |
+| ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| 1 | 1 KB | 5.3 | 13.2 | 10.7 | 0.40x | 0.49x |
+| 1 | 100 KB | 729.3 | 339.8 | 898.3 | **2.15x** | 0.81x |
+| 1 | 1 MB | 1,198.5 | 1,621.9 | 2,664.8 | 0.74x | 0.45x |
+| 10 | 1 KB | 100.0 | 49.1 | 42.5 | **2.04x** | **2.35x** |
+| 10 | 100 KB | 2,308.1 | 937.5 | 1,731.4 | **2.46x** | **1.33x** |
+| 10 | 1 MB | 2,854.3 | 2,980.1 | 4,081.4 | 0.96x | 0.70x |
+| 100 | 1 KB | 58.2 | 50.9 | 58.0 | **1.14x** | **1.00x** |
+| 100 | 100 KB | 2,287.4 | 1,288.4 | 2,268.5 | **1.78x** | **1.01x** |
+| 100 | 1 MB | 2,659.9 | 2,438.3 | 4,132.4 | **1.09x** | 0.64x |
 
-NetConduit's per-message overhead is extremely low. At 1000 channels, it achieves
-4.8M msg/s while Go muxes plateau around 240K–370K msg/s.
+### Raw TCP baseline
 
----
+Raw TCP uses **N separate connections** (no multiplexing) — a theoretical ceiling, not a practical alternative. Full per-implementation tables for both Go raw TCP and .NET raw TCP are in the [comparison report](../benchmarks/docker/results/comparison-report.md).
 
-## Bulk Throughput (MB/s)
+## What it means
 
-Each channel sends a single data payload. Measures raw transfer speed. Higher is better.
+- For **small-message high-frequency** workloads (game tick, RPC, control planes), NetConduit's writer/scheduler is much faster than the popular Go multiplexers.
+- For **single bulk transfers** at large payloads, raw TCP is ahead of every multiplexer; among muxes, NetConduit is competitive and wins on small-to-medium payloads with multiple channels.
+- The cost NetConduit pays: credit-based backpressure (no OOM under load), priority queuing, and adaptive windowing. These features add measurable overhead but provide guarantees the simpler muxes don't offer.
 
-| Channels | Data Size | NetConduit | FRP/Yamux |    Smux | NC vs FRP | NC vs Smux |
-| -------- | --------- | ---------: | --------: | ------: | --------: | ---------: |
-| 1        | 1KB       |        5.3 |      13.2 |    10.7 |     0.40x |      0.49x |
-| 1        | 100KB     |      729.3 |     339.8 |   898.3 | **2.15x** |      0.81x |
-| 1        | 1MB       |    1,198.5 |   1,621.9 | 2,664.8 |     0.74x |      0.45x |
-| 10       | 1KB       |      100.0 |      49.1 |    42.5 | **2.04x** |  **2.35x** |
-| 10       | 100KB     |    2,308.1 |     937.5 | 1,731.4 | **2.46x** |  **1.33x** |
-| 10       | 1MB       |    2,854.3 |   2,980.1 | 4,081.4 |     0.96x |      0.70x |
-| 100      | 1KB       |       58.2 |      50.9 |    58.0 | **1.14x** |  **1.00x** |
-| 100      | 100KB     |    2,287.4 |   1,288.4 | 2,268.5 | **1.78x** |  **1.01x** |
-| 100      | 1MB       |    2,659.9 |   2,438.3 | 4,132.4 | **1.09x** |      0.64x |
+## What is benchmarked
 
-**Result: NetConduit wins 10/18 vs Go muxes** (7/9 vs FRP/Yamux, 3/9 vs Smux).
+The project at [`benchmarks/docker/netconduit-comparison`](../benchmarks/docker/netconduit-comparison/) runs two workloads:
 
-NetConduit's credit-based flow control adds per-transfer overhead that is most
-visible in single-channel large payloads vs Smux. With more channels (≥10),
-NetConduit becomes competitive or faster than FRP/Yamux across the board.
+| Workload | Measures |
+| --- | --- |
+| `throughput` | Sustained MB/sec across 1 / 10 / 100 channels at 1 KiB / 100 KiB / 1 MiB payloads. |
+| `game-tick` | Messages/sec under a tight tick loop across 1 / 10 / 50 / 1000 channels at 64 / 256 byte payloads. |
 
----
+Two implementations on the .NET side: bare `TcpClient` / `TcpListener` and `StreamMultiplexer` over `NetConduit.Transport.Tcp`. The Go side (`benchmarks/docker/go-comparison`) runs raw TCP, FRP/Yamux, and Smux.
 
-## Analysis
+## Running
 
-### Why NetConduit dominates game-tick messaging
-
-The Go muxes (Yamux, Smux) use goroutine-per-stream with mutex-protected shared
-buffers. Every send involves goroutine scheduling + mutex contention. NetConduit
-uses a single dedicated writer thread with channel-based queuing, eliminating
-per-message scheduling overhead on the hot path.
-
-### Why bulk throughput is mixed vs Smux
-
-Smux is a minimal mux: fire-and-forget, no flow control, no backpressure. It
-achieves higher raw 1MB throughput at the cost of memory safety under load.
-NetConduit's credit-based windowing prevents OOM but requires a credit-grant
-round-trip before sending large payloads.
-
-### What NetConduit provides that simpler muxes don't
-
-| Feature                       | NetConduit | FRP/Yamux | Smux |
-| ----------------------------- | :--------: | :-------: | :--: |
-| Credit-based backpressure     |     ✓      |     ✗     |  ✗   |
-| Priority queuing              |     ✓      |     ✗     |  ✗   |
-| Adaptive windowing            |     ✓      |     ✗     |  ✗   |
-| OOM protection under load     |     ✓      |     ✗     |  ✗   |
-| Channel starvation prevention |     ✓      |     ✗     |  ✗   |
-
-These features add measurable overhead on bulk transfers but provide production
-safety guarantees that simpler muxes don't offer.
-
----
-
-## Reproducing
+The full suite in a controlled Docker environment with CPU affinity and `GOMAXPROCS` pinned:
 
 ```bash
-cd benchmarks/docker
-bash run-docker.sh
+./benchmarks/docker/run-docker.sh
 ```
 
-Requirements: Docker with Linux containers. Results are saved to
-`benchmarks/docker/results/comparison-report.md`.
+A faster local run that skips Docker:
 
----
+```bash
+./benchmarks/docker/run-quick.sh
+```
 
-## Raw TCP Baselines
+Or run the .NET side directly:
 
-For completeness, here are all implementations including raw TCP (N separate
-connections). Raw TCP is not multiplexing — it uses one connection per channel.
+```bash
+dotnet run --project benchmarks/docker/netconduit-comparison -c Release -- throughput
+dotnet run --project benchmarks/docker/netconduit-comparison -c Release -- game-tick
+```
 
-### Throughput (MB/s)
+Without arguments both workloads run.
 
-| Channels | Data Size | Raw TCP (Go) | FRP/Yamux |    Smux | Raw TCP (.NET) | NetConduit |
-| -------- | --------- | -----------: | --------: | ------: | -------------: | ---------: |
-| 1        | 1KB       |          4.6 |      13.2 |    10.7 |            2.1 |        5.3 |
-| 1        | 100KB     |        486.1 |     339.8 |   898.3 |          291.6 |      729.3 |
-| 1        | 1MB       |      3,275.7 |   1,621.9 | 2,664.8 |        2,399.8 |    1,198.5 |
-| 10       | 1KB       |         25.8 |      49.1 |    42.5 |            9.0 |      100.0 |
-| 10       | 100KB     |      1,939.8 |     937.5 | 1,731.4 |          928.4 |    2,308.1 |
-| 10       | 1MB       |      8,498.2 |   2,980.1 | 4,081.4 |        2,994.8 |    2,854.3 |
-| 100      | 1KB       |         26.8 |      50.9 |    58.0 |           22.3 |       58.2 |
-| 100      | 100KB     |      2,284.1 |   1,288.4 | 2,268.5 |        2,363.4 |    2,287.4 |
-| 100      | 1MB       |      9,837.8 |   2,438.3 | 4,132.4 |        6,571.5 |    2,659.9 |
+## Output files
 
-### Game-Tick (msg/s)
+`run-benchmarks.sh` writes:
 
-| Channels | Msg Size | Raw TCP (Go) | FRP/Yamux |    Smux | Raw TCP (.NET) | NetConduit |
-| -------- | -------- | -----------: | --------: | ------: | -------------: | ---------: |
-| 1        | 64B      |      647,800 |   246,015 | 326,407 |      2,622,336 |  1,140,551 |
-| 1        | 256B     |    1,235,674 |   212,599 | 336,030 |      2,436,740 |  1,147,881 |
-| 10       | 64B      |    3,614,933 |   237,982 | 287,982 |              — |  1,242,974 |
-| 10       | 256B     |    3,296,033 |   246,564 | 286,267 |              — |  1,176,395 |
-| 50       | 64B      |    3,916,126 |   273,151 | 293,880 |      4,663,568 |  1,546,152 |
-| 50       | 256B     |    3,455,165 |   262,566 | 280,286 |      4,345,537 |  1,232,333 |
-| 1000     | 64B      |    3,813,299 |   264,416 | 239,971 |              — |  4,759,378 |
-| 1000     | 256B     |    7,651,200 |   370,360 | 246,764 |      4,255,481 |  2,686,055 |
+- `benchmarks/docker/results/dotnet-throughput.json`
+- `benchmarks/docker/results/dotnet-gametick.json`
+- `benchmarks/docker/results/go-throughput.json`
+- `benchmarks/docker/results/go-gametick.json`
 
-> **Note:** Some .NET Raw TCP entries show "—" where the benchmark encountered
-> IOExceptions due to connection storms (10–1000 simultaneous TCP connections
-> overwhelming the kernel). This is precisely why multiplexing exists.
+`report.py` then folds those into [`benchmarks/docker/results/comparison-report.md`](../benchmarks/docker/results/comparison-report.md).
+
+Legacy BenchmarkDotNet artifacts from older runs are kept under [`BenchmarkDotNet.Artifacts/results/`](../BenchmarkDotNet.Artifacts/results/) for reference.
+
+## Tuning hints
+
+| Goal | Knob |
+| --- | --- |
+| Maximum single-channel throughput | `ChannelOptions.SlabSize = 4..16 MiB` |
+| Critical small messages | Raise `ChannelOptions.Priority` |
+| Low latency | `TcpClient.NoDelay = true` in a custom `StreamFactory` |
+| High channel count | Default 1 MiB slab keeps memory bounded at `count * 1 MiB` |

@@ -1,103 +1,63 @@
-# NetConduit RpcFramework Sample
+# RpcFrameworkSample
 
-Simple request/response RPC pattern using MessageTransit.
+A small RPC framework built on `MessageTransit<RpcRequest, RpcResponse>`. Demonstrates that NetConduit is sufficient on its own to build typed request/response APIs — no extra protocol library needed.
 
-## Features
+## What it shows
 
-- **Type-safe RPC** - JSON-serialized request/response messages
-- **Multiple operations** - Add, Multiply, Concat, GetTime, Echo, SlowOperation
-- **Request correlation** - Request IDs match responses to requests
-- **Native AOT compatible** - Uses source-generated JSON serialization
+- Asymmetric `MessageTransit<TSend, TReceive>` where the server's send/receive types are the **client's reverse**.
+- A `SimpleRpcClient.CallAsync<T>` helper that correlates requests and responses by `RequestId`.
+- AOT-safe JSON via `JsonSerializerContext`.
+- Error propagation: the server returns `RpcResponse { Success = false, Error = "..." }` for unknown methods.
 
-## Usage
+## Topology
 
-### Start Server
-
-```bash
-dotnet run -- server [host] [port]
+```
+   client                                  server
+     |   { "Method": "Add", "Args": [...] }   |
+     | -----------------------------------> |
+     |   { "RequestId": ..., "Result": 7 }    |
+     | <----------------------------------- |
 ```
 
-Default: `127.0.0.1:9002`
+Built-in methods in the sample server: `Add`, `Multiply`, `Concat`, `GetTime`, `Echo`. Unknown methods return an error.
 
-### Run Client
+## Run
 
-```bash
-dotnet run -- client [host] [port]
+```powershell
+# Server
+dotnet run --project samples/RpcFrameworkSample -- server 127.0.0.1 5000
+
+# Client
+dotnet run --project samples/RpcFrameworkSample -- client 127.0.0.1 5000
 ```
 
-## Examples
+| Arg | Meaning |
+| --- | --- |
+| 1 | `server` or `client` |
+| 2 | host (default `127.0.0.1`) |
+| 3 | port (default `5000`) |
 
-```bash
-# Terminal 1: Start server
-dotnet run -- server
+## Key code shape
 
-# Terminal 2: Run client
-dotnet run -- client
+```csharp
+// Client side
+var transit = await mux.OpenMessageTransitAsync<RpcRequest, RpcResponse>(
+    "rpc", RpcJson.Default.RpcRequest, RpcJson.Default.RpcResponse);
 
-# Output:
-# Add(5, 3) = 8
-# Multiply(4.5, 2.0) = 9.0
-# Concat(["Hello", " ", "World"]) = "Hello World"
-# GetTime() = { "Utc": "...", "Local": "...", "UnixTimestamp": ... }
+var client = new SimpleRpcClient(transit);
+int sum = await client.CallAsync<int>("Add", new[] { 2, 3 });
 ```
 
-## Available RPC Methods
+```csharp
+// Server side
+var transit = await mux.AcceptMessageTransitAsync<RpcResponse, RpcRequest>(
+    "rpc", RpcJson.Default.RpcResponse, RpcJson.Default.RpcRequest);
 
-| Method | Parameters | Description |
-|--------|------------|-------------|
-| `Add` | `a`, `b` (int) | Returns a + b |
-| `Multiply` | `a`, `b` (double) | Returns a × b |
-| `Concat` | `strings` (array) | Joins strings |
-| `GetTime` | none | Returns current time info |
-| `Echo` | any | Returns parameters as-is |
-| `SlowOperation` | `delayMs` (optional) | Simulates slow operation |
-
-## Protocol
-
-### Request
-
-```json
+await foreach (var req in transit.ReceiveAllAsync())
 {
-  "requestId": "abc123",
-  "method": "Add",
-  "parameters": { "a": 5, "b": 3 }
+    var resp = HandleRpc(req);
+    await transit.SendAsync(resp);
 }
 ```
 
-### Response
-
-```json
-{
-  "requestId": "abc123",
-  "success": true,
-  "result": 8
-}
-```
-
-## Architecture
-
-```
-┌─────────────────────┐                    ┌─────────────────────┐
-│       Client        │                    │       Server        │
-│                     │                    │                     │
-│  SimpleRpcClient    │  rpc-requests      │  ProcessRpcAsync()  │
-│  ┌───────────────┐  │  ──────────────▶   │  ┌───────────────┐  │
-│  │  CallAsync()  │──┼────────────────────┼──│ Method Router │  │
-│  └───────────────┘  │                    │  └───────────────┘  │
-│         ▲           │  rpc-responses     │         │           │
-│         │           │  ◀──────────────   │         ▼           │
-│  ┌───────────────┐  │                    │  ┌───────────────┐  │
-│  │ ReceiveLoop   │◀─┼────────────────────┼──│ SendAsync()   │  │
-│  └───────────────┘  │                    │  └───────────────┘  │
-└─────────────────────┘                    └─────────────────────┘
-```
-
-## NetConduit Features Demonstrated
-
-| Feature | Usage |
-|---------|-------|
-| `MessageTransit<TSend, TReceive>` | Different types for request/response |
-| `OpenMessageTransitAsync` | Open bidirectional message channel |
-| `ReceiveAllAsync` | Process requests as async enumerable |
-| `SendAsync` | Send typed messages |
-| Source-generated JSON | Native AOT compatible serialization |
+Notice that the server's `MessageTransit` type arguments are **swapped** versus the client.

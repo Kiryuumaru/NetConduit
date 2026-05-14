@@ -1,144 +1,75 @@
-# NetConduit TcpTunnel Sample
+# SimpleTcpTunnel
 
-TCP port forwarding through a relay server - similar to SSH `-L` tunneling or ngrok.
+A three-role TCP tunnel: **relay** + **agent** + **forward**. Lets a TCP service behind NAT/firewall (the agent) accept connections from any TCP client (forward) by routing through a publicly reachable relay.
 
-## Overview
+## What it shows
 
-```
-┌─────────────┐       ┌─────────────┐       ┌─────────────┐       ┌─────────────┐
-│   Client    │──────▶│   Forward   │──────▶│    Relay    │──────▶│   Agent     │
-│ (e.g. curl) │       │ (port 4000) │       │ (port 6000) │       │ (port 8080) │
-└─────────────┘       └─────────────┘       └─────────────┘       └─────────────┘
-                                                                        │
-                                                                        ▼
-                                                                  ┌─────────────┐
-                                                                  │ Local       │
-                                                                  │ Service     │
-                                                                  └─────────────┘
-```
+- Three coordinating processes over a single NetConduit relay.
+- Per-tunnel-connection channel via `DuplexStreamTransit` — opening a new logical TCP stream is one extension method call.
+- Control plane via `MessageTransit` for tunnel registration and listing.
+- Optional **WebSocket relay** (`port/path`) so the agent can sit behind HTTP proxies.
 
-## Components
+## Roles
 
-| Component | Description |
-|-----------|-------------|
-| **Relay** | Central hub that routes traffic between agents and forwards |
-| **Agent** | Registers a local service with the relay, making it accessible |
-| **Forward** | Creates a local port that tunnels traffic to a remote service |
-| **List** | Shows all services registered with the relay |
+| Role | Listens / Connects | Job |
+| --- | --- | --- |
+| `relay` | listens for agents and forwards | switching fabric |
+| `agent`  | connects out to relay, opens local target | exposes a local service through the relay |
+| `forward` | listens locally, dials relay | accepts client TCP connections and pipes them to the agent |
+| `list` | queries relay | prints registered tunnels |
 
-## Usage
-
-### 1. Start the Relay Server
-
-```bash
-dotnet run -- relay 6000 6001/relay
-```
-
-### 2. Register a Service (Agent)
-
-On a machine with a local service (e.g., web server on port 8080):
-
-```bash
-dotnet run -- agent localhost 6000 mywebapp 8080
-```
-
-This registers `mywebapp` with the relay, exposing `localhost:8080`.
-
-### 3. Access the Service (Forward)
-
-From any machine that can reach the relay:
-
-```bash
-dotnet run -- forward localhost 6000 mywebapp 4000
-```
-
-Now `localhost:4000` tunnels to the agent's `localhost:8080`.
-
-### 4. List Available Services
-
-```bash
-dotnet run -- list localhost 6000
-```
-
-Output:
-```
-Available services:
-─────────────────────────────────────────────────────
-  mywebapp            (MACHINE-NAME  ) → :8080
-─────────────────────────────────────────────────────
-Total: 1 service(s)
-```
-
-## Examples
-
-### Expose a Local Web Server
-
-```bash
-# Terminal 1: Start relay
-dotnet run -- relay 6000
-
-# Terminal 2: Start agent (expose local web server)
-dotnet run -- agent localhost 6000 webapp 3000
-
-# Terminal 3: Forward to access it
-dotnet run -- forward localhost 6000 webapp 8080
-
-# Now http://localhost:8080 reaches the web server on port 3000
-```
-
-### WebSocket Transport
-
-Agents and forwards can connect via WebSocket instead of TCP:
-
-```bash
-# Agent connecting via WebSocket
-dotnet run -- agent localhost 6001/relay myservice 8080
-
-# Forward via WebSocket
-dotnet run -- forward localhost 6001/relay myservice 4000
-```
-
-## Features
-
-- **Multiple concurrent tunnels** - Each connection creates a new tunnel
-- **Auto-reconnection** - Agent and Forward reconnect if connection drops
-- **TCP and WebSocket** - Choose your transport
-- **Service discovery** - List command shows all registered services
-
-## Architecture
-
-The sample demonstrates several NetConduit features:
-
-| Feature | Usage |
-|---------|-------|
-| `DuplexStreamTransit` | Bidirectional data streams for tunnel channels |
-| `MessageTransit` | JSON control messages (register, tunnel request, etc.) |
-| `OpenDuplexStreamAsync` | Opens paired write/read channels for full duplex |
-| `AcceptChannelsAsync` | Accepts incoming channels from remote side |
-| Auto-reconnection | Transparent recovery from connection drops |
-
-## Protocol
-
-Control channel messages (JSON with `$type` discriminator):
-
-| Message | Direction | Description |
-|---------|-----------|-------------|
-| `RegisterService` | Agent → Relay | Register a service |
-| `RegisterAck` | Relay → Agent | Acknowledge registration |
-| `TunnelRequest` | Forward → Relay | Request tunnel to service |
-| `TunnelAccept` | Relay → Forward | Tunnel established |
-| `TunnelReject` | Relay → Forward | Tunnel failed |
-| `ListRequest` | Client → Relay | List services |
-| `ServiceList` | Relay → Client | Available services |
-
-## Command Reference
+## Topology
 
 ```
-Usage: TcpTunnel <command> [options]
+   tcp client                forward                relay                agent             target service
+       |   tcp connect ----->  |                      |                    |  (e.g. localhost:8080)
+       |                       |  open duplex "X" --> |                    |
+       |                       |                      | open duplex "X" -> | <--- local tcp dial
+       |                       |                      |                    |
+       |  bytes <===================== piped duplex stream ============>  bytes
+```
 
-Commands:
-  relay    <tcp-port> <ws-port/path>    Start relay server
-  agent    <host> <port[/path]> <name> <local-port>   Register service
-  forward  <host> <port[/path]> <name> <local-port>   Forward to service
-  list     <host> <port[/path]>         List services
+## Run
+
+```powershell
+# Relay listens on TCP :5000 AND WebSocket :5001/relay simultaneously
+dotnet run --project samples/SimpleTcpTunnel -- relay 5000 5001/relay
+
+# Agent: connect to relay over TCP, expose tunnel name "web" pointing at local port 8080
+dotnet run --project samples/SimpleTcpTunnel -- agent localhost 5000 web 8080
+
+# Forwarder: connect to relay over TCP, request tunnel "web", listen locally on port 4000
+dotnet run --project samples/SimpleTcpTunnel -- forward localhost 5000 web 4000
+
+# Mixed: agent talking to the same relay via its WebSocket port
+dotnet run --project samples/SimpleTcpTunnel -- agent relay.example.com 5001/relay myapp 3000
+
+# List tunnels registered on a relay
+dotnet run --project samples/SimpleTcpTunnel -- list localhost 5000
+```
+
+Once running, a TCP client connecting to `localhost:4000` (the forwarder) reaches the agent's `localhost:8080` (the target service) through the relay.
+
+## Key code shape
+
+```csharp
+// Forwarder: per inbound tcp connection
+var tcp = await listener.AcceptTcpClientAsync();
+var duplex = await relayMux.OpenDuplexStreamAsync($"tunnel:{name}:{Guid.NewGuid()}");
+_ = tcp.GetStream().CopyToAsync(duplex);
+_ = duplex.CopyToAsync(tcp.GetStream());
+```
+
+```csharp
+// Agent: accept matching channels and dial local service
+await foreach (var ch in mux.AcceptChannelsAsync())
+{
+    if (ch.ChannelId.StartsWith($"tunnel:{tunnelName}:"))
+    {
+        var duplex = new DuplexStreamTransit(/* paired writer */, ch);
+        var local = new TcpClient(); await local.ConnectAsync(target, targetPort);
+        _ = duplex.CopyToAsync(local.GetStream());
+        _ = local.GetStream().CopyToAsync(duplex);
+    }
+}
 ```

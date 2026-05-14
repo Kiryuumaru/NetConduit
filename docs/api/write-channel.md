@@ -1,93 +1,78 @@
-# IWriteChannel
+# `IWriteChannel`
 
-Outbound channel interface for writing data to the remote side. Implements `IAsyncDisposable` and `IDisposable`. See [Channels](../concepts/channels.md) for concepts.
+Namespace: `NetConduit.Interfaces`.
 
-## Creating
+The local end of an outbound channel.
 
 ```csharp
-// From multiplexer
-var channel = mux.OpenChannel("data");
-
-// With options
-var channel = mux.OpenChannel(new ChannelOptions
+public interface IWriteChannel : IAsyncDisposable, IDisposable
 {
-    ChannelId = "priority-data",
-    Priority = ChannelPriority.High
-});
+    string          ChannelId      { get; }
+    ChannelState    State          { get; }
+    bool            IsReady        { get; }
+    bool            IsConnected    { get; }
+    ChannelPriority Priority       { get; }
+    ChannelStats    Stats          { get; }
+    ChannelCloseReason? CloseReason   { get; }
+    Exception?          CloseException { get; }
 
-// Open and wait for ready
-var channel = await mux.OpenChannelAsync("data", cancellationToken);
+    event EventHandler?                       Ready;
+    event EventHandler?                       Connected;
+    event EventHandler<DisconnectedEventArgs>? Disconnected;
+    event EventHandler<ChannelCloseEventArgs>? Closed;
+
+    Task      WaitForReadyAsync(CancellationToken ct = default);
+    ValueTask WriteAsync(ReadOnlyMemory<byte> data, CancellationToken ct = default);
+    ValueTask CloseAsync(CancellationToken ct = default);
+    Stream    AsStream();
+}
 ```
 
-## Writing Data
+## Lifecycle
+
+```
+Opening  -INIT/ACK->  Open  -FIN->  Closing  -drained->  Closed
+```
+
+- `IsReady` becomes true on transition to `Open` and **stays true** for the channel's lifetime.
+- `IsConnected` tracks the transport — it flips false on disconnect and true again on reconnect (while the channel is still open).
+- `State` transitions:
+  - `Opening` — `INIT` sent, no ACK yet.
+  - `Open` — confirmed by remote, data flows.
+  - `Closing` — local `CloseAsync` called and `FIN` queued; buffered data still draining.
+  - `Closed` — transport sent FIN/ERR or close has fully drained.
+
+## `WriteAsync`
 
 ```csharp
-// WriteAsync (primary method)
-await channel.WriteAsync(data, cancellationToken);
-
-// Wait for channel confirmation first
-await channel.WaitForReadyAsync(cancellationToken);
-await channel.WriteAsync(data);
+await channel.WriteAsync(payload, ct);
 ```
 
-## Stream Interop
+- Synchronous up to the channel's slab capacity. Beyond that it asynchronously waits for slab space (this is the local backpressure).
+- Frame size is bounded by `FrameConstants.MaxFramePayloadSize` (16 MiB) per multiplexer frame; larger writes are split automatically.
+- Throws:
+  - `ChannelClosedException` if the channel is `Closed`.
+  - `TimeoutException` if `SendTimeout` elapses while waiting for slab space.
+  - `OperationCanceledException` on `ct` cancellation.
+- After write returns, bytes are committed to the slab. Actual transmission happens asynchronously on the mux writer loop. Use `IStreamMultiplexer.FlushAsync` to force flush.
 
-Use `AsStream()` for APIs that require a `Stream`:
+## `CloseAsync`
 
-```csharp
-var stream = channel.AsStream();
-using var writer = new StreamWriter(stream, leaveOpen: true);
-await writer.WriteLineAsync("Hello!");
-```
+Sends a `FIN` to the remote. Pending bytes already in the slab are flushed first. After `CloseAsync`:
+- `State` becomes `Closing`, then `Closed` when drained.
+- `WriteAsync` calls throw `ChannelClosedException`.
 
-## Properties
+`DisposeAsync` is equivalent to `CloseAsync` + resource cleanup.
 
-| Property         | Type                  | Description                                                 |
-| ---------------- | --------------------- | ----------------------------------------------------------- |
-| `ChannelId`      | `string`              | The channel identifier                                      |
-| `State`          | `ChannelState`        | Current state: Opening, Open, Closing, Closed               |
-| `IsReady`        | `bool`                | Whether channel is confirmed by remote (stays true forever) |
-| `IsConnected`    | `bool`                | Whether the underlying transport is active                  |
-| `Priority`       | `ChannelPriority`     | Priority level                                              |
-| `Stats`          | `ChannelStats`        | Bytes/frames sent                                           |
-| `CloseReason`    | `ChannelCloseReason?` | Why the channel was closed                                  |
-| `CloseException` | `Exception?`          | Exception that caused closure                               |
+## `AsStream`
 
-## Methods
-
-| Method                                                | Returns     | Description                      |
-| ----------------------------------------------------- | ----------- | -------------------------------- |
-| `WriteAsync(ReadOnlyMemory<byte>, CancellationToken)` | `ValueTask` | Write data to the channel        |
-| `WaitForReadyAsync(CancellationToken)`                | `Task`      | Wait until confirmed by remote   |
-| `CloseAsync(CancellationToken)`                       | `ValueTask` | Send FIN frame gracefully        |
-| `AsStream()`                                          | `Stream`    | Get a Stream wrapper for interop |
-| `DisposeAsync()`                                      | `ValueTask` | Close and dispose the channel    |
+Returns a `Stream` wrapper where `Write` calls translate to `WriteAsync`. `CanWrite == true`, `CanRead == false`, `CanSeek == false`. Useful for adapters that want a `Stream` directly without going through `StreamTransit`.
 
 ## Events
 
-| Event          | Signature                              | Description                                |
-| -------------- | -------------------------------------- | ------------------------------------------ |
-| `Ready`        | `EventHandler?`                        | Channel confirmed by remote (fires once)   |
-| `Connected`    | `EventHandler?`                        | Transport connected (including reconnects) |
-| `Disconnected` | `EventHandler<DisconnectedEventArgs>?` | Transport disconnected                     |
-| `Closed`       | `EventHandler<ChannelCloseEventArgs>?` | Channel closed                             |
-
-```csharp
-channel.Closed += (sender, e) =>
-{
-    Console.WriteLine($"Write channel closed: {e.Reason}");
-};
-```
-
-## Disposing
-
-```csharp
-// Explicit
-await channel.DisposeAsync();
-
-// await using
-await using var channel = mux.OpenChannel("data");
-await channel.WriteAsync(data);
-```
-
-Disposing a write channel sends a FIN to the remote side, signaling end-of-stream.
+| Event | Fires when |
+| --- | --- |
+| `Ready` | Channel becomes `Open`. Once. |
+| `Connected` | Transport reconnected and the channel is still alive. |
+| `Disconnected` | Transport dropped (channel may resume after reconnect if replay is enabled). |
+| `Closed` | Channel transitions to `Closed`. Carries `ChannelCloseReason` and any exception. |

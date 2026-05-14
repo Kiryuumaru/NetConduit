@@ -1,182 +1,160 @@
-# MessageTransit
+# Message transit
 
-Send and receive JSON-serialized messages. Ideal for RPC, events, and command patterns. See [Transit Overview](index.md) for alternatives.
+Package: [`NetConduit.Transit.Message`](https://www.nuget.org/packages/NetConduit.Transit.Message).
 
-## Basic Usage
+`MessageTransit<TSend, TReceive>` sends and receives discrete typed JSON messages over a channel pair. Each message is preceded by a 4-byte big-endian length prefix so message boundaries survive across reads.
+
+Built on top of the same `>>` / `<<` channel pair convention as [DuplexStreamTransit](duplex-stream.md).
+
+## API
 
 ```csharp
-using NetConduit.Transit.Message;
+public sealed class MessageTransit<TSend, TReceive> : IMessageTransit<TSend, TReceive>
+{
+    // AOT-safe constructor
+    public MessageTransit(
+        IWriteChannel? writeChannel,
+        IReadChannel? readChannel,
+        JsonTypeInfo<TSend>? sendTypeInfo,
+        JsonTypeInfo<TReceive>? receiveTypeInfo,
+        int maxMessageSize = 16 * 1024 * 1024);
+
+    // Non-AOT convenience
+    [RequiresUnreferencedCode("…")]
+    [RequiresDynamicCode("…")]
+    public MessageTransit(
+        IWriteChannel? writeChannel,
+        IReadChannel? readChannel,
+        JsonSerializerOptions? jsonOptions = null,
+        int maxMessageSize = 16 * 1024 * 1024);
+
+    // From ITransit
+    public bool IsReady { get; }
+    public bool IsConnected { get; }
+    public string? WriteChannelId { get; }
+    public string? ReadChannelId { get; }
+    public event EventHandler? Ready;
+    public event EventHandler? Connected;
+    public event EventHandler<DisconnectedEventArgs>? Disconnected;
+    public Task WaitForReadyAsync(CancellationToken ct = default);
+
+    public ValueTask SendAsync(TSend message, CancellationToken cancellationToken = default);
+    public ValueTask<TReceive?> ReceiveAsync(CancellationToken cancellationToken = default);
+    public IAsyncEnumerable<TReceive> ReceiveAllAsync(CancellationToken cancellationToken = default);
+}
+```
+
+- Either `writeChannel` or `readChannel` may be `null` (send-only or receive-only transit).
+- `maxMessageSize` rejects oversized frames on both ends. Default 16 MiB (matches `FrameConstants.MaxFramePayloadSize`).
+- `ReceiveAsync` returns `default(TReceive?)` on EOF.
+
+## Extension methods
+
+The extensions cover `TSend == TReceive` and the asymmetric case, with sync and async variants. AOT-safe overloads take `JsonTypeInfo<T>`; non-AOT overloads take `JsonSerializerOptions`.
+
+```csharp
+public static class MessageTransitExtensions
+{
+    // Symmetric (T <-> T), AOT-safe
+    public static MessageTransit<T,T> OpenMessageTransit<T>(
+        this IStreamMultiplexer mux, string channelId,
+        JsonTypeInfo<T> typeInfo, int maxMessageSize = 16 * 1024 * 1024);
+
+    public static Task<MessageTransit<T,T>> OpenMessageTransitAsync<T>(
+        this IStreamMultiplexer mux, string channelId,
+        JsonTypeInfo<T> typeInfo, int maxMessageSize = 16 * 1024 * 1024,
+        CancellationToken cancellationToken = default);
+
+    public static MessageTransit<T,T> AcceptMessageTransit<T>(/* same */);
+    public static Task<MessageTransit<T,T>> AcceptMessageTransitAsync<T>(/* same */);
+
+    // Asymmetric (TSend, TReceive), AOT-safe
+    public static MessageTransit<TSend,TReceive> OpenMessageTransit<TSend,TReceive>(
+        this IStreamMultiplexer mux, string channelId,
+        JsonTypeInfo<TSend> sendTypeInfo,
+        JsonTypeInfo<TReceive> receiveTypeInfo,
+        int maxMessageSize = 16 * 1024 * 1024);
+    // + Accept and Async variants
+
+    // JsonSerializerOptions overloads (non-AOT) for all of the above
+    // — each marked [RequiresUnreferencedCode] / [RequiresDynamicCode]
+}
+```
+
+## Example — symmetric chat message
+
+```csharp
 using System.Text.Json.Serialization;
+using NetConduit;
+using NetConduit.Transit.Message;
 
-// Define message type
-public record ChatMessage(string User, string Text);
+public record ChatMessage(string From, string Text);
 
-// Source-generated serialization (Native AOT compatible)
 [JsonSerializable(typeof(ChatMessage))]
-public partial class ChatContext : JsonSerializerContext { }
-
-// Create transit (same type for send/receive)
-await using var transit = await mux.OpenMessageTransitAsync("chat", ChatContext.Default.ChatMessage);
-
-// Send
-await transit.SendAsync(new ChatMessage("Alice", "Hello!"));
-
-// Receive
-var msg = await transit.ReceiveAsync();
-Console.WriteLine($"{msg.User}: {msg.Text}");
+internal partial class AppJson : JsonSerializerContext;
 ```
 
-## Methods
-
-### SendAsync
-
-Send a single message:
-
 ```csharp
-await transit.SendAsync(new ChatMessage("Alice", "Hello!"));
-await transit.SendAsync(new ChatMessage("Bob", "Hi there!"));
+// Both sides
+await using var transit = await mux.OpenMessageTransitAsync(
+    "chat",
+    AppJson.Default.ChatMessage);
+
+await transit.SendAsync(new ChatMessage("Alice", "hello"));
+
+await foreach (var msg in transit.ReceiveAllAsync())
+    Console.WriteLine($"{msg.From}: {msg.Text}");
 ```
 
-### ReceiveAsync
+The other side uses `AcceptMessageTransitAsync` with the same base ID.
 
-Receive a single message (blocks until message arrives):
-
-```csharp
-var message = await transit.ReceiveAsync(cancellationToken);
-if (message is not null)
-{
-    Console.WriteLine($"{message.User}: {message.Text}");
-}
-// Returns null when channel closes
-```
-
-### ReceiveAllAsync (Recommended)
-
-Enumerate all messages as an async stream:
+## Example — asymmetric request/response
 
 ```csharp
-await foreach (var message in transit.ReceiveAllAsync(cancellationToken))
-{
-    Console.WriteLine($"{message.User}: {message.Text}");
-}
-// Loop exits when channel closes or cancellation requested
-```
-
-## Properties
-
-| Property         | Type      | Description                                    |
-| ---------------- | --------- | ---------------------------------------------- |
-| `IsConnected`    | `bool`    | True if transit has open channels              |
-| `WriteChannelId` | `string?` | ID of the write channel (null if receive-only) |
-| `ReadChannelId`  | `string?` | ID of the read channel (null if send-only)     |
-
-## Different Send/Receive Types
-
-For RPC-style request/response with separate types:
-
-```csharp
-public record Request(string Method, object[] Args);
-public record Response(bool Success, object? Result, string? Error);
+public record Request(string Method, string Arg);
+public record Response(bool Ok, string? Result);
 
 [JsonSerializable(typeof(Request))]
 [JsonSerializable(typeof(Response))]
-public partial class RpcContext : JsonSerializerContext { }
-
-// Client sends Request, receives Response
-var clientTransit = await mux.OpenMessageTransitAsync(
-    "rpc",
-    RpcContext.Default.Request,
-    RpcContext.Default.Response);
-
-// Server receives Request, sends Response
-var serverTransit = await mux.AcceptMessageTransitAsync(
-    "rpc",
-    RpcContext.Default.Response,  // Server sends Response
-    RpcContext.Default.Request);  // Server receives Request
+internal partial class RpcJson : JsonSerializerContext;
 ```
 
-## Send-Only / Receive-Only
+```csharp
+// Client
+await using var t = await mux.OpenMessageTransitAsync<Request, Response>(
+    "rpc",
+    RpcJson.Default.Request,
+    RpcJson.Default.Response);
 
-For one-way communication:
+await t.SendAsync(new Request("ping", ""));
+var reply = await t.ReceiveAsync();
+```
 
 ```csharp
-// Publisher (send only)
-var publisher = mux.OpenSendOnlyMessageTransit(
-    "events",
-    EventContext.Default.Event);
-await publisher.SendAsync(new Event("user-joined", data));
+// Server
+await using var t = await mux.AcceptMessageTransitAsync<Response, Request>(
+    "rpc",
+    RpcJson.Default.Response,
+    RpcJson.Default.Request);
 
-// Subscriber (receive only)
-var subscriber = await mux.AcceptReceiveOnlyMessageTransitAsync(
-    "events",
-    EventContext.Default.Event);
-
-await foreach (var evt in subscriber.ReceiveAllAsync(ct))
+await foreach (var req in t.ReceiveAllAsync())
 {
-    HandleEvent(evt);
+    await t.SendAsync(new Response(true, Handle(req)));
 }
 ```
 
-## Without Source Generation (Non-AOT)
+(Note the type-argument **order swaps** on the receiver: the server's `TSend` is what the client receives, and vice versa.)
 
-For development or when AOT isn't needed:
+## Threading
 
-```csharp
-// Uses reflection-based serialization
-var transit = await mux.OpenMessageTransitAsync<ChatMessage>("chat");
+`SendAsync` and `ReceiveAsync` are thread-safe. Internally each direction is serialized by a semaphore so concurrent callers don't tear messages.
+
+## Frame format
+
+```
++----------+----------+----------+----------+--------- ... ---------+
+|       message length (u32, big-endian)    |    UTF-8 JSON bytes   |
++----------+----------+----------+----------+--------- ... ---------+
 ```
 
-⚠️ Reflection-based overloads are marked `[RequiresUnreferencedCode]` and don't work with Native AOT.
-
-## Configuration
-
-### Max Message Size
-
-```csharp
-// Limit message size (default: 16MB)
-var transit = await mux.OpenMessageTransitAsync(
-    "chat",
-    ChatContext.Default.ChatMessage,
-    maxMessageSize: 1024 * 1024);  // 1MB
-```
-
-### Custom JSON Options (Reflection mode)
-
-```csharp
-var jsonOptions = new JsonSerializerOptions
-{
-    PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
-    WriteIndented = false
-};
-
-var transit = await mux.OpenMessageTransitAsync<ChatMessage>(
-    "chat",
-    jsonOptions: jsonOptions);
-```
-
-## Direct Construction
-
-For full control, construct `MessageTransit<TSend, TReceive>` directly with raw channels:
-
-```csharp
-var writeChannel = mux.OpenChannel("requests");
-var readChannel = await mux.AcceptChannelAsync("responses");
-
-var transit = new MessageTransit<Request, Response>(
-    writeChannel, readChannel,
-    RpcContext.Default.Request,
-    RpcContext.Default.Response);
-```
-
-## Message Ordering
-
-Messages are guaranteed to arrive in send order (FIFO):
-
-```csharp
-// Sender
-await transit.SendAsync(msg1);
-await transit.SendAsync(msg2);
-await transit.SendAsync(msg3);
-
-// Receiver always gets: msg1, msg2, msg3 (in order)
-```
+The 4-byte length is per **message** (not per multiplexer frame). NetConduit's own 8-byte frame header sits underneath and may split or merge messages across multiple `Data` frames.

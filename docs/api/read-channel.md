@@ -1,98 +1,61 @@
-# IReadChannel
+# `IReadChannel`
 
-Inbound channel interface for reading data from the remote side. Implements `IAsyncDisposable` and `IDisposable`. See [Channels](../concepts/channels.md) for concepts.
+Namespace: `NetConduit.Interfaces`.
 
-## Accepting
+The local end of an inbound channel.
 
 ```csharp
-// Accept specific channel by ID (waits until ready)
-var channel = await mux.AcceptChannelAsync("data", cancellationToken);
-
-// Accept without waiting
-var channel = mux.AcceptChannel("data");
-await channel.WaitForReadyAsync(cancellationToken);
-
-// Accept all channels
-await foreach (var channel in mux.AcceptChannelsAsync(cancellationToken))
+public interface IReadChannel : IAsyncDisposable, IDisposable
 {
-    Console.WriteLine($"Got: {channel.ChannelId}");
+    string          ChannelId      { get; }
+    ChannelState    State          { get; }
+    bool            IsReady        { get; }
+    bool            IsConnected    { get; }
+    ChannelPriority Priority       { get; }
+    ChannelStats    Stats          { get; }
+    ChannelCloseReason? CloseReason   { get; }
+    Exception?          CloseException { get; }
+
+    event EventHandler?                       Ready;
+    event EventHandler?                       Connected;
+    event EventHandler<DisconnectedEventArgs>? Disconnected;
+    event EventHandler<ChannelCloseEventArgs>? Closed;
+
+    Task      WaitForReadyAsync(CancellationToken ct = default);
+    ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken ct = default);
+    ValueTask CloseAsync(CancellationToken ct = default);
+    Stream    AsStream();
 }
 ```
 
-## Reading Data
+## `ReadAsync`
 
 ```csharp
-// ReadAsync (primary method)
-var buffer = new byte[4096];
-var bytesRead = await channel.ReadAsync(buffer, cancellationToken);
-// Returns 0 when the remote side closes the channel
+int n = await channel.ReadAsync(buffer, ct);
+if (n == 0)  // EOF
+    return;
 ```
 
-## Stream Interop
+- Returns the number of bytes read (1..`buffer.Length`), or **0 at EOF** (remote sent `FIN` and all buffered data is consumed).
+- May return fewer bytes than the buffer holds — loop or use `Stream.CopyToAsync` via `AsStream()`.
+- Throws:
+  - `ChannelClosedException` if the channel is closed due to error (`RemoteError`, `TransportFailed`, `MuxDisposed`).
+  - `OperationCanceledException` on `ct` cancellation.
 
-Use `AsStream()` for APIs that require a `Stream`:
+## `CloseAsync`
 
-```csharp
-var stream = channel.AsStream();
-using var reader = new StreamReader(stream, leaveOpen: true);
-var line = await reader.ReadLineAsync();
-```
+Acknowledges the remote's intent to close (or initiates close locally if not already closed by remote). Subsequent `ReadAsync` calls return 0 immediately.
 
-## Read Loop Pattern
+`DisposeAsync` is equivalent to `CloseAsync` + cleanup.
 
-```csharp
-var buffer = new byte[4096];
-int bytesRead;
-while ((bytesRead = await channel.ReadAsync(buffer, ct)) > 0)
-{
-    ProcessData(buffer.AsSpan(0, bytesRead));
-}
-// Channel is closed when ReadAsync returns 0
-```
+## `AsStream`
 
-## Properties
+Returns a `Stream` wrapper. `CanRead == true`, `CanWrite == false`, `CanSeek == false`. EOF is reported when `Read` returns 0.
 
-| Property         | Type                  | Description                                                 |
-| ---------------- | --------------------- | ----------------------------------------------------------- |
-| `ChannelId`      | `string`              | The channel identifier                                      |
-| `State`          | `ChannelState`        | Current state: Opening, Open, Closing, Closed               |
-| `IsReady`        | `bool`                | Whether channel is confirmed by remote (stays true forever) |
-| `IsConnected`    | `bool`                | Whether the underlying transport is active                  |
-| `Priority`       | `ChannelPriority`     | Priority level                                              |
-| `Stats`          | `ChannelStats`        | Bytes/frames received                                       |
-| `CloseReason`    | `ChannelCloseReason?` | Why the channel was closed                                  |
-| `CloseException` | `Exception?`          | Exception that caused closure                               |
+## Backpressure
 
-## Methods
-
-| Method                                       | Returns          | Description                      |
-| -------------------------------------------- | ---------------- | -------------------------------- |
-| `ReadAsync(Memory<byte>, CancellationToken)` | `ValueTask<int>` | Read data (0 = EOF)              |
-| `WaitForReadyAsync(CancellationToken)`       | `Task`           | Wait until confirmed by remote   |
-| `CloseAsync(CancellationToken)`              | `ValueTask`      | Gracefully close the channel     |
-| `AsStream()`                                 | `Stream`         | Get a Stream wrapper for interop |
-| `DisposeAsync()`                             | `ValueTask`      | Close and dispose the channel    |
+The remote's writer is paused when our read buffer fills. Reading drains the buffer and `ACK` frames are sent back to credit the remote, allowing further sends. See [Backpressure](../concepts/backpressure.md).
 
 ## Events
 
-| Event          | Signature                              | Description                                |
-| -------------- | -------------------------------------- | ------------------------------------------ |
-| `Ready`        | `EventHandler?`                        | Channel confirmed by remote (fires once)   |
-| `Connected`    | `EventHandler?`                        | Transport connected (including reconnects) |
-| `Disconnected` | `EventHandler<DisconnectedEventArgs>?` | Transport disconnected                     |
-| `Closed`       | `EventHandler<ChannelCloseEventArgs>?` | Channel closed                             |
-
-```csharp
-channel.Closed += (sender, e) =>
-{
-    Console.WriteLine($"Read channel closed: {e.Reason}");
-};
-```
-
-## Disposing
-
-```csharp
-await channel.DisposeAsync();
-```
-
-Disposing a read channel signals the remote side that you're no longer interested in the data.
+Same shape as `IWriteChannel`: `Ready`, `Connected`, `Disconnected`, `Closed`.

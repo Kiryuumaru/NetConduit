@@ -1,43 +1,63 @@
 # Statistics
 
-Runtime statistics for multiplexers and channels.
+NetConduit exposes lightweight counters on every multiplexer and channel. Reads are volatile (no locking required) and cheap enough to poll on a UI timer.
 
-## MultiplexerStats
+## `MultiplexerStats`
 
-Access via `mux.Stats`:
-
-```csharp
-var stats = mux.Stats;
-Console.WriteLine($"Bytes sent: {stats.BytesSent}");
-Console.WriteLine($"Bytes received: {stats.BytesReceived}");
-Console.WriteLine($"Open channels: {stats.OpenChannels}");
-Console.WriteLine($"Total opened: {stats.TotalChannelsOpened}");
-Console.WriteLine($"Total closed: {stats.TotalChannelsClosed}");
-Console.WriteLine($"Uptime: {stats.Uptime}");
-```
-
-| Property              | Type       | Description                              |
-| --------------------- | ---------- | ---------------------------------------- |
-| `BytesSent`           | `long`     | Total bytes sent across all channels     |
-| `BytesReceived`       | `long`     | Total bytes received across all channels |
-| `OpenChannels`        | `int`      | Currently open channel count             |
-| `TotalChannelsOpened` | `int`      | Total channels opened since start        |
-| `TotalChannelsClosed` | `int`      | Total channels closed since start        |
-| `Uptime`              | `TimeSpan` | Time since multiplexer started           |
-
-## ChannelStats
-
-Access via `channel.Stats`:
+Namespace: `NetConduit.Models`.
 
 ```csharp
-var stats = channel.Stats;
-Console.WriteLine($"Sent: {stats.BytesSent} bytes ({stats.FramesSent} frames)");
-Console.WriteLine($"Received: {stats.BytesReceived} bytes ({stats.FramesReceived} frames)");
+public sealed class MultiplexerStats
+{
+    public long     BytesSent            { get; }
+    public long     BytesReceived        { get; }
+    public int      OpenChannels         { get; }
+    public int      TotalChannelsOpened  { get; }
+    public int      TotalChannelsClosed  { get; }
+    public TimeSpan Uptime               { get; }
+}
 ```
 
-| Property         | Type   | Description                     |
-| ---------------- | ------ | ------------------------------- |
-| `BytesSent`      | `long` | Bytes sent on this channel      |
-| `BytesReceived`  | `long` | Bytes received on this channel  |
-| `FramesSent`     | `long` | Frames sent on this channel     |
-| `FramesReceived` | `long` | Frames received on this channel |
+Available via `IStreamMultiplexer.Stats`.
+
+| Counter | Meaning |
+| --- | --- |
+| `BytesSent` | Total payload bytes written into channels (does **not** include framing overhead). |
+| `BytesReceived` | Total payload bytes delivered out of channels. |
+| `OpenChannels` | Currently open channels (excluding `Opening`/`Closing`). |
+| `TotalChannelsOpened` | Count of channels opened during this session. |
+| `TotalChannelsClosed` | Count of channels closed during this session. |
+| `Uptime` | Elapsed wall time since `Start()` was called. `TimeSpan.Zero` before start. |
+
+## `ChannelStats`
+
+Namespace: `NetConduit.Models`.
+
+```csharp
+public sealed class ChannelStats
+{
+    public long BytesSent       { get; }
+    public long BytesReceived   { get; }
+    public long FramesSent      { get; }
+    public long FramesReceived  { get; }
+}
+```
+
+Available via `IWriteChannel.Stats` and `IReadChannel.Stats`.
+
+| Counter | Meaning |
+| --- | --- |
+| `BytesSent` / `BytesReceived` | Payload bytes for this channel only. |
+| `FramesSent` / `FramesReceived` | Number of multiplexer frames; payloads may span many frames. |
+
+## Example — periodic status
+
+```csharp
+var timer = new PeriodicTimer(TimeSpan.FromSeconds(5));
+while (await timer.WaitForNextTickAsync())
+{
+    var s = mux.Stats;
+    Console.WriteLine(
+        $"up={s.Uptime} channels={s.OpenChannels} sent={s.BytesSent:N0}B recv={s.BytesReceived:N0}B");
+}
+```

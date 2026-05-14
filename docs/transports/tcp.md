@@ -1,12 +1,25 @@
-# TCP Transport
+# TCP transport
 
-Reliable TCP sockets. The simplest and most common transport. See [Transport Comparison](index.md) for alternatives.
+Package: [`NetConduit.Transport.Tcp`](https://www.nuget.org/packages/NetConduit.Transport.Tcp).
 
-## Installation
+Wraps `System.Net.Sockets.TcpClient` / `TcpListener`. Sets `NoDelay = true` on every connection. Supports reconnection on the client side.
 
-```bash
-dotnet add package NetConduit.Transport.Tcp
+## API
+
+```csharp
+public static class TcpMultiplexer
+{
+    public static MultiplexerOptions CreateOptions(string host, int port);
+    public static MultiplexerOptions CreateOptions(IPEndPoint endpoint);
+    public static MultiplexerOptions CreateServerOptions(TcpListener listener);
+}
 ```
+
+| Helper | Behavior |
+| --- | --- |
+| `CreateOptions(host, port)` | Each factory call resolves `host`, opens a new `TcpClient`, returns its stream. Reconnect-friendly. |
+| `CreateOptions(endpoint)` | Same but takes an `IPEndPoint`. |
+| `CreateServerOptions(listener)` | Accepts one `TcpClient` from `listener` on first factory call; throws on subsequent calls. Server cannot reconnect (use a custom factory for that — see [Reconnection](../concepts/reconnection.md#server-side-reconnection)). |
 
 ## Client
 
@@ -14,87 +27,46 @@ dotnet add package NetConduit.Transport.Tcp
 using NetConduit;
 using NetConduit.Transport.Tcp;
 
-var options = TcpMultiplexer.CreateOptions("localhost", 5000);
-var mux = StreamMultiplexer.Create(options);
+await using var mux = StreamMultiplexer.Create(TcpMultiplexer.CreateOptions("127.0.0.1", 5000));
 mux.Start();
 await mux.WaitForReadyAsync();
 
-var channel = mux.OpenChannel("data");
-await channel.WriteAsync(data);
+var ch = await mux.OpenChannelAsync("requests");
+await ch.WriteAsync(Encoding.UTF8.GetBytes("hello"));
 ```
 
-Overloads:
+## Server
 
 ```csharp
-// Host + port
-var options = TcpMultiplexer.CreateOptions("example.com", 9000);
-
-// IPEndPoint
-var options = TcpMultiplexer.CreateOptions(new IPEndPoint(IPAddress.Loopback, 9000));
-```
-
-## Server (Single Client)
-
-```csharp
-using NetConduit;
-using NetConduit.Transport.Tcp;
 using System.Net;
 using System.Net.Sockets;
+using NetConduit;
+using NetConduit.Transport.Tcp;
 
 var listener = new TcpListener(IPAddress.Any, 5000);
 listener.Start();
 
-var options = TcpMultiplexer.CreateServerOptions(listener);
-var mux = StreamMultiplexer.Create(options);
+await using var mux = StreamMultiplexer.Create(TcpMultiplexer.CreateServerOptions(listener));
 mux.Start();
 await mux.WaitForReadyAsync();
 
-await foreach (var channel in mux.AcceptChannelsAsync())
-{
-    _ = HandleChannelAsync(channel);
-}
+await foreach (var ch in mux.AcceptChannelsAsync())
+    _ = HandleAsync(ch);
 ```
 
-## Server (Multi-Client)
+## Reconnection
 
-For multiple concurrent TCP clients, create a multiplexer per connection:
+The client factory creates a fresh `TcpClient` on every call, so reconnection works out of the box when `MaxAutoReconnectAttempts > 0`:
 
 ```csharp
-var listener = new TcpListener(IPAddress.Any, 5000);
-listener.Start();
-
-while (true)
+var opts = TcpMultiplexer.CreateOptions("relay.example.com", 5000) with
 {
-    var tcpClient = await listener.AcceptTcpClientAsync();
-    _ = Task.Run(async () =>
-    {
-        var accepted = false;
-        var options = new MultiplexerOptions
-        {
-            StreamFactory = _ =>
-            {
-                if (accepted) throw new InvalidOperationException("No reconnect");
-                accepted = true;
-                return Task.FromResult<IStreamPair>(new StreamPair(tcpClient.GetStream(), tcpClient));
-            }
-        };
-
-        await using var mux = StreamMultiplexer.Create(options);
-        mux.Start();
-        await mux.WaitForReadyAsync();
-
-        await foreach (var channel in mux.AcceptChannelsAsync())
-        {
-            _ = HandleChannelAsync(channel);
-        }
-    });
-}
+    MaxAutoReconnectAttempts = 5,
+};
 ```
 
-## API
+(The factory inside `opts` is a `StreamFactoryDelegate` — `MultiplexerOptions` is a `record` so `with` works for tuning.)
 
-| Method                | Signature                                                  | Description                   |
-| --------------------- | ---------------------------------------------------------- | ----------------------------- |
-| `CreateOptions`       | `TcpMultiplexer.CreateOptions(string host, int port)`      | Client options with host/port |
-| `CreateOptions`       | `TcpMultiplexer.CreateOptions(IPEndPoint endpoint)`        | Client options with endpoint  |
-| `CreateServerOptions` | `TcpMultiplexer.CreateServerOptions(TcpListener listener)` | Server options from listener  |
+## Platform
+
+Windows, Linux, macOS, anywhere `System.Net.Sockets` is supported.

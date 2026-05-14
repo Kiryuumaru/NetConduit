@@ -1,98 +1,67 @@
-# MultiplexerOptions
+# `MultiplexerOptions`
 
-Configuration for a multiplexer session. See [StreamMultiplexer](stream-multiplexer.md) for usage.
+Namespace: `NetConduit.Models`.
 
-## Properties
-
-| Property                         | Type                    | Default          | Description                                 |
-| -------------------------------- | ----------------------- | ---------------- | ------------------------------------------- |
-| `StreamFactory`                  | `StreamFactoryDelegate` | (required)       | Factory that creates transport stream pairs |
-| `SessionId`                      | `Guid?`                 | auto-generated   | Session identity                            |
-| `DefaultSlabSize`                | `int`                   | 1,048,576 (1 MB) | Default slab size per channel               |
-| `PingInterval`                   | `TimeSpan`              | 30s              | Interval between keepalive pings            |
-| `PingTimeout`                    | `TimeSpan`              | 10s              | Time to wait for pong reply                 |
-| `MaxMissedPings`                 | `int`                   | 3                | Missed pings before disconnect              |
-| `GoAwayTimeout`                  | `TimeSpan`              | 30s              | Time to wait during graceful shutdown       |
-| `MaxAutoReconnectAttempts`       | `int`                   | 0 (unlimited)    | Max reconnect attempts                      |
-| `AutoReconnectDelay`             | `TimeSpan`              | 1s               | Base delay between reconnect attempts       |
-| `MaxAutoReconnectDelay`          | `TimeSpan`              | 30s              | Maximum reconnect delay                     |
-| `AutoReconnectBackoffMultiplier` | `double`                | 2.0              | Backoff multiplier                          |
-| `ConnectionTimeout`              | `TimeSpan`              | 30s              | Timeout for StreamFactory calls             |
-| `DefaultChannelOptions`          | `DefaultChannelOptions` | (defaults)       | Default options for new channels            |
-
-## StreamFactory
-
-The `StreamFactory` delegate is called to create new transport connections:
+Session-level configuration. Passed to `StreamMultiplexer.Create` (or to transport factories, which forward it).
 
 ```csharp
-public delegate Task<IStreamPair> StreamFactoryDelegate(CancellationToken cancellationToken);
-```
-
-It's called:
-- Once at startup for the initial connection
-- On each reconnection attempt (if reconnection is configured)
-
-Example:
-
-```csharp
-var options = new MultiplexerOptions
+public sealed record MultiplexerOptions
 {
-    StreamFactory = async (ct) =>
-    {
-        var tcp = new TcpClient();
-        await tcp.ConnectAsync("localhost", 5000, ct);
-        return new StreamPair(tcp.GetStream(), tcp);
-    }
-};
+    public required StreamFactoryDelegate StreamFactory { get; init; }
+    public Guid?     SessionId                       { get; init; }
+    public int       DefaultSlabSize                 { get; init; } = 1 * 1024 * 1024;        // 1 MiB
+    public TimeSpan  PingInterval                    { get; init; } = TimeSpan.FromSeconds(30);
+    public TimeSpan  PingTimeout                     { get; init; } = TimeSpan.FromSeconds(10);
+    public int       MaxMissedPings                  { get; init; } = 3;
+    public TimeSpan  GoAwayTimeout                   { get; init; } = TimeSpan.FromSeconds(30);
+    public int       MaxAutoReconnectAttempts        { get; init; } = 0;                      // 0 = unlimited
+    public TimeSpan  AutoReconnectDelay              { get; init; } = TimeSpan.FromSeconds(1);
+    public TimeSpan  MaxAutoReconnectDelay           { get; init; } = TimeSpan.FromSeconds(30);
+    public double    AutoReconnectBackoffMultiplier  { get; init; } = 2.0;
+    public TimeSpan  ConnectionTimeout               { get; init; } = TimeSpan.FromSeconds(30);
+    public DefaultChannelOptions DefaultChannelOptions { get; init; } = new();
+}
 ```
 
-## DefaultChannelOptions
+## Property reference
 
-Default options applied to channels that don't specify their own:
+| Property | Default | Meaning |
+| --- | --- | --- |
+| `StreamFactory` | (required) | Builds a fresh `IStreamPair` on connect and reconnect. |
+| `SessionId` | new GUID | Local session identity. Sticky across reconnects. |
+| `DefaultSlabSize` | 1 MiB | Bytes pre-allocated per channel for outbound frames. See [Backpressure](../concepts/backpressure.md). |
+| `PingInterval` | 30 s | Time between keepalive pings. |
+| `PingTimeout` | 10 s | Time to wait for a `Pong` before counting a missed ping. |
+| `MaxMissedPings` | 3 | After this many missed pings, the connection is declared dead. |
+| `GoAwayTimeout` | 30 s | How long `GoAwayAsync` waits for channels to drain. |
+| `MaxAutoReconnectAttempts` | `0` | `0` = **unlimited** retries. `>0` = max attempts; further failures throw. |
+| `AutoReconnectDelay` | 1 s | Base delay for the first reconnect attempt. |
+| `MaxAutoReconnectDelay` | 30 s | Cap for exponential backoff. |
+| `AutoReconnectBackoffMultiplier` | 2.0 | Multiplier applied to delay each attempt. |
+| `ConnectionTimeout` | 30 s | Per-attempt timeout passed to `StreamFactory`. |
+| `DefaultChannelOptions` | new | Defaults used when `ChannelOptions` aren't specified. |
 
-| Property      | Type              | Default          | Description              |
-| ------------- | ----------------- | ---------------- | ------------------------ |
-| `Priority`    | `ChannelPriority` | `Normal`         | Default channel priority |
-| `SlabSize`    | `int`             | 1,048,576 (1 MB) | Default slab size        |
-| `SendTimeout` | `TimeSpan`        | 30s              | Default send timeout     |
+## Reconnect behavior
 
-## Transport Helpers
+- If `MaxAutoReconnectAttempts == 0` (default), the mux retries forever but the **replay buffer is disabled**. Open channels are torn down on disconnect with `ChannelCloseReason.TransportFailed`.
+- If `MaxAutoReconnectAttempts > 0`, the **replay buffer is enabled** on channels (unacked bytes are re-sent after reconnect). After the configured limit is reached, channels close with `ChannelCloseReason.TransportFailed`.
 
-Rather than constructing `MultiplexerOptions` directly, use transport-specific helpers:
+See [Reconnection](../concepts/reconnection.md).
 
-```csharp
-// TCP
-var options = TcpMultiplexer.CreateOptions("localhost", 5000);
-
-// WebSocket
-var options = WebSocketMultiplexer.CreateOptions("ws://localhost:5000/mux");
-
-// UDP
-var options = UdpMultiplexer.CreateOptions("localhost", 5000);
-
-// IPC
-var options = IpcMultiplexer.CreateOptions("my-app");
-
-// QUIC
-var options = QuicMultiplexer.CreateOptions("localhost", 5000);
-```
-
-See [Transports](../transports/index.md) for details.
-
-## Reconnection Example
+## `DefaultChannelOptions`
 
 ```csharp
-var options = new MultiplexerOptions
+public sealed class DefaultChannelOptions
 {
-    StreamFactory = async (ct) =>
-    {
-        var tcp = new TcpClient();
-        await tcp.ConnectAsync("server.example.com", 5000, ct);
-        return new StreamPair(tcp.GetStream(), tcp);
-    },
-    MaxAutoReconnectAttempts = 0,           // Unlimited
-    AutoReconnectDelay = TimeSpan.FromSeconds(2),
-    MaxAutoReconnectDelay = TimeSpan.FromSeconds(60),
-    AutoReconnectBackoffMultiplier = 2.0
-};
+    public ChannelPriority Priority { get; init; } = ChannelPriority.Normal;
+    public int             SlabSize { get; init; } = 1 * 1024 * 1024;
+    public TimeSpan        SendTimeout { get; init; } = TimeSpan.FromSeconds(30);
+}
 ```
+
+Applied by `OpenChannel(string)` extension (no per-channel `ChannelOptions`).
+
+## Validation
+
+- `DefaultSlabSize` must be between 64 KiB and 64 MiB (`FrameConstants.MinSlabSize` / `MaxSlabSize`).
+- `StreamFactory` is `required` — omitting it is a compile error.

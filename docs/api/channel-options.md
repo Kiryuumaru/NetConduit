@@ -1,54 +1,46 @@
-# ChannelOptions
+# `ChannelOptions`
 
-Per-channel configuration. See [Channels](../concepts/channels.md) for concepts.
+Namespace: `NetConduit.Models`.
 
-## Properties
-
-| Property      | Type              | Default          | Description                               |
-| ------------- | ----------------- | ---------------- | ----------------------------------------- |
-| `ChannelId`   | `string`          | (required)       | Unique channel identifier                 |
-| `Priority`    | `ChannelPriority` | `Normal`         | Channel priority level                    |
-| `SlabSize`    | `int`             | 1,048,576 (1 MB) | Slab size in bytes                        |
-| `SendTimeout` | `TimeSpan`        | 30s              | Timeout for sends blocked on backpressure |
-
-## Usage
+Per-channel configuration passed to `IStreamMultiplexer.OpenChannel`.
 
 ```csharp
-var channel = mux.OpenChannel(new ChannelOptions
+public sealed class ChannelOptions
 {
-    ChannelId = "high-priority-control",
-    Priority = ChannelPriority.Highest,
-    SlabSize = 256 * 1024,                    // 256KB (small, control messages)
-    SendTimeout = TimeSpan.FromSeconds(5)      // Fail fast
+    public required string          ChannelId   { get; init; }
+    public ChannelPriority          Priority    { get; init; } = ChannelPriority.Normal;
+    public int                      SlabSize    { get; init; } = 1 * 1024 * 1024;        // 1 MiB
+    public TimeSpan                 SendTimeout { get; init; } = TimeSpan.FromSeconds(30);
+}
+```
+
+## Property reference
+
+| Property | Default | Meaning |
+| --- | --- | --- |
+| `ChannelId` | (required) | UTF-8 string identifying this channel. Must be unique on the mux. Length <= 1024 bytes. Must not contain `>>` or `<<` if used by [transits](../transits/index.md). |
+| `Priority` | `Normal` (128) | Ordering hint for the writer loop when multiple channels are ready. See [Priority](../concepts/priority.md). |
+| `SlabSize` | 1 MiB | Bytes pre-allocated for outbound framing on this channel. Larger slabs allow more in-flight data before backpressure. |
+| `SendTimeout` | 30 s | Maximum time `WriteAsync` will wait for slab space before throwing `TimeoutException`. |
+
+## Example
+
+```csharp
+var ch = mux.OpenChannel(new ChannelOptions
+{
+    ChannelId = "video",
+    Priority  = ChannelPriority.High,
+    SlabSize  = 4 * 1024 * 1024,
+    SendTimeout = TimeSpan.FromSeconds(5),
 });
 ```
 
-## Priority Levels
+## Defaults from the mux
 
-| Level     | Value | Use Case                |
-| --------- | ----- | ----------------------- |
-| `Highest` | 255   | Control, heartbeats     |
-| `High`    | 192   | Interactive, user input |
-| `Normal`  | 128   | Default                 |
-| `Low`     | 64    | Background              |
-| `Lowest`  | 0     | Bulk data               |
+`OpenChannel(string)` (the extension method) uses `MultiplexerOptions.DefaultChannelOptions` for `Priority`, `SlabSize`, and `SendTimeout`.
 
-See [Priority](../concepts/priority.md) for details.
+## Validation
 
-## SlabSize
-
-The slab is a pre-allocated buffer for the channel. Larger slabs allow more data in-flight before backpressure kicks in. Smaller slabs reduce memory usage per channel.
-
-See [Backpressure](../concepts/backpressure.md) for flow control details.
-
-## SendTimeout
-
-Time to wait when the credit window is exhausted before throwing `TimeoutException`:
-
-```csharp
-var channel = mux.OpenChannel(new ChannelOptions
-{
-    ChannelId = "data",
-    SendTimeout = TimeSpan.FromSeconds(60)  // Wait longer for slow receivers
-});
-```
+- `SlabSize` must be between 64 KiB and 64 MiB.
+- `ChannelId` must be non-empty and <= 1024 bytes when UTF-8 encoded.
+- Duplicate IDs throw `InvalidOperationException` at `OpenChannel` time.

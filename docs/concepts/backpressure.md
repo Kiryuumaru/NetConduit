@@ -1,72 +1,75 @@
 # Backpressure
 
-Credit-based flow control prevents fast senders from overwhelming slow receivers. See [Concepts Overview](index.md) for related concepts.
+NetConduit uses **per-channel slab buffers with credit-based flow control**. Slow consumers slow down their producer without blocking other channels on the same multiplexer.
 
-## How It Works
+## How it works
 
-Each channel has a **credit window** — the number of bytes the sender is allowed to write before waiting for the receiver to acknowledge consumption:
+Every channel has a fixed-size ring buffer ("slab") on each side:
 
-```
-Sender                          Receiver
-  │                                │
-  │──── Data (consumes credit) ───▶│
-  │──── Data (consumes credit) ───▶│
-  │                                │
-  │    [credit exhausted, waits]   │
-  │                                │
-  │◀─── Credit grant (ack) ────────│  (receiver processed data)
-  │                                │
-  │──── More data ────────────────▶│
-```
+- **Writer side.** `WriteAsync` copies your bytes into the slab and queues a `Data` frame. If the slab is full, `WriteAsync` waits — up to `SendTimeout` — for the consumer's `Ack` to free space.
+- **Reader side.** Incoming `Data` frames land in the slab. `ReadAsync` drains it. As bytes are consumed, the multiplexer emits `Ack` frames back to the writer advancing the read position.
 
-## Behavior
+Because each channel has its own slab, a stalled `chat` channel can't block an `uploads` channel that's still draining.
 
-- **Sender blocks** when credit is exhausted (backpressure applied)
-- **Receiver grants credit** as it reads data from the channel
-- **No data loss** — the sender simply waits until the receiver is ready
-- **Per-channel** — slow Channel A doesn't affect fast Channel B
-
-## Configuration
-
-Credit windows are managed via slab sizes in [ChannelOptions](../api/channel-options.md):
+## Tuning slab size
 
 ```csharp
-var channel = mux.OpenChannel(new ChannelOptions
+mux.OpenChannel(new ChannelOptions
 {
-    ChannelId = "high-throughput",
-    SlabSize = 4 * 1024 * 1024  // 4MB slab (larger = less frequent credit updates)
+    ChannelId = "uploads",
+    SlabSize  = 4 * 1024 * 1024,   // 4 MiB
 });
 ```
 
-Default slab size is configured in [MultiplexerOptions](../api/multiplexer-options.md):
+| Constant | Value |
+| --- | --- |
+| `MinSlabSize` | 64 KiB |
+| `DefaultSlabSize` | 1 MiB |
+| `MaxSlabSize` | 64 MiB |
+
+Larger slab:
+
+- More data in flight per channel → higher peak throughput on high-latency links.
+- More memory per channel.
+
+Smaller slab:
+
+- Tighter pushback on fast producers.
+- Lower memory.
+
+Pick larger for bulk transfers, default for general traffic, smaller for many short-lived channels.
+
+## `SendTimeout`
 
 ```csharp
-var options = new MultiplexerOptions
+new ChannelOptions
 {
-    StreamFactory = ...,
-    DefaultSlabSize = 2 * 1024 * 1024  // 2MB default for all channels
-};
+    ChannelId   = "uploads",
+    SendTimeout = TimeSpan.FromSeconds(60),
+}
 ```
 
-## SendTimeout
+`SendTimeout` caps how long `WriteAsync` will wait for slab space. On timeout it throws — typically `OperationCanceledException` from the inner CTS, or a `MultiplexerException` with `ErrorCode.Timeout` for protocol-level timeouts. Default: 30 seconds.
 
-If the receiver is completely stalled and never grants credit, the sender will timeout:
+## What `WriteAsync` actually returns
 
-```csharp
-var channel = mux.OpenChannel(new ChannelOptions
-{
-    ChannelId = "data",
-    SendTimeout = TimeSpan.FromSeconds(60)  // Throw after 60s of no credit
-});
-```
+`WriteAsync` returns when your bytes are **enqueued into the slab** — not when they hit the wire. To force a flush to the transport, call `mux.FlushAsync()`.
 
-Default send timeout is 30 seconds.
+## Reads return early
 
-## Observing Backpressure
+`ReadAsync(Memory<byte> buffer)` returns the number of bytes available, which may be **less** than the buffer size. Loop until you have what you need, or use the channel's `Stream` adapter (`ch.AsStream()`), which loops for you.
 
-Channel statistics show bytes sent/received, which can indicate backpressure:
+A return of `0` means EOF: the channel is closed and no more data will arrive.
 
-```csharp
-var stats = channel.Stats;
-// Large difference between BytesSent and peer's BytesReceived = backpressure
-```
+## Coordinating with priorities
+
+When several channels have data ready, the writer thread picks the next frame by priority (see [Priority](priority.md)). Backpressure on one channel doesn't reorder others — they continue to be picked in priority order.
+
+## When slabs aren't enough
+
+For very large, monotonic transfers (multi-GB files), prefer:
+
+- Many smaller messages on a single channel — each `WriteAsync` is its own credit step.
+- Multiple channels in parallel — one per file or shard.
+
+The [File Transfer sample](../../samples/FileTransferSample/README.md) shows the per-file-channel pattern.

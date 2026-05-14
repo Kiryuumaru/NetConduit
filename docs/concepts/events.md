@@ -1,117 +1,84 @@
 # Events
 
-Multiplexer and channel lifecycle events for monitoring connection state. See [Concepts Overview](index.md) for related concepts.
+Both `IStreamMultiplexer` and `IWriteChannel`/`IReadChannel` raise events for major lifecycle moments. All events are raised on internal threads — keep handlers quick or marshal to your own context.
 
-## Multiplexer Events
+## Multiplexer events
 
-| Event             | Signature                               | When                                       |
-| ----------------- | --------------------------------------- | ------------------------------------------ |
-| `Ready`           | `EventHandler?`                         | First handshake complete (fires once)      |
-| `Connected`       | `EventHandler?`                         | Transport connected (initial or reconnect) |
-| `Disconnected`    | `EventHandler<DisconnectedEventArgs>?`  | Transport disconnected                     |
-| `Reconnecting`    | `EventHandler<ReconnectingEventArgs>?`  | Reconnection attempt starting              |
-| `ChannelOpened`   | `EventHandler<ChannelEventArgs>?`       | Outbound channel opened locally            |
-| `ChannelAccepted` | `EventHandler<ChannelEventArgs>?`       | Inbound channel confirmed by remote        |
-| `ChannelClosed`   | `EventHandler<ChannelClosedEventArgs>?` | Channel closed                             |
-| `Error`           | `EventHandler<ErrorEventArgs>?`         | Error occurred                             |
+| Event | When |
+| --- | --- |
+| `Connected` | Transport up. Fires on initial connect and every successful reconnect. |
+| `Ready` | First handshake completed. Fires **exactly once** per multiplexer instance. |
+| `ChannelOpened` | A local `OpenChannel` was acknowledged by the remote. Args: `ChannelEventArgs`. |
+| `ChannelAccepted` | An inbound `Init` arrived and the local `AcceptChannel` completed. Args: `ChannelEventArgs`. |
+| `ChannelClosed` | A channel transitioned to `Closed`. Args: `ChannelClosedEventArgs` (with `ChannelId` and any `Exception`). |
+| `Error` | A non-fatal protocol or transport error occurred. Args: `ErrorEventArgs`. |
+| `Disconnected` | Transport dropped. Args: `DisconnectedEventArgs` (with `DisconnectReason` and any `Exception`). |
+| `Reconnecting` | A reconnect attempt is about to start. Args: `ReconnectingEventArgs.Attempt` (1-based). |
 
-## Usage
+## Channel events
+
+Each `IWriteChannel` and `IReadChannel`:
+
+| Event | When |
+| --- | --- |
+| `Ready` | The channel first becomes `Open`. Fires **once**. |
+| `Connected` | The underlying transport is up and this channel is active (initial + every reconnect if replay is enabled). |
+| `Disconnected` | The transport dropped. Args: `DisconnectedEventArgs`. |
+| `Closed` | The channel transitioned to `Closed`. Args: `ChannelCloseEventArgs` (with `Reason` and any `Exception`). |
+
+## Typical ordering
+
+Successful initial connect:
+
+```
+mux.Connected
+  ↓
+mux.Ready                       (IsReady becomes true)
+  ↓ you call OpenChannel("a")
+mux.ChannelOpened("a")
+ch.Ready                        (per channel)
+ch.Connected                    (per channel)
+```
+
+Graceful shutdown:
+
+```
+GoAwayAsync()
+  ↓ remote acks drain
+mux.ChannelClosed(...)         (one per channel)
+ch.Closed                      (per channel)
+mux.Disconnected(GoAwayReceived)
+mux.DisposeAsync() finishes
+```
+
+Reconnect (`MaxAutoReconnectAttempts > 0`):
+
+```
+mux.Disconnected(TransportError)
+ch.Disconnected                 (per open channel)
+mux.Reconnecting(Attempt = 1)
+... (factory call, handshake) ...
+mux.Connected                   (Ready does NOT fire again)
+ch.Connected                    (per channel; replay completes silently)
+```
+
+## Subscribing safely
+
+Events fire on internal threads:
 
 ```csharp
-var mux = StreamMultiplexer.Create(options);
-
-mux.Ready += (sender, e) =>
-    Console.WriteLine("Multiplexer ready!");
-
-mux.Connected += (sender, e) =>
-    Console.WriteLine("Connected!");
-
-mux.Disconnected += (sender, e) =>
-    Console.WriteLine($"Disconnected: {e.Reason} ({e.Exception?.Message})");
-
-mux.Reconnecting += (sender, e) =>
-    Console.WriteLine($"Reconnecting... attempt {e.Attempt}");
-
-mux.ChannelOpened += (sender, e) =>
-    Console.WriteLine($"Channel opened: {e.ChannelId}");
-
-mux.ChannelAccepted += (sender, e) =>
-    Console.WriteLine($"Channel accepted: {e.ChannelId}");
-
-mux.ChannelClosed += (sender, e) =>
-    Console.WriteLine($"Channel closed: {e.ChannelId}");
-
-mux.Error += (sender, e) =>
-    Console.WriteLine($"Error: {e.Exception.Message}");
-
-mux.Start();
-```
-
-## Event Args Types
-
-| Type                     | Properties                                              |
-| ------------------------ | ------------------------------------------------------- |
-| `ChannelEventArgs`       | `ChannelId` (string)                                    |
-| `ChannelClosedEventArgs` | `ChannelId` (string), `Exception` (Exception?)          |
-| `ChannelCloseEventArgs`  | `Reason` (ChannelCloseReason), `Exception` (Exception?) |
-| `DisconnectedEventArgs`  | `Reason` (DisconnectReason), `Exception` (Exception?)   |
-| `ErrorEventArgs`         | `Exception` (Exception)                                 |
-| `ReconnectingEventArgs`  | `Attempt` (int)                                         |
-
-## Event Ordering
-
-Events fire in this order during the multiplexer lifecycle:
-
-```
-Start()
-  → Connected
-  → Ready (once, never again)
-  → ChannelOpened (per channel)
-  → ChannelAccepted (per channel)
-  → ChannelClosed (per channel)
-  → Disconnected
-  → Reconnecting (if reconnection enabled)
-  → Connected (reconnected)
-  → ...
-  → Disconnected (final)
-```
-
-## Channel Events
-
-Individual channels have their own events:
-
-| Event          | Signature                              | When                                       |
-| -------------- | -------------------------------------- | ------------------------------------------ |
-| `Ready`        | `EventHandler?`                        | Channel confirmed by remote (fires once)   |
-| `Connected`    | `EventHandler?`                        | Transport connected (including reconnects) |
-| `Disconnected` | `EventHandler<DisconnectedEventArgs>?` | Transport disconnected                     |
-| `Closed`       | `EventHandler<ChannelCloseEventArgs>?` | Channel closed                             |
-
-```csharp
-var channel = mux.OpenChannel("data");
-channel.Closed += (sender, e) =>
+mux.Disconnected += (_, args) =>
 {
-    Console.WriteLine($"Channel closed: {e.Reason}");
+    // Quick work only — don't await, don't block.
+    _logger.LogWarning("disconnected: {Reason}", args.Reason);
 };
 ```
 
-See [Channels](channels.md) for close reasons.
-
-## Disconnect Reasons
-
-| Reason           | Description                             |
-| ---------------- | --------------------------------------- |
-| `GoAwayReceived` | Remote side initiated graceful shutdown |
-| `TransportError` | Underlying transport failed             |
-| `LocalDispose`   | Local `DisposeAsync` was called         |
-
-## Thread Safety
-
-Events fire on background threads. Use synchronization when updating shared state:
+For richer reactions, post the work to your own dispatcher:
 
 ```csharp
-var connected = false;
-
-mux.Connected += (sender, e) => Volatile.Write(ref connected, true);
-mux.Disconnected += (sender, e) => Volatile.Write(ref connected, false);
+mux.ChannelAccepted += (_, args) =>
+    _taskScheduler.Post(() => HandleAcceptAsync(args.ChannelId));
 ```
+
+Unsubscribing is unnecessary if the multiplexer is disposed afterwards — disposal clears all subscriptions.

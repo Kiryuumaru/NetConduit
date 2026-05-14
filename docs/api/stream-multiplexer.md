@@ -1,152 +1,117 @@
-# IStreamMultiplexer
+# `IStreamMultiplexer` / `StreamMultiplexer`
 
-The core interface that multiplexes multiple channels over a single bidirectional stream. Extends `IAsyncDisposable`. The concrete implementation is created via `StreamMultiplexer.Create()`.
+The core multiplexer interface. A `StreamMultiplexer` wraps an `IStreamPair` and exposes virtual channels.
 
-## Creating a Multiplexer
+Namespace: `NetConduit.Interfaces` (interface), `NetConduit` (class).
 
-Use the static `Create` factory method with [MultiplexerOptions](multiplexer-options.md):
-
-```csharp
-var options = TcpMultiplexer.CreateOptions("localhost", 9000);
-var mux = StreamMultiplexer.Create(options);
-```
-
-Transport helpers create the options for you — see [Transports](../transports/index.md).
-
-## Lifecycle
-
-A multiplexer goes through these stages:
-
-```
-Create → Start → Ready → Active → Shutdown/Dispose
-```
-
-### Start
-
-`Start` launches the background run loop (handshake, read/write loops):
+## Interface
 
 ```csharp
-var mux = StreamMultiplexer.Create(options);
-mux.Start();
-```
-
-`Start` is synchronous and returns `void`. It kicks off background tasks but does not wait for the connection to be ready.
-
-### WaitForReadyAsync
-
-Blocks until the first successful connection and handshake complete:
-
-```csharp
-await mux.WaitForReadyAsync(cancellationToken);
-// Now safe to open/accept channels
-```
-
-### GoAwayAsync
-
-Initiates graceful shutdown — signals the remote side that no new channels will be opened:
-
-```csharp
-await mux.GoAwayAsync(cancellationToken);
-```
-
-See [Graceful Shutdown](../concepts/graceful-shutdown.md) for the full shutdown protocol.
-
-### FlushAsync
-
-Force an immediate flush of pending writes to the transport:
-
-```csharp
-await mux.FlushAsync(cancellationToken);
-```
-
-### DisposeAsync
-
-Disposes all channels and the underlying transport:
-
-```csharp
-await mux.DisposeAsync();
-```
-
-Always dispose with `await using`:
-
-```csharp
-await using var mux = StreamMultiplexer.Create(options);
-```
-
-## Channel Operations
-
-### Opening Channels
-
-Open an outbound channel (the remote side must accept it):
-
-```csharp
-// Simple — default options
-var channel = mux.OpenChannel("data");
-
-// Custom options
-var channel = mux.OpenChannel(new ChannelOptions
+public interface IStreamMultiplexer : IAsyncDisposable
 {
-    ChannelId = "priority-data",
-    Priority = ChannelPriority.High,
-    SlabSize = 4 * 1024 * 1024
-});
-```
+    // ----- Properties -----
+    MultiplexerOptions Options { get; }
+    MultiplexerStats   Stats   { get; }
 
-Returns an [`IWriteChannel`](write-channel.md).
+    bool IsReady       { get; }   // true after first successful handshake. Sticky.
+    bool IsConnected   { get; }   // transport is currently connected
+    bool IsRunning     { get; }   // started and not disposed
+    bool IsShuttingDown{ get; }   // graceful shutdown in progress
 
-### Accepting Channels
+    Guid SessionId       { get; } // local session identity
+    Guid RemoteSessionId { get; } // remote session identity
 
-Accept inbound channels opened by the remote side:
+    IReadOnlyCollection<string> ActiveChannelIds { get; }
+    int                         ActiveChannelCount { get; }
+    DisconnectReason?           DisconnectReason   { get; }
 
-```csharp
-// Accept a specific channel
-var channel = await mux.AcceptChannelAsync("data", cancellationToken);
+    // ----- Events -----
+    event EventHandler? Ready;
+    event EventHandler<ChannelEventArgs>?       ChannelOpened;
+    event EventHandler<ChannelEventArgs>?       ChannelAccepted;
+    event EventHandler<ChannelClosedEventArgs>? ChannelClosed;
+    event EventHandler<ErrorEventArgs>?         Error;
+    event EventHandler<DisconnectedEventArgs>?  Disconnected;
+    event EventHandler?                         Connected;
+    event EventHandler<ReconnectingEventArgs>?  Reconnecting;
 
-// Accept all channels
-await foreach (var channel in mux.AcceptChannelsAsync(cancellationToken))
-{
-    _ = HandleChannelAsync(channel);
+    // ----- Lifecycle -----
+    void Start();
+    Task WaitForReadyAsync(CancellationToken ct = default);
+    ValueTask GoAwayAsync(CancellationToken ct = default);
+    ValueTask FlushAsync (CancellationToken ct = default);
+
+    // ----- Channels -----
+    IWriteChannel  OpenChannel  (ChannelOptions options);
+    IReadChannel   AcceptChannel(string channelId);
+    IAsyncEnumerable<IReadChannel> AcceptChannelsAsync(CancellationToken ct = default);
+
+    IWriteChannel? GetWriteChannel(string channelId);
+    IReadChannel?  GetReadChannel (string channelId);
 }
 ```
 
-Returns [`IReadChannel`](read-channel.md) instances.
-
-### Looking Up Channels
-
-Find existing channels by ID:
+## Class `StreamMultiplexer`
 
 ```csharp
-var writeChannel = mux.GetWriteChannel("data");    // null if not found
-var readChannel = mux.GetReadChannel("data");      // null if not found
+namespace NetConduit;
+
+public sealed class StreamMultiplexer : IStreamMultiplexer
+{
+    public static StreamMultiplexer Create(MultiplexerOptions options);
+}
 ```
 
-## Properties
+The constructor is private — always use `Create`. Transport packages wrap this with role-specific factories (`TcpMultiplexer.CreateOptions`, `TcpMultiplexer.CreateServerOptions`, etc.).
 
-| Property             | Type                          | Description                                                      |
-| -------------------- | ----------------------------- | ---------------------------------------------------------------- |
-| `Options`            | `MultiplexerOptions`          | The configuration                                                |
-| `Stats`              | `MultiplexerStats`            | Runtime statistics                                               |
-| `IsReady`            | `bool`                        | Whether mux has completed initial handshake (stays true forever) |
-| `IsConnected`        | `bool`                        | Whether transport is connected                                   |
-| `IsRunning`          | `bool`                        | Whether mux is started and not disposed                          |
-| `IsShuttingDown`     | `bool`                        | Whether GoAway is in progress                                    |
-| `SessionId`          | `Guid`                        | Local session identity                                           |
-| `RemoteSessionId`    | `Guid`                        | Remote peer's session identity                                   |
-| `ActiveChannelIds`   | `IReadOnlyCollection<string>` | IDs of all active channels                                       |
-| `ActiveChannelCount` | `int`                         | Number of active channels                                        |
-| `DisconnectReason`   | `DisconnectReason?`           | Reason for last disconnection                                    |
+## Lifecycle methods
+
+| Method | Behavior |
+| --- | --- |
+| `Start()` | Begins the main loop, handshake, and IO tasks. Throws if already running. Returns immediately; use `WaitForReadyAsync` to await readiness. |
+| `WaitForReadyAsync(ct)` | Completes when the first connection's handshake succeeds. Never completes again on reconnects. |
+| `GoAwayAsync(ct)` | Sends a `GoAway` control frame, refuses new channels, waits for active ones to drain (up to `MultiplexerOptions.GoAwayTimeout`). |
+| `FlushAsync(ct)` | Signals the writer loop to flush all buffered frames to the transport, then completes. |
+| `DisposeAsync()` | Stops loops, closes channels, disposes the transport. Raises `Disconnected` with `LocalDispose`. |
+
+## Channel methods
+
+```csharp
+IWriteChannel ch = mux.OpenChannel(new ChannelOptions { ChannelId = "data" });
+await ch.WaitForReadyAsync();
+```
+
+```csharp
+IReadChannel ch = mux.AcceptChannel("data");
+await ch.WaitForReadyAsync();
+```
+
+```csharp
+await foreach (var ch in mux.AcceptChannelsAsync(ct))
+{
+    _ = Task.Run(() => HandleAsync(ch));
+}
+```
+
+`OpenChannel` allocates a channel index immediately and sends `INIT`. `AcceptChannel` returns a pending channel; it becomes ready when the remote `INIT` arrives (or the multiplexer is already aware of a matching unclaimed inbound channel).
+
+`GetWriteChannel` and `GetReadChannel` return `null` if no channel with that ID currently exists; they don't open new ones.
+
+See also: [`StreamMultiplexerExtensions`](extensions.md) for `OpenChannel(string)`, `OpenChannelAsync`, `AcceptChannelAsync`.
 
 ## Events
 
-| Event             | Signature                               | Description                                |
-| ----------------- | --------------------------------------- | ------------------------------------------ |
-| `Ready`           | `EventHandler?`                         | First handshake complete (fires once)      |
-| `Connected`       | `EventHandler?`                         | Transport connected (initial or reconnect) |
-| `Disconnected`    | `EventHandler<DisconnectedEventArgs>?`  | Transport disconnected                     |
-| `Reconnecting`    | `EventHandler<ReconnectingEventArgs>?`  | Reconnection attempt starting              |
-| `ChannelOpened`   | `EventHandler<ChannelEventArgs>?`       | Outbound channel opened locally            |
-| `ChannelAccepted` | `EventHandler<ChannelEventArgs>?`       | Inbound channel confirmed by remote        |
-| `ChannelClosed`   | `EventHandler<ChannelClosedEventArgs>?` | Channel closed                             |
-| `Error`           | `EventHandler<ErrorEventArgs>?`         | Error occurred                             |
+| Event | Fires when |
+| --- | --- |
+| `Ready` | First handshake succeeds (once). |
+| `Connected` | Each time the transport connects (initial + each reconnect). |
+| `Disconnected` | Transport disconnects. |
+| `Reconnecting` | Each reconnect attempt starts. `Attempt` is 1-based. |
+| `ChannelOpened` | A locally opened channel becomes ready. |
+| `ChannelAccepted` | A remotely opened channel becomes ready. |
+| `ChannelClosed` | Any channel closes. |
+| `Error` | Non-fatal error occurred. |
 
-See [Events](../concepts/events.md) for details.
+## Thread safety
+
+All methods on `IStreamMultiplexer` are safe to call from any thread. Events are raised on internal IO threads — do not block on them.

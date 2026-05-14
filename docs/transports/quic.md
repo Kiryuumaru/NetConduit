@@ -1,18 +1,55 @@
-# QUIC Transport
+# QUIC transport
 
-QUIC protocol transport using .NET's built-in QUIC support. Provides 0-RTT connection establishment and native multiplexing at the transport layer. See [Transport Comparison](index.md) for alternatives.
+Package: [`NetConduit.Transport.Quic`](https://www.nuget.org/packages/NetConduit.Transport.Quic).
 
-## Requirements
+Wraps `System.Net.Quic` (.NET 8+). QUIC speaks TLS 1.3, supports stream multiplexing natively, and survives IP-address changes. NetConduit uses **one bidirectional QUIC stream** as the transport and runs its own multiplexer on top.
 
-- .NET 8 or later
-- OS support: Windows, Linux, macOS
-- TLS certificate (required by QUIC specification)
+## Platform support
 
-## Installation
+`QuicMultiplexer` is annotated:
 
-```bash
-dotnet add package NetConduit.Transport.Quic
+```csharp
+[SupportedOSPlatform("windows")]
+[SupportedOSPlatform("linux")]
+[SupportedOSPlatform("macos")]
 ```
+
+`System.Net.Quic` requires OS-level QUIC support. The library checks `QuicListener.IsSupported` and throws `PlatformNotSupportedException` early when QUIC is unavailable.
+
+Check at runtime if you target environments that might not have it:
+
+```csharp
+if (!QuicListener.IsSupported)
+    Console.WriteLine("QUIC not available on this OS / runtime");
+```
+
+## API
+
+```csharp
+public static class QuicMultiplexer
+{
+    public static MultiplexerOptions CreateOptions(
+        string host, int port,
+        string? alpn = null,
+        bool allowInsecure = false);
+
+    public static Task<QuicListener> ListenAsync(
+        IPEndPoint endPoint,
+        X509Certificate2 certificate,
+        string? alpn = null,
+        CancellationToken cancellationToken = default);
+
+    public static MultiplexerOptions CreateServerOptions(QuicListener listener);
+}
+```
+
+### ALPN
+
+`alpn` is the Application-Layer Protocol Negotiation identifier. Default: `"netconduit"`. Both peers must agree.
+
+### `allowInsecure`
+
+Client only. When `true`, certificate validation is **skipped**. Use only for local development.
 
 ## Client
 
@@ -20,59 +57,49 @@ dotnet add package NetConduit.Transport.Quic
 using NetConduit;
 using NetConduit.Transport.Quic;
 
-var options = QuicMultiplexer.CreateOptions("localhost", 5000);
-var mux = StreamMultiplexer.Create(options);
+var opts = QuicMultiplexer.CreateOptions(
+    host: "example.com",
+    port: 5000,
+    alpn: "myapp",
+    allowInsecure: false);
+
+await using var mux = StreamMultiplexer.Create(opts);
 mux.Start();
 await mux.WaitForReadyAsync();
-
-var channel = mux.OpenChannel("data");
-await channel.WriteAsync(data);
-```
-
-Options:
-
-```csharp
-// With custom ALPN protocol identifier
-var options = QuicMultiplexer.CreateOptions("localhost", 5000, alpn: "my-protocol");
-
-// Allow insecure (self-signed) certificates (development only)
-var options = QuicMultiplexer.CreateOptions("localhost", 5000, allowInsecure: true);
 ```
 
 ## Server
 
 ```csharp
-using NetConduit;
-using NetConduit.Transport.Quic;
 using System.Net;
 using System.Security.Cryptography.X509Certificates;
+using NetConduit;
+using NetConduit.Transport.Quic;
 
-var cert = X509Certificate2.CreateFromPemFile("cert.pem", "key.pem");
+var cert = new X509Certificate2("server.pfx", "password");
+
 var listener = await QuicMultiplexer.ListenAsync(
     new IPEndPoint(IPAddress.Any, 5000),
-    cert);
+    cert,
+    alpn: "myapp");
 
-var options = QuicMultiplexer.CreateServerOptions(listener);
-var mux = StreamMultiplexer.Create(options);
+await using var mux = StreamMultiplexer.Create(QuicMultiplexer.CreateServerOptions(listener));
 mux.Start();
 await mux.WaitForReadyAsync();
-
-await foreach (var channel in mux.AcceptChannelsAsync())
-{
-    _ = HandleChannelAsync(channel);
-}
 ```
 
-## API
+The certificate must have a private key. For dev, a self-signed cert works (clients then need `allowInsecure: true`).
 
-| Method                | Signature                                                                                                                             | Description                  |
-| --------------------- | ------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------- |
-| `CreateOptions`       | `QuicMultiplexer.CreateOptions(string host, int port, string? alpn = null, bool allowInsecure = false)`                               | Client options               |
-| `ListenAsync`         | `QuicMultiplexer.ListenAsync(IPEndPoint endPoint, X509Certificate2 certificate, string? alpn = null, CancellationToken ct = default)` | Create QUIC listener         |
-| `CreateServerOptions` | `QuicMultiplexer.CreateServerOptions(QuicListener listener)`                                                                          | Server options from listener |
+## Behavior notes
 
-## Platform Support
+- The transport opens **one** outbound bidirectional QUIC stream. The first byte (`0x01`) is a handshake marker so both ends synchronize.
+- `MaxInboundBidirectionalStreams` is set to 100 (room for future use); only one is actually used by the multiplexer.
+- TLS 1.3 only.
 
-Attribute: `[SupportedOSPlatform("windows")]`, `[SupportedOSPlatform("linux")]`, `[SupportedOSPlatform("macos")]`
+## When to pick QUIC
 
-QUIC requires operating system support for the QUIC protocol (via msquic or equivalent).
+- Modern infrastructure where TCP middleboxes are a problem.
+- Mobile/roaming clients that may switch networks.
+- You want TLS built into the transport without managing it yourself.
+
+For simpler deployments, [TCP](tcp.md) or [WebSocket](websocket.md) is usually fine.

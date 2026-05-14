@@ -1,12 +1,30 @@
-# WebSocket Transport
+# WebSocket transport
 
-WebSocket client and server support. HTTP-friendly for firewall traversal and browser integration. See [Transport Comparison](index.md) for alternatives.
+Package: [`NetConduit.Transport.WebSocket`](https://www.nuget.org/packages/NetConduit.Transport.WebSocket).
 
-## Installation
+Wraps `System.Net.WebSockets.ClientWebSocket` and `System.Net.WebSockets.WebSocket`. An internal `WebSocketStream` adapter converts message-mode WebSockets into a byte stream the multiplexer can use.
 
-```bash
-dotnet add package NetConduit.Transport.WebSocket
+## API
+
+```csharp
+public static class WebSocketMultiplexer
+{
+    public static MultiplexerOptions CreateOptions(
+        Uri uri,
+        Action<ClientWebSocketOptions>? clientOptions = null);
+
+    public static MultiplexerOptions CreateOptions(
+        string url,
+        Action<ClientWebSocketOptions>? clientOptions = null);
+
+    public static MultiplexerOptions CreateServerOptions(WebSocket webSocket);
+}
 ```
+
+| Helper | Behavior |
+| --- | --- |
+| `CreateOptions(uri[, clientOptions])` | Each factory call opens a fresh `ClientWebSocket` to `uri`. `clientOptions` lets you set headers, sub-protocols, credentials. Reconnect-friendly. |
+| `CreateServerOptions(webSocket)` | Wraps an already-accepted server-side `WebSocket`. Use after `HttpListener.AcceptWebSocketAsync` or ASP.NET's `HttpContext.WebSockets.AcceptWebSocketAsync`. Single accept only. |
 
 ## Client
 
@@ -14,110 +32,70 @@ dotnet add package NetConduit.Transport.WebSocket
 using NetConduit;
 using NetConduit.Transport.WebSocket;
 
-var options = WebSocketMultiplexer.CreateOptions("ws://localhost:5000/mux");
-var mux = StreamMultiplexer.Create(options);
+var opts = WebSocketMultiplexer.CreateOptions("ws://localhost:5000/chat",
+    clientOptions: o =>
+    {
+        o.SetRequestHeader("Authorization", "Bearer …");
+    });
+
+await using var mux = StreamMultiplexer.Create(opts);
 mux.Start();
 await mux.WaitForReadyAsync();
-
-var channel = mux.OpenChannel("data");
-await channel.WriteAsync(data);
 ```
 
-Overloads:
-
-```csharp
-// String URL
-var options = WebSocketMultiplexer.CreateOptions("wss://example.com/mux");
-
-// Uri
-var options = WebSocketMultiplexer.CreateOptions(new Uri("wss://example.com/mux"));
-
-// With custom WebSocket options (auth, headers, etc.)
-var options = WebSocketMultiplexer.CreateOptions("wss://example.com/mux", ws =>
-{
-    ws.SetRequestHeader("Authorization", "Bearer token");
-});
-```
-
-## Server (Single Client)
-
-From an existing `WebSocket` instance (ASP.NET Core middleware):
+## Server (ASP.NET Core minimal API)
 
 ```csharp
 using NetConduit;
 using NetConduit.Transport.WebSocket;
 
-app.Map("/mux", async (HttpContext ctx) =>
+var builder = WebApplication.CreateBuilder(args);
+var app = builder.Build();
+
+app.UseWebSockets();
+app.Map("/chat", async (HttpContext ctx) =>
 {
-    var ws = await ctx.WebSockets.AcceptWebSocketAsync();
-    var options = WebSocketMultiplexer.CreateServerOptions(ws);
-
-    await using var mux = StreamMultiplexer.Create(options);
-    mux.Start();
-    await mux.WaitForReadyAsync();
-
-    await foreach (var channel in mux.AcceptChannelsAsync())
+    if (!ctx.WebSockets.IsWebSocketRequest)
     {
-        _ = HandleChannelAsync(channel);
+        ctx.Response.StatusCode = 400;
+        return;
     }
-});
-```
 
-## Server (Multi-Client with Reconnection)
-
-`WebSocketMuxListener` manages multiple WebSocket sessions with reconnection support:
-
-```csharp
-using NetConduit.Transport.WebSocket;
-
-await using var listener = new WebSocketMuxListener();
-
-// In ASP.NET Core middleware:
-app.Map("/mux", async (HttpContext ctx) =>
-{
     var ws = await ctx.WebSockets.AcceptWebSocketAsync();
-    await listener.HandleAsync(ws);
+
+    await using var mux = StreamMultiplexer.Create(WebSocketMultiplexer.CreateServerOptions(ws));
+    mux.Start();
+    await mux.WaitForReadyAsync(ctx.RequestAborted);
+
+    await foreach (var ch in mux.AcceptChannelsAsync(ctx.RequestAborted))
+        _ = HandleAsync(ch, ctx.RequestAborted);
 });
 
-// Process accepted multiplexers:
-await foreach (var mux in listener.AcceptMuxesAsync(ct))
-{
-    _ = Task.Run(async () =>
-    {
-        await foreach (var channel in mux.AcceptChannelsAsync())
-        {
-            _ = HandleChannelAsync(channel);
-        }
-    });
-}
+app.Run();
 ```
 
-## Reconnectable Client
-
-For clients that reconnect to a `WebSocketMuxListener`:
+## Server (`HttpListener`)
 
 ```csharp
-var (options, bind) = WebSocketMuxListener.CreateReconnectableClientOptions("ws://localhost:5000/mux");
-var mux = StreamMultiplexer.Create(options);
-bind(mux);
+var listener = new HttpListener();
+listener.Prefixes.Add("http://localhost:5000/chat/");
+listener.Start();
+
+var ctx = await listener.GetContextAsync();
+var wsCtx = await ctx.AcceptWebSocketAsync(subProtocol: null);
+
+await using var mux = StreamMultiplexer.Create(WebSocketMultiplexer.CreateServerOptions(wsCtx.WebSocket));
 mux.Start();
-await mux.WaitForReadyAsync();
 ```
 
-## API
+## When WebSocket is the right pick
 
-| Method                | Signature                                                                                              | Description                            |
-| --------------------- | ------------------------------------------------------------------------------------------------------ | -------------------------------------- |
-| `CreateOptions`       | `WebSocketMultiplexer.CreateOptions(Uri uri, Action<ClientWebSocketOptions>? clientOptions = null)`    | Client options from URI                |
-| `CreateOptions`       | `WebSocketMultiplexer.CreateOptions(string url, Action<ClientWebSocketOptions>? clientOptions = null)` | Client options from URL string         |
-| `CreateServerOptions` | `WebSocketMultiplexer.CreateServerOptions(WebSocket webSocket)`                                        | Server options from existing WebSocket |
+- Browser clients.
+- Networks that allow only HTTP/HTTPS outbound.
+- Hosting beside an existing ASP.NET app.
 
-### WebSocketMuxListener
+The protocol overhead is modest (a few bytes of WebSocket framing per write). For raw throughput on internal networks, [TCP](tcp.md) is slightly faster.
 
-| Member             | Signature                                                                                       | Description                                         |
-| ------------------ | ----------------------------------------------------------------------------------------------- | --------------------------------------------------- |
-| Constructor        | `WebSocketMuxListener(Func<MultiplexerOptions, MultiplexerOptions>? customize = null)`          | Create listener with optional options customization |
-| `HandleAsync`      | `Task HandleAsync(WebSocket webSocket, Guid? sessionId = null, CancellationToken ct = default)` | Handle incoming WebSocket                           |
-| `AcceptMuxesAsync` | `IAsyncEnumerable<IStreamMultiplexer> AcceptMuxesAsync(CancellationToken ct = default)`         | Accept multiplexer sessions                         |
-| `RemoveSession`    | `bool RemoveSession(Guid sessionId)`                                                            | Remove a session                                    |
-| Static             | `CreateReconnectableClientOptions(Uri baseUri, ...)`                                            | Create reconnectable client config                  |
+## Platform
+
+Cross-platform. `ClientWebSocket` requires .NET 8+ for the modern API surface used here; targets are net8.0/net9.0/net10.0.

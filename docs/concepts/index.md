@@ -1,36 +1,19 @@
 # Concepts
 
-Core concepts for understanding how NetConduit works.
+Read these in order, or jump to the topic you need.
 
-## Overview
-
-| Concept                                   | Description                                      |
-| ----------------------------------------- | ------------------------------------------------ |
-| [Channels](channels.md)                   | Virtual one-way streams over a single connection |
-| [Backpressure](backpressure.md)           | Credit-based flow control                        |
-| [Priority](priority.md)                   | Channel priority levels                          |
-| [Reconnection](reconnection.md)           | Auto-reconnection with state recovery            |
-| [Graceful Shutdown](graceful-shutdown.md) | GoAway protocol                                  |
-| [Heartbeat](heartbeat.md)                 | Keep-alive ping/pong                             |
-| [Events](events.md)                       | Multiplexer lifecycle events                     |
-
-## How It Works
-
-NetConduit takes a single bidirectional stream and multiplexes it into many virtual channels:
-
-```
-Application:    Channel A    Channel B    Channel C
-                    │            │            │
-                    ▼            ▼            ▼
-NetConduit:    ┌─────────────────────────────────────┐
-               │  Frame Router (mux/demux)           │
-               │  - 8-byte frame headers             │
-               │  - Credit-based flow control        │
-               │  - Priority scheduling              │
-               └─────────────────────────────────────┘
-                              │
-                              ▼
-Transport:          Single Stream (TCP, WS, etc.)
-```
-
-Each channel is independent — data on one channel doesn't block others (no head-of-line blocking at the mux layer).
+| Topic | Summary |
+| --- | --- |
+| [Multiplexer](multiplexer.md) | What `StreamMultiplexer` is, its lifecycle, ready vs. connected, sessions. |
+| [Channels](channels.md) | Channel IDs, open vs. accept, state transitions, write/read split. |
+| [Transports](transports.md) | The role of `IStreamPair` and the `StreamFactoryDelegate`. |
+| [Transits](transits.md) | What a transit is and when to use one. |
+| [Framing protocol](framing-protocol.md) | The wire format: 8-byte header, frame types, control subtypes. |
+| [Backpressure](backpressure.md) | Slabs, credit-based flow control, `SendTimeout`. |
+| [Priority](priority.md) | How writer ordering works across channels. |
+| [Heartbeat](heartbeat.md) | `PingInterval`, `PingTimeout`, missed pings. |
+| [Reconnection](reconnection.md) | When the multiplexer reconnects, how replay works. |
+| [Graceful shutdown](graceful-shutdown.md) | `GoAwayAsync`, drain semantics, dispose order. |
+| [Events](events.md) | Event ordering, when each event fires. |
+| [Statistics](statistics.md) | `MultiplexerStats` and `ChannelStats`. |
+| [AOT and source generators](aot.md) | Trim-safe APIs and JSON source generation. |
