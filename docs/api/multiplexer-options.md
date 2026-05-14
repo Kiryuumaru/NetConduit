@@ -43,8 +43,8 @@ public sealed record MultiplexerOptions
 
 ## Reconnect behavior
 
-- If `MaxAutoReconnectAttempts == 0`, the mux retries forever and **enables a replay buffer** on channels (uncommitted frames are re-sent after reconnect).
-- If `MaxAutoReconnectAttempts > 0`, the replay buffer is **disabled**. After the limit is reached, channels close with `ChannelCloseReason.TransportFailed`.
+- If `MaxAutoReconnectAttempts == 0` (default), the mux retries forever but the **replay buffer is disabled**. Open channels are torn down on disconnect with `ChannelCloseReason.TransportFailed`.
+- If `MaxAutoReconnectAttempts > 0`, the **replay buffer is enabled** on channels (unacked bytes are re-sent after reconnect). After the configured limit is reached, channels close with `ChannelCloseReason.TransportFailed`.
 
 See [Reconnection](../concepts/reconnection.md).
 

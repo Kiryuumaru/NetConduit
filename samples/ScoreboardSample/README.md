@@ -43,12 +43,12 @@ dotnet run --project samples/ScoreboardSample -- player 5000 localhost Alice
 
 ## Reconnection detail
 
-Both sides set `MaxAutoReconnectAttempts = 0` (unlimited) and supply a `StreamFactory` that:
+Both sides set `MaxAutoReconnectAttempts > 0` (server `5`, client `10`) and supply a `StreamFactory` that:
 
 - **Server:** awaits `listener.AcceptTcpClientAsync()` each invocation, returning a fresh `StreamPair` per accept.
 - **Client:** opens a new `TcpClient` and connects to the host:port each invocation.
 
-When the transport drops, the multiplexer re-invokes the factory until it succeeds. Channels stay open across reconnects (replay buffer is enabled because `MaxAutoReconnectAttempts > 0` is **not** set — `0` means unlimited and **does** enable replay).
+When the transport drops, the multiplexer re-invokes the factory up to the configured number of times. Because `MaxAutoReconnectAttempts > 0`, the **replay buffer is enabled** and channels stay open across reconnects — unacked bytes are re-sent after the new handshake.
 
 > Tip: kill the server while a player is running. After restart, the player auto-reconnects and the leaderboard resumes.
 
@@ -66,6 +66,6 @@ StreamFactoryDelegate factory = async ct =>
 await using var mux = StreamMultiplexer.Create(new MultiplexerOptions
 {
     StreamFactory = factory,
-    MaxAutoReconnectAttempts = 0,    // unlimited
+    MaxAutoReconnectAttempts = 10,   // enables replay buffer
 });
 ```
