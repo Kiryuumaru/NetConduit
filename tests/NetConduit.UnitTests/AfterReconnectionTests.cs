@@ -317,8 +317,12 @@ public sealed class AfterReconnectionTests : IAsyncDisposable
     [Fact]
     public async Task Reconnect_MultipleSequentialReconnections_AllSucceed()
     {
-        int connectedCount = 0;
-        var thirdConnect = new TaskCompletionSource();
+        int clientConnectedCount = 0;
+        int serverConnectedCount = 0;
+        var clientReconnect2 = new TaskCompletionSource();
+        var serverReconnect2 = new TaskCompletionSource();
+        var clientReconnect3 = new TaskCompletionSource();
+        var serverReconnect3 = new TaskCompletionSource();
 
         var client = StreamMultiplexer.Create(new MultiplexerOptions
         {
@@ -329,8 +333,9 @@ public sealed class AfterReconnectionTests : IAsyncDisposable
         });
         client.Connected += (_, _) =>
         {
-            var c = Interlocked.Increment(ref connectedCount);
-            if (c >= 3) thirdConnect.TrySetResult();
+            var c = Interlocked.Increment(ref clientConnectedCount);
+            if (c >= 2) clientReconnect2.TrySetResult();
+            if (c >= 3) clientReconnect3.TrySetResult();
         };
 
         var server = StreamMultiplexer.Create(new MultiplexerOptions
@@ -340,6 +345,12 @@ public sealed class AfterReconnectionTests : IAsyncDisposable
             MaxAutoReconnectAttempts = 10,
             AutoReconnectDelay = TimeSpan.FromMilliseconds(10),
         });
+        server.Connected += (_, _) =>
+        {
+            var c = Interlocked.Increment(ref serverConnectedCount);
+            if (c >= 2) serverReconnect2.TrySetResult();
+            if (c >= 3) serverReconnect3.TrySetResult();
+        };
 
         client.Start();
         server.Start();
@@ -348,24 +359,28 @@ public sealed class AfterReconnectionTests : IAsyncDisposable
             client.WaitForReadyAsync(cts.Token),
             server.WaitForReadyAsync(cts.Token));
 
-        // First reconnect
-        var secondConnect = new TaskCompletionSource();
-        client.Connected += (_, _) =>
-        {
-            if (Volatile.Read(ref connectedCount) >= 2) secondConnect.TrySetResult();
-        };
+        // First reconnect — wait for BOTH sides to be fully reconnected before
+        // killing again. Waiting on only the client side races against the server
+        // still wiring up its IO loops, which can leave the next kill targeting a
+        // partially-initialized transport and stall the second reconnect.
         _factory.KillCurrentTransport();
-        await secondConnect.Task.WaitAsync(cts.Token);
+        await Task.WhenAll(
+            clientReconnect2.Task.WaitAsync(cts.Token),
+            serverReconnect2.Task.WaitAsync(cts.Token));
 
-        // Verify connected
         Assert.True(client.IsConnected);
+        Assert.True(server.IsConnected);
 
         // Second reconnect
         _factory.KillCurrentTransport();
-        await thirdConnect.Task.WaitAsync(cts.Token);
+        await Task.WhenAll(
+            clientReconnect3.Task.WaitAsync(cts.Token),
+            serverReconnect3.Task.WaitAsync(cts.Token));
 
         Assert.True(client.IsConnected);
-        Assert.True(connectedCount >= 3);
+        Assert.True(server.IsConnected);
+        Assert.True(clientConnectedCount >= 3);
+        Assert.True(serverConnectedCount >= 3);
 
         await client.DisposeAsync();
         await server.DisposeAsync();
