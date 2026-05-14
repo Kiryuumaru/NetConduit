@@ -1,0 +1,47 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+	<PropertyGroup>
+		<LangVersion>preview</LangVersion>
+		<TargetFrameworks>net8.0;net9.0;net10.0</TargetFrameworks>
+		<ImplicitUsings>enable</ImplicitUsings>
+		<Nullable>enable</Nullable>
+		<IsAotCompatible>true</IsAotCompatible>
+		<EnableTrimAnalyzer>true</EnableTrimAnalyzer>
+		<GenerateDocumentationFile>true</GenerateDocumentationFile>
+		<UseLocalNetConduit Condition="'$(UseLocalNetConduit)' == '' and '$(Configuration)' == 'Debug'">true</UseLocalNetConduit>
+		<UseLocalNetConduit Condition="'$(UseLocalNetConduit)' == '' and '$(Configuration)' != 'Debug'">false</UseLocalNetConduit>
+	</PropertyGroup>
+
+	<!-- NuGet Package Metadata -->
+	<PropertyGroup>
+		<PackageId>NetConduit.Mesh</PackageId>
+		<Authors>Kiryuumaru</Authors>
+		<Company>Kiryuumaru</Company>
+		<Copyright>Kiryuumaru</Copyright>
+		<Description>Multi-hop routing layer for NetConduit. Open a full IStreamMultiplexer to any reachable node through direct neighbor connections.</Description>
+		<PackageTags>multiplexer;mesh;routing;networking;async;aot</PackageTags>
+		<PackageProjectUrl>https://github.com/Kiryuumaru/NetConduit</PackageProjectUrl>
+		<RepositoryUrl>https://github.com/Kiryuumaru/NetConduit.git</RepositoryUrl>
+		<RepositoryType>git</RepositoryType>
+		<PackageReadmeFile>README.md</PackageReadmeFile>
+		<PackageLicenseFile>LICENSE</PackageLicenseFile>
+	</PropertyGroup>
+
+	<ItemGroup>
+		<None Include="..\..\README.md" Pack="true" PackagePath="\" />
+		<None Include="..\..\LICENSE" Pack="true" PackagePath="\" />
+	</ItemGroup>
+
+	<ItemGroup Condition="'$(UseLocalNetConduit)' == 'true'">
+		<ProjectReference Include="..\NetConduit\NetConduit.csproj" />
+	</ItemGroup>
+
+	<ItemGroup Condition="'$(UseLocalNetConduit)' != 'true'">
+		<PackageReference Include="NetConduit" Version="3.0.1" />
+	</ItemGroup>
+
+	<ItemGroup>
+		<InternalsVisibleTo Include="NetConduit.Mesh.UnitTests" />
+	</ItemGroup>
+
+</Project>
