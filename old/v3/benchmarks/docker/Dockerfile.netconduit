@@ -1,0 +1,12 @@
+FROM mcr.microsoft.com/dotnet/sdk:10.0 AS build
+WORKDIR /repo
+COPY src/NetConduit/ src/NetConduit/
+COPY benchmarks/docker/netconduit-comparison/ benchmarks/docker/netconduit-comparison/
+RUN dotnet publish benchmarks/docker/netconduit-comparison/NetConduit.ComparisonBench.csproj \
+    -c Release -f net10.0 -o /app --nologo -v q
+
+FROM mcr.microsoft.com/dotnet/runtime:10.0
+COPY --from=build /app /app
+WORKDIR /app
+ENV DOTNET_SYSTEM_NET_SOCKETS_INLINE_COMPLETIONS=1
+ENTRYPOINT ["dotnet", "NetConduit.ComparisonBench.dll"]
