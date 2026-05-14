@@ -3,10 +3,11 @@ namespace NetConduit.Mesh.UnitTests;
 public class MeshChannelNamingTests
 {
     [Fact]
-    public void TopologyConstants_AreCorrect()
+    public void TopologyChannelName_IsBuiltFromSenderId()
     {
-        Assert.Equal("_mesh:topo>>", MeshChannelNaming.TopologyOutbound);
-        Assert.Equal("_mesh:topo<<", MeshChannelNaming.TopologyInbound);
+        Assert.Equal("_mesh:topo:from:A", MeshChannelNaming.BuildTopologyChannel("A"));
+        Assert.Equal("_mesh:topo:from:node-7", MeshChannelNaming.BuildTopologyChannel("node-7"));
+        Assert.StartsWith(MeshChannelNaming.Prefix, MeshChannelNaming.BuildTopologyChannel("X"));
     }
 
     [Fact]

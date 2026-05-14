@@ -10,11 +10,11 @@ internal static class MeshChannelNaming
     /// <summary>Common prefix of every mesh-reserved channel ID.</summary>
     internal const string Prefix = "_mesh:";
 
-    /// <summary>Outbound topology channel name on a neighbor mux.</summary>
-    internal const string TopologyOutbound = "_mesh:topo>>";
+    /// <summary>Prefix of the per-sender topology channel: <c>_mesh:topo:from:&lt;senderNodeId&gt;</c>.</summary>
+    internal const string TopologyFromPrefix = "_mesh:topo:from:";
 
-    /// <summary>Inbound topology channel name on a neighbor mux.</summary>
-    internal const string TopologyInbound = "_mesh:topo<<";
+    /// <summary>Build the topology channel name carrying <paramref name="senderNodeId"/>'s state to its peers.</summary>
+    internal static string BuildTopologyChannel(string senderNodeId) => TopologyFromPrefix + senderNodeId;
 
     private const string RoutePrefix = "_mesh:route:";
     private const string OutboundSuffix = ">>";

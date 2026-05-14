@@ -25,6 +25,7 @@
     <Project Path="tests/NetConduit.Transport.Ipc.IntegrationTests/NetConduit.Transport.Ipc.IntegrationTests.csproj" />
     <Project Path="tests/NetConduit.Transport.Quic.IntegrationTests/NetConduit.Transport.Quic.IntegrationTests.csproj" />
     <Project Path="tests/NetConduit.Mesh.UnitTests/NetConduit.Mesh.UnitTests.csproj" />
+    <Project Path="tests/NetConduit.Mesh.IntegrationTests/NetConduit.Mesh.IntegrationTests.csproj" />
   </Folder>
   <Folder Name="/samples/">
     <Project Path="samples/FileTransferSample/FileTransferSample.csproj" />
