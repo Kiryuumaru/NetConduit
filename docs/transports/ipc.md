@@ -5,14 +5,14 @@ Inter-Process Communication using TCP loopback (Windows) or Unix domain sockets 
 ## Installation
 
 ```bash
-dotnet add package NetConduit.Ipc
+dotnet add package NetConduit.Transport.Ipc
 ```
 
 ## Client
 
 ```csharp
 using NetConduit;
-using NetConduit.Ipc;
+using NetConduit.Transport.Ipc;
 
 var options = IpcMultiplexer.CreateOptions("my-app-ipc");
 var mux = StreamMultiplexer.Create(options);
@@ -27,7 +27,7 @@ await channel.WriteAsync(requestData);
 
 ```csharp
 using NetConduit;
-using NetConduit.Ipc;
+using NetConduit.Transport.Ipc;
 
 var options = IpcMultiplexer.CreateServerOptions("my-app-ipc");
 var mux = StreamMultiplexer.Create(options);

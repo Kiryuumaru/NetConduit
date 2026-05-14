@@ -1,6 +1,5 @@
 using System.Text.Json;
 using NetConduit.Internal;
-using NetConduit.Transits;
 using Xunit;
 
 namespace NetConduit.UnitTests;
@@ -544,141 +543,6 @@ public sealed class UnhappyPathTests
 
     #endregion
 
-    #region Transit Error Paths
-
-    [Fact]
-    public async Task MessageTransit_SendAfterDispose_ThrowsObjectDisposed()
-    {
-        var (client, server) = await CreateReadyPairAsync();
-
-        var w = client.OpenChannel("m1");
-        var r = await server.AcceptChannelAsync("m1");
-
-#pragma warning disable IL2026, IL3050
-        var transit = new MessageTransit<TestMessage, TestMessage>(w, r);
-#pragma warning restore IL2026, IL3050
-
-        await transit.DisposeAsync();
-
-        await Assert.ThrowsAsync<ObjectDisposedException>(() =>
-            transit.SendAsync(new TestMessage { Name = "x", Value = 0 }).AsTask());
-
-        await client.DisposeAsync();
-        await server.DisposeAsync();
-    }
-
-    [Fact]
-    public async Task MessageTransit_ReceiveAfterDispose_ThrowsObjectDisposed()
-    {
-        var (client, server) = await CreateReadyPairAsync();
-
-        var w = client.OpenChannel("m2");
-        var r = await server.AcceptChannelAsync("m2");
-
-#pragma warning disable IL2026, IL3050
-        var transit = new MessageTransit<TestMessage, TestMessage>(w, r);
-#pragma warning restore IL2026, IL3050
-
-        await transit.DisposeAsync();
-
-        await Assert.ThrowsAsync<ObjectDisposedException>(() =>
-            transit.ReceiveAsync().AsTask());
-
-        await client.DisposeAsync();
-        await server.DisposeAsync();
-    }
-
-    [Fact]
-    public async Task MessageTransit_OversizedMessage_ThrowsInvalidOperation()
-    {
-        var (client, server) = await CreateReadyPairAsync();
-
-        var w = client.OpenChannel("m3");
-        var r = await server.AcceptChannelAsync("m3");
-
-        // Tiny max message size (100 bytes)
-#pragma warning disable IL2026, IL3050
-        var transit = new MessageTransit<TestMessage, TestMessage>(w, r, maxMessageSize: 100);
-#pragma warning restore IL2026, IL3050
-
-        // Message that serializes to > 100 bytes
-        var bigMsg = new TestMessage { Name = new string('x', 200), Value = 1 };
-
-        var ex = await Assert.ThrowsAsync<InvalidOperationException>(() =>
-            transit.SendAsync(bigMsg).AsTask());
-
-        Assert.Contains("exceeds maximum", ex.Message);
-
-        await transit.DisposeAsync();
-        await client.DisposeAsync();
-        await server.DisposeAsync();
-    }
-
-    [Fact]
-    public async Task MessageTransit_ReceiveAllAsync_StopsOnChannelClose()
-    {
-        var (client, server) = await CreateReadyPairAsync();
-
-        var w = client.OpenChannel("m4");
-        var r = await server.AcceptChannelAsync("m4");
-
-#pragma warning disable IL2026, IL3050
-        var sender = new MessageTransit<TestMessage, TestMessage>(w, null);
-        var receiver = new MessageTransit<TestMessage, TestMessage>(null, r);
-#pragma warning restore IL2026, IL3050
-
-        // Send one message then close
-        await sender.SendAsync(new TestMessage { Name = "only", Value = 1 });
-        await sender.DisposeAsync();
-
-        var messages = new List<TestMessage>();
-        await foreach (var msg in receiver.ReceiveAllAsync())
-        {
-            messages.Add(msg);
-        }
-
-        Assert.Single(messages);
-        Assert.Equal("only", messages[0].Name);
-
-        await receiver.DisposeAsync();
-        await client.DisposeAsync();
-        await server.DisposeAsync();
-    }
-
-    [Fact]
-    public async Task StreamTransit_WriteAfterDispose_Throws()
-    {
-        var (client, server) = await CreateReadyPairAsync();
-
-        var transit = new StreamTransit(client.OpenChannel("s1"));
-        await transit.DisposeAsync();
-
-        await Assert.ThrowsAnyAsync<Exception>(() =>
-            transit.WriteAsync(new byte[] { 1, 2, 3 }).AsTask());
-
-        await client.DisposeAsync();
-        await server.DisposeAsync();
-    }
-
-    [Fact]
-    public async Task StreamTransit_ReadAfterDispose_ThrowsObjectDisposed()
-    {
-        var (client, server) = await CreateReadyPairAsync();
-
-        var w = client.OpenChannel("s2");
-        var r = await server.AcceptChannelAsync("s2");
-        var transit = new StreamTransit(r);
-        await transit.DisposeAsync();
-
-        await Assert.ThrowsAsync<ObjectDisposedException>(() =>
-            transit.ReadAsync(new byte[10]).AsTask());
-
-        await client.DisposeAsync();
-        await server.DisposeAsync();
-    }
-
-    #endregion
-
     #region Event Firing on Error Paths
 
     [Fact]
@@ -818,26 +682,6 @@ public sealed class UnhappyPathTests
         await channel.CloseAsync();
         await channel.CloseAsync();
         await channel.CloseAsync();
-
-        await client.DisposeAsync();
-        await server.DisposeAsync();
-    }
-
-    [Fact]
-    public async Task MessageTransit_MultipleDispose_IsIdempotent()
-    {
-        var (client, server) = await CreateReadyPairAsync();
-
-        var w = client.OpenChannel("m");
-        var r = await server.AcceptChannelAsync("m");
-
-#pragma warning disable IL2026, IL3050
-        var transit = new MessageTransit<TestMessage, TestMessage>(w, r);
-#pragma warning restore IL2026, IL3050
-
-        await transit.DisposeAsync();
-        await transit.DisposeAsync();
-        await transit.DisposeAsync();
 
         await client.DisposeAsync();
         await server.DisposeAsync();
@@ -1006,3 +850,4 @@ public sealed class UnhappyPathTests
 
     #endregion
 }
+

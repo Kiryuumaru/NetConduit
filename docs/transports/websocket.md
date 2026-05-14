@@ -5,14 +5,14 @@ WebSocket client and server support. HTTP-friendly for firewall traversal and br
 ## Installation
 
 ```bash
-dotnet add package NetConduit.WebSocket
+dotnet add package NetConduit.Transport.WebSocket
 ```
 
 ## Client
 
 ```csharp
 using NetConduit;
-using NetConduit.WebSocket;
+using NetConduit.Transport.WebSocket;
 
 var options = WebSocketMultiplexer.CreateOptions("ws://localhost:5000/mux");
 var mux = StreamMultiplexer.Create(options);
@@ -45,7 +45,7 @@ From an existing `WebSocket` instance (ASP.NET Core middleware):
 
 ```csharp
 using NetConduit;
-using NetConduit.WebSocket;
+using NetConduit.Transport.WebSocket;
 
 app.Map("/mux", async (HttpContext ctx) =>
 {
@@ -68,7 +68,7 @@ app.Map("/mux", async (HttpContext ctx) =>
 `WebSocketMuxListener` manages multiple WebSocket sessions with reconnection support:
 
 ```csharp
-using NetConduit.WebSocket;
+using NetConduit.Transport.WebSocket;
 
 await using var listener = new WebSocketMuxListener();
 

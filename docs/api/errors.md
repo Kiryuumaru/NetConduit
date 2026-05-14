@@ -103,11 +103,11 @@ catch (ChannelClosedException ex) when (ex.CloseReason == ChannelCloseReason.Tra
 ### Handling multiplexer errors
 
 ```csharp
-mux.OnError += (ex) =>
+mux.Error += (sender, e) =>
 {
-    if (ex is MultiplexerException mex)
+    if (e.Exception is MultiplexerException mex)
         logger.LogError("Mux error {Code}: {Message}", mex.ErrorCode, mex.Message);
     else
-        logger.LogError(ex, "Unexpected error");
+        logger.LogError(e.Exception, "Unexpected error");
 };
 ```

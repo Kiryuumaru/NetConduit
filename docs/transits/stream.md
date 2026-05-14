@@ -7,7 +7,7 @@ For bidirectional streaming, use [DuplexStreamTransit](duplex-stream.md).
 ## Basic Usage
 
 ```csharp
-using NetConduit.Transits;
+using NetConduit.Transit.Stream;
 
 // Write-only (sender)
 var writeStream = mux.OpenStream("file-upload");

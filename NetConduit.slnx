@@ -2,27 +2,35 @@
   <Project Path="build/_build.csproj" />
   <Folder Name="/src/">
     <Project Path="src/NetConduit/NetConduit.csproj" />
-    <Project Path="src/NetConduit.Tcp/NetConduit.Tcp.csproj" />
-    <Project Path="src/NetConduit.WebSocket/NetConduit.WebSocket.csproj" />
-    <Project Path="src/NetConduit.Udp/NetConduit.Udp.csproj" />
-    <Project Path="src/NetConduit.Ipc/NetConduit.Ipc.csproj" />
-    <Project Path="src/NetConduit.Quic/NetConduit.Quic.csproj" />
+    <Project Path="src/NetConduit.Transit.Stream/NetConduit.Transit.Stream.csproj" />
+    <Project Path="src/NetConduit.Transit.DuplexStream/NetConduit.Transit.DuplexStream.csproj" />
+    <Project Path="src/NetConduit.Transit.Message/NetConduit.Transit.Message.csproj" />
+    <Project Path="src/NetConduit.Transit.DeltaMessage/NetConduit.Transit.DeltaMessage.csproj" />
+    <Project Path="src/NetConduit.Transport.Tcp/NetConduit.Transport.Tcp.csproj" />
+    <Project Path="src/NetConduit.Transport.WebSocket/NetConduit.Transport.WebSocket.csproj" />
+    <Project Path="src/NetConduit.Transport.Udp/NetConduit.Transport.Udp.csproj" />
+    <Project Path="src/NetConduit.Transport.Ipc/NetConduit.Transport.Ipc.csproj" />
+    <Project Path="src/NetConduit.Transport.Quic/NetConduit.Transport.Quic.csproj" />
   </Folder>
   <Folder Name="/tests/">
     <Project Path="tests/NetConduit.UnitTests/NetConduit.UnitTests.csproj" />
-    <Project Path="tests/NetConduit.Tcp.IntegrationTests/NetConduit.Tcp.IntegrationTests.csproj" />
-    <Project Path="tests/NetConduit.WebSocket.IntegrationTests/NetConduit.WebSocket.IntegrationTests.csproj" />
-    <Project Path="tests/NetConduit.Udp.IntegrationTests/NetConduit.Udp.IntegrationTests.csproj" />
-    <Project Path="tests/NetConduit.Ipc.IntegrationTests/NetConduit.Ipc.IntegrationTests.csproj" />
-    <Project Path="tests/NetConduit.Quic.IntegrationTests/NetConduit.Quic.IntegrationTests.csproj" />
+    <Project Path="tests/NetConduit.Transit.Stream.UnitTests/NetConduit.Transit.Stream.UnitTests.csproj" />
+    <Project Path="tests/NetConduit.Transit.DuplexStream.UnitTests/NetConduit.Transit.DuplexStream.UnitTests.csproj" />
+    <Project Path="tests/NetConduit.Transit.Message.UnitTests/NetConduit.Transit.Message.UnitTests.csproj" />
+    <Project Path="tests/NetConduit.Transit.DeltaMessage.UnitTests/NetConduit.Transit.DeltaMessage.UnitTests.csproj" />
+    <Project Path="tests/NetConduit.Transport.Tcp.IntegrationTests/NetConduit.Transport.Tcp.IntegrationTests.csproj" />
+    <Project Path="tests/NetConduit.Transport.WebSocket.IntegrationTests/NetConduit.Transport.WebSocket.IntegrationTests.csproj" />
+    <Project Path="tests/NetConduit.Transport.Udp.IntegrationTests/NetConduit.Transport.Udp.IntegrationTests.csproj" />
+    <Project Path="tests/NetConduit.Transport.Ipc.IntegrationTests/NetConduit.Transport.Ipc.IntegrationTests.csproj" />
+    <Project Path="tests/NetConduit.Transport.Quic.IntegrationTests/NetConduit.Transport.Quic.IntegrationTests.csproj" />
   </Folder>
   <Folder Name="/samples/">
-    <Project Path="samples/NetConduit.Samples.FileTransfer/NetConduit.Samples.FileTransfer.csproj" />
-    <Project Path="samples/NetConduit.Samples.GroupChat/NetConduit.Samples.GroupChat.csproj" />
-    <Project Path="samples/NetConduit.Samples.Pong/NetConduit.Samples.Pong.csproj" />
-    <Project Path="samples/NetConduit.Samples.RemoteShell/NetConduit.Samples.RemoteShell.csproj" />
-    <Project Path="samples/NetConduit.Samples.RpcFramework/NetConduit.Samples.RpcFramework.csproj" />
-    <Project Path="samples/NetConduit.Samples.Scoreboard/NetConduit.Samples.Scoreboard.csproj" />
-    <Project Path="samples/NetConduit.Samples.TcpTunnel/NetConduit.Samples.TcpTunnel.csproj" />
+    <Project Path="samples/FileTransferSample/FileTransferSample.csproj" />
+    <Project Path="samples/GroupChatSample/GroupChatSample.csproj" />
+    <Project Path="samples/PongGame/PongGame.csproj" />
+    <Project Path="samples/RemoteShellSample/RemoteShellSample.csproj" />
+    <Project Path="samples/RpcFrameworkSample/RpcFrameworkSample.csproj" />
+    <Project Path="samples/ScoreboardSample/ScoreboardSample.csproj" />
+    <Project Path="samples/SimpleTcpTunnel/SimpleTcpTunnel.csproj" />
   </Folder>
 </Solution>

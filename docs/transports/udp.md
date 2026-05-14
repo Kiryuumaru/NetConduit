@@ -5,14 +5,14 @@ UDP with a built-in reliability layer. Suitable for low-latency scenarios where 
 ## Installation
 
 ```bash
-dotnet add package NetConduit.Udp
+dotnet add package NetConduit.Transport.Udp
 ```
 
 ## Client
 
 ```csharp
 using NetConduit;
-using NetConduit.Udp;
+using NetConduit.Transport.Udp;
 
 var options = UdpMultiplexer.CreateOptions("localhost", 5000);
 var mux = StreamMultiplexer.Create(options);
@@ -27,7 +27,7 @@ await channel.WriteAsync(data);
 
 ```csharp
 using NetConduit;
-using NetConduit.Udp;
+using NetConduit.Transport.Udp;
 
 var options = UdpMultiplexer.CreateServerOptions(5000);
 var mux = StreamMultiplexer.Create(options);

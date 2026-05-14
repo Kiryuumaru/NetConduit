@@ -1,0 +1,23 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+
+	<PropertyGroup>
+		<LangVersion>preview</LangVersion>
+		<TargetFramework>net10.0</TargetFramework>
+		<OutputType>Exe</OutputType>
+		<ImplicitUsings>enable</ImplicitUsings>
+		<Nullable>enable</Nullable>
+		<IsPackable>false</IsPackable>
+		<RootNamespace>GroupChatSample</RootNamespace>
+		<AssemblyName>GroupChatSample</AssemblyName>
+	</PropertyGroup>
+
+	<ItemGroup>
+		<ProjectReference Include="..\..\src\NetConduit.Transit.Stream\NetConduit.Transit.Stream.csproj" />
+		<ProjectReference Include="..\..\src\NetConduit.Transit.DuplexStream\NetConduit.Transit.DuplexStream.csproj" />
+		<ProjectReference Include="..\..\src\NetConduit.Transit.Message\NetConduit.Transit.Message.csproj" />
+		<ProjectReference Include="..\..\src\NetConduit.Transit.DeltaMessage\NetConduit.Transit.DeltaMessage.csproj" />
+		<ProjectReference Include="..\..\src\NetConduit.Transport.Tcp\NetConduit.Transport.Tcp.csproj" />
+		<ProjectReference Include="..\..\src\NetConduit.Transport.WebSocket\NetConduit.Transport.WebSocket.csproj" />
+	</ItemGroup>
+
+</Project>

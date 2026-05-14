@@ -11,14 +11,14 @@ QUIC protocol transport using .NET's built-in QUIC support. Provides 0-RTT conne
 ## Installation
 
 ```bash
-dotnet add package NetConduit.Quic
+dotnet add package NetConduit.Transport.Quic
 ```
 
 ## Client
 
 ```csharp
 using NetConduit;
-using NetConduit.Quic;
+using NetConduit.Transport.Quic;
 
 var options = QuicMultiplexer.CreateOptions("localhost", 5000);
 var mux = StreamMultiplexer.Create(options);
@@ -43,7 +43,7 @@ var options = QuicMultiplexer.CreateOptions("localhost", 5000, allowInsecure: tr
 
 ```csharp
 using NetConduit;
-using NetConduit.Quic;
+using NetConduit.Transport.Quic;
 using System.Net;
 using System.Security.Cryptography.X509Certificates;
 

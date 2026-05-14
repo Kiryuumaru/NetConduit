@@ -1,5 +1,4 @@
 using System.Security.Cryptography;
-using NetConduit.Transits;
 
 namespace NetConduit.UnitTests;
 
@@ -384,64 +383,6 @@ public sealed class NestedMuxTests
     }
 
     [Fact]
-    public async Task NestedMux_DuplexStreamTransitAsTransport_Works()
-    {
-        var (outerClient, outerServer) = CreatePair();
-        outerClient.Start();
-        outerServer.Start();
-        await Task.WhenAll(outerClient.WaitForReadyAsync(), outerServer.WaitForReadyAsync());
-        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
-
-        // Use DuplexStreamTransit to create the bidirectional transport
-        var (cWrite, sRead, sWrite, cRead) = await CreateBidirectionalChannelPairAsync(
-            outerClient, outerServer, "fwd", "rev", cts.Token);
-
-        var clientDuplex = new DuplexStreamTransit(cWrite, cRead);
-        var serverDuplex = new DuplexStreamTransit(sWrite, sRead);
-
-        var innerClient = StreamMultiplexer.Create(new MultiplexerOptions
-        {
-            StreamFactory = _ => Task.FromResult<IStreamPair>(
-                new DuplexStreamPair(clientDuplex)),
-        });
-        var innerServer = StreamMultiplexer.Create(new MultiplexerOptions
-        {
-            StreamFactory = _ => Task.FromResult<IStreamPair>(
-                new DuplexStreamPair(serverDuplex)),
-        });
-
-        innerClient.Start();
-        innerServer.Start();
-        await Task.WhenAll(innerClient.WaitForReadyAsync(cts.Token),
-                           innerServer.WaitForReadyAsync(cts.Token));
-
-        var writer = await innerClient.OpenChannelAsync("test", cts.Token);
-        var reader = await innerServer.AcceptChannelAsync("test", cts.Token);
-
-        var testData = new byte[2048];
-        Random.Shared.NextBytes(testData);
-
-        await writer.WriteAsync(testData, cts.Token);
-        await writer.DisposeAsync();
-
-        var received = new byte[2048];
-        int total = 0;
-        while (total < testData.Length)
-        {
-            var read = await reader.ReadAsync(received.AsMemory(total), cts.Token);
-            if (read == 0) break;
-            total += read;
-        }
-
-        Assert.Equal(testData, received);
-
-        await innerClient.DisposeAsync();
-        await innerServer.DisposeAsync();
-        await outerClient.DisposeAsync();
-        await outerServer.DisposeAsync();
-    }
-
-    [Fact]
     public async Task NestedMux_DisposingOuter_InnerOperationsFail()
     {
         var (outerClient, outerServer) = CreatePair();
@@ -492,11 +433,5 @@ public sealed class NestedMuxTests
         public Stream WriteStream => writeChannel.AsStream();
         public ValueTask DisposeAsync() => ValueTask.CompletedTask;
     }
-
-    private sealed class DuplexStreamPair(Stream duplexStream) : IStreamPair
-    {
-        public Stream ReadStream => duplexStream;
-        public Stream WriteStream => duplexStream;
-        public ValueTask DisposeAsync() => ValueTask.CompletedTask;
-    }
 }
+

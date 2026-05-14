@@ -7,7 +7,7 @@ Transits add semantic meaning to raw [channels](../concepts/channels.md), provid
 | Transit                                 | Use Case           | Description                          |
 | --------------------------------------- | ------------------ | ------------------------------------ |
 | [MessageTransit](message.md)            | RPC, events        | Send/receive JSON-serialized objects |
-| [DeltaTransit](delta.md)                | State sync         | Send only changed properties         |
+| [DeltaMessageTransit](delta-message.md)        | State sync         | Send only changed properties         |
 | [DuplexStreamTransit](duplex-stream.md) | Bidirectional data | Two-way stream abstraction           |
 | [StreamTransit](stream.md)              | One-way data       | Simple stream wrapper                |
 
@@ -18,7 +18,7 @@ Transits add semantic meaning to raw [channels](../concepts/channels.md), provid
 await transit.SendAsync(new ChatMessage("Alice", "Hi!"));
 var msg = await transit.ReceiveAsync();
 
-// DeltaTransit - state changes
+// DeltaMessageTransit - state changes
 state.Score = 150;
 await transit.SendAsync(state);  // Only sends changed Score field
 
@@ -33,7 +33,7 @@ var n = await readStream.ReadAsync(buffer);
 
 ## ReceiveAllAsync Pattern (Recommended)
 
-Both MessageTransit and DeltaTransit support `ReceiveAllAsync` for clean message/state loops:
+Both MessageTransit and DeltaMessageTransit support `ReceiveAllAsync` for clean message/state loops:
 
 ```csharp
 // MessageTransit
@@ -42,8 +42,8 @@ await foreach (var message in transit.ReceiveAllAsync(cancellationToken))
     HandleMessage(message);
 }
 
-// DeltaTransit
-await foreach (var state in deltaTransit.ReceiveAllAsync(cancellationToken))
+// DeltaMessageTransit
+await foreach (var state in DeltaMessageTransit.ReceiveAllAsync(cancellationToken))
 {
     UpdateUI(state);
 }
@@ -54,15 +54,15 @@ await foreach (var state in deltaTransit.ReceiveAllAsync(cancellationToken))
 All transits have convenient extension methods on `IStreamMultiplexer`:
 
 ```csharp
-using NetConduit.Transits;
+using NetConduit.Transit.Message;
 
 // MessageTransit
 var transit = await mux.OpenMessageTransitAsync("chat", ChatContext.Default.ChatMessage);
 var transit = await mux.AcceptMessageTransitAsync("chat", ChatContext.Default.ChatMessage);
 
-// DeltaTransit
-var delta = await mux.OpenDeltaTransitAsync("state", GameContext.Default.GameState);
-var delta = await mux.AcceptDeltaTransitAsync("state", GameContext.Default.GameState);
+// DeltaMessageTransit
+var delta = await mux.OpenDeltaMessageTransitAsync("state", GameContext.Default.GameState);
+var delta = await mux.AcceptDeltaMessageTransitAsync("state", GameContext.Default.GameState);
 
 // StreamTransit
 var stream = mux.OpenStream("file");

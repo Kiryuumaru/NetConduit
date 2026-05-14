@@ -7,7 +7,7 @@ For one-way streaming, use [StreamTransit](stream.md).
 ## Basic Usage
 
 ```csharp
-using NetConduit.Transits;
+using NetConduit.Transit.DuplexStream;
 
 // Side A opens
 await using var streamA = await mux.OpenDuplexStreamAsync("tunnel");

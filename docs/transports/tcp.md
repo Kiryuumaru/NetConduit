@@ -5,14 +5,14 @@ Reliable TCP sockets. The simplest and most common transport. See [Transport Com
 ## Installation
 
 ```bash
-dotnet add package NetConduit.Tcp
+dotnet add package NetConduit.Transport.Tcp
 ```
 
 ## Client
 
 ```csharp
 using NetConduit;
-using NetConduit.Tcp;
+using NetConduit.Transport.Tcp;
 
 var options = TcpMultiplexer.CreateOptions("localhost", 5000);
 var mux = StreamMultiplexer.Create(options);
@@ -37,7 +37,7 @@ var options = TcpMultiplexer.CreateOptions(new IPEndPoint(IPAddress.Loopback, 90
 
 ```csharp
 using NetConduit;
-using NetConduit.Tcp;
+using NetConduit.Transport.Tcp;
 using System.Net;
 using System.Net.Sockets;
 
