@@ -86,8 +86,9 @@ internal static class RouteForwarder
                     read = await src.ReadAsync(buffer, ct).ConfigureAwait(false);
                 }
                 catch (OperationCanceledException) { return; }
-                catch
+                catch (Exception ex)
                 {
+                    mesh.RaiseError(ex);
                     return;
                 }
                 if (read == 0)
@@ -101,8 +102,9 @@ internal static class RouteForwarder
                     mesh.OnRelayBytesForwarded(read);
                 }
                 catch (OperationCanceledException) { return; }
-                catch
+                catch (Exception ex)
                 {
+                    mesh.RaiseError(ex);
                     return;
                 }
             }

@@ -253,7 +253,6 @@ public sealed class MeshMultiplexer : IMeshMultiplexer
         }
 
         _stats.IncrementSubMultiplexers();
-        _stats.IncrementRoutesOpened();
         return opener.SubMultiplexer;
     }
 
@@ -638,6 +637,11 @@ public sealed class MeshMultiplexer : IMeshMultiplexer
     internal void OnRelayBytesForwarded(long count)
     {
         _stats.AddRelayBytes(count);
+    }
+
+    internal void OnSubMultiplexerOpened()
+    {
+        _stats.IncrementSubMultiplexers();
     }
 
     internal void OnSubMultiplexerClosed()

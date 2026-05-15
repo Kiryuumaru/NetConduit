@@ -17,7 +17,6 @@ internal sealed class AcceptorSession : IAsyncDisposable
     private readonly string _sourceNodeId;
     private readonly string _multiplexerId;
     private readonly Channel<(IReadChannel Reader, IWriteChannel Writer)> _incoming;
-    private readonly TaskCompletionSource _emittedSignal = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
     private StreamMultiplexer? _subMux;
     private volatile bool _explicit;
@@ -61,13 +60,13 @@ internal sealed class AcceptorSession : IAsyncDisposable
         _subMux = StreamMultiplexer.Create(muxOptions);
         _subMux.Disconnected += OnSubMuxDisconnected;
         _subMux.Start();
+        _mesh.OnSubMultiplexerOpened();
     }
 
     private void OnSubMuxDisconnected(object? sender, DisconnectedEventArgs e)
     {
+        // Terminal disconnect — release mesh-side state regardless of IsRunning.
         if (_disposed) return;
-        var mux = _subMux;
-        if (mux is null || mux.IsRunning) return;
         _ = HandleTerminalDisconnectAsync();
     }
 
@@ -131,11 +130,6 @@ internal sealed class AcceptorSession : IAsyncDisposable
         {
             // Emit via AcceptMultiplexersAsync exactly once per acceptor.
             inbox.TryWrite(new RoutedMultiplexer(_sourceNodeId, _multiplexerId, _subMux!));
-            _emittedSignal.TrySetResult();
-        }
-        else if (firstArrival)
-        {
-            _emittedSignal.TrySetResult();
         }
     }
 
@@ -163,10 +157,7 @@ internal sealed class AcceptorSession : IAsyncDisposable
         if (_subMux is not null)
         {
             _subMux.Disconnected -= OnSubMuxDisconnected;
-            if (_subMux.IsRunning)
-            {
-                try { await _subMux.DisposeAsync().ConfigureAwait(false); } catch { }
-            }
+            try { await _subMux.DisposeAsync().ConfigureAwait(false); } catch { }
             _mesh.OnSubMultiplexerClosed();
         }
     }

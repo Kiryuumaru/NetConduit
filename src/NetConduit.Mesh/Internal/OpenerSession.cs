@@ -54,11 +54,11 @@ internal sealed class OpenerSession : IAsyncDisposable
 
     private void OnSubMuxDisconnected(object? sender, DisconnectedEventArgs e)
     {
-        // Terminal disconnect: user disposed the sub-mux, or all reconnect attempts exhausted.
-        // Either way, the sub-mux is gone and we must release mesh-side state.
+        // StreamMultiplexer raises Disconnected only for terminal states (transport error,
+        // GoAway received, local dispose). At this point the sub-mux is gone — release
+        // mesh-side state regardless of IsRunning, which may not have flipped yet for
+        // GoAway-received.
         if (_disposed) return;
-        var mux = _subMux;
-        if (mux is null || mux.IsRunning) return;
         _ = HandleTerminalDisconnectAsync();
     }
 
@@ -122,6 +122,7 @@ internal sealed class OpenerSession : IAsyncDisposable
                             writer.WaitForReadyAsync(ct),
                             reader.WaitForReadyAsync(ct)).ConfigureAwait(false);
 
+                        _mesh.OnRouteSucceeded();
                         return new StreamPair(reader.AsStream(), writer.AsStream(),
                             new ChannelPairOwner(reader, writer));
                     }
@@ -164,10 +165,7 @@ internal sealed class OpenerSession : IAsyncDisposable
         if (_subMux is not null)
         {
             _subMux.Disconnected -= OnSubMuxDisconnected;
-            if (_subMux.IsRunning)
-            {
-                try { await _subMux.DisposeAsync().ConfigureAwait(false); } catch { }
-            }
+            try { await _subMux.DisposeAsync().ConfigureAwait(false); } catch { }
             _mesh.OnSubMultiplexerClosed();
         }
     }
