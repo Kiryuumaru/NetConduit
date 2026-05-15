@@ -31,18 +31,18 @@ public class LinkFailoverTests
         var (muxCD_C, muxCD_D, _) = await MuxFixture.CreateMuxPairAsync(cts.Token);
         var (muxDE_D, muxDE_E, _) = await MuxFixture.CreateMuxPairAsync(cts.Token);
 
-        static MeshMultiplexerOptions OptionsFor(string nodeId) => new()
+        var baseOpts = new MeshMultiplexerOptions
         {
-            NodeId = nodeId,
+            NodeId = "placeholder",
             RouteTimeout = TimeSpan.FromSeconds(20),
             MaxRouteRetries = 20,
         };
 
-        await using var meshA = MeshMultiplexer.Create(OptionsFor("A"));
-        await using var meshB = MeshMultiplexer.Create(OptionsFor("B"));
-        await using var meshC = MeshMultiplexer.Create(OptionsFor("C"));
-        await using var meshD = MeshMultiplexer.Create(OptionsFor("D"));
-        await using var meshE = MeshMultiplexer.Create(OptionsFor("E"));
+        await using var meshA = MeshMultiplexer.Create(baseOpts with { NodeId = "A" });
+        await using var meshB = MeshMultiplexer.Create(baseOpts with { NodeId = "B" });
+        await using var meshC = MeshMultiplexer.Create(baseOpts with { NodeId = "C" });
+        await using var meshD = MeshMultiplexer.Create(baseOpts with { NodeId = "D" });
+        await using var meshE = MeshMultiplexer.Create(baseOpts with { NodeId = "E" });
 
         meshA.Start(); meshB.Start(); meshC.Start(); meshD.Start(); meshE.Start();
 

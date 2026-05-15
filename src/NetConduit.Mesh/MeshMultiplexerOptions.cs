@@ -6,7 +6,7 @@ namespace NetConduit.Mesh;
 /// <summary>
 /// Configuration for a mesh multiplexer.
 /// </summary>
-public sealed class MeshMultiplexerOptions
+public sealed record MeshMultiplexerOptions
 {
     /// <summary>Local node identifier. Must be non-empty and may not contain ':' '/' '&lt;' '&gt;' '\0' or control characters.</summary>
     public required string NodeId { get; init; }
