@@ -1,5 +1,6 @@
 using System.Threading.Channels;
 using NetConduit;
+using NetConduit.Events;
 using NetConduit.Interfaces;
 using NetConduit.Models;
 
@@ -58,7 +59,22 @@ internal sealed class AcceptorSession : IAsyncDisposable
         };
 
         _subMux = StreamMultiplexer.Create(muxOptions);
+        _subMux.Disconnected += OnSubMuxDisconnected;
         _subMux.Start();
+    }
+
+    private void OnSubMuxDisconnected(object? sender, DisconnectedEventArgs e)
+    {
+        if (_disposed) return;
+        var mux = _subMux;
+        if (mux is null || mux.IsRunning) return;
+        _ = HandleTerminalDisconnectAsync();
+    }
+
+    private async Task HandleTerminalDisconnectAsync()
+    {
+        try { await DisposeAsync().ConfigureAwait(false); } catch { }
+        _mesh.RemoveAcceptor(_sourceNodeId, _multiplexerId);
     }
 
     private async Task<IStreamPair> CreateRouteStreamAsync(CancellationToken ct)
@@ -146,7 +162,11 @@ internal sealed class AcceptorSession : IAsyncDisposable
 
         if (_subMux is not null)
         {
-            try { await _subMux.DisposeAsync().ConfigureAwait(false); } catch { }
+            _subMux.Disconnected -= OnSubMuxDisconnected;
+            if (_subMux.IsRunning)
+            {
+                try { await _subMux.DisposeAsync().ConfigureAwait(false); } catch { }
+            }
             _mesh.OnSubMultiplexerClosed();
         }
     }

@@ -645,6 +645,16 @@ public sealed class MeshMultiplexer : IMeshMultiplexer
         _stats.DecrementSubMultiplexers();
     }
 
+    internal void RemoveOpener(string targetNodeId, string multiplexerId)
+    {
+        _openers.TryRemove(new OpenerKey(targetNodeId, multiplexerId), out _);
+    }
+
+    internal void RemoveAcceptor(string sourceNodeId, string multiplexerId)
+    {
+        _acceptors.TryRemove(new AcceptorKey(sourceNodeId, multiplexerId), out _);
+    }
+
     internal void OnRouteFailed()
     {
         _stats.IncrementRoutesFailed();
