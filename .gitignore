@@ -9,6 +9,9 @@
 # Memory
 .memory/
 
+# MSBuild lock service cache
+*.lscache
+
 # User-specific files
 *.rsuser
 *.suo
