@@ -51,7 +51,7 @@ mux.Disconnected(GoAwayReceived)
 mux.DisposeAsync() finishes
 ```
 
-Reconnect (`MaxAutoReconnectAttempts > 0`):
+Reconnect (`MaxAutoReconnectAttempts != 0` — the default `-1` enables this):
 
 ```
 mux.Disconnected(TransportError)

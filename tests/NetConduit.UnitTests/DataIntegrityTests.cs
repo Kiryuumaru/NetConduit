@@ -305,7 +305,7 @@ public sealed class DataIntegrityTests
         Random.Shared.NextBytes(sent);
         var expectedHash = SHA256.HashData(sent);
 
-        var writeChannel = client.OpenChannel("large");
+        var writeChannel = client.OpenChannel(new ChannelOptions { ChannelId = "large", SlabSize = 4 * 1024 * 1024 });
         var readChannel = await server.AcceptChannelAsync("large", cts.Token);
 
         // Write in chunks
