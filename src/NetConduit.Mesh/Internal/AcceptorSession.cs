@@ -20,10 +20,11 @@ internal sealed class AcceptorSession : IAsyncDisposable
     private readonly Channel<(IReadChannel Reader, IWriteChannel Writer)> _incoming;
 
     private StreamMultiplexer? _subMux;
+    private RoutedSubMultiplexer? _userFacing;
     private volatile bool _explicit;
     private volatile bool _disposed;
 
-    internal IStreamMultiplexer? SubMultiplexer => _subMux;
+    internal IStreamMultiplexer? SubMultiplexer => _userFacing;
 
     internal AcceptorSession(MeshMultiplexer mesh, string sourceNodeId, string multiplexerId, bool isExplicit)
     {
@@ -62,6 +63,7 @@ internal sealed class AcceptorSession : IAsyncDisposable
 
         _subMux = StreamMultiplexer.Create(muxOptions);
         _subMux.Disconnected += OnSubMuxDisconnected;
+        _userFacing = new RoutedSubMultiplexer(_subMux);
         _subMux.Start();
         _mesh.OnSubMultiplexerOpened();
     }

@@ -17,6 +17,7 @@ internal sealed class OpenerSession : IAsyncDisposable
     private readonly string _targetNodeId;
     private readonly string _multiplexerId;
     private StreamMultiplexer? _subMux;
+    private RoutedSubMultiplexer? _userFacing;
     private volatile bool _disposed;
 
     internal OpenerSession(MeshMultiplexer mesh, string targetNodeId, string multiplexerId)
@@ -27,7 +28,7 @@ internal sealed class OpenerSession : IAsyncDisposable
     }
 
     internal IStreamMultiplexer SubMultiplexer
-        => _subMux ?? throw new InvalidOperationException("Sub-mux not constructed.");
+        => _userFacing ?? throw new InvalidOperationException("Sub-mux not constructed.");
 
     internal void Construct()
     {
@@ -52,6 +53,7 @@ internal sealed class OpenerSession : IAsyncDisposable
 
         _subMux = StreamMultiplexer.Create(muxOptions);
         _subMux.Disconnected += OnSubMuxDisconnected;
+        _userFacing = new RoutedSubMultiplexer(_subMux);
         _subMux.Start();
     }
 
