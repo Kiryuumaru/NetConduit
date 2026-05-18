@@ -266,14 +266,9 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IChannelOwner
                 var transport = await ConnectWithRetryAsync(hasConnectedBefore, ct);
 
                 // Handshake: reconnect if we've connected before, initial otherwise.
-                // A transient transport EOF mid-handshake (peer closed the stream before
-                // sending its handshake bytes) counts against MaxAutoReconnectAttempts
-                // the same way StreamFactory failures do. This is common under mesh route
-                // churn where the route channel pair is disposed mid-handshake. Without
-                // the retry, a transient EOF aborts the sub-mux even when retries are
-                // configured. Protocol errors, session mismatches, and timeouts are NOT
-                // retried — they indicate a real configuration or peer fault and must
-                // propagate immediately.
+                // Only transport I/O failures raised by the handshake path are retryable.
+                // Protocol errors, session mismatches, and timeouts fail fast because they
+                // indicate a configuration or peer fault, not route churn.
                 try
                 {
                     if (hasConnectedBefore)
@@ -293,35 +288,17 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IChannelOwner
                 {
                     throw;
                 }
-                catch (IOException handshakeEx)
+                catch (HandshakeTransportException handshakeEx)
                 {
                     handshakeAttempt++;
-
-                    // Handshake retries are capped independently of MaxAutoReconnectAttempts.
-                    // Rationale: a handshake EOF means the peer's stream closed before any
-                    // bytes flowed. If the StreamFactory returns a fresh transport per call
-                    // (e.g. mesh sub-mux opening a new route), a small bounded retry budget
-                    // is enough to recover from transient race conditions. If the factory
-                    // returns the same already-broken transport, an unbounded retry budget
-                    // (-1) would busy-loop. Cap at MaxHandshakeRetryAttempts to bound both.
-                    const int MaxHandshakeRetryAttempts = 3;
-                    int configuredMax = _options.MaxAutoReconnectAttempts;
-                    int effectiveMax = configuredMax == 0
-                        ? 0
-                        : configuredMax < 0
-                            ? MaxHandshakeRetryAttempts
-                            : Math.Min(configuredMax, MaxHandshakeRetryAttempts);
-
                     _transport = null;
                     try { await transport.DisposeAsync(); } catch { }
 
                     RaiseEvent(Error, new Events.ErrorEventArgs(handshakeEx));
 
-                    if (effectiveMax == 0 || handshakeAttempt >= effectiveMax)
+                    if (!HasHandshakeRetryBudget(handshakeAttempt))
                         throw;
 
-                    // Backoff between handshake retries so we don't busy-loop against a
-                    // peer that keeps closing the stream.
                     try
                     {
                         await Task.Delay(_options.AutoReconnectDelay, ct);
@@ -447,6 +424,12 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IChannelOwner
             // Fatal error (protocol error, exhausted retries) — notify waiters
             _readyTcs.TrySetException(ex);
         }
+    }
+
+    private bool HasHandshakeRetryBudget(int failedAttempts)
+    {
+        int maxAttempts = _options.MaxAutoReconnectAttempts;
+        return maxAttempts < 0 || failedAttempts < maxAttempts;
     }
 
     private async Task<IStreamPair> ConnectWithRetryAsync(bool isReconnect, CancellationToken ct)
@@ -911,12 +894,21 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IChannelOwner
         FrameHeader.WriteTo(handshake, ChannelConstants.ControlChannel, FrameFlags.Ctrl, 16);
         _sessionId.TryWriteBytes(handshake.AsSpan(FrameHeader.Size));
 
-        await transport.WriteStream.WriteAsync(handshake, ct);
-        await transport.WriteStream.FlushAsync(ct);
-
-        // Read remote session ID
         byte[] remoteHandshake = new byte[FrameHeader.Size + 16];
-        await ReadExactAsync(transport.ReadStream, remoteHandshake, ct);
+        try
+        {
+            await transport.WriteStream.WriteAsync(handshake, ct);
+            await transport.WriteStream.FlushAsync(ct);
+            await ReadExactAsync(transport.ReadStream, remoteHandshake, ct);
+        }
+        catch (HandshakeTransportException)
+        {
+            throw;
+        }
+        catch (IOException ex)
+        {
+            throw new HandshakeTransportException("Transport failed during initial handshake.", ex);
+        }
 
         var remoteHeader = FrameHeader.Parse(remoteHandshake);
         if (remoteHeader.Flags != FrameFlags.Ctrl || remoteHeader.PayloadLength != 16)
@@ -944,19 +936,39 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IChannelOwner
         FrameHeader.WriteTo(frame, ChannelConstants.ControlChannel, FrameFlags.Ctrl, reconnectPayload.Length);
         reconnectPayload.CopyTo(frame.AsSpan(FrameHeader.Size));
 
-        await transport.WriteStream.WriteAsync(frame, ct);
-        await transport.WriteStream.FlushAsync(ct);
-
-        // Read remote reconnect frame: [CtrlSubtype.Reconnect][sessionId:16B]
         byte[] headerBuf = new byte[FrameHeader.Size];
-        await ReadExactAsync(transport.ReadStream, headerBuf, ct);
+        try
+        {
+            await transport.WriteStream.WriteAsync(frame, ct);
+            await transport.WriteStream.FlushAsync(ct);
+            await ReadExactAsync(transport.ReadStream, headerBuf, ct);
+        }
+        catch (HandshakeTransportException)
+        {
+            throw;
+        }
+        catch (IOException ex)
+        {
+            throw new HandshakeTransportException("Transport failed during reconnect handshake.", ex);
+        }
         var header = FrameHeader.Parse(headerBuf);
 
         if (header.Flags != FrameFlags.Ctrl || header.PayloadLength < 17)
             throw new MultiplexerException(ErrorCode.ProtocolError, "Invalid reconnect frame.");
 
         byte[] remotePayload = new byte[header.PayloadLength];
-        await ReadExactAsync(transport.ReadStream, remotePayload, ct);
+        try
+        {
+            await ReadExactAsync(transport.ReadStream, remotePayload, ct);
+        }
+        catch (HandshakeTransportException)
+        {
+            throw;
+        }
+        catch (IOException ex)
+        {
+            throw new HandshakeTransportException("Transport failed during reconnect handshake.", ex);
+        }
 
         if (remotePayload[0] != CtrlSubtype.Reconnect)
             throw new MultiplexerException(ErrorCode.ProtocolError, "Expected reconnect subtype.");
@@ -973,7 +985,9 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IChannelOwner
         {
             int read = await stream.ReadAsync(buffer[totalRead..], ct);
             if (read == 0)
-                throw new IOException("Transport stream closed unexpectedly.");
+                throw new HandshakeTransportException(
+                    "Transport stream closed before the handshake completed.",
+                    new EndOfStreamException("Transport stream closed unexpectedly."));
             totalRead += read;
         }
     }
