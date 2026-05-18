@@ -256,6 +256,7 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IChannelOwner
     private async Task MainLoopAsync(CancellationToken ct)
     {
         bool hasConnectedBefore = false;
+        int handshakeAttempt = 0;
 
         try
         {
@@ -264,19 +265,61 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IChannelOwner
                 // Connect with retry (no delay on first attempt)
                 var transport = await ConnectWithRetryAsync(hasConnectedBefore, ct);
 
-                // Handshake: reconnect if we've connected before, initial otherwise
-                if (hasConnectedBefore)
+                // Handshake: reconnect if we've connected before, initial otherwise.
+                // Handshake failures count against MaxAutoReconnectAttempts the same way
+                // StreamFactory failures do — the transport was acquired but the peer
+                // tore down the stream before the handshake could complete (common under
+                // mesh route churn where the route channel pair is disposed mid-handshake).
+                // Without this retry, a transient handshake EOF aborts the sub-mux even
+                // when retries are configured.
+                try
                 {
-                    await PerformReconnectHandshakeAsync(transport, ct);
+                    if (hasConnectedBefore)
+                    {
+                        await PerformReconnectHandshakeAsync(transport, ct);
 
-                    foreach (var ch in _registry.GetAllWriteChannels())
-                        ch.PrepareReplay();
+                        foreach (var ch in _registry.GetAllWriteChannels())
+                            ch.PrepareReplay();
+                    }
+                    else
+                    {
+                        _transport = transport;
+                        await PerformHandshakeAsync(ct);
+                    }
                 }
-                else
+                catch (OperationCanceledException) when (ct.IsCancellationRequested)
                 {
-                    _transport = transport;
-                    await PerformHandshakeAsync(ct);
+                    throw;
                 }
+                catch (Exception handshakeEx)
+                {
+                    // Treat as a connect attempt for retry-budget purposes.
+                    handshakeAttempt++;
+                    int maxAttempts = _options.MaxAutoReconnectAttempts;
+
+                    _transport = null;
+                    try { await transport.DisposeAsync(); } catch { }
+
+                    RaiseEvent(Error, new Events.ErrorEventArgs(handshakeEx));
+
+                    if (maxAttempts == 0 || (maxAttempts > 0 && handshakeAttempt >= maxAttempts))
+                        throw;
+
+                    // Backoff between handshake retries so we don't busy-loop against a
+                    // peer that keeps closing the stream.
+                    try
+                    {
+                        await Task.Delay(_options.AutoReconnectDelay, ct);
+                    }
+                    catch (OperationCanceledException) when (ct.IsCancellationRequested)
+                    {
+                        throw;
+                    }
+
+                    continue;
+                }
+
+                handshakeAttempt = 0;
 
                 _transport = transport;
                 _isConnected = true;
