@@ -138,7 +138,7 @@ internal sealed class AcceptorSession : IAsyncDisposable
         if (firstArrival && !_explicit)
         {
             // Emit via AcceptMultiplexersAsync exactly once per acceptor.
-            inbox.TryWrite(new RoutedMultiplexer(_sourceNodeId, _multiplexerId, _subMux!));
+            inbox.TryWrite(new RoutedMultiplexer(_sourceNodeId, _multiplexerId, _userFacing!));
         }
     }
 
