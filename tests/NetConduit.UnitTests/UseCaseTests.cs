@@ -109,7 +109,7 @@ public sealed class UseCaseTests
         var fileData = new byte[fileSize];
         Random.Shared.NextBytes(fileData);
 
-        var writeCh = client.OpenChannel("file-transfer");
+        var writeCh = client.OpenChannel(new ChannelOptions { ChannelId = "file-transfer", SlabSize = 2 * 1024 * 1024 });
         var readCh = await server.AcceptChannelAsync("file-transfer", cts.Token);
 
         // Send in chunks

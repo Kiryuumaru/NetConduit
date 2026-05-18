@@ -112,6 +112,13 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IChannelOwner
     /// </summary>
     public static StreamMultiplexer Create(MultiplexerOptions options)
     {
+        ArgumentNullException.ThrowIfNull(options);
+        if (options.MaxAutoReconnectAttempts < -1)
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(options),
+                "MaxAutoReconnectAttempts must be -1 (unlimited), 0 (no reconnect), or a positive bound.");
+        }
         return new StreamMultiplexer(options, useOddIndices: true);
     }
 
@@ -135,7 +142,7 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IChannelOwner
         if (!_isRunning)
             throw new InvalidOperationException("Multiplexer has not been started.");
 
-        bool enableReplay = _options.MaxAutoReconnectAttempts > 0;
+        bool enableReplay = _options.MaxAutoReconnectAttempts != 0;
         ushort index = _registry.AllocateChannelIndex();
         var channel = new WriteChannel(
             options.ChannelId,
@@ -394,7 +401,8 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IChannelOwner
         {
             ct.ThrowIfCancellationRequested();
 
-            // Enforce max attempts (0 = unlimited)
+            // Enforce max attempts. -1 = unlimited, 0 = single attempt (no retry),
+            // >0 = at most N total attempts.
             if (maxAttempts > 0 && attempt > maxAttempts)
                 throw new MultiplexerException(ErrorCode.Internal,
                     $"Connection failed after {maxAttempts} attempts.");
@@ -435,8 +443,9 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IChannelOwner
             {
                 RaiseEvent(Error, new Events.ErrorEventArgs(ex));
 
-                // If max attempts is 0 (no retry on initial) and not reconnecting, propagate immediately
-                if (!isReconnect && maxAttempts == 0)
+                // maxAttempts == 0 means no retry: propagate the first failure immediately
+                // whether this is the initial connect or a reconnect after the link died.
+                if (maxAttempts == 0)
                     throw;
             }
         }

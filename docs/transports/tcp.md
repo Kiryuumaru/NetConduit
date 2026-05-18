@@ -56,7 +56,7 @@ await foreach (var ch in mux.AcceptChannelsAsync())
 
 ## Reconnection
 
-The client factory creates a fresh `TcpClient` on every call, so reconnection works out of the box when `MaxAutoReconnectAttempts > 0`:
+The client factory creates a fresh `TcpClient` on every call, so reconnection works out of the box. The default `MaxAutoReconnectAttempts = -1` reconnects forever with replay enabled; set a positive bound to cap retries, or `0` to disable reconnect entirely:
 
 ```csharp
 var opts = TcpMultiplexer.CreateOptions("relay.example.com", 5000) with
