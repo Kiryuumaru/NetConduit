@@ -361,6 +361,20 @@ public sealed class MeshMultiplexer : IMeshMultiplexer
         {
             return;
         }
+        await GoAwayCoreAsync(ct).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Internal shutdown that does NOT honour <see cref="_isDisposed"/>. Called from
+    /// both <see cref="GoAwayAsync"/> (with the public guard) and <see cref="DisposeAsync"/>
+    /// (which has already flipped <c>_isDisposed</c> by the time it runs).
+    /// </summary>
+    private async Task GoAwayCoreAsync(CancellationToken ct)
+    {
+        if (_isShuttingDown)
+        {
+            return;
+        }
         _isShuttingDown = true;
 
         // Snapshot collections under lock then act outside it.
@@ -431,7 +445,11 @@ public sealed class MeshMultiplexer : IMeshMultiplexer
 
         try
         {
-            await GoAwayAsync(CancellationToken.None).ConfigureAwait(false);
+            // Use the core directly: GoAwayAsync's public guard would short-circuit
+            // because we've already set _isDisposed = true above. The core path is
+            // what actually disposes NeighborSessions and unsubscribes from neighbor
+            // mux lifecycle events.
+            await GoAwayCoreAsync(CancellationToken.None).ConfigureAwait(false);
         }
         catch
         {

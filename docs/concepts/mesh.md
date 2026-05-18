@@ -48,7 +48,7 @@ neighbor; downstream hops are encoded in the `_mesh:route:` channel options so
 each relay can forward without re-running BFS.
 
 `MeshMultiplexerOptions.MaxHops` caps the path length. A request with a longer
-path is rejected at the source with `MeshRouteException`.
+path is rejected at the source with `MeshRoutingException`.
 
 ## Pool affinity
 
@@ -77,14 +77,14 @@ backward-compatible behavior — every advanced knob is opt-in.
 | --- | --- | --- |
 | `NodeId` | (required) | Stable identity for this node in the topology map. |
 | `PoolId` | `null` | Optional grouping tag advertised with this node's entry. |
-| `MaxHops` | `8` | Reject routes longer than this at the source. |
+| `MaxHops` | `10` | Reject routes longer than this at the source. |
 | `RouteTimeout` | `30s` | How long a route open will wait for a path. |
 | `MaxRouteRetries` | `3` | Retry budget for the routed sub-mux when its transport dies. `-1` = unbounded. |
 | `MaxConcurrentRelays` | `100` | Cap on relay slots this node hosts as an intermediate. |
 | `RecomputeDebounce` | `Zero` | Coalesce N rapid topology updates into one BFS. `Zero` preserves the synchronous recompute path. Non-zero values can stale the route table during an active reroute — only enable if you actually have churn. |
 | `TopologyAntiEntropyInterval` | `Zero` | Periodic re-broadcast of local topology to recover from silently-dropped frames. `Zero` disables. Pairs cleanly with `RecomputeDebounce > 0` when running at scale. |
 | `DefaultSlabSize`, `PingInterval`, `PingTimeout`, `MaxMissedPings`, `GoAwayTimeout`, `DefaultChannelOptions` | (StreamMultiplexer defaults) | Forwarded to every routed sub-mux. |
-| `MaxTopologyMessageSize` | `64KiB` | Hard cap on a single inbound topology frame. |
+| `MaxTopologyMessageSize` | `1 MiB` | Hard cap on a single inbound topology frame. |
 
 ### `MaxRouteRetries = -1` — unbounded reroute
 
@@ -105,6 +105,25 @@ Caveats:
   with a `CancellationToken` if you need a timeout.
 - Counters that track `RoutesFailed` now count retries, not terminal
   failures. Drives different telemetry expectations.
+- **Reroute is not seamless mid-stream.** When the sub-mux reconnects
+  along a different path, channels rely on `StreamMultiplexer`'s replay
+  semantics. In-flight stream data that the peer had not yet acked may
+  be retransmitted; channels opened during the outage may be reopened
+  after recovery. The sub-mux *identity* survives the reroute, but
+  applications must tolerate the same retransmit/reopen semantics that
+  apply to a single-link `StreamMultiplexer` reconnect. If you need
+  end-to-end exactly-once semantics, layer them on top.
+
+### Path stickiness and direct-link health
+
+The router prefers the shortest path from the current topology snapshot.
+A neighbor mux that is up at the *transport* layer is considered usable
+even if its routed sub-mux is mid-reconnect — direct-link health is not
+filtered out of BFS. This keeps the routing decision deterministic and
+cheap, but it means a freshly-rejoined neighbor can briefly absorb
+opens that will then take the normal reconnect path. Use
+`MaxRouteRetries = -1` if you want these opens to ride out the
+re-stabilization rather than fail.
 
 ### `RecomputeDebounce` — coalesced BFS
 

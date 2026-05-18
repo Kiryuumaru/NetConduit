@@ -158,16 +158,18 @@ public class HardenTests
             if (!subA.IsRunning) terminalDisconnect = true;
         };
 
-        // Default MaxRouteRetries=3 with RouteTimeout=2s would exhaust within ~6-10s.
-        // With -1 (unbounded) the sub-mux must keep trying. Wait long enough that a
-        // bounded retry policy would have terminated.
+        // Actually break the underlying neighbor link so the sub-mux must rely on
+        // reconnect/replay. Default MaxRouteRetries=3 with RouteTimeout=2s would
+        // exhaust within ~6-10s. With -1 (unbounded) the sub-mux must keep trying
+        // for the entire window.
+        await muxAB_A.DisposeAsync();
+        await muxAB_B.DisposeAsync();
+
         await Task.Delay(TimeSpan.FromSeconds(8), cts.Token);
 
         Assert.False(terminalDisconnect, "Sub-mux raised terminal disconnect under MaxRouteRetries=-1.");
 
         await routed.Multiplexer.DisposeAsync();
-        await muxAB_A.DisposeAsync();
-        await muxAB_B.DisposeAsync();
     }
 
     /// <summary>
