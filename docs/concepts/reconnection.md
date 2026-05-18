@@ -6,10 +6,11 @@ If the transport drops, the multiplexer can rebuild the connection and resume tr
 
 | `MaxAutoReconnectAttempts` | Behavior |
 | --- | --- |
-| `0` (default) | Unlimited reconnect attempts. **No replay buffer** is allocated for new channels. Open channels are torn down on disconnect with `ChannelCloseReason.TransportFailed`. |
-| `> 0` | Up to N reconnect attempts. **Replay buffer enabled**: open channels survive disconnects; unacked bytes are replayed after the reconnect handshake. |
+| `0` (default) | No reconnect. The first transport failure raises terminal `Disconnected`. **No replay buffer** is allocated for new channels; open channels are torn down with `ChannelCloseReason.TransportFailed`. |
+| `-1` | Unlimited reconnect attempts. **Replay buffer enabled**: open channels survive disconnects; unacked bytes are replayed after the reconnect handshake. |
+| `> 0` | Up to N reconnect attempts. **Replay buffer enabled**. After the limit is reached, channels close with `ChannelCloseReason.TransportFailed`. |
 
-Set `MaxAutoReconnectAttempts > 0` if you want existing channels to survive transport drops.
+Set `MaxAutoReconnectAttempts != 0` if you want existing channels to survive transport drops.
 
 ```csharp
 new MultiplexerOptions

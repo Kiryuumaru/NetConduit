@@ -28,7 +28,15 @@ public sealed record MultiplexerOptions
     /// <summary>Time to wait during graceful shutdown for channels to drain.</summary>
     public TimeSpan GoAwayTimeout { get; init; } = TimeSpan.FromSeconds(30);
 
-    /// <summary>Maximum auto-reconnect attempts. 0 = unlimited.</summary>
+    /// <summary>
+    /// Maximum auto-reconnect attempts when the underlying transport dies.
+    /// <list type="bullet">
+    /// <item><description><c>-1</c> = unlimited reconnects. The multiplexer keeps trying forever until disposed.</description></item>
+    /// <item><description><c>0</c> = no reconnect (default). The first transport failure raises terminal <c>Disconnected</c>.</description></item>
+    /// <item><description><c>&gt;0</c> = bounded retries. After this many consecutive failures the multiplexer gives up.</description></item>
+    /// </list>
+    /// Replay of in-flight stream data is enabled whenever auto-reconnect is enabled (any non-zero value).
+    /// </summary>
     public int MaxAutoReconnectAttempts { get; init; }
 
     /// <summary>Base delay between reconnect attempts.</summary>
