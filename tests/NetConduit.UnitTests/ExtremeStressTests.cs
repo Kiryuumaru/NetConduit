@@ -117,7 +117,7 @@ public sealed class ExtremeStressTests
         await Task.WhenAll(client.WaitForReadyAsync(), server.WaitForReadyAsync());
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(120));
 
-        var writer = client.OpenChannel("big-transfer");
+        var writer = client.OpenChannel(new ChannelOptions { ChannelId = "big-transfer", SlabSize = 4 * 1024 * 1024 });
         var reader = await server.AcceptChannelAsync("big-transfer", cts.Token);
 
         const int totalSize = 2 * 1024 * 1024;

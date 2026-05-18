@@ -386,7 +386,7 @@ static async Task<int> RunAgentAsync(string[] args, CancellationToken ct)
     Console.WriteLine($"╚══════════════════════════════════════════════════════════════╝");
     Console.WriteLine();
 
-    // MaxAutoReconnectAttempts defaults to 0 (unlimited)
+    // MaxAutoReconnectAttempts defaults to -1 (unlimited reconnect with replay)
     await using var mux = StreamMultiplexer.Create(options);
 
     mux.Reconnecting += (_, e) =>
@@ -536,7 +536,7 @@ static async Task<int> RunForwardAsync(string[] args, CancellationToken ct)
 
     var pendingTunnels = new ConcurrentDictionary<string, TaskCompletionSource<DuplexStreamTransit>>();
 
-    // MaxAutoReconnectAttempts defaults to 0 (unlimited)
+    // MaxAutoReconnectAttempts defaults to -1 (unlimited reconnect with replay)
     await using var mux = StreamMultiplexer.Create(options);
 
     mux.Reconnecting += (_, e) =>

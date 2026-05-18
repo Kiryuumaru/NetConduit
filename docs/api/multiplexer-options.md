@@ -14,7 +14,7 @@ public sealed record MultiplexerOptions
     public TimeSpan  PingTimeout                     { get; init; } = TimeSpan.FromSeconds(10);
     public int       MaxMissedPings                  { get; init; } = 3;
     public TimeSpan  GoAwayTimeout                   { get; init; } = TimeSpan.FromSeconds(30);
-    public int       MaxAutoReconnectAttempts        { get; init; } = 0;                      // 0 = unlimited
+    public int       MaxAutoReconnectAttempts        { get; init; } = -1;                     // -1 = unlimited (default), 0 = no reconnect
     public TimeSpan  AutoReconnectDelay              { get; init; } = TimeSpan.FromSeconds(1);
     public TimeSpan  MaxAutoReconnectDelay           { get; init; } = TimeSpan.FromSeconds(30);
     public double    AutoReconnectBackoffMultiplier  { get; init; } = 2.0;
@@ -34,7 +34,7 @@ public sealed record MultiplexerOptions
 | `PingTimeout` | 10 s | Time to wait for a `Pong` before counting a missed ping. |
 | `MaxMissedPings` | 3 | After this many missed pings, the connection is declared dead. |
 | `GoAwayTimeout` | 30 s | How long `GoAwayAsync` waits for channels to drain. |
-| `MaxAutoReconnectAttempts` | `0` | `0` = **unlimited** retries. `>0` = max attempts; further failures throw. |
+| `MaxAutoReconnectAttempts` | `-1` | `-1` = **unlimited** retries (default; replay buffer enabled). `0` = no reconnect (terminal on first failure; replay disabled). `>0` = max attempts; further failures throw. |
 | `AutoReconnectDelay` | 1 s | Base delay for the first reconnect attempt. |
 | `MaxAutoReconnectDelay` | 30 s | Cap for exponential backoff. |
 | `AutoReconnectBackoffMultiplier` | 2.0 | Multiplier applied to delay each attempt. |
@@ -43,8 +43,9 @@ public sealed record MultiplexerOptions
 
 ## Reconnect behavior
 
-- If `MaxAutoReconnectAttempts == 0` (default), the mux retries forever but the **replay buffer is disabled**. Open channels are torn down on disconnect with `ChannelCloseReason.TransportFailed`.
-- If `MaxAutoReconnectAttempts > 0`, the **replay buffer is enabled** on channels (unacked bytes are re-sent after reconnect). After the configured limit is reached, channels close with `ChannelCloseReason.TransportFailed`.
+- The default `MaxAutoReconnectAttempts = -1` reconnects forever with **replay buffer enabled**: open channels survive transport drops; unacked bytes are re-sent after reconnect.
+- If `MaxAutoReconnectAttempts == 0`, no reconnect is attempted; the first transport failure raises terminal `Disconnected`. The **replay buffer is disabled**. Open channels are torn down with `ChannelCloseReason.TransportFailed`.
+- If `MaxAutoReconnectAttempts > 0`, the **replay buffer is enabled** for up to N attempts. After the configured limit is reached, channels close with `ChannelCloseReason.TransportFailed`.
 
 See [Reconnection](../concepts/reconnection.md).
 
