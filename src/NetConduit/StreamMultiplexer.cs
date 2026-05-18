@@ -266,12 +266,14 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IChannelOwner
                 var transport = await ConnectWithRetryAsync(hasConnectedBefore, ct);
 
                 // Handshake: reconnect if we've connected before, initial otherwise.
-                // Handshake failures count against MaxAutoReconnectAttempts the same way
-                // StreamFactory failures do — the transport was acquired but the peer
-                // tore down the stream before the handshake could complete (common under
-                // mesh route churn where the route channel pair is disposed mid-handshake).
-                // Without this retry, a transient handshake EOF aborts the sub-mux even
-                // when retries are configured.
+                // A transient transport EOF mid-handshake (peer closed the stream before
+                // sending its handshake bytes) counts against MaxAutoReconnectAttempts
+                // the same way StreamFactory failures do. This is common under mesh route
+                // churn where the route channel pair is disposed mid-handshake. Without
+                // the retry, a transient EOF aborts the sub-mux even when retries are
+                // configured. Protocol errors, session mismatches, and timeouts are NOT
+                // retried — they indicate a real configuration or peer fault and must
+                // propagate immediately.
                 try
                 {
                     if (hasConnectedBefore)
@@ -291,9 +293,8 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IChannelOwner
                 {
                     throw;
                 }
-                catch (Exception handshakeEx)
+                catch (IOException handshakeEx)
                 {
-                    // Treat as a connect attempt for retry-budget purposes.
                     handshakeAttempt++;
                     int maxAttempts = _options.MaxAutoReconnectAttempts;
 
