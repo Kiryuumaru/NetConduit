@@ -59,10 +59,18 @@ internal static class RouteForwarder
             });
             forwardReader = nextHopSession.Mux.AcceptChannel(forwardInboundId);
 
-            // Pipe both directions.
-            var t1 = PipeAsync(inbound, forwardWriter, mesh, ct);
-            var t2 = PipeAsync(forwardReader, responseWriter, mesh, ct);
-            await Task.WhenAll(t1, t2).ConfigureAwait(false);
+            using var relayCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            var relayCt = relayCts.Token;
+            var t1 = PipeAsync(inbound, forwardWriter, mesh, relayCt);
+            var t2 = PipeAsync(forwardReader, responseWriter, mesh, relayCt);
+
+            // A routed transport is only valid while both half-duplex pipes are alive.
+            // If one side closes, cancel the opposite reader so the finally block tears
+            // down every leg and endpoints reconnect instead of writing into a dead path.
+            await Task.WhenAny(t1, t2).ConfigureAwait(false);
+            await relayCts.CancelAsync().ConfigureAwait(false);
+            try { await Task.WhenAll(t1, t2).ConfigureAwait(false); }
+            catch (OperationCanceledException) { }
         }
         finally
         {
