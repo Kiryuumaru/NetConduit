@@ -73,7 +73,7 @@ public class ThreeNodeLineTests
         Assert.Equal(payload, buf[..total]);
 
         // Stats: B should have forwarded bytes both directions (at least the payload).
-        Assert.True(meshB.Stats.RelayBytesForwarded >= payload.Length);
+        await MeshTestAssertions.AssertRelayBytesForwardedAtLeastAsync(meshB, payload.Length, cts.Token);
 
         await writer.DisposeAsync();
         await reader.DisposeAsync();

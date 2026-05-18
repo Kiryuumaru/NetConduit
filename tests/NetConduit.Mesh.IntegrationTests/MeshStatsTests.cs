@@ -77,7 +77,6 @@ public class MeshStatsTests
         await aReady.Task.WaitAsync(cts.Token);
 
         long beforeBytes = meshB.Stats.RelayBytesForwarded;
-        long beforeRelays = meshB.Stats.ActiveRelays;
 
         var acceptTask = Task.Run(async () =>
         {
@@ -110,9 +109,8 @@ public class MeshStatsTests
         }
         Assert.Equal(payload.Length, total);
 
-        // The relay must have forwarded at least the payload bytes (sub-mux framing adds more).
-        Assert.True(meshB.Stats.RelayBytesForwarded >= beforeBytes + payload.Length,
-            $"Expected >= {beforeBytes + payload.Length}, got {meshB.Stats.RelayBytesForwarded}");
+        // Relay stats are telemetry from a different task; observe them as eventually consistent.
+        await MeshTestAssertions.AssertRelayBytesForwardedAtLeastAsync(meshB, beforeBytes + payload.Length, cts.Token);
 
         await writer.DisposeAsync();
         await reader.DisposeAsync();
