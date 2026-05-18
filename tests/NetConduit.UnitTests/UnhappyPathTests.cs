@@ -1,4 +1,5 @@
 using System.Text.Json;
+using NetConduit.Constants;
 using NetConduit.Internal;
 using Xunit;
 
@@ -431,6 +432,33 @@ public sealed class UnhappyPathTests
 
         var ex = await Assert.ThrowsAsync<MultiplexerException>(() => mux.WaitForReadyAsync());
         Assert.Equal(ErrorCode.ProtocolError, ex.ErrorCode);
+        Assert.Equal(1, attempts);
+
+        await mux.DisposeAsync();
+    }
+
+    [Fact]
+    public async Task InitialHandshake_AcceptsReconnectFrameFromPeerThatAlreadyCompletedSession()
+    {
+        int attempts = 0;
+        Guid remoteSessionId = Guid.NewGuid();
+        byte[] reconnectHandshake = BuildReconnectHandshakeFrame(remoteSessionId);
+        var mux = StreamMultiplexer.Create(new MultiplexerOptions
+        {
+            StreamFactory = _ =>
+            {
+                Interlocked.Increment(ref attempts);
+                return Task.FromResult<IStreamPair>(new StaticReadStreamPair(reconnectHandshake));
+            },
+            MaxAutoReconnectAttempts = 0,
+            PingInterval = TimeSpan.Zero,
+        });
+        mux.Start();
+
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+        await mux.WaitForReadyAsync(cts.Token);
+
+        Assert.Equal(remoteSessionId, mux.RemoteSessionId);
         Assert.Equal(1, attempts);
 
         await mux.DisposeAsync();
@@ -945,6 +973,15 @@ public sealed class UnhappyPathTests
             ReadStream.Dispose();
             return ValueTask.CompletedTask;
         }
+    }
+
+    private static byte[] BuildReconnectHandshakeFrame(Guid sessionId)
+    {
+        byte[] frame = new byte[FrameHeader.Size + 17];
+        FrameHeader.WriteTo(frame, ChannelConstants.ControlChannel, FrameFlags.Ctrl, 17);
+        frame[FrameHeader.Size] = CtrlSubtype.Reconnect;
+        sessionId.TryWriteBytes(frame.AsSpan(FrameHeader.Size + 1, 16));
+        return frame;
     }
 }
 
