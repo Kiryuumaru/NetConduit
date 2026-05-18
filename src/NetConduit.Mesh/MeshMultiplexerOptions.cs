@@ -20,8 +20,27 @@ public sealed record MeshMultiplexerOptions
     /// <summary>How long the mesh waits for a route to land before failing an open.</summary>
     public TimeSpan RouteTimeout { get; init; } = TimeSpan.FromSeconds(30);
 
-    /// <summary>Maximum reroute attempts after a routed session loses its underlying path.</summary>
+    /// <summary>
+    /// Maximum reroute attempts after a routed session loses its underlying path.
+    /// Use <c>-1</c> for unbounded retries — the routed sub-mux will keep attempting to
+    /// re-route forever until disposed by the application.
+    /// </summary>
     public int MaxRouteRetries { get; init; } = 3;
+
+    /// <summary>
+    /// Debounce window for topology recomputation. Topology updates received within this
+    /// window are coalesced into a single BFS + broadcast. Smaller = faster convergence,
+    /// larger = lower CPU under churn. Use <see cref="TimeSpan.Zero"/> (the default) for
+    /// immediate recompute — required for tests and topologies where a routed path can
+    /// be invalidated by a single peer advertisement.
+    /// </summary>
+    public TimeSpan RecomputeDebounce { get; init; } = TimeSpan.Zero;
+
+    /// <summary>
+    /// Periodic re-broadcast of local topology to all neighbors, recovering from any
+    /// silently-dropped topology frames. Use <see cref="TimeSpan.Zero"/> to disable.
+    /// </summary>
+    public TimeSpan TopologyAntiEntropyInterval { get; init; } = TimeSpan.Zero;
 
     /// <summary>Maximum concurrent relay sessions this node will host as an intermediate hop.</summary>
     public int MaxConcurrentRelays { get; init; } = 100;
@@ -66,9 +85,22 @@ public sealed record MeshMultiplexerOptions
             throw new ArgumentOutOfRangeException(nameof(RouteTimeout), "RouteTimeout must be > 0.");
         }
 
-        if (MaxRouteRetries < 0)
+        if (MaxRouteRetries < -1)
         {
-            throw new ArgumentOutOfRangeException(nameof(MaxRouteRetries), "MaxRouteRetries must be >= 0.");
+            throw new ArgumentOutOfRangeException(nameof(MaxRouteRetries),
+                "MaxRouteRetries must be >= 0 for a bounded retry count, or -1 for unbounded retries.");
+        }
+
+        if (RecomputeDebounce < TimeSpan.Zero)
+        {
+            throw new ArgumentOutOfRangeException(nameof(RecomputeDebounce),
+                "RecomputeDebounce must be >= 0.");
+        }
+
+        if (TopologyAntiEntropyInterval < TimeSpan.Zero)
+        {
+            throw new ArgumentOutOfRangeException(nameof(TopologyAntiEntropyInterval),
+                "TopologyAntiEntropyInterval must be >= 0 (Zero disables anti-entropy).");
         }
 
         if (MaxConcurrentRelays < 0)

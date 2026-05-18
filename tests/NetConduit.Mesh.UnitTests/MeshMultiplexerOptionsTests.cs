@@ -52,9 +52,30 @@ public class MeshMultiplexerOptionsTests
     }
 
     [Fact]
-    public void Validate_RejectsNegativeMaxRouteRetries()
+    public void Validate_AcceptsNegativeOneMaxRouteRetriesAsUnbounded()
     {
         var opts = new MeshMultiplexerOptions { NodeId = "n", MaxRouteRetries = -1 };
+        opts.Validate();
+    }
+
+    [Fact]
+    public void Validate_RejectsMaxRouteRetriesBelowMinusOne()
+    {
+        var opts = new MeshMultiplexerOptions { NodeId = "n", MaxRouteRetries = -2 };
+        Assert.Throws<ArgumentOutOfRangeException>(() => opts.Validate());
+    }
+
+    [Fact]
+    public void Validate_RejectsNegativeRecomputeDebounce()
+    {
+        var opts = new MeshMultiplexerOptions { NodeId = "n", RecomputeDebounce = TimeSpan.FromMilliseconds(-1) };
+        Assert.Throws<ArgumentOutOfRangeException>(() => opts.Validate());
+    }
+
+    [Fact]
+    public void Validate_RejectsNegativeTopologyAntiEntropyInterval()
+    {
+        var opts = new MeshMultiplexerOptions { NodeId = "n", TopologyAntiEntropyInterval = TimeSpan.FromMilliseconds(-1) };
         Assert.Throws<ArgumentOutOfRangeException>(() => opts.Validate());
     }
 

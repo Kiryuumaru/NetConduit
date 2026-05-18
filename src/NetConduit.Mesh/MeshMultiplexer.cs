@@ -30,8 +30,31 @@ public sealed class MeshMultiplexer : IMeshMultiplexer
     private readonly Channel<RoutedMultiplexer> _inbox = Channel.CreateUnbounded<RoutedMultiplexer>(
         new UnboundedChannelOptions { SingleReader = false, SingleWriter = false });
 
+    // T6 — in-flight neighbor-session disposals from RemoveNeighbor /
+    // HandleNeighborMuxDead. Those paths fire-and-forget the async teardown; we track
+    // the tasks here so DisposeAsync can drain them and so RemoveNeighborAsync can
+    // await its own disposal without exposing internal session types.
+    private readonly ConcurrentDictionary<Task, byte> _pendingNeighborDisposals = new();
+
     private readonly TaskCompletionSource _readyTcs = new(TaskCreationOptions.RunContinuationsAsynchronously);
     private readonly CancellationTokenSource _cts = new();
+
+    // T0 — event-driven route signaling. Replaces the previous 50ms busy-poll in
+    // OpenerSession.OpenRouteAsync. Bumped (under _stateLock) every time the route table
+    // changes; pending openers WaitForChangeAsync on this version.
+    private long _routeVersion;
+    private TaskCompletionSource _routeChange = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+    // T2 — debounced topology recompute. Set when topology changes; the recompute timer
+    // drains it. _recomputePending is the single-flight gate.
+    private int _recomputePending;
+    private Timer? _recomputeTimer;
+    private Timer? _antiEntropyTimer;
+
+    // T3 — auto-cleanse session-version counter. Each NeighborSession created gets a
+    // monotonic version; HandleNeighborMuxDead checks this to ignore late events from
+    // replaced sessions.
+    private int _nextSessionVersion;
 
     private long _localVersion;
     private long _nonceSequence;
@@ -125,6 +148,18 @@ public sealed class MeshMultiplexer : IMeshMultiplexer
             _localVersion = 1;
             _map.Apply(_options.NodeId, _localVersion, _options.PoolId, Array.Empty<string>());
         }
+
+        // T2 — recompute debounce timer. Always created so MarkDirtyAndScheduleRecompute
+        // can schedule. With RecomputeDebounce=Zero we still get correct (immediate) behavior
+        // because the timer fires once and the loop completes synchronously.
+        _recomputeTimer = new Timer(OnRecomputeTimer, null, Timeout.InfiniteTimeSpan, Timeout.InfiniteTimeSpan);
+
+        // T2 — optional anti-entropy. Disabled by default (Zero).
+        if (_options.TopologyAntiEntropyInterval > TimeSpan.Zero)
+        {
+            _antiEntropyTimer = new Timer(OnAntiEntropyTimer, null,
+                _options.TopologyAntiEntropyInterval, _options.TopologyAntiEntropyInterval);
+        }
     }
 
     /// <inheritdoc />
@@ -162,6 +197,14 @@ public sealed class MeshMultiplexer : IMeshMultiplexer
         NeighborSession session;
         lock (_stateLock)
         {
+            // T4 — re-check disposed state INSIDE the lock to close the race with a
+            // concurrent DisposeAsync that may have flipped _isDisposed after our top-level
+            // guard but before we insert.
+            if (_isDisposed)
+            {
+                throw new ObjectDisposedException(nameof(MeshMultiplexer));
+            }
+
             if (_neighbors.ContainsKey(remoteNodeId))
             {
                 throw new InvalidOperationException(
@@ -181,7 +224,8 @@ public sealed class MeshMultiplexer : IMeshMultiplexer
                 _map.Apply(remoteNodeId, 0, remotePoolId, Array.Empty<string>());
             }
 
-            session = new NeighborSession(this, remoteNodeId, mux, remotePoolId);
+            int sessionVersion = ++_nextSessionVersion;
+            session = new NeighborSession(this, remoteNodeId, mux, remotePoolId, sessionVersion);
             _neighbors[remoteNodeId] = session;
 
             RecomputeRoutesUnderLock();
@@ -218,7 +262,8 @@ public sealed class MeshMultiplexer : IMeshMultiplexer
             RecomputeRoutesUnderLock();
         }
 
-        _ = session!.DisposeAsync();
+        // Tracked via _pendingNeighborDisposals so DisposeAsync can drain it.
+        _ = TrackNeighborDisposal(session!);
         BroadcastLocalTopology();
         RaiseTopologyChanged();
     }
@@ -242,6 +287,14 @@ public sealed class MeshMultiplexer : IMeshMultiplexer
                 $"A routed multiplexer to '{targetNodeId}' with ID '{multiplexerId}' is already open.");
         }
 
+        // T4 — close the race with a concurrent DisposeAsync that may have snapshotted
+        // _openers before our TryAdd.
+        if (_isDisposed)
+        {
+            _openers.TryRemove(key, out _);
+            throw new ObjectDisposedException(nameof(MeshMultiplexer));
+        }
+
         try
         {
             opener.Construct();
@@ -254,22 +307,6 @@ public sealed class MeshMultiplexer : IMeshMultiplexer
 
         _stats.IncrementSubMultiplexers();
         return opener.SubMultiplexer;
-    }
-
-    /// <inheritdoc />
-    public async Task<IStreamMultiplexer> OpenMultiplexerAsync(string targetNodeId, string multiplexerId, CancellationToken ct = default)
-    {
-        var mux = OpenMultiplexer(targetNodeId, multiplexerId);
-        try
-        {
-            await mux.WaitForReadyAsync(ct).ConfigureAwait(false);
-        }
-        catch
-        {
-            await mux.DisposeAsync().ConfigureAwait(false);
-            throw;
-        }
-        return mux;
     }
 
     /// <inheritdoc />
@@ -286,19 +323,20 @@ public sealed class MeshMultiplexer : IMeshMultiplexer
         var key = new AcceptorKey(sourceNodeId, multiplexerId);
         var acceptor = _acceptors.GetOrAdd(key, k => new AcceptorSession(this, k.SourceNodeId, k.MultiplexerId, isExplicit: true));
         acceptor.MarkExplicit();
+
+        // T4 — close the race with a concurrent DisposeAsync that may have snapshotted
+        // _acceptors before our GetOrAdd. If we lost that race, remove ourselves and throw.
+        if (_isDisposed)
+        {
+            _acceptors.TryRemove(key, out _);
+            throw new ObjectDisposedException(nameof(MeshMultiplexer));
+        }
+
         if (acceptor.SubMultiplexer is null)
         {
             acceptor.Construct();
         }
         return acceptor.SubMultiplexer ?? throw new InvalidOperationException("Acceptor sub-mux not constructed.");
-    }
-
-    /// <inheritdoc />
-    public async Task<IStreamMultiplexer> AcceptMultiplexerAsync(string sourceNodeId, string multiplexerId, CancellationToken ct = default)
-    {
-        var mux = AcceptMultiplexer(sourceNodeId, multiplexerId);
-        await mux.WaitForReadyAsync(ct).ConfigureAwait(false);
-        return mux;
     }
 
     /// <inheritdoc />
@@ -386,6 +424,11 @@ public sealed class MeshMultiplexer : IMeshMultiplexer
         }
         _isDisposed = true;
 
+        // T2 — stop the debounce + anti-entropy timers before tearing down state so
+        // late firings don't touch a half-disposed mesh.
+        try { _recomputeTimer?.Dispose(); } catch { }
+        try { _antiEntropyTimer?.Dispose(); } catch { }
+
         try
         {
             await GoAwayAsync(CancellationToken.None).ConfigureAwait(false);
@@ -403,6 +446,15 @@ public sealed class MeshMultiplexer : IMeshMultiplexer
         {
         }
 
+        // T0 — wake any opener still waiting on the route signal so they observe
+        // shutdown promptly instead of blocking until their timeout.
+        TaskCompletionSource routeChange;
+        lock (_stateLock)
+        {
+            routeChange = _routeChange;
+        }
+        routeChange.TrySetCanceled();
+
         foreach (var opener in _openers.Values)
         {
             try { await opener.DisposeAsync().ConfigureAwait(false); } catch { }
@@ -414,6 +466,14 @@ public sealed class MeshMultiplexer : IMeshMultiplexer
             try { await acceptor.DisposeAsync().ConfigureAwait(false); } catch { }
         }
         _acceptors.Clear();
+
+        // T6 — drain any in-flight neighbor disposals from RemoveNeighbor /
+        // HandleNeighborMuxDead so they don't leak background work past dispose return.
+        var pending = _pendingNeighborDisposals.Keys.ToArray();
+        if (pending.Length > 0)
+        {
+            try { await Task.WhenAll(pending).ConfigureAwait(false); } catch { }
+        }
 
         _cts.Dispose();
         _readyTcs.TrySetCanceled();
@@ -457,6 +517,13 @@ public sealed class MeshMultiplexer : IMeshMultiplexer
             _routes[target] = hop;
         }
 
+        // T0 — pulse waiters every recompute. Even if the externally-visible set didn't
+        // change, an in-flight opener might be waiting for a specific next-hop to land.
+        _routeVersion++;
+        var oldChange = _routeChange;
+        _routeChange = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        oldChange.TrySetResult();
+
         var toRaiseReachable = new List<(string node, string? pool, int hops)>();
         var toRaiseUnreachable = new List<string>();
 
@@ -493,6 +560,29 @@ public sealed class MeshMultiplexer : IMeshMultiplexer
         }
     }
 
+    /// <summary>
+    /// T0 — wait until the route table changes or <paramref name="ct"/> fires. Returns the
+    /// route version observed BEFORE the wait so callers can detect missed updates.
+    /// </summary>
+    internal Task WaitForRouteChangeAsync(long versionSeen, CancellationToken ct)
+    {
+        Task task;
+        lock (_stateLock)
+        {
+            if (_routeVersion != versionSeen)
+            {
+                return Task.CompletedTask;
+            }
+            task = _routeChange.Task;
+        }
+        return task.WaitAsync(ct);
+    }
+
+    internal long CurrentRouteVersion
+    {
+        get { lock (_stateLock) { return _routeVersion; } }
+    }
+
     internal bool TryGetRoute(string targetNodeId, out string nextHopNodeId, out int hopCount)
     {
         lock (_stateLock)
@@ -525,6 +615,29 @@ public sealed class MeshMultiplexer : IMeshMultiplexer
 
     internal long NextNonce() => Interlocked.Increment(ref _nonceSequence);
 
+    /// <summary>
+    /// T6 — register an in-flight neighbor disposal so <see cref="DisposeAsync"/> can
+    /// drain it. Without tracking, fast add/remove churn leaks background work past
+    /// dispose return, polluting downstream tests and producing flakes that look like
+    /// convergence bugs.
+    /// </summary>
+    private Task TrackNeighborDisposal(NeighborSession session)
+    {
+        var task = session.DisposeAsync().AsTask();
+        if (task.IsCompleted)
+        {
+            return task;
+        }
+        _pendingNeighborDisposals.TryAdd(task, 0);
+        task.ContinueWith(static (t, state) =>
+        {
+            var dict = (ConcurrentDictionary<Task, byte>)state!;
+            dict.TryRemove(t, out _);
+        }, _pendingNeighborDisposals, CancellationToken.None,
+            TaskContinuationOptions.ExecuteSynchronously, TaskScheduler.Default);
+        return task;
+    }
+
     internal MeshMultiplexerOptions Options => _options;
 
     internal CancellationToken ShutdownToken => _cts.Token;
@@ -534,6 +647,7 @@ public sealed class MeshMultiplexer : IMeshMultiplexer
         _stats.IncrementTopologyReceived();
 
         bool changed = false;
+        bool synchronousRecompute = _options.RecomputeDebounce <= TimeSpan.Zero;
         lock (_stateLock)
         {
             foreach (var entry in entries)
@@ -549,7 +663,10 @@ public sealed class MeshMultiplexer : IMeshMultiplexer
                 }
             }
 
-            if (changed)
+            // Keep Apply+Recompute atomic under the lock when debounce is disabled
+            // (matches pre-T2 behavior). When debounce is enabled the recompute runs
+            // off-thread under its own lock acquisition.
+            if (changed && synchronousRecompute)
             {
                 RecomputeRoutesUnderLock();
             }
@@ -557,8 +674,15 @@ public sealed class MeshMultiplexer : IMeshMultiplexer
 
         if (changed)
         {
-            BroadcastLocalTopology();
-            RaiseTopologyChanged();
+            if (synchronousRecompute)
+            {
+                BroadcastLocalTopology();
+                RaiseTopologyChanged();
+            }
+            else
+            {
+                ScheduleRecompute();
+            }
         }
 
         // The mesh becomes "ready" once the first topology exchange has completed
@@ -569,6 +693,100 @@ public sealed class MeshMultiplexer : IMeshMultiplexer
             _readyTcs.TrySetResult();
             RaiseEvent(Ready, EventArgs.Empty);
         }
+    }
+
+    /// <summary>
+    /// T2 — schedule a debounced recompute. If a recompute is already pending, this is a
+    /// no-op. With <see cref="MeshMultiplexerOptions.RecomputeDebounce"/> = Zero the timer
+    /// fires immediately.
+    /// </summary>
+    private void ScheduleRecompute()
+    {
+        if (_isDisposed) return;
+        if (Interlocked.Exchange(ref _recomputePending, 1) != 0)
+        {
+            return;
+        }
+        try
+        {
+            _recomputeTimer?.Change(_options.RecomputeDebounce, Timeout.InfiniteTimeSpan);
+        }
+        catch (ObjectDisposedException)
+        {
+        }
+    }
+
+    private void OnRecomputeTimer(object? _)
+    {
+        if (_isDisposed) return;
+        if (Interlocked.Exchange(ref _recomputePending, 0) == 0) return;
+
+        lock (_stateLock)
+        {
+            // _map may have been mutated multiple times since we last ran BFS — drain by
+            // running once.
+            RecomputeRoutesUnderLock();
+        }
+
+        BroadcastLocalTopology();
+        RaiseTopologyChanged();
+    }
+
+    private void OnAntiEntropyTimer(object? _)
+    {
+        if (_isDisposed) return;
+        // T2 anti-entropy: re-broadcast local snapshot. Single-flight in NeighborSession
+        // ensures this never enqueues a duplicate write.
+        try
+        {
+            BroadcastLocalTopology();
+        }
+        catch (Exception ex)
+        {
+            RaiseError(ex);
+        }
+    }
+
+    /// <summary>
+    /// T3 — invoked by a <see cref="NeighborSession"/> when its underlying mux reaches a
+    /// terminal disconnect (auto-reconnect exhausted, or never enabled). Drops the neighbor
+    /// from local adjacency without disposing the application-owned mux.
+    /// The <paramref name="sessionVersion"/> check rejects late events from a session that
+    /// has already been replaced by a fresh <see cref="AddNeighbor"/> for the same node ID.
+    /// </summary>
+    internal void HandleNeighborMuxDead(string remoteNodeId, int sessionVersion)
+    {
+        if (_isDisposed || _isShuttingDown) return;
+
+        NeighborSession? session;
+        lock (_stateLock)
+        {
+            if (!_neighbors.TryGetValue(remoteNodeId, out session))
+            {
+                return;
+            }
+            if (session.Version != sessionVersion)
+            {
+                // Already replaced by a newer session for the same node ID.
+                return;
+            }
+            _neighbors.Remove(remoteNodeId);
+
+            var selfEntry = GetOrCreateSelfEntry();
+            if (selfEntry.Neighbors.Remove(remoteNodeId))
+            {
+                _localVersion++;
+                _map.Apply(_options.NodeId, _localVersion, _options.PoolId, selfEntry.Neighbors.ToArray());
+            }
+
+            RecomputeRoutesUnderLock();
+        }
+
+        // Dispose mesh-side session state but NOT the application's neighbor mux —
+        // that's still owned by the caller of AddNeighbor.
+        _ = TrackNeighborDisposal(session!);
+        BroadcastLocalTopology();
+        RaiseTopologyChanged();
     }
 
     internal void BroadcastLocalTopology()

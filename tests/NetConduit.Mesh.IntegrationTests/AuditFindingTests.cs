@@ -42,7 +42,7 @@ public class AuditFindingTests
         var routed = await acceptTask.WaitAsync(cts.Token);
         await routed.Multiplexer.WaitForReadyAsync(cts.Token);
 
-        Assert.Equal(2, meshA.Stats.ActiveSubMultiplexers + meshB.Stats.ActiveSubMultiplexers);
+        Assert.Equal(2L, meshA.Stats.ActiveSubMultiplexers + meshB.Stats.ActiveSubMultiplexers);
 
         // Remote (B) initiates a graceful shutdown of the routed sub-mux. This causes
         // StreamMultiplexer.Disconnected to fire on A's opener with reason=GoAwayReceived
@@ -55,8 +55,8 @@ public class AuditFindingTests
         {
             await Task.Delay(20, cts.Token);
         }
-        Assert.Equal(0, meshA.Stats.ActiveSubMultiplexers);
-        Assert.Equal(0, meshB.Stats.ActiveSubMultiplexers);
+        Assert.Equal(0L, meshA.Stats.ActiveSubMultiplexers);
+        Assert.Equal(0L, meshB.Stats.ActiveSubMultiplexers);
 
         await subA.DisposeAsync();
         await muxAB_A.DisposeAsync();

@@ -52,7 +52,9 @@ internal sealed class AcceptorSession : IAsyncDisposable
             PingTimeout = opts.PingTimeout,
             MaxMissedPings = opts.MaxMissedPings,
             GoAwayTimeout = opts.GoAwayTimeout,
-            MaxAutoReconnectAttempts = opts.MaxRouteRetries,
+            // T5 — MaxRouteRetries = -1 means unbounded. StreamMultiplexer treats
+            // MaxAutoReconnectAttempts == 0 as "unlimited", so map -1 to 0.
+            MaxAutoReconnectAttempts = opts.MaxRouteRetries < 0 ? 0 : opts.MaxRouteRetries,
             ConnectionTimeout = opts.RouteTimeout,
             DefaultChannelOptions = opts.DefaultChannelOptions,
         };
@@ -65,14 +67,14 @@ internal sealed class AcceptorSession : IAsyncDisposable
 
     private void OnSubMuxDisconnected(object? sender, DisconnectedEventArgs e)
     {
-        // Terminal disconnect — release mesh-side state regardless of IsRunning.
+        // Terminal disconnect — release mesh-side state synchronously. Do NOT re-enter
+        // _subMux.DisposeAsync(); the mux is already tearing itself down. Fire-and-forget
+        // here would leak post-Dispose background work and pollute downstream tests.
         if (_disposed) return;
-        _ = HandleTerminalDisconnectAsync();
-    }
-
-    private async Task HandleTerminalDisconnectAsync()
-    {
-        try { await DisposeAsync().ConfigureAwait(false); } catch { }
+        _disposed = true;
+        _incoming.Writer.TryComplete();
+        _subMux!.Disconnected -= OnSubMuxDisconnected;
+        _mesh.OnSubMultiplexerClosed();
         _mesh.RemoveAcceptor(_sourceNodeId, _multiplexerId);
     }
 
@@ -159,6 +161,7 @@ internal sealed class AcceptorSession : IAsyncDisposable
             _subMux.Disconnected -= OnSubMuxDisconnected;
             try { await _subMux.DisposeAsync().ConfigureAwait(false); } catch { }
             _mesh.OnSubMultiplexerClosed();
+            _mesh.RemoveAcceptor(_sourceNodeId, _multiplexerId);
         }
     }
 }

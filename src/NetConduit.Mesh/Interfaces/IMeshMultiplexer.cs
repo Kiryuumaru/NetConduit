@@ -56,14 +56,8 @@ public interface IMeshMultiplexer : IAsyncDisposable
     /// <summary>Open a routed sub-multiplexer to a target node. Returns synchronously in pending state.</summary>
     IStreamMultiplexer OpenMultiplexer(string targetNodeId, string multiplexerId);
 
-    /// <summary>Open a routed sub-multiplexer and await its ready state.</summary>
-    Task<IStreamMultiplexer> OpenMultiplexerAsync(string targetNodeId, string multiplexerId, CancellationToken ct = default);
-
     /// <summary>Accept a routed sub-multiplexer from a specific source. Returns synchronously in pending state.</summary>
     IStreamMultiplexer AcceptMultiplexer(string sourceNodeId, string multiplexerId);
-
-    /// <summary>Accept a routed sub-multiplexer and await its ready state.</summary>
-    Task<IStreamMultiplexer> AcceptMultiplexerAsync(string sourceNodeId, string multiplexerId, CancellationToken ct = default);
 
     /// <summary>Enumerate all inbound routed sub-multiplexers as they arrive.</summary>
     IAsyncEnumerable<RoutedMultiplexer> AcceptMultiplexersAsync(CancellationToken ct = default);

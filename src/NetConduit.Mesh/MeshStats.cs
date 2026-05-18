@@ -12,14 +12,14 @@ public sealed class MeshStats
     private long _relayBytesForwarded;
     private long _topologyMessagesSent;
     private long _topologyMessagesReceived;
-    private int _activeSubMultiplexers;
-    private int _activeRelays;
+    private long _activeSubMultiplexers;
+    private long _activeRelays;
 
     /// <summary>Currently active routed sub-multiplexers (opener + acceptor sides counted separately).</summary>
-    public int ActiveSubMultiplexers => Volatile.Read(ref _activeSubMultiplexers);
+    public long ActiveSubMultiplexers => Interlocked.Read(ref _activeSubMultiplexers);
 
     /// <summary>Currently active relay sessions on this node.</summary>
-    public int ActiveRelays => Volatile.Read(ref _activeRelays);
+    public long ActiveRelays => Interlocked.Read(ref _activeRelays);
 
     /// <summary>Total routes opened over the lifetime of this mesh (including reroutes).</summary>
     public long RoutesOpened => Interlocked.Read(ref _routesOpened);

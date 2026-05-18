@@ -42,7 +42,9 @@ internal sealed class OpenerSession : IAsyncDisposable
             PingTimeout = opts.PingTimeout,
             MaxMissedPings = opts.MaxMissedPings,
             GoAwayTimeout = opts.GoAwayTimeout,
-            MaxAutoReconnectAttempts = opts.MaxRouteRetries,
+            // T5 — MaxRouteRetries = -1 means unbounded. StreamMultiplexer treats
+            // MaxAutoReconnectAttempts == 0 as "unlimited", so map -1 to 0.
+            MaxAutoReconnectAttempts = opts.MaxRouteRetries < 0 ? 0 : opts.MaxRouteRetries,
             ConnectionTimeout = opts.RouteTimeout,
             DefaultChannelOptions = opts.DefaultChannelOptions,
         };
@@ -55,16 +57,14 @@ internal sealed class OpenerSession : IAsyncDisposable
     private void OnSubMuxDisconnected(object? sender, DisconnectedEventArgs e)
     {
         // StreamMultiplexer raises Disconnected only for terminal states (transport error,
-        // GoAway received, local dispose). At this point the sub-mux is gone — release
-        // mesh-side state regardless of IsRunning, which may not have flipped yet for
-        // GoAway-received.
+        // GoAway received, local dispose). The mux is already tearing itself down — we
+        // MUST NOT fire-and-forget a Task that re-enters _subMux.DisposeAsync() because
+        // that leaks background work past the user's await routed.DisposeAsync() return,
+        // polluting downstream tests. Just release mesh-side state synchronously.
         if (_disposed) return;
-        _ = HandleTerminalDisconnectAsync();
-    }
-
-    private async Task HandleTerminalDisconnectAsync()
-    {
-        try { await DisposeAsync().ConfigureAwait(false); } catch { }
+        _disposed = true;
+        _subMux!.Disconnected -= OnSubMuxDisconnected;
+        _mesh.OnSubMultiplexerClosed();
         _mesh.RemoveOpener(_targetNodeId, _multiplexerId);
     }
 
@@ -88,59 +88,85 @@ internal sealed class OpenerSession : IAsyncDisposable
 
         while (!ct.IsCancellationRequested && DateTime.UtcNow < deadline)
         {
-            if (_mesh.TryGetRoute(_targetNodeId, out string nextHop, out int hops))
+            // T0 — snapshot the route version BEFORE we read the route table so we can
+            // detect a recompute that lands while we're trying to open.
+            long versionSeen = _mesh.CurrentRouteVersion;
+
+            bool openAttempted = false;
+            if (_mesh.TryGetRoute(_targetNodeId, out string nextHop, out _) &&
+                _mesh.TryGetNeighbor(nextHop, out var nextHopSession))
             {
-                if (hops > _mesh.Options.MaxHops)
+                openAttempted = true;
+                long nonce = _mesh.NextNonce();
+                string outboundId = MeshChannelNaming.BuildOutboundRoute(
+                    _targetNodeId, _mesh.NodeId, _multiplexerId, nonce);
+                string inboundId = MeshChannelNaming.BuildInboundRoute(
+                    _targetNodeId, _mesh.NodeId, _multiplexerId, nonce);
+
+                var slot = _mesh.Options.DefaultChannelOptions;
+                IWriteChannel? writer = null;
+                IReadChannel? reader = null;
+                try
                 {
-                    _mesh.OnRouteFailed();
-                    throw new MeshRoutingException(_targetNodeId,
-                        $"Path to '{_targetNodeId}' exceeds MaxHops ({_mesh.Options.MaxHops}).");
+                    writer = nextHopSession.Mux.OpenChannel(new ChannelOptions
+                    {
+                        ChannelId = outboundId,
+                        Priority = slot.Priority,
+                        SlabSize = slot.SlabSize,
+                        SendTimeout = slot.SendTimeout,
+                    });
+                    reader = nextHopSession.Mux.AcceptChannel(inboundId);
+
+                    await Task.WhenAll(
+                        writer.WaitForReadyAsync(ct),
+                        reader.WaitForReadyAsync(ct)).ConfigureAwait(false);
+
+                    _mesh.OnRouteSucceeded();
+                    return new StreamPair(reader.AsStream(), writer.AsStream(),
+                        new ChannelPairOwner(reader, writer));
                 }
-                if (_mesh.TryGetNeighbor(nextHop, out var nextHopSession))
+                catch (Exception ex)
                 {
-                    long nonce = _mesh.NextNonce();
-                    string outboundId = MeshChannelNaming.BuildOutboundRoute(
-                        _targetNodeId, _mesh.NodeId, _multiplexerId, nonce);
-                    string inboundId = MeshChannelNaming.BuildInboundRoute(
-                        _targetNodeId, _mesh.NodeId, _multiplexerId, nonce);
-
-                    var slot = _mesh.Options.DefaultChannelOptions;
-                    IWriteChannel? writer = null;
-                    IReadChannel? reader = null;
-                    try
-                    {
-                        writer = nextHopSession.Mux.OpenChannel(new ChannelOptions
-                        {
-                            ChannelId = outboundId,
-                            Priority = slot.Priority,
-                            SlabSize = slot.SlabSize,
-                            SendTimeout = slot.SendTimeout,
-                        });
-                        reader = nextHopSession.Mux.AcceptChannel(inboundId);
-
-                        await Task.WhenAll(
-                            writer.WaitForReadyAsync(ct),
-                            reader.WaitForReadyAsync(ct)).ConfigureAwait(false);
-
-                        _mesh.OnRouteSucceeded();
-                        return new StreamPair(reader.AsStream(), writer.AsStream(),
-                            new ChannelPairOwner(reader, writer));
-                    }
-                    catch (Exception ex)
-                    {
-                        lastError = ex;
-                        if (writer is not null) { try { await writer.DisposeAsync().ConfigureAwait(false); } catch { } }
-                        if (reader is not null) { try { await reader.DisposeAsync().ConfigureAwait(false); } catch { } }
-                    }
+                    lastError = ex;
+                    if (writer is not null) { try { await writer.DisposeAsync().ConfigureAwait(false); } catch { } }
+                    if (reader is not null) { try { await reader.DisposeAsync().ConfigureAwait(false); } catch { } }
                 }
             }
 
+            TimeSpan remaining = deadline - DateTime.UtcNow;
+            if (remaining <= TimeSpan.Zero) break;
+
+            if (openAttempted)
+            {
+                // We had a route but the open itself failed (channel collision, neighbor
+                // mux transient hiccup, etc.). Short backoff then retry — waiting on a
+                // route-table change here would deadlock because the route hasn't moved.
+                try
+                {
+                    await Task.Delay(TimeSpan.FromMilliseconds(50), ct).ConfigureAwait(false);
+                }
+                catch (OperationCanceledException)
+                {
+                    break;
+                }
+                continue;
+            }
+
+            // T0 — no route. Wait for the route table to change, bounded by the remaining
+            // deadline. This replaces the previous 50ms busy-poll for the "no route" case.
+            using var waitCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            waitCts.CancelAfter(remaining);
             try
             {
-                await Task.Delay(TimeSpan.FromMilliseconds(50), ct).ConfigureAwait(false);
+                await _mesh.WaitForRouteChangeAsync(versionSeen, waitCts.Token).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException) when (ct.IsCancellationRequested)
+            {
+                break;
             }
             catch (OperationCanceledException)
             {
+                // Deadline elapsed — exit the outer loop.
                 break;
             }
         }
@@ -167,6 +193,7 @@ internal sealed class OpenerSession : IAsyncDisposable
             _subMux.Disconnected -= OnSubMuxDisconnected;
             try { await _subMux.DisposeAsync().ConfigureAwait(false); } catch { }
             _mesh.OnSubMultiplexerClosed();
+            _mesh.RemoveOpener(_targetNodeId, _multiplexerId);
         }
     }
 }
