@@ -1,4 +1,5 @@
 using NetConduit;
+using NetConduit.Enums;
 using NetConduit.Events;
 using NetConduit.Interfaces;
 using NetConduit.Models;
@@ -57,12 +58,15 @@ internal sealed class OpenerSession : IAsyncDisposable
     private void OnSubMuxDisconnected(object? sender, DisconnectedEventArgs e)
     {
         // Disconnected fires on every transport death, including transient ones that
-        // the sub-mux will recover from via StreamFactory (route retry). Only clean up
-        // once the sub-mux has stopped running (retries exhausted, GoAway, or disposed).
+        // the sub-mux will recover from via StreamFactory (route retry). Terminal reasons
+        // (GoAwayReceived, LocalDispose) must always release state — IsRunning may still
+        // be true at the moment the event fires for a remote-initiated GoAway. Transient
+        // TransportError is only treated as terminal once retries are exhausted
+        // (IsRunning flips to false).
         if (_disposed) return;
-        if (_subMux!.IsRunning) return;
+        if (e.Reason == DisconnectReason.TransportError && _subMux!.IsRunning) return;
         _disposed = true;
-        _subMux.Disconnected -= OnSubMuxDisconnected;
+        _subMux!.Disconnected -= OnSubMuxDisconnected;
         _mesh.OnSubMultiplexerClosed();
         _mesh.RemoveOpener(_targetNodeId, _multiplexerId);
     }
