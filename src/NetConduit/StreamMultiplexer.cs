@@ -834,6 +834,16 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IChannelOwner
         _controlChannel.WriteRawFrame(frame);
     }
 
+    void IChannelOwner.SendAck(ushort channelIndex, uint consumedPosition)
+    {
+        if (_controlChannel is null) return;
+
+        byte[] frame = new byte[FrameHeader.Size + 4];
+        FrameHeader.WriteTo(frame, channelIndex, FrameFlags.Ack, 4);
+        BinaryPrimitives.WriteUInt32BigEndian(frame.AsSpan(FrameHeader.Size, 4), consumedPosition);
+        _controlChannel.WriteRawFrame(frame);
+    }
+
     private async Task PerformHandshakeAsync(CancellationToken ct)
     {
         var transport = _transport ?? throw new InvalidOperationException("Transport not initialized.");

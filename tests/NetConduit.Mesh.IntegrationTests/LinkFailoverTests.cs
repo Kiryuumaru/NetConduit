@@ -158,21 +158,128 @@ public class LinkFailoverTests
     }
 
     /// <summary>
-    /// Aspirational test for the seamless mid-stream reroute design goal:
-    /// when an intermediate edge fails, the existing routed sub-multiplexer
-    /// should transparently re-route over the new shortest path without
-    /// raising Disconnected on the endpoint sub-muxes, and a payload sent
-    /// during/after the outage should arrive exactly once.
-    ///
-    /// Current gap: when the relay's route channel dies the sub-mux's
-    /// underlying transport ends and raises Disconnected at the endpoint;
-    /// additionally the underlying StreamMultiplexer replay logic re-delivers
-    /// already-consumed bytes after the new transport is established. Both
-    /// gaps need to be closed before this test can pass.
+    /// When an intermediate edge fails but an alternative path exists, the existing routed
+    /// sub-multiplexer must transparently re-route over the new shortest path:
+    /// - Neither endpoint observes <c>Disconnected</c>.
+    /// - A payload written after the failure arrives intact on the peer.
+    /// - The mesh routes around the failure without the application calling
+    ///   <c>RemoveNeighbor</c> — only the underlying neighbor mux is disposed.
     /// </summary>
-    [Fact(Skip = "Seamless mid-stream reroute is not yet implemented; tracked as a follow-up.")]
-    public Task BreakIntermediateLink_RoutedMuxRerouteSeamlessly()
+    [Fact]
+    [Trait("Category", "LinkFailover")]
+    public async Task BreakIntermediateLink_RoutedMuxRerouteSeamlessly()
     {
-        return Task.CompletedTask;
+        using var cts = new CancellationTokenSource(TestTimeout);
+
+        var (muxAB_A, muxAB_B, _) = await MuxFixture.CreateMuxPairAsync(cts.Token);
+        var (muxBC_B, muxBC_C, _) = await MuxFixture.CreateMuxPairAsync(cts.Token);
+        var (muxBE_B, muxBE_E, _) = await MuxFixture.CreateMuxPairAsync(cts.Token);
+        var (muxCD_C, muxCD_D, _) = await MuxFixture.CreateMuxPairAsync(cts.Token);
+        var (muxDE_D, muxDE_E, _) = await MuxFixture.CreateMuxPairAsync(cts.Token);
+
+        var baseOpts = new MeshMultiplexerOptions
+        {
+            NodeId = "placeholder",
+            RouteTimeout = TimeSpan.FromSeconds(20),
+            MaxRouteRetries = -1, // unbounded — endpoints must NOT terminally disconnect.
+        };
+
+        await using var meshA = MeshMultiplexer.Create(baseOpts with { NodeId = "A" });
+        await using var meshB = MeshMultiplexer.Create(baseOpts with { NodeId = "B" });
+        await using var meshC = MeshMultiplexer.Create(baseOpts with { NodeId = "C" });
+        await using var meshD = MeshMultiplexer.Create(baseOpts with { NodeId = "D" });
+        await using var meshE = MeshMultiplexer.Create(baseOpts with { NodeId = "E" });
+
+        meshA.Start(); meshB.Start(); meshC.Start(); meshD.Start(); meshE.Start();
+
+        meshA.AddNeighbor("B", muxAB_A);
+        meshB.AddNeighbor("A", muxAB_B);
+        meshB.AddNeighbor("C", muxBC_B);
+        meshC.AddNeighbor("B", muxBC_C);
+        meshB.AddNeighbor("E", muxBE_B);
+        meshE.AddNeighbor("B", muxBE_E);
+        meshC.AddNeighbor("D", muxCD_C);
+        meshD.AddNeighbor("C", muxCD_D);
+        meshD.AddNeighbor("E", muxDE_D);
+        meshE.AddNeighbor("D", muxDE_E);
+
+        var aReachable = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        meshA.NodeReachable += (_, e) => { if (e.NodeId == "E") aReachable.TrySetResult(); };
+        await aReachable.Task.WaitAsync(cts.Token);
+
+        // Open the routed sub-mux. Initial path: A -> B -> E.
+        var acceptTask = Task.Run(async () =>
+        {
+            await foreach (var r in meshE.AcceptMultiplexersAsync(cts.Token))
+            {
+                return r;
+            }
+            throw new InvalidOperationException("Never accepted.");
+        }, cts.Token);
+
+        await using var subA = await meshA.OpenMultiplexerAsync("E", "rpc-seamless", cts.Token);
+        var routed = await acceptTask.WaitAsync(cts.Token);
+        await using var subE = routed.Multiplexer;
+        await subE.WaitForReadyAsync(cts.Token);
+
+        // Track whether either endpoint observes a terminal Disconnected during the reroute.
+        var subADisconnected = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var subEDisconnected = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        subA.Disconnected += (_, _) => subADisconnected.TrySetResult(true);
+        subE.Disconnected += (_, _) => subEDisconnected.TrySetResult(true);
+
+        var writerA = subA.OpenChannel(new ChannelOptions { ChannelId = "data" });
+        var readerE = subE.AcceptChannel("data");
+        await Task.WhenAll(writerA.WaitForReadyAsync(cts.Token), readerE.WaitForReadyAsync(cts.Token));
+
+        // Sanity: a payload flows over the initial A -> B -> E path.
+        var ping = new byte[] { 1, 2, 3, 4 };
+        await writerA.WriteAsync(ping, cts.Token);
+        var pingBuf = new byte[ping.Length];
+        int got = 0;
+        while (got < ping.Length)
+        {
+            int n = await readerE.ReadAsync(pingBuf.AsMemory(got), cts.Token);
+            if (n == 0) break;
+            got += n;
+        }
+        Assert.Equal(ping, pingBuf);
+
+        // Break only the B-E underlying transport. We do NOT call RemoveNeighbor — the
+        // mesh must observe the disconnect, mark the neighbor unhealthy, re-advertise
+        // topology, and the existing routed sub-mux must seamlessly re-route over
+        // A -> B -> C -> D -> E.
+        await muxBE_B.DisposeAsync();
+        await muxBE_E.DisposeAsync();
+
+        // Send a second payload over the SAME pre-existing channel. This must succeed
+        // without either endpoint raising Disconnected.
+        var pong = new byte[] { 9, 8, 7, 6, 5 };
+        await writerA.WriteAsync(pong, cts.Token);
+        var pongBuf = new byte[pong.Length];
+        got = 0;
+        while (got < pong.Length)
+        {
+            int n = await readerE.ReadAsync(pongBuf.AsMemory(got), cts.Token);
+            if (n == 0) break;
+            got += n;
+        }
+        Assert.Equal(pong, pongBuf);
+
+        // Neither endpoint should have observed Disconnected.
+        Assert.False(subADisconnected.Task.IsCompleted, "Opener sub-mux observed Disconnected during reroute.");
+        Assert.False(subEDisconnected.Task.IsCompleted, "Acceptor sub-mux observed Disconnected during reroute.");
+
+        await writerA.DisposeAsync();
+        await readerE.DisposeAsync();
+
+        await muxAB_A.DisposeAsync();
+        await muxAB_B.DisposeAsync();
+        await muxBC_B.DisposeAsync();
+        await muxBC_C.DisposeAsync();
+        await muxCD_C.DisposeAsync();
+        await muxCD_D.DisposeAsync();
+        await muxDE_D.DisposeAsync();
+        await muxDE_E.DisposeAsync();
     }
 }

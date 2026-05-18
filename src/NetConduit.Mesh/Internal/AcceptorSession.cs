@@ -67,13 +67,14 @@ internal sealed class AcceptorSession : IAsyncDisposable
 
     private void OnSubMuxDisconnected(object? sender, DisconnectedEventArgs e)
     {
-        // Terminal disconnect — release mesh-side state synchronously. Do NOT re-enter
-        // _subMux.DisposeAsync(); the mux is already tearing itself down. Fire-and-forget
-        // here would leak post-Dispose background work and pollute downstream tests.
+        // Disconnected fires on every transport death, including transient ones that
+        // the sub-mux will recover from via StreamFactory (route retry). Only clean up
+        // once the sub-mux has stopped running (retries exhausted, GoAway, or disposed).
         if (_disposed) return;
+        if (_subMux!.IsRunning) return;
         _disposed = true;
         _incoming.Writer.TryComplete();
-        _subMux!.Disconnected -= OnSubMuxDisconnected;
+        _subMux.Disconnected -= OnSubMuxDisconnected;
         _mesh.OnSubMultiplexerClosed();
         _mesh.RemoveAcceptor(_sourceNodeId, _multiplexerId);
     }

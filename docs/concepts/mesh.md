@@ -107,23 +107,26 @@ Caveats:
   failures. Drives different telemetry expectations.
 - **Reroute is not seamless mid-stream.** When the sub-mux reconnects
   along a different path, channels rely on `StreamMultiplexer`'s replay
-  semantics. In-flight stream data that the peer had not yet acked may
-  be retransmitted; channels opened during the outage may be reopened
+  semantics. The writer replays its entire send slab; the reader skips
+  bytes it already received so no duplicates are delivered to the
+  application. Channels opened during the outage may be reopened
   after recovery. The sub-mux *identity* survives the reroute, but
-  applications must tolerate the same retransmit/reopen semantics that
-  apply to a single-link `StreamMultiplexer` reconnect. If you need
-  end-to-end exactly-once semantics, layer them on top.
+  applications must tolerate the same reconnect/reopen semantics that
+  apply to a single-link `StreamMultiplexer` reconnect.
 
 ### Path stickiness and direct-link health
 
-The router prefers the shortest path from the current topology snapshot.
-A neighbor mux that is up at the *transport* layer is considered usable
-even if its routed sub-mux is mid-reconnect — direct-link health is not
-filtered out of BFS. This keeps the routing decision deterministic and
-cheap, but it means a freshly-rejoined neighbor can briefly absorb
-opens that will then take the normal reconnect path. Use
-`MaxRouteRetries = -1` if you want these opens to ride out the
-re-stabilization rather than fail.
+The router picks the shortest path from the current topology snapshot.
+Only **healthy** neighbors appear in a node's advertised adjacency list,
+so BFS naturally routes around unhealthy links. When a neighbor mux
+disconnects, the local node removes it from its advertised neighbors and
+broadcasts immediately; peers recompute routes within one topology
+convergence round.
+
+A freshly-recovered neighbor is re-advertised once its mux fires
+`Connected`. Routes may shift back to the shorter path at that point.
+Use `MaxRouteRetries = -1` on the routed sub-mux if you want opens to
+ride out the re-stabilization rather than fail.
 
 ### `RecomputeDebounce` — coalesced BFS
 
@@ -153,17 +156,22 @@ in development.
 
 ## Self-healing behavior
 
-The mesh layer subscribes to each neighbor mux's `Disconnected` and
-`Connected` events. When a neighbor mux reaches its terminal disconnect
-state (auto-reconnect exhausted or disposed), the mesh drops it from
-local adjacency, runs BFS, broadcasts the updated topology, and raises
-`NodeUnreachable` for any node that loses its only path. The
-application does NOT need to call `RemoveNeighbor` for routing to
-adapt — `RemoveNeighbor` is reserved for permanent intent.
+Neighbor registration is **sticky**. The mesh never auto-removes a
+neighbor — `RemoveNeighbor` is reserved for explicit, permanent intent.
 
-On `Connected` (a recovered neighbor mux), the mesh re-broadcasts local
-topology so the recovered peer relearns adjacency.
+The mesh layer subscribes to each neighbor mux's `Disconnected` and
+`Connected` events. When a neighbor mux disconnects (whether mid-reconnect
+or terminal), the mesh marks that session **unhealthy**, removes the
+neighbor from its *advertised* adjacency list, bumps local topology
+version, broadcasts the update, and runs BFS. Peers that receive the
+update route around the unhealthy link. If the neighbor was the only path
+to some node, `NodeUnreachable` fires.
+
+On `Connected` (a recovered neighbor mux), the mesh marks the session
+healthy again, re-adds the neighbor to the advertised adjacency, bumps
+version, broadcasts, and re-runs BFS. Routes that were previously
+diverted may shift back to the recovered link.
 
 The application still owns the lifetime of the `IStreamMultiplexer`
-passed to `AddNeighbor`. Auto-cleanse does NOT dispose your mux; it just
-detaches mesh state from a peer that's already gone.
+passed to `AddNeighbor`. Health transitions do NOT dispose your mux; the
+mesh merely adjusts routing around it.

@@ -56,14 +56,13 @@ internal sealed class OpenerSession : IAsyncDisposable
 
     private void OnSubMuxDisconnected(object? sender, DisconnectedEventArgs e)
     {
-        // StreamMultiplexer raises Disconnected only for terminal states (transport error,
-        // GoAway received, local dispose). The mux is already tearing itself down — we
-        // MUST NOT fire-and-forget a Task that re-enters _subMux.DisposeAsync() because
-        // that leaks background work past the user's await routed.DisposeAsync() return,
-        // polluting downstream tests. Just release mesh-side state synchronously.
+        // Disconnected fires on every transport death, including transient ones that
+        // the sub-mux will recover from via StreamFactory (route retry). Only clean up
+        // once the sub-mux has stopped running (retries exhausted, GoAway, or disposed).
         if (_disposed) return;
+        if (_subMux!.IsRunning) return;
         _disposed = true;
-        _subMux!.Disconnected -= OnSubMuxDisconnected;
+        _subMux.Disconnected -= OnSubMuxDisconnected;
         _mesh.OnSubMultiplexerClosed();
         _mesh.RemoveOpener(_targetNodeId, _multiplexerId);
     }

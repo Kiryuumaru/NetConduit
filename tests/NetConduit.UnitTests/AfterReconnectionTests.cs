@@ -112,34 +112,31 @@ public sealed class AfterReconnectionTests : IAsyncDisposable
         Assert.Equal(testData, buf);
 
         // Now kill transport and wait for reconnect
-        var reconnectedTcs = new TaskCompletionSource();
-        int connCount = 0;
-        client.Connected += (_, _) =>
-        {
-            if (Interlocked.Increment(ref connCount) >= 1)
-                reconnectedTcs.TrySetResult();
-        };
+        var reconnectedClient = new TaskCompletionSource();
+        var reconnectedServer = new TaskCompletionSource();
+        client.Connected += (_, _) => reconnectedClient.TrySetResult();
+        server.Connected += (_, _) => reconnectedServer.TrySetResult();
         _factory.KillCurrentTransport();
-        await reconnectedTcs.Task.WaitAsync(cts.Token);
+        await Task.WhenAll(
+            reconnectedClient.Task.WaitAsync(cts.Token),
+            reconnectedServer.Task.WaitAsync(cts.Token));
 
         // Write more data after reconnect — it should flow through
         byte[] moreData = [0xCA, 0xFE];
         await wch.WriteAsync(moreData);
 
-        // After reconnect, unACK'd data is replayed first (small payloads never hit
-        // the 25% ACK threshold), then new data follows. Read all and verify new data
-        // is present at the end.
+        // After reconnect, previously-received data is NOT replayed to the reader.
+        // Only new data arrives.
         byte[] all = new byte[64];
         int totalRead = 0;
-        while (totalRead < testData.Length + moreData.Length)
+        while (totalRead < moreData.Length)
         {
             int r = await rch.ReadAsync(all.AsMemory(totalRead), cts.Token);
             if (r == 0) break;
             totalRead += r;
         }
-        // New data appears after replayed data
-        Assert.True(totalRead >= testData.Length + moreData.Length);
-        Assert.Equal(moreData, all.AsSpan(totalRead - moreData.Length, moreData.Length).ToArray());
+        Assert.Equal(moreData.Length, totalRead);
+        Assert.Equal(moreData, all.AsSpan(0, moreData.Length).ToArray());
 
         await client.DisposeAsync();
         await server.DisposeAsync();
@@ -280,30 +277,26 @@ public sealed class AfterReconnectionTests : IAsyncDisposable
         }
 
         // Kill and reconnect
+        var reconnectedServer = new TaskCompletionSource();
         client.Connected += (_, _) => reconnectedClient.TrySetResult();
+        server.Connected += (_, _) => reconnectedServer.TrySetResult();
         _factory.KillCurrentTransport();
-        await reconnectedClient.Task.WaitAsync(cts.Token);
+        await Task.WhenAll(
+            reconnectedClient.Task.WaitAsync(cts.Token),
+            reconnectedServer.Task.WaitAsync(cts.Token));
 
         // Write new data to all channels after reconnect
         for (int i = 0; i < 3; i++)
             await wChannels[i].WriteAsync(new byte[] { (byte)(i + 100) });
 
-        // After reconnect, unACK'd data replays first (1 byte per channel),
-        // then new data follows. Read past replay to find new data.
+        // After reconnect, previously-received data is NOT replayed.
+        // Only new data arrives.
         for (int i = 0; i < 3; i++)
         {
-            byte[] all = new byte[16];
-            int totalRead = 0;
-            // Need at least 2 bytes: 1 replayed + 1 new
-            while (totalRead < 2)
-            {
-                int r = await rChannels[i].ReadAsync(all.AsMemory(totalRead), cts.Token);
-                if (r == 0) break;
-                totalRead += r;
-            }
-            Assert.True(totalRead >= 2);
-            // New data is at the end
-            Assert.Equal((byte)(i + 100), all[totalRead - 1]);
+            byte[] b = new byte[1];
+            int r = await rChannels[i].ReadAsync(b, cts.Token);
+            Assert.Equal(1, r);
+            Assert.Equal((byte)(i + 100), b[0]);
         }
 
         await client.DisposeAsync();

@@ -28,7 +28,11 @@ internal sealed class ReadChannel : Stream, IReadChannel, IValueTaskSource<int>
 
     private int _receivedPos;
     private int _consumedPos;
-    private int _ackSentPos;
+    private long _totalReceived; // total payload bytes ever received (for skip-on-reconnect)
+
+    // Replay skip: on reconnect, the writer replays from position 0.
+    // The reader skips bytes it already received.
+    private long _skipBytes;
 
     // Direct delivery state
     private Memory<byte>? _pendingUserBuffer;
@@ -139,6 +143,7 @@ internal sealed class ReadChannel : Stream, IReadChannel, IValueTaskSource<int>
     internal void MarkDisconnected(DisconnectReason reason, Exception? exception = null)
     {
         _isConnected = false;
+        _skipBytes = _totalReceived;
         Disconnected?.Invoke(this, new DisconnectedEventArgs(reason, exception));
     }
 
@@ -167,7 +172,6 @@ internal sealed class ReadChannel : Stream, IReadChannel, IValueTaskSource<int>
                 _slabMemory.Span.Slice(_consumedPos, toCopy).CopyTo(buffer.Span);
                 _consumedPos += toCopy;
                 Interlocked.Add(ref Stats._bytesReceived, toCopy);
-                MaybeSendAck();
                 return new ValueTask<int>(toCopy);
             }
 
@@ -211,6 +215,17 @@ internal sealed class ReadChannel : Stream, IReadChannel, IValueTaskSource<int>
                 lock (_lock)
                 {
                     if (_state == ChannelState.Closed) break;
+
+                    // Skip replayed bytes we already received before disconnect
+                    if (_skipBytes > 0)
+                    {
+                        int skip = (int)Math.Min(_skipBytes, payload.Length);
+                        _skipBytes -= skip;
+                        payload = payload[skip..];
+                        if (payload.IsEmpty) break;
+                    }
+
+                    _totalReceived += payload.Length;
                     if (!TryDirectDeliver(payload))
                         BufferInSlab(payload);
                 }
@@ -252,7 +267,6 @@ internal sealed class ReadChannel : Stream, IReadChannel, IValueTaskSource<int>
                 BufferInSlab(payload[toCopy..]);
             }
 
-            MaybeSendAck();
             _readCompletion.Core.SetResult(toCopy);
             return true;
         }
@@ -290,21 +304,6 @@ internal sealed class ReadChannel : Stream, IReadChannel, IValueTaskSource<int>
         }
         _receivedPos = remaining;
         _consumedPos = 0;
-        _ackSentPos = Math.Max(0, _ackSentPos - consumed);
-    }
-
-    private void MaybeSendAck()
-    {
-        if (_ackChannel is null) return;
-
-        int consumed = _consumedPos;
-        int delta = consumed - _ackSentPos;
-        // Send ACK when 25%+ of slab capacity has been freed
-        if (delta >= _slabSize / 4)
-        {
-            _ackChannel.WriteAckFrame((uint)consumed);
-            _ackSentPos = consumed;
-        }
     }
 
     /// <summary>

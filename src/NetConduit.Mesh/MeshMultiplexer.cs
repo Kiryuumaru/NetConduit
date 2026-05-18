@@ -211,11 +211,20 @@ public sealed class MeshMultiplexer : IMeshMultiplexer
                     $"Neighbor '{remoteNodeId}' is already registered. Remove it first.");
             }
 
-            // Update local entry: add neighbor, bump version.
+            int sessionVersion = ++_nextSessionVersion;
+            session = new NeighborSession(this, remoteNodeId, mux, remotePoolId, sessionVersion);
+            _neighbors[remoteNodeId] = session;
+
+            // Only advertise this neighbor while it is healthy. If the mux is not yet
+            // connected at AddNeighbor time, we wait for its first Connected event
+            // before bumping our local version (handled by OnNeighborHealthChanged).
             var selfEntry = GetOrCreateSelfEntry();
-            var newNeighbors = new HashSet<string>(selfEntry.Neighbors, StringComparer.Ordinal) { remoteNodeId };
-            _localVersion++;
-            _map.Apply(_options.NodeId, _localVersion, _options.PoolId, newNeighbors.ToArray());
+            if (session.IsHealthy && !selfEntry.Neighbors.Contains(remoteNodeId))
+            {
+                selfEntry.Neighbors.Add(remoteNodeId);
+                _localVersion++;
+                _map.Apply(_options.NodeId, _localVersion, _options.PoolId, selfEntry.Neighbors.ToArray());
+            }
 
             // Seed neighbor with at least a stub entry so it can be picked up by BFS once
             // bidirectional confirmation lands via topology exchange.
@@ -223,10 +232,6 @@ public sealed class MeshMultiplexer : IMeshMultiplexer
             {
                 _map.Apply(remoteNodeId, 0, remotePoolId, Array.Empty<string>());
             }
-
-            int sessionVersion = ++_nextSessionVersion;
-            session = new NeighborSession(this, remoteNodeId, mux, remotePoolId, sessionVersion);
-            _neighbors[remoteNodeId] = session;
 
             RecomputeRoutesUnderLock();
         }
@@ -766,45 +771,64 @@ public sealed class MeshMultiplexer : IMeshMultiplexer
     }
 
     /// <summary>
-    /// T3 — invoked by a <see cref="NeighborSession"/> when its underlying mux reaches a
-    /// terminal disconnect (auto-reconnect exhausted, or never enabled). Drops the neighbor
-    /// from local adjacency without disposing the application-owned mux.
+    /// Called by a <see cref="NeighborSession"/> when its underlying mux raises Connected
+    /// or Disconnected. The neighbor stays registered in <see cref="_neighbors"/> across
+    /// health flips — only the advertised adjacency list excludes unhealthy neighbors so
+    /// BFS routes around them, and the neighbor returns to routable state automatically
+    /// when its underlying mux recovers. Explicit removal remains a user-only action via
+    /// <see cref="RemoveNeighbor"/>.
     /// The <paramref name="sessionVersion"/> check rejects late events from a session that
     /// has already been replaced by a fresh <see cref="AddNeighbor"/> for the same node ID.
     /// </summary>
-    internal void HandleNeighborMuxDead(string remoteNodeId, int sessionVersion)
+    internal void OnNeighborHealthChanged(string remoteNodeId, int sessionVersion, bool healthy)
     {
         if (_isDisposed || _isShuttingDown) return;
 
-        NeighborSession? session;
+        bool changed = false;
         lock (_stateLock)
         {
-            if (!_neighbors.TryGetValue(remoteNodeId, out session))
+            if (!_neighbors.TryGetValue(remoteNodeId, out var session))
             {
                 return;
             }
             if (session.Version != sessionVersion)
             {
-                // Already replaced by a newer session for the same node ID.
                 return;
             }
-            _neighbors.Remove(remoteNodeId);
+            if (session.IsHealthy == healthy)
+            {
+                return;
+            }
+            session.SetHealthy(healthy);
 
             var selfEntry = GetOrCreateSelfEntry();
-            if (selfEntry.Neighbors.Remove(remoteNodeId))
+            bool advertisedPresence = selfEntry.Neighbors.Contains(remoteNodeId);
+            if (healthy && !advertisedPresence)
             {
+                selfEntry.Neighbors.Add(remoteNodeId);
                 _localVersion++;
                 _map.Apply(_options.NodeId, _localVersion, _options.PoolId, selfEntry.Neighbors.ToArray());
+                changed = true;
+            }
+            else if (!healthy && advertisedPresence)
+            {
+                selfEntry.Neighbors.Remove(remoteNodeId);
+                _localVersion++;
+                _map.Apply(_options.NodeId, _localVersion, _options.PoolId, selfEntry.Neighbors.ToArray());
+                changed = true;
             }
 
-            RecomputeRoutesUnderLock();
+            if (changed)
+            {
+                RecomputeRoutesUnderLock();
+            }
         }
 
-        // Dispose mesh-side session state but NOT the application's neighbor mux —
-        // that's still owned by the caller of AddNeighbor.
-        _ = TrackNeighborDisposal(session!);
-        BroadcastLocalTopology();
-        RaiseTopologyChanged();
+        if (changed)
+        {
+            BroadcastLocalTopology();
+            RaiseTopologyChanged();
+        }
     }
 
     internal void BroadcastLocalTopology()

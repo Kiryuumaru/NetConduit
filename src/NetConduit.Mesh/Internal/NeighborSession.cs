@@ -33,17 +33,26 @@ internal sealed class NeighborSession : IAsyncDisposable
     private byte[]? _pendingFrame;
     private TaskCompletionSource? _pendingSignal;
     private volatile bool _disposed;
+    private volatile bool _isHealthy = true;
 
     internal string RemoteNodeId => _remoteNodeId;
     internal IStreamMultiplexer Mux => _mux;
     internal string? RemotePoolId { get; }
 
     /// <summary>
-    /// Monotonic version assigned by the mesh when the session is created. Used by the
-    /// auto-cleanse path so a late <c>Disconnected</c> event from a replaced session does
-    /// not remove its successor.
+    /// Monotonic version assigned by the mesh when the session is created. Used by health
+    /// transitions so a late event from a replaced session does not affect its successor.
     /// </summary>
     internal int Version => _sessionVersion;
+
+    /// <summary>
+    /// True when the underlying neighbor mux is currently connected. The neighbor stays
+    /// registered across health flips; only the advertised adjacency list excludes
+    /// unhealthy neighbors so BFS routes around them.
+    /// </summary>
+    internal bool IsHealthy => _isHealthy;
+
+    internal void SetHealthy(bool healthy) => _isHealthy = healthy;
 
     internal NeighborSession(MeshMultiplexer mesh, string remoteNodeId, IStreamMultiplexer mux, string? remotePoolId, int sessionVersion)
     {
@@ -51,6 +60,7 @@ internal sealed class NeighborSession : IAsyncDisposable
         _remoteNodeId = remoteNodeId;
         _mux = mux;
         _sessionVersion = sessionVersion;
+        _isHealthy = mux.IsConnected;
         RemotePoolId = remotePoolId;
     }
 
@@ -86,16 +96,19 @@ internal sealed class NeighborSession : IAsyncDisposable
 
     private void OnMuxDisconnected(object? sender, DisconnectedEventArgs e)
     {
-        // Don't auto-cleanse if the mux is still trying to reconnect — wait until terminal.
-        // _mux.IsRunning flips to false once auto-reconnect is exhausted or the mux is disposed.
+        // Neighbor registration is sticky — we do NOT remove the neighbor when its
+        // underlying mux drops. Instead we mark the session unhealthy so the mesh
+        // re-advertises its local adjacency without this neighbor, causing peers to
+        // route around it until it comes back. The neighbor's own mux owns its
+        // reconnect strategy; when it recovers we re-mark healthy on Connected.
         if (_disposed) return;
-        if (_mux.IsRunning) return;
-        _mesh.HandleNeighborMuxDead(_remoteNodeId, _sessionVersion);
+        _mesh.OnNeighborHealthChanged(_remoteNodeId, _sessionVersion, healthy: false);
     }
 
     private void OnMuxConnected(object? sender, EventArgs e)
     {
         if (_disposed) return;
+        _mesh.OnNeighborHealthChanged(_remoteNodeId, _sessionVersion, healthy: true);
         // Help the recovered neighbor relearn our adjacency.
         try { SendTopology(_mesh.SnapshotLocalEntries()); } catch { }
     }

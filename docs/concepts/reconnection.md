@@ -6,7 +6,7 @@ If the transport drops, the multiplexer can rebuild the connection and resume tr
 
 | `MaxAutoReconnectAttempts` | Behavior |
 | --- | --- |
-| `-1` (default) | Unlimited reconnect attempts. **Replay buffer enabled**: open channels survive disconnects; unacked bytes are replayed after the reconnect handshake. |
+| `-1` (default) | Unlimited reconnect attempts. **Replay buffer enabled**: open channels survive disconnects; sent bytes are replayed after the reconnect handshake and the reader skips duplicates. |
 | `0` | No reconnect. The first transport failure raises terminal `Disconnected`. **No replay buffer** is allocated for new channels; open channels are torn down with `ChannelCloseReason.TransportFailed`. |
 | `> 0` | Up to N reconnect attempts. **Replay buffer enabled**. After the limit is reached, channels close with `ChannelCloseReason.TransportFailed`. |
 
@@ -57,11 +57,13 @@ Per-channel events mirror this: each open channel fires `Disconnected` then `Con
 
 ## What "replay" means
 
-When `MaxAutoReconnectAttempts > 0`, each open channel keeps a tail of recently sent bytes in its slab. On reconnect:
+When `MaxAutoReconnectAttempts != 0`, each open write channel keeps its entire slab of sent data. On reconnect:
 
-1. Both peers exchange `Ctrl/Reconnect` frames carrying their last-acked positions per channel.
-2. Each side replays anything the other side hasn't acked.
-3. Channels resume from the exact byte where they left off — your `ReadAsync` and `WriteAsync` calls just continue.
+1. Both peers exchange `Ctrl/Reconnect` frames carrying their session IDs.
+2. If the session IDs match, each side replays all data from its write channels.
+3. The receiving side skips any bytes it already received before the disconnect—your `ReadAsync` sees only new data that wasn't delivered before the break.
+
+The skip is transparent: your `ReadAsync` and `WriteAsync` calls just continue as if nothing happened. If data was partially delivered before the disconnect, only the undelivered portion appears after reconnect.
 
 Channels that were not yet `Open` at the moment of disconnect are reopened on the new connection.
 
