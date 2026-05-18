@@ -52,11 +52,9 @@ internal sealed class AcceptorSession : IAsyncDisposable
             PingTimeout = opts.PingTimeout,
             MaxMissedPings = opts.MaxMissedPings,
             GoAwayTimeout = opts.GoAwayTimeout,
-            // T5 — MaxRouteRetries = -1 means "effectively unlimited". We map to
-            // int.MaxValue rather than 0 because StreamMultiplexer treats 0 as
-            // unlimited reconnect attempts BUT also disables channel replay buffering
-            // in that case. Using int.MaxValue keeps replay enabled.
-            MaxAutoReconnectAttempts = opts.MaxRouteRetries < 0 ? int.MaxValue : opts.MaxRouteRetries,
+            // MaxRouteRetries shares the same convention as MaxAutoReconnectAttempts:
+            // -1 = unbounded retries (replay enabled), 0 = no retries, >0 = bounded.
+            MaxAutoReconnectAttempts = opts.MaxRouteRetries,
             ConnectionTimeout = opts.RouteTimeout,
             DefaultChannelOptions = opts.DefaultChannelOptions,
         };
