@@ -296,14 +296,28 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IChannelOwner
                 catch (IOException handshakeEx)
                 {
                     handshakeAttempt++;
-                    int maxAttempts = _options.MaxAutoReconnectAttempts;
+
+                    // Handshake retries are capped independently of MaxAutoReconnectAttempts.
+                    // Rationale: a handshake EOF means the peer's stream closed before any
+                    // bytes flowed. If the StreamFactory returns a fresh transport per call
+                    // (e.g. mesh sub-mux opening a new route), a small bounded retry budget
+                    // is enough to recover from transient race conditions. If the factory
+                    // returns the same already-broken transport, an unbounded retry budget
+                    // (-1) would busy-loop. Cap at MaxHandshakeRetryAttempts to bound both.
+                    const int MaxHandshakeRetryAttempts = 3;
+                    int configuredMax = _options.MaxAutoReconnectAttempts;
+                    int effectiveMax = configuredMax == 0
+                        ? 0
+                        : configuredMax < 0
+                            ? MaxHandshakeRetryAttempts
+                            : Math.Min(configuredMax, MaxHandshakeRetryAttempts);
 
                     _transport = null;
                     try { await transport.DisposeAsync(); } catch { }
 
                     RaiseEvent(Error, new Events.ErrorEventArgs(handshakeEx));
 
-                    if (maxAttempts == 0 || (maxAttempts > 0 && handshakeAttempt >= maxAttempts))
+                    if (effectiveMax == 0 || handshakeAttempt >= effectiveMax)
                         throw;
 
                     // Backoff between handshake retries so we don't busy-loop against a
