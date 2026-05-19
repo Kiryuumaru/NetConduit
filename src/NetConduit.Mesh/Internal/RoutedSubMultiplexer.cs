@@ -33,10 +33,10 @@ internal sealed class RoutedSubMultiplexer : IStreamMultiplexer
 
     private void OnInnerDisconnected(object? sender, DisconnectedEventArgs e)
     {
-        // TransportError is part of the seamless reroute cycle whenever
-        // MaxAutoReconnectAttempts != 0. Forward only terminal reasons so
-        // applications see Disconnected once, at end of life.
-        if (e.Reason == NetConduit.Enums.DisconnectReason.TransportError) return;
+        // Suppress only transient transport drops that the inner mux will
+        // recover from via StreamFactory-driven reroute. Terminal failures
+        // (retry budget exhausted, GoAway, LocalDispose) must reach the app.
+        if (e.Reason == NetConduit.Enums.DisconnectReason.TransportError && e.WillRetry) return;
         Disconnected?.Invoke(this, e);
     }
 
@@ -68,6 +68,7 @@ internal sealed class RoutedSubMultiplexer : IStreamMultiplexer
     public IWriteChannel OpenChannel(ChannelOptions options) => _inner.OpenChannel(options);
     public IReadChannel AcceptChannel(string channelId) => _inner.AcceptChannel(channelId);
     public IAsyncEnumerable<IReadChannel> AcceptChannelsAsync(CancellationToken ct = default) => _inner.AcceptChannelsAsync(ct);
+    public IAsyncEnumerable<IReadChannel> AcceptChannelsAsync(string channelIdPrefix, CancellationToken ct = default) => _inner.AcceptChannelsAsync(channelIdPrefix, ct);
     public IWriteChannel? GetWriteChannel(string channelId) => _inner.GetWriteChannel(channelId);
     public IReadChannel? GetReadChannel(string channelId) => _inner.GetReadChannel(channelId);
     public ValueTask GoAwayAsync(CancellationToken ct = default) => _inner.GoAwayAsync(ct);

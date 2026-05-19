@@ -25,6 +25,19 @@ public sealed class MeshMultiplexer : IMeshMultiplexer
     private readonly HashSet<string> _reachable = new(StringComparer.Ordinal);
     private readonly Dictionary<string, RouteHop> _routes = new(StringComparer.Ordinal);
 
+    // Cached reachability snapshot keyed by remote node ID. Mirrors `_reachable` /
+    // `_routes` but carries the full (node, pool, hopCount) tuple so GetReachable
+    // can serve a race-free snapshot without re-querying the adjacency map.
+    private readonly Dictionary<string, NodeReachableEventArgs> _reachabilityInfo
+        = new(StringComparer.Ordinal);
+
+    // One-shot waiters keyed by node ID. Completed under `_stateLock` whenever a
+    // node transitions to reachable, before the public NodeReachable event fires.
+    // Subscribe-then-check on the event has an inherent gap; waiters parked here
+    // are race-free with respect to the route recompute.
+    private readonly Dictionary<string, List<TaskCompletionSource<NodeReachableEventArgs>>>
+        _reachableWaiters = new(StringComparer.Ordinal);
+
     private readonly ConcurrentDictionary<OpenerKey, OpenerSession> _openers = new();
     private readonly ConcurrentDictionary<AcceptorKey, AcceptorSession> _acceptors = new();
     private readonly Channel<RoutedMultiplexer> _inbox = Channel.CreateUnbounded<RoutedMultiplexer>(
@@ -35,6 +48,13 @@ public sealed class MeshMultiplexer : IMeshMultiplexer
     // the tasks here lets DisposeAsync drain them and lets RemoveNeighborAsync await
     // its own disposal without exposing internal session types.
     private readonly ConcurrentDictionary<Task, byte> _pendingNeighborDisposals = new();
+
+    // In-flight routed-session closes triggered by inner-mux terminal Disconnected
+    // events. The event handler runs synchronously on the publisher thread; the
+    // actual cleanup is async, so the resulting task is parked here and drained on
+    // mesh dispose. Without this, ChurnTests-style open/dispose loops leak relay
+    // teardown work past test boundaries and pollute subsequent tests.
+    private readonly ConcurrentDictionary<Task, byte> _pendingSessionCloses = new();
 
     private readonly TaskCompletionSource _readyTcs = new(TaskCreationOptions.RunContinuationsAsynchronously);
     private readonly CancellationTokenSource _cts = new();
@@ -102,6 +122,64 @@ public sealed class MeshMultiplexer : IMeshMultiplexer
 
     /// <inheritdoc />
     public MeshStats Stats => _stats;
+
+    /// <inheritdoc />
+    public NodeReachableEventArgs? GetReachable(string nodeId)
+    {
+        ArgumentNullException.ThrowIfNull(nodeId);
+        lock (_stateLock)
+        {
+            return _reachabilityInfo.TryGetValue(nodeId, out var info) ? info : null;
+        }
+    }
+
+    /// <inheritdoc />
+    public Task<NodeReachableEventArgs> WaitForReachableAsync(string nodeId, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(nodeId);
+        TaskCompletionSource<NodeReachableEventArgs> tcs;
+        lock (_stateLock)
+        {
+            if (_isDisposed)
+            {
+                return Task.FromException<NodeReachableEventArgs>(
+                    new ObjectDisposedException(nameof(MeshMultiplexer)));
+            }
+            if (_reachabilityInfo.TryGetValue(nodeId, out var info))
+            {
+                return Task.FromResult(info);
+            }
+            tcs = new TaskCompletionSource<NodeReachableEventArgs>(
+                TaskCreationOptions.RunContinuationsAsynchronously);
+            if (!_reachableWaiters.TryGetValue(nodeId, out var list))
+            {
+                list = new List<TaskCompletionSource<NodeReachableEventArgs>>();
+                _reachableWaiters[nodeId] = list;
+            }
+            list.Add(tcs);
+        }
+
+        if (!ct.CanBeCanceled)
+        {
+            return tcs.Task;
+        }
+
+        // Bind cancellation: when the token fires, cancel the TCS so the awaiter
+        // observes OperationCanceledException. Leaving the entry in `_reachableWaiters`
+        // is fine — a stale TCS that has already transitioned to canceled will be
+        // silently ignored when the recompute later signals it.
+        var registration = ct.Register(static state =>
+        {
+            var t = (TaskCompletionSource<NodeReachableEventArgs>)state!;
+            t.TrySetCanceled();
+        }, tcs);
+        return tcs.Task.ContinueWith(static (t, state) =>
+        {
+            ((CancellationTokenRegistration)state!).Dispose();
+            return t.GetAwaiter().GetResult();
+        }, registration, CancellationToken.None,
+           TaskContinuationOptions.ExecuteSynchronously, TaskScheduler.Default);
+    }
 
     /// <inheritdoc />
     public event EventHandler? Ready;
@@ -476,6 +554,26 @@ public sealed class MeshMultiplexer : IMeshMultiplexer
         }
         routeChange.TrySetCanceled();
 
+        // Cancel any pending reachability waiters so awaiters of WaitForReachableAsync
+        // observe shutdown immediately rather than blocking until their token fires.
+        List<TaskCompletionSource<NodeReachableEventArgs>>? waitersToCancel = null;
+        lock (_stateLock)
+        {
+            if (_reachableWaiters.Count > 0)
+            {
+                waitersToCancel = new List<TaskCompletionSource<NodeReachableEventArgs>>();
+                foreach (var list in _reachableWaiters.Values)
+                {
+                    waitersToCancel.AddRange(list);
+                }
+                _reachableWaiters.Clear();
+            }
+        }
+        if (waitersToCancel is not null)
+        {
+            foreach (var tcs in waitersToCancel) tcs.TrySetCanceled();
+        }
+
         foreach (var opener in _openers.Values)
         {
             try { await opener.DisposeAsync().ConfigureAwait(false); } catch { }
@@ -494,6 +592,16 @@ public sealed class MeshMultiplexer : IMeshMultiplexer
         if (pending.Length > 0)
         {
             try { await Task.WhenAll(pending).ConfigureAwait(false); } catch { }
+        }
+
+        // Drain in-flight session closes triggered by inner-mux terminal Disconnected
+        // events. These run async on the threadpool; without explicit draining they
+        // leak past the dispose return boundary and pollute downstream consumers
+        // (subsequent tests, parallel sessions, etc.).
+        var pendingCloses = _pendingSessionCloses.Keys.ToArray();
+        if (pendingCloses.Length > 0)
+        {
+            try { await Task.WhenAll(pendingCloses).ConfigureAwait(false); } catch { }
         }
 
         _cts.Dispose();
@@ -532,10 +640,13 @@ public sealed class MeshMultiplexer : IMeshMultiplexer
         var prevReachable = new HashSet<string>(_reachable, StringComparer.Ordinal);
         _reachable.Clear();
         _routes.Clear();
+        _reachabilityInfo.Clear();
         foreach (var (target, hop) in newRoutes)
         {
             _reachable.Add(target);
             _routes[target] = hop;
+            _reachabilityInfo[target] = new NodeReachableEventArgs(
+                target, snapshot.PoolOf(target), hop.HopCount);
         }
 
         // Pulse waiters every recompute. Even if the externally-visible set didn't
@@ -545,14 +656,14 @@ public sealed class MeshMultiplexer : IMeshMultiplexer
         _routeChange = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         oldChange.TrySetResult();
 
-        var toRaiseReachable = new List<(string node, string? pool, int hops)>();
+        var toRaiseReachable = new List<NodeReachableEventArgs>();
         var toRaiseUnreachable = new List<string>();
 
-        foreach (var (target, hop) in newRoutes)
+        foreach (var (target, _) in newRoutes)
         {
             if (!prevReachable.Contains(target))
             {
-                toRaiseReachable.Add((target, snapshot.PoolOf(target), hop.HopCount));
+                toRaiseReachable.Add(_reachabilityInfo[target]);
             }
         }
         foreach (string old in prevReachable)
@@ -563,15 +674,48 @@ public sealed class MeshMultiplexer : IMeshMultiplexer
             }
         }
 
+        // Drain reachability waiters BEFORE leaving the lock so a freshly-reachable
+        // node's awaiter resolves with the exact snapshot we just installed. Any
+        // node currently in `_reachabilityInfo` (not only first-transitions) wakes
+        // all its waiters: the contract is "complete once reachable", which a node
+        // that was already reachable trivially satisfies.
+        List<(TaskCompletionSource<NodeReachableEventArgs> Tcs, NodeReachableEventArgs Info)>?
+            waitersToSignal = null;
+        if (_reachableWaiters.Count > 0)
+        {
+            foreach (var (node, info) in _reachabilityInfo)
+            {
+                if (_reachableWaiters.TryGetValue(node, out var list))
+                {
+                    waitersToSignal ??= new();
+                    foreach (var tcs in list)
+                    {
+                        waitersToSignal.Add((tcs, info));
+                    }
+                    _reachableWaiters.Remove(node);
+                }
+            }
+        }
+
+        if (waitersToSignal is not null)
+        {
+            // Resolve outside the lock-critical event-raising path so handler
+            // continuations don't hold _stateLock.
+            foreach (var (tcs, info) in waitersToSignal)
+            {
+                tcs.TrySetResult(info);
+            }
+        }
+
         // Defer event raising to outside the lock via Task.Run-style enqueue.
         if (toRaiseReachable.Count > 0 || toRaiseUnreachable.Count > 0)
         {
             ThreadPool.UnsafeQueueUserWorkItem(static state =>
             {
                 var (self, reachable, unreachable) = state;
-                foreach (var (node, pool, hops) in reachable)
+                foreach (var info in reachable)
                 {
-                    self.RaiseEvent(self.NodeReachable, new NodeReachableEventArgs(node, pool, hops));
+                    self.RaiseEvent(self.NodeReachable, info);
                 }
                 foreach (var node in unreachable)
                 {
@@ -914,6 +1058,23 @@ public sealed class MeshMultiplexer : IMeshMultiplexer
     internal void RemoveAcceptor(string sourceNodeId, string multiplexerId)
     {
         _acceptors.TryRemove(new AcceptorKey(sourceNodeId, multiplexerId), out _);
+    }
+
+    /// <summary>
+    /// Register an in-flight routed-session close task so <see cref="DisposeAsync"/>
+    /// can drain it. The continuation removes the task once it completes so the
+    /// collection stays bounded to currently-running closes.
+    /// </summary>
+    internal void TrackSessionClose(Task closeTask)
+    {
+        if (closeTask.IsCompleted) return;
+        _pendingSessionCloses.TryAdd(closeTask, 0);
+        _ = closeTask.ContinueWith(static (t, state) =>
+        {
+            var dict = (ConcurrentDictionary<Task, byte>)state!;
+            dict.TryRemove(t, out _);
+        }, _pendingSessionCloses, CancellationToken.None,
+           TaskContinuationOptions.ExecuteSynchronously, TaskScheduler.Default);
     }
 
     internal void OnRouteFailed()

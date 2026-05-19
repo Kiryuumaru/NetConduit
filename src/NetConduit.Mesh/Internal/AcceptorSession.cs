@@ -1,34 +1,25 @@
 using System.Threading.Channels;
 using NetConduit;
-using NetConduit.Enums;
-using NetConduit.Events;
 using NetConduit.Interfaces;
 using NetConduit.Models;
 
 namespace NetConduit.Mesh.Internal;
 
 /// <summary>
-/// Remote-side routed sub-multiplexer (acceptor). Waits for an inbound route pair to arrive
-/// from the dispatcher, then constructs a StreamMultiplexer whose StreamFactory yields the
-/// next available pair (initial + reroutes).
+/// Remote-side routed sub-multiplexer (acceptor). Buffers inbound route pairs from
+/// the mesh dispatcher; the inner StreamMultiplexer's StreamFactory drains them
+/// one at a time across initial connect and subsequent reroute cycles.
 /// </summary>
-internal sealed class AcceptorSession : IAsyncDisposable
+internal sealed class AcceptorSession : RoutedSessionBase
 {
-    private readonly MeshMultiplexer _mesh;
     private readonly string _sourceNodeId;
     private readonly string _multiplexerId;
     private readonly Channel<(IReadChannel Reader, IWriteChannel Writer)> _incoming;
-
-    private StreamMultiplexer? _subMux;
-    private RoutedSubMultiplexer? _userFacing;
     private volatile bool _explicit;
-    private volatile bool _disposed;
-
-    internal IStreamMultiplexer? SubMultiplexer => _userFacing;
 
     internal AcceptorSession(MeshMultiplexer mesh, string sourceNodeId, string multiplexerId, bool isExplicit)
+        : base(mesh)
     {
-        _mesh = mesh;
         _sourceNodeId = sourceNodeId;
         _multiplexerId = multiplexerId;
         _explicit = isExplicit;
@@ -38,16 +29,14 @@ internal sealed class AcceptorSession : IAsyncDisposable
 
     internal void MarkExplicit() => _explicit = true;
 
-    internal void Construct()
+    /// <inheritdoc />
+    protected override MultiplexerOptions BuildMultiplexerOptions()
     {
-        if (_subMux is not null) return;
-
-        var sessionId = DeterministicSessionId.Compute(_mesh.NodeId, _sourceNodeId, _multiplexerId);
-        var opts = _mesh.Options;
-
-        var muxOptions = new MultiplexerOptions
+        var sessionId = DeterministicSessionId.Compute(Mesh.NodeId, _sourceNodeId, _multiplexerId);
+        var opts = Mesh.Options;
+        return new MultiplexerOptions
         {
-            StreamFactory = (ct) => CreateRouteStreamAsync(ct),
+            StreamFactory = CreateRouteStreamAsync,
             SessionId = sessionId,
             DefaultSlabSize = opts.DefaultSlabSize,
             PingInterval = opts.PingInterval,
@@ -60,45 +49,50 @@ internal sealed class AcceptorSession : IAsyncDisposable
             ConnectionTimeout = opts.RouteTimeout,
             DefaultChannelOptions = opts.DefaultChannelOptions,
         };
-
-        _subMux = StreamMultiplexer.Create(muxOptions);
-        _subMux.Disconnected += OnSubMuxDisconnected;
-        _userFacing = new RoutedSubMultiplexer(_subMux);
-        _subMux.Start();
-        _mesh.OnSubMultiplexerOpened();
     }
 
-    private void OnSubMuxDisconnected(object? sender, DisconnectedEventArgs e)
+    /// <inheritdoc />
+    protected override void OnConstructed() => Mesh.OnSubMultiplexerOpened();
+
+    /// <inheritdoc />
+    protected override void RemoveFromMesh()
+        => Mesh.RemoveAcceptor(_sourceNodeId, _multiplexerId);
+
+    /// <inheritdoc />
+    protected override async ValueTask OnClosingAsync()
     {
-        // Disconnected fires on every transport death, including transient ones that
-        // the sub-mux will recover from via StreamFactory (route retry). Terminal reasons
-        // (GoAwayReceived, LocalDispose) must always release state — IsRunning may still
-        // be true at the moment the event fires for a remote-initiated GoAway. Transient
-        // TransportError is only treated as terminal once retries are exhausted
-        // (IsRunning flips to false).
-        if (_disposed) return;
-        if (e.Reason == DisconnectReason.TransportError && _subMux!.IsRunning) return;
-        _disposed = true;
+        // Reject further inbound pairs and drain anything still buffered.
         _incoming.Writer.TryComplete();
-        _subMux!.Disconnected -= OnSubMuxDisconnected;
-        _mesh.OnSubMultiplexerClosed();
-        _mesh.RemoveAcceptor(_sourceNodeId, _multiplexerId);
+        while (_incoming.Reader.TryRead(out var pair))
+        {
+            try { await pair.Reader.DisposeAsync().ConfigureAwait(false); } catch { }
+            try { await pair.Writer.DisposeAsync().ConfigureAwait(false); } catch { }
+        }
     }
 
+    /// <summary>
+    /// Wait for the next route pair from the dispatcher and hand it to the inner
+    /// StreamMultiplexer as a fresh transport. The inner mux already applies
+    /// <c>ConnectionTimeout</c> (= <c>RouteTimeout</c>) to the token it passes here,
+    /// so no second timer is needed: per-call cancellation is bounded by the inner,
+    /// and pair-readiness uses the same token. This avoids the stale-CTS hazard of
+    /// applying a method-scoped timer that conflates "wait for next pair" with
+    /// "wait for that pair to handshake".
+    /// </summary>
     private async Task<IStreamPair> CreateRouteStreamAsync(CancellationToken ct)
     {
-        using var linked = CancellationTokenSource.CreateLinkedTokenSource(ct, _mesh.ShutdownToken);
-        linked.CancelAfter(_mesh.Options.RouteTimeout);
+        using var linked = CancellationTokenSource.CreateLinkedTokenSource(ct, Mesh.ShutdownToken);
+        var token = linked.Token;
 
         try
         {
-            while (await _incoming.Reader.WaitToReadAsync(linked.Token).ConfigureAwait(false))
+            while (await _incoming.Reader.WaitToReadAsync(token).ConfigureAwait(false))
             {
                 if (_incoming.Reader.TryRead(out var pair))
                 {
                     await Task.WhenAll(
-                        pair.Reader.WaitForReadyAsync(linked.Token),
-                        pair.Writer.WaitForReadyAsync(linked.Token)).ConfigureAwait(false);
+                        pair.Reader.WaitForReadyAsync(token),
+                        pair.Writer.WaitForReadyAsync(token)).ConfigureAwait(false);
                     return new StreamPair(pair.Reader.AsStream(), pair.Writer.AsStream(),
                         new ChannelPairOwner(pair.Reader, pair.Writer));
                 }
@@ -108,21 +102,21 @@ internal sealed class AcceptorSession : IAsyncDisposable
         {
         }
 
-        _mesh.OnRouteFailed();
+        Mesh.OnRouteFailed();
         throw new MeshRoutingException(_sourceNodeId,
             $"No incoming route from '{_sourceNodeId}' within RouteTimeout.");
     }
 
     internal async Task OnIncomingRouteAsync(IReadChannel reader, IWriteChannel writer, ChannelWriter<RoutedMultiplexer> inbox)
     {
-        if (_disposed)
+        if (IsClosed)
         {
             try { await reader.DisposeAsync().ConfigureAwait(false); } catch { }
             try { await writer.DisposeAsync().ConfigureAwait(false); } catch { }
             return;
         }
 
-        bool firstArrival = _subMux is null;
+        bool firstArrival = Inner is null;
         if (firstArrival)
         {
             Construct();
@@ -138,37 +132,7 @@ internal sealed class AcceptorSession : IAsyncDisposable
         if (firstArrival && !_explicit)
         {
             // Emit via AcceptMultiplexersAsync exactly once per acceptor.
-            inbox.TryWrite(new RoutedMultiplexer(_sourceNodeId, _multiplexerId, _userFacing!));
-        }
-    }
-
-    internal async Task GoAwayAsync(CancellationToken ct)
-    {
-        if (_subMux is not null)
-        {
-            try { await _subMux.GoAwayAsync(ct).ConfigureAwait(false); } catch { }
-        }
-    }
-
-    public async ValueTask DisposeAsync()
-    {
-        if (_disposed) return;
-        _disposed = true;
-        _incoming.Writer.TryComplete();
-
-        // Drain any unprocessed pairs.
-        while (_incoming.Reader.TryRead(out var pair))
-        {
-            try { await pair.Reader.DisposeAsync().ConfigureAwait(false); } catch { }
-            try { await pair.Writer.DisposeAsync().ConfigureAwait(false); } catch { }
-        }
-
-        if (_subMux is not null)
-        {
-            _subMux.Disconnected -= OnSubMuxDisconnected;
-            try { await _subMux.DisposeAsync().ConfigureAwait(false); } catch { }
-            _mesh.OnSubMultiplexerClosed();
-            _mesh.RemoveAcceptor(_sourceNodeId, _multiplexerId);
+            inbox.TryWrite(new RoutedMultiplexer(_sourceNodeId, _multiplexerId, UserFacing!));
         }
     }
 }

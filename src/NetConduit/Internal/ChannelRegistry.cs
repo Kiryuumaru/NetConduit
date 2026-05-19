@@ -18,6 +18,29 @@ internal sealed class ChannelRegistry
     private readonly ConcurrentDictionary<string, ReadChannel> _pendingAcceptChannels = new();
     private readonly Channel<ReadChannel> _acceptQueue = Channel.CreateUnbounded<ReadChannel>();
 
+    // Prefix-routed accept subscriptions. When EnqueueForAccept sees a channel
+    // whose id starts with a registered prefix, it routes the channel to that
+    // subscription's queue instead of the default _acceptQueue. This lets an
+    // overlay (e.g. mesh) cleanly multiplex on a host application's mux without
+    // stealing application channels. Subscriptions are checked in registration
+    // order; longest-prefix-first ordering is the caller's responsibility (the
+    // mesh registers exactly one prefix, "_mesh:", so ordering does not matter
+    // in practice today).
+    private readonly object _prefixSubscriptionsLock = new();
+    private readonly List<PrefixSubscription> _prefixSubscriptions = new();
+
+    private sealed class PrefixSubscription
+    {
+        internal string Prefix { get; }
+        internal Channel<ReadChannel> Queue { get; }
+
+        internal PrefixSubscription(string prefix)
+        {
+            Prefix = prefix;
+            Queue = Channel.CreateUnbounded<ReadChannel>();
+        }
+    }
+
     /// <summary>
     /// Serializes the compound "register pending + read existing" sequences in
     /// AcceptChannel against the reader's "adopt pending + register read channel"
@@ -130,7 +153,22 @@ internal sealed class ChannelRegistry
             tcs.TrySetResult(channel);
             return;
         }
-        // Otherwise queue for generic AcceptChannelsAsync
+
+        // Prefix-routed subscription wins over the default queue. Lookups are
+        // O(N) over registered prefixes; N is expected to be tiny (1-2 overlays).
+        lock (_prefixSubscriptionsLock)
+        {
+            foreach (var sub in _prefixSubscriptions)
+            {
+                if (channel.ChannelId.StartsWith(sub.Prefix, StringComparison.Ordinal))
+                {
+                    sub.Queue.Writer.TryWrite(channel);
+                    return;
+                }
+            }
+        }
+
+        // Default: queue for generic AcceptChannelsAsync
         _acceptQueue.Writer.TryWrite(channel);
     }
 
@@ -166,6 +204,36 @@ internal sealed class ChannelRegistry
         return _acceptQueue.Reader.ReadAllAsync(ct);
     }
 
+    /// <summary>
+    /// Register (or reuse) a prefix-routed subscription. Returns the
+    /// <see cref="IAsyncEnumerable{T}"/> that drains channels whose id starts
+    /// with <paramref name="prefix"/>. Channels in flight at registration time
+    /// that have already been enqueued to the default queue are not retroactively
+    /// re-routed; register the subscription before any channel of the prefix
+    /// is expected to arrive.
+    /// </summary>
+    internal IAsyncEnumerable<ReadChannel> AcceptChannelsAsync(string prefix, CancellationToken ct)
+    {
+        if (string.IsNullOrEmpty(prefix))
+        {
+            throw new ArgumentException("Prefix must be non-empty.", nameof(prefix));
+        }
+
+        PrefixSubscription sub;
+        lock (_prefixSubscriptionsLock)
+        {
+            // Reuse existing registration so repeated enumeration of the same
+            // prefix from the same multiplexer instance shares a single queue.
+            sub = _prefixSubscriptions.FirstOrDefault(s => s.Prefix == prefix)
+                ?? new PrefixSubscription(prefix);
+            if (!_prefixSubscriptions.Contains(sub))
+            {
+                _prefixSubscriptions.Add(sub);
+            }
+        }
+        return sub.Queue.Reader.ReadAllAsync(ct);
+    }
+
     internal void CancelAllPendingAccepts()
     {
         foreach (var kvp in _pendingAccepts)
@@ -174,6 +242,14 @@ internal sealed class ChannelRegistry
         }
         _pendingAccepts.Clear();
         _acceptQueue.Writer.TryComplete();
+        lock (_prefixSubscriptionsLock)
+        {
+            foreach (var sub in _prefixSubscriptions)
+            {
+                sub.Queue.Writer.TryComplete();
+            }
+            _prefixSubscriptions.Clear();
+        }
     }
 
     internal void AbortAllChannels(ChannelCloseReason reason, Exception? exception = null)

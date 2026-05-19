@@ -32,6 +32,22 @@ public interface IMeshMultiplexer : IAsyncDisposable
     /// <summary>Mesh statistics.</summary>
     MeshStats Stats { get; }
 
+    /// <summary>
+    /// Snapshot the current reachability of <paramref name="nodeId"/>. Returns the
+    /// node's <see cref="NodeReachableEventArgs"/> (with pool and hop count) if
+    /// reachable, or <c>null</c> if not. Race-free with respect to concurrent route
+    /// recomputes: the snapshot reflects exactly one routing state.
+    /// </summary>
+    NodeReachableEventArgs? GetReachable(string nodeId);
+
+    /// <summary>
+    /// Wait until <paramref name="nodeId"/> is reachable through the mesh and return
+    /// the reachability snapshot at that moment. Race-free: if the node is already
+    /// reachable at call time, returns immediately; otherwise the waiter is parked
+    /// inside the route-recompute critical section so no transition is missed.
+    /// </summary>
+    Task<NodeReachableEventArgs> WaitForReachableAsync(string nodeId, CancellationToken ct = default);
+
     /// <summary>Raised once when the mesh first becomes ready.</summary>
     event EventHandler? Ready;
 

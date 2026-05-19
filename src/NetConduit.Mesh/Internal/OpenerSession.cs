@@ -1,43 +1,34 @@
 using NetConduit;
-using NetConduit.Enums;
-using NetConduit.Events;
 using NetConduit.Interfaces;
 using NetConduit.Models;
 
 namespace NetConduit.Mesh.Internal;
 
 /// <summary>
-/// Local-side routed sub-multiplexer (opener). Holds the StreamMultiplexer instance
-/// whose StreamFactory runs BFS, opens route channels on the chosen next-hop neighbor mux,
+/// Local-side routed sub-multiplexer (opener). The inner StreamMultiplexer's
+/// StreamFactory runs BFS, opens route channels on the chosen next-hop neighbor mux,
 /// and returns the channel pair as a StreamPair.
 /// </summary>
-internal sealed class OpenerSession : IAsyncDisposable
+internal sealed class OpenerSession : RoutedSessionBase
 {
-    private readonly MeshMultiplexer _mesh;
     private readonly string _targetNodeId;
     private readonly string _multiplexerId;
-    private StreamMultiplexer? _subMux;
-    private RoutedSubMultiplexer? _userFacing;
-    private volatile bool _disposed;
 
     internal OpenerSession(MeshMultiplexer mesh, string targetNodeId, string multiplexerId)
+        : base(mesh)
     {
-        _mesh = mesh;
         _targetNodeId = targetNodeId;
         _multiplexerId = multiplexerId;
     }
 
-    internal IStreamMultiplexer SubMultiplexer
-        => _userFacing ?? throw new InvalidOperationException("Sub-mux not constructed.");
-
-    internal void Construct()
+    /// <inheritdoc />
+    protected override MultiplexerOptions BuildMultiplexerOptions()
     {
-        var sessionId = DeterministicSessionId.Compute(_mesh.NodeId, _targetNodeId, _multiplexerId);
-        var opts = _mesh.Options;
-
-        var muxOptions = new MultiplexerOptions
+        var sessionId = DeterministicSessionId.Compute(Mesh.NodeId, _targetNodeId, _multiplexerId);
+        var opts = Mesh.Options;
+        return new MultiplexerOptions
         {
-            StreamFactory = (ct) => CreateRouteStreamAsync(ct),
+            StreamFactory = CreateRouteStreamAsync,
             SessionId = sessionId,
             DefaultSlabSize = opts.DefaultSlabSize,
             PingInterval = opts.PingInterval,
@@ -50,32 +41,15 @@ internal sealed class OpenerSession : IAsyncDisposable
             ConnectionTimeout = opts.RouteTimeout,
             DefaultChannelOptions = opts.DefaultChannelOptions,
         };
-
-        _subMux = StreamMultiplexer.Create(muxOptions);
-        _subMux.Disconnected += OnSubMuxDisconnected;
-        _userFacing = new RoutedSubMultiplexer(_subMux);
-        _subMux.Start();
     }
 
-    private void OnSubMuxDisconnected(object? sender, DisconnectedEventArgs e)
-    {
-        // Disconnected fires on every transport death, including transient ones that
-        // the sub-mux will recover from via StreamFactory (route retry). Terminal reasons
-        // (GoAwayReceived, LocalDispose) must always release state — IsRunning may still
-        // be true at the moment the event fires for a remote-initiated GoAway. Transient
-        // TransportError is only treated as terminal once retries are exhausted
-        // (IsRunning flips to false).
-        if (_disposed) return;
-        if (e.Reason == DisconnectReason.TransportError && _subMux!.IsRunning) return;
-        _disposed = true;
-        _subMux!.Disconnected -= OnSubMuxDisconnected;
-        _mesh.OnSubMultiplexerClosed();
-        _mesh.RemoveOpener(_targetNodeId, _multiplexerId);
-    }
+    /// <inheritdoc />
+    protected override void RemoveFromMesh()
+        => Mesh.RemoveOpener(_targetNodeId, _multiplexerId);
 
     private async Task<IStreamPair> CreateRouteStreamAsync(CancellationToken ct)
     {
-        var linked = CancellationTokenSource.CreateLinkedTokenSource(ct, _mesh.ShutdownToken);
+        var linked = CancellationTokenSource.CreateLinkedTokenSource(ct, Mesh.ShutdownToken);
         try
         {
             return await OpenRouteAsync(linked.Token).ConfigureAwait(false);
@@ -88,27 +62,27 @@ internal sealed class OpenerSession : IAsyncDisposable
 
     private async Task<IStreamPair> OpenRouteAsync(CancellationToken ct)
     {
-        var deadline = DateTime.UtcNow + _mesh.Options.RouteTimeout;
+        var deadline = DateTime.UtcNow + Mesh.Options.RouteTimeout;
         Exception? lastError = null;
 
         while (!ct.IsCancellationRequested && DateTime.UtcNow < deadline)
         {
             // Snapshot the route version BEFORE we read the route table so we can
             // detect a recompute that lands while we're trying to open.
-            long versionSeen = _mesh.CurrentRouteVersion;
+            long versionSeen = Mesh.CurrentRouteVersion;
 
             bool openAttempted = false;
-            if (_mesh.TryGetRoute(_targetNodeId, out string nextHop, out _) &&
-                _mesh.TryGetNeighbor(nextHop, out var nextHopSession))
+            if (Mesh.TryGetRoute(_targetNodeId, out string nextHop, out _) &&
+                Mesh.TryGetNeighbor(nextHop, out var nextHopSession))
             {
                 openAttempted = true;
-                long nonce = _mesh.NextNonce();
+                long nonce = Mesh.NextNonce();
                 string outboundId = MeshChannelNaming.BuildOutboundRoute(
-                    _targetNodeId, _mesh.NodeId, _multiplexerId, nonce);
+                    _targetNodeId, Mesh.NodeId, _multiplexerId, nonce);
                 string inboundId = MeshChannelNaming.BuildInboundRoute(
-                    _targetNodeId, _mesh.NodeId, _multiplexerId, nonce);
+                    _targetNodeId, Mesh.NodeId, _multiplexerId, nonce);
 
-                var slot = _mesh.Options.DefaultChannelOptions;
+                var slot = Mesh.Options.DefaultChannelOptions;
                 IWriteChannel? writer = null;
                 IReadChannel? reader = null;
                 try
@@ -126,7 +100,7 @@ internal sealed class OpenerSession : IAsyncDisposable
                         writer.WaitForReadyAsync(ct),
                         reader.WaitForReadyAsync(ct)).ConfigureAwait(false);
 
-                    _mesh.OnRouteSucceeded();
+                    Mesh.OnRouteSucceeded();
                     return new StreamPair(reader.AsStream(), writer.AsStream(),
                         new ChannelPairOwner(reader, writer));
                 }
@@ -164,7 +138,7 @@ internal sealed class OpenerSession : IAsyncDisposable
             waitCts.CancelAfter(remaining);
             try
             {
-                await _mesh.WaitForRouteChangeAsync(versionSeen, waitCts.Token).ConfigureAwait(false);
+                await Mesh.WaitForRouteChangeAsync(versionSeen, waitCts.Token).ConfigureAwait(false);
             }
             catch (OperationCanceledException) when (ct.IsCancellationRequested)
             {
@@ -177,30 +151,9 @@ internal sealed class OpenerSession : IAsyncDisposable
             }
         }
 
-        _mesh.OnRouteFailed();
+        Mesh.OnRouteFailed();
         throw new MeshRoutingException(_targetNodeId,
             $"No route to '{_targetNodeId}' within RouteTimeout.", lastError ?? new TimeoutException());
-    }
-
-    internal async Task GoAwayAsync(CancellationToken ct)
-    {
-        if (_subMux is not null)
-        {
-            try { await _subMux.GoAwayAsync(ct).ConfigureAwait(false); } catch { }
-        }
-    }
-
-    public async ValueTask DisposeAsync()
-    {
-        if (_disposed) return;
-        _disposed = true;
-        if (_subMux is not null)
-        {
-            _subMux.Disconnected -= OnSubMuxDisconnected;
-            try { await _subMux.DisposeAsync().ConfigureAwait(false); } catch { }
-            _mesh.OnSubMultiplexerClosed();
-            _mesh.RemoveOpener(_targetNodeId, _multiplexerId);
-        }
     }
 }
 

@@ -233,14 +233,11 @@ internal sealed class NeighborSession : IAsyncDisposable
     {
         try
         {
-            await foreach (var inbound in _mux.AcceptChannelsAsync(ct).ConfigureAwait(false))
+            await foreach (var inbound in _mux.AcceptChannelsAsync(MeshChannelNaming.Prefix, ct).ConfigureAwait(false))
             {
-                if (!MeshChannelNaming.IsReserved(inbound.ChannelId))
-                {
-                    // Not a mesh channel — ignore (caller handles application channels).
-                    continue;
-                }
-
+                // Prefix-filtered subscription guarantees every channel here starts with
+                // "_mesh:" — application channels stay queued on the default reader for
+                // the host. We still validate sub-prefix to drop malformed mesh traffic.
                 if (inbound.ChannelId.StartsWith(MeshChannelNaming.TopologyFromPrefix, StringComparison.Ordinal))
                 {
                     // Topology channels are already set up via AcceptChannel; not handled in this loop.
