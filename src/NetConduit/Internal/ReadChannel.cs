@@ -28,11 +28,17 @@ internal sealed class ReadChannel : Stream, IReadChannel, IValueTaskSource<int>
 
     private int _receivedPos;
     private int _consumedPos;
-    private long _totalReceived; // total payload bytes ever received (for skip-on-reconnect)
 
-    // Replay skip: on reconnect, the writer replays from position 0.
-    // The reader skips bytes it already received.
-    private long _skipBytes;
+    // Cumulative frame bytes (FrameHeader.Size + payload.Length) ever received,
+    // counted post-skip. Mirrors the writer's slab position so an ACK that
+    // reports this value can be applied directly as a slab position.
+    private long _frameBytesReceived;
+    private long _ackSentFrameBytes;
+
+    // Replay skip: on reconnect, the writer replays from its last ACKed slab
+    // position. The reader skips the frame bytes that arrived after the last
+    // ACK so it doesn't re-deliver them to the user.
+    private long _skipFrameBytes;
 
     // Direct delivery state
     private Memory<byte>? _pendingUserBuffer;
@@ -143,7 +149,10 @@ internal sealed class ReadChannel : Stream, IReadChannel, IValueTaskSource<int>
     internal void MarkDisconnected(DisconnectReason reason, Exception? exception = null)
     {
         _isConnected = false;
-        _skipBytes = _totalReceived;
+        // Frames received but never acknowledged will be replayed by the writer
+        // when it reconnects. Skip exactly those frame bytes so the user sees
+        // each payload exactly once.
+        _skipFrameBytes = _frameBytesReceived - _ackSentFrameBytes;
         Disconnected?.Invoke(this, new DisconnectedEventArgs(reason, exception));
     }
 
@@ -177,6 +186,12 @@ internal sealed class ReadChannel : Stream, IReadChannel, IValueTaskSource<int>
 
             if (_state == ChannelState.Closed)
                 return new ValueTask<int>(0); // EOF
+
+            // Reader caught up to the writer with no buffered data: a natural
+            // moment to flush any sub-threshold ACK so the writer's slab can
+            // compact while we park, instead of pinning unacked bytes until
+            // the next burst trips the receive-side threshold.
+            MaybeSendAck();
 
             // Slow path: register for direct delivery
             _pendingUserBuffer = buffer;
@@ -216,18 +231,27 @@ internal sealed class ReadChannel : Stream, IReadChannel, IValueTaskSource<int>
                 {
                     if (_state == ChannelState.Closed) break;
 
-                    // Skip replayed bytes we already received before disconnect
-                    if (_skipBytes > 0)
+                    int frameBytes = FrameHeader.Size + payload.Length;
+
+                    // Skip whole frames that were already received before the
+                    // last disconnect; the writer is replaying them now.
+                    if (_skipFrameBytes > 0)
                     {
-                        int skip = (int)Math.Min(_skipBytes, payload.Length);
-                        _skipBytes -= skip;
-                        payload = payload[skip..];
-                        if (payload.IsEmpty) break;
+                        if (_skipFrameBytes >= frameBytes)
+                        {
+                            _skipFrameBytes -= frameBytes;
+                            break;
+                        }
+                        // Misaligned skip should never happen with frame-granular ACKs.
+                        throw new MultiplexerException(
+                            ErrorCode.ProtocolError,
+                            "Replay skip is not aligned to a frame boundary.");
                     }
 
-                    _totalReceived += payload.Length;
+                    _frameBytesReceived += frameBytes;
                     if (!TryDirectDeliver(payload))
                         BufferInSlab(payload);
+                    MaybeSendAck();
                 }
                 break;
 
@@ -304,6 +328,23 @@ internal sealed class ReadChannel : Stream, IReadChannel, IValueTaskSource<int>
         }
         _receivedPos = remaining;
         _consumedPos = 0;
+    }
+
+    // Send an ACK when the cumulative unacked frame bytes cross 1/16 of the
+    // slab. The reported value is cumulative frame bytes received, which
+    // matches the writer's slab position exactly so OnAck can apply it as a
+    // monotonic position without any unit conversion. Called from the
+    // receive path on every Data frame and from ReadAsync's slow path when
+    // the reader catches up: same gate, no duplicate policy.
+    private void MaybeSendAck()
+    {
+        if (_owner is null) return;
+        long delta = _frameBytesReceived - _ackSentFrameBytes;
+        if (delta >= _slabSize / 16)
+        {
+            _owner.SendAck(_channelIndex, (uint)_frameBytesReceived);
+            _ackSentFrameBytes = _frameBytesReceived;
+        }
     }
 
     /// <summary>
