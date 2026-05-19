@@ -217,40 +217,44 @@ public static class QuicMultiplexer
 
         ArgumentNullException.ThrowIfNull(listener);
 
-        var accepted = false;
+        // 0 = idle, 1 = accepting, 2 = accepted
+        var state = 0;
         return new MultiplexerOptions
         {
             StreamFactory = async ct =>
             {
-                if (accepted)
+                var prev = Interlocked.CompareExchange(ref state, 1, 0);
+                if (prev == 2)
                 {
                     throw new InvalidOperationException(
                         "Server-side QUIC multiplexer does not support reconnection. " +
                         "Accept another connection from the listener to create a new multiplexer.");
                 }
+                if (prev == 1)
+                {
+                    throw new InvalidOperationException(
+                        "Server-side QUIC multiplexer is already accepting a connection.");
+                }
 
-                accepted = true;
-
-                var connection = await listener.AcceptConnectionAsync(ct).ConfigureAwait(false);
+                QuicConnection? connection = null;
+                QuicStream? stream = null;
                 try
                 {
-                    var stream = await connection.AcceptInboundStreamAsync(ct).ConfigureAwait(false);
-                    try
-                    {
-                        var preface = new byte[1];
-                        _ = await stream.ReadAsync(preface, ct).ConfigureAwait(false);
+                    connection = await listener.AcceptConnectionAsync(ct).ConfigureAwait(false);
+                    stream = await connection.AcceptInboundStreamAsync(ct).ConfigureAwait(false);
+                    var preface = new byte[1];
+                    _ = await stream.ReadAsync(preface, ct).ConfigureAwait(false);
 
-                        return new StreamPair(stream, stream, connection);
-                    }
-                    catch
-                    {
-                        await stream.DisposeAsync().ConfigureAwait(false);
-                        throw;
-                    }
+                    Interlocked.Exchange(ref state, 2);
+                    return new StreamPair(stream, stream, connection);
                 }
                 catch
                 {
-                    await connection.DisposeAsync().ConfigureAwait(false);
+                    Interlocked.CompareExchange(ref state, 0, 1);
+                    if (stream is not null)
+                        await stream.DisposeAsync().ConfigureAwait(false);
+                    if (connection is not null)
+                        await connection.DisposeAsync().ConfigureAwait(false);
                     throw;
                 }
             }
