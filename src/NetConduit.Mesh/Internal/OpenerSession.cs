@@ -93,7 +93,7 @@ internal sealed class OpenerSession : IAsyncDisposable
 
         while (!ct.IsCancellationRequested && DateTime.UtcNow < deadline)
         {
-            // T0 — snapshot the route version BEFORE we read the route table so we can
+            // Snapshot the route version BEFORE we read the route table so we can
             // detect a recompute that lands while we're trying to open.
             long versionSeen = _mesh.CurrentRouteVersion;
 
@@ -157,8 +157,9 @@ internal sealed class OpenerSession : IAsyncDisposable
                 continue;
             }
 
-            // T0 — no route. Wait for the route table to change, bounded by the remaining
-            // deadline. This replaces the previous 50ms busy-poll for the "no route" case.
+            // No route: wait for the route table to change, bounded by the remaining
+            // deadline. Event-driven so we wake immediately on recompute instead of
+            // busy-polling.
             using var waitCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
             waitCts.CancelAfter(remaining);
             try

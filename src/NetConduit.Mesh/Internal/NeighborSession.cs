@@ -24,7 +24,7 @@ internal sealed class NeighborSession : IAsyncDisposable
     private IWriteChannel? _topologyWriter;
     private IReadChannel? _topologyReader;
 
-    // T6 — track fire-and-forget inbound route handlers so DisposeAsync can drain them.
+    // Track fire-and-forget inbound route handlers so DisposeAsync can drain them.
     // Without this, a routed sub-mux's relay/dispatch loop survives past the session's
     // own teardown, leaking background work past test end.
     private readonly System.Collections.Concurrent.ConcurrentDictionary<Task, byte> _pendingHandlers = new();
@@ -373,7 +373,7 @@ internal sealed class NeighborSession : IAsyncDisposable
             try { await _topologyWriteTask.ConfigureAwait(false); } catch { }
         }
 
-        // T6 — drain inbound route handlers so they don't leak past session disposal.
+        // Drain inbound route handlers so they don't leak past session disposal.
         var pending = _pendingHandlers.Keys.ToArray();
         if (pending.Length > 0)
         {
