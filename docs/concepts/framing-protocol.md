@@ -36,7 +36,7 @@ Limits (internal `FrameConstants` in `NetConduit.Constants`):
 | `0x00` | `Data` | Channel payload bytes. |
 | `0x01` | `Init` | Open channel. Payload is the UTF-8 channel ID. |
 | `0x02` | `Fin` | Close channel gracefully. No payload. |
-| `0x03` | `Ack` | Acknowledge received bytes. Payload is a 4-byte position. |
+| `0x03` | `Ack` | Acknowledge received bytes. Payload is an 8-byte position. |
 | `0x04` | `Err` | Channel error. Payload is `errorCode (u16)` + UTF-8 message. |
 | `0x05` | `Ping` | Keepalive request. Payload is an 8-byte timestamp. |
 | `0x06` | `Pong` | Keepalive response. Payload echoes the timestamp. |
@@ -72,7 +72,7 @@ On reconnect, the `Ctrl/Reconnect` exchange verifies session ID continuity. If t
 
 ## Flow control
 
-`Ack` frames carry a per-channel cumulative byte position (4 bytes, big-endian). The initial `Ack` (position 0) sent on channel creation confirms the channel is open. Runtime `Ack` frames can advance the write-side compaction pointer to free slab space; however, when reconnection replay is enabled, the writer retains all sent data for replay and slab compaction relies on successful acknowledgement. See [Backpressure](backpressure.md).
+`Ack` frames carry a per-channel cumulative byte position (8 bytes, big-endian). The initial `Ack` (position 0) sent on channel creation confirms the channel is open. Runtime `Ack` frames can advance the write-side compaction pointer to free slab space; however, when reconnection replay is enabled, the writer retains all sent data for replay and slab compaction relies on successful acknowledgement. See [Backpressure](backpressure.md).
 
 ## Errors
 

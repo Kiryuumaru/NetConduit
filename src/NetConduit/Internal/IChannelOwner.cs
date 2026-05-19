@@ -21,5 +21,5 @@ internal interface IChannelOwner
     /// Used by ReadChannel to inform the remote WriteChannel how far the consumer
     /// has consumed, so PrepareReplay on reconnect skips already-delivered bytes.
     /// </summary>
-    void SendAck(ushort channelIndex, uint consumedPosition);
+    void SendAck(ushort channelIndex, ulong consumedPosition);
 }

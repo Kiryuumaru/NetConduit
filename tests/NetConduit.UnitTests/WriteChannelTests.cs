@@ -16,7 +16,7 @@ public sealed class WriteChannelTests
         }
 
         public void NotifyChannelCompleted(ushort channelIndex, string channelId) { }
-        public void SendAck(ushort channelIndex, uint consumedPosition) { }
+        public void SendAck(ushort channelIndex, ulong consumedPosition) { }
     }
 
     private static WriteChannel CreateChannel(TestRouter? router = null, int slabSize = 64 * 1024)
@@ -144,7 +144,7 @@ public sealed class WriteChannelTests
     }
 
     [Fact]
-    public void WriteAckFrame_Builds4BytePayload()
+    public void WriteAckFrame_Builds8BytePayload()
     {
         var channel = CreateChannel();
 
@@ -153,7 +153,28 @@ public sealed class WriteChannelTests
         var ready = channel.TakeReady();
         var header = FrameHeader.Parse(ready.Span);
         Assert.Equal(FrameFlags.Ack, header.Flags);
-        Assert.Equal(4, header.PayloadLength);
+        Assert.Equal(8, header.PayloadLength);
+    }
+
+    [Fact]
+    public void WriteAckFrame_RoundTripsPositionAboveUInt32Max()
+    {
+        // Cumulative ACK positions are 64-bit so that a long-running channel
+        // does not deadlock once it has received more than 2 GiB. Encode a
+        // value above uint.MaxValue and assert the wire payload preserves it.
+        var channel = CreateChannel();
+        const ulong position = (ulong)uint.MaxValue + 12345UL;
+
+        channel.WriteAckFrame(position);
+
+        var ready = channel.TakeReady();
+        var header = FrameHeader.Parse(ready.Span);
+        Assert.Equal(FrameFlags.Ack, header.Flags);
+        Assert.Equal(8, header.PayloadLength);
+
+        ulong decoded = System.Buffers.Binary.BinaryPrimitives.ReadUInt64BigEndian(
+            ready.Span.Slice(FrameHeader.Size, 8));
+        Assert.Equal(position, decoded);
     }
 
     [Fact]
