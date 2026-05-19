@@ -70,4 +70,18 @@ public class UdpMultiplexerTests
         Assert.Equal(testData.Length, totalRead);
         Assert.Equal(testData, buffer);
     }
+
+    [Fact(Timeout = 30000)]
+    public async Task ClientFactory_ThrowsTimeoutException_WhenNoServerAcksHello()
+    {
+        int port = GetAvailablePort();
+        var clientOptions = UdpMultiplexer.CreateOptions("::1", port);
+
+        using var ctorCts = new CancellationTokenSource(TimeSpan.FromSeconds(20));
+
+        await Assert.ThrowsAsync<TimeoutException>(async () =>
+        {
+            await clientOptions.StreamFactory!(ctorCts.Token);
+        });
+    }
 }

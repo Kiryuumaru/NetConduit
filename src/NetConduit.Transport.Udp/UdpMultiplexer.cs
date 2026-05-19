@@ -38,7 +38,7 @@ public static class UdpMultiplexer
                     client.Client.DualMode = true;
                     await client.Client.ConnectAsync(host, port, ct).ConfigureAwait(false);
                     await client.SendAsync(HelloPayload, ct).ConfigureAwait(false);
-                    await TryReceiveHelloAckAsync(client, ct).ConfigureAwait(false);
+                    await ReceiveHelloAckAsync(client, ct).ConfigureAwait(false);
 
                     var reliable = new ReliableUdpStream(client, udpOptions);
                     return new StreamPair(reliable);
@@ -104,7 +104,7 @@ public static class UdpMultiplexer
         };
     }
 
-    private static async Task TryReceiveHelloAckAsync(UdpClient client, CancellationToken cancellationToken)
+    private static async Task ReceiveHelloAckAsync(UdpClient client, CancellationToken cancellationToken)
     {
         const int maxRetries = 20;
         const int retryDelayMs = 200;
@@ -131,5 +131,8 @@ public static class UdpMultiplexer
                 await client.SendAsync(HelloPayload, cancellationToken).ConfigureAwait(false);
             }
         }
+
+        throw new TimeoutException(
+            $"UDP transport did not receive NC_HELLO_ACK from the remote endpoint after {maxRetries} attempts.");
     }
 }
