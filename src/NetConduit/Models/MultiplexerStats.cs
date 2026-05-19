@@ -29,6 +29,6 @@ public sealed class MultiplexerStats
 
     /// <summary>Time since the multiplexer started.</summary>
     public TimeSpan Uptime => _startTicks > 0
-        ? TimeSpan.FromTicks(Environment.TickCount64 - _startTicks)
+        ? TimeSpan.FromMilliseconds(Environment.TickCount64 - _startTicks)
         : TimeSpan.Zero;
 }
