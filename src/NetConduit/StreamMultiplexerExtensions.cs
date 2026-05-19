@@ -14,7 +14,18 @@ public static class StreamMultiplexerExtensions
     /// </summary>
     public static IWriteChannel OpenChannel(
         this IStreamMultiplexer mux, string channelId)
-        => mux.OpenChannel(new ChannelOptions { ChannelId = channelId });
+    {
+        ArgumentNullException.ThrowIfNull(mux);
+
+        var defaults = mux.Options.DefaultChannelOptions;
+        return mux.OpenChannel(new ChannelOptions
+        {
+            ChannelId = channelId,
+            Priority = defaults.Priority,
+            SlabSize = defaults.SlabSize,
+            SendTimeout = defaults.SendTimeout,
+        });
+    }
 
     /// <summary>
     /// Open a new outbound channel and wait until it is ready.

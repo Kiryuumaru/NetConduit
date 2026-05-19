@@ -52,16 +52,14 @@ public sealed class InputValidationTests
     }
 
     [Fact]
-    public async Task OpenChannel_EmptyId_Allowed()
+    public async Task OpenChannel_EmptyId_Throws()
     {
         var (client, server) = CreatePair();
         client.Start();
         server.Start();
         await Task.WhenAll(client.WaitForReadyAsync(), server.WaitForReadyAsync());
 
-        // Empty string channel IDs are allowed by the API
-        var ch = client.OpenChannel("");
-        Assert.Equal("", ch.ChannelId);
+        Assert.Throws<ArgumentException>(() => client.OpenChannel(""));
 
         await client.DisposeAsync();
         await server.DisposeAsync();
@@ -104,6 +102,20 @@ public sealed class InputValidationTests
     }
 
     [Fact]
+    public async Task AcceptChannel_EmptyId_Throws()
+    {
+        var (client, server) = CreatePair();
+        client.Start();
+        server.Start();
+        await Task.WhenAll(client.WaitForReadyAsync(), server.WaitForReadyAsync());
+
+        Assert.Throws<ArgumentException>(() => server.AcceptChannel(""));
+
+        await client.DisposeAsync();
+        await server.DisposeAsync();
+    }
+
+    [Fact]
     public async Task OpenChannel_VeryLongId_HandledCorrectly()
     {
         var (client, server) = CreatePair();
@@ -120,6 +132,96 @@ public sealed class InputValidationTests
 
         Assert.Equal(longId, ch.ChannelId);
         Assert.Equal(longId, readCh.ChannelId);
+
+        await client.DisposeAsync();
+        await server.DisposeAsync();
+    }
+
+    [Fact]
+    public async Task OpenChannel_MaxUtf8Id_IsAccepted()
+    {
+        var (client, server) = CreatePair();
+        client.Start();
+        server.Start();
+        await Task.WhenAll(client.WaitForReadyAsync(), server.WaitForReadyAsync());
+
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(120));
+
+        string maxId = new('x', 1024);
+        var ch = client.OpenChannel(maxId);
+        var readCh = await server.AcceptChannelAsync(maxId, cts.Token);
+
+        Assert.Equal(maxId, ch.ChannelId);
+        Assert.Equal(maxId, readCh.ChannelId);
+
+        await client.DisposeAsync();
+        await server.DisposeAsync();
+    }
+
+    [Fact]
+    public async Task OpenChannel_OverMaxUtf8Id_Throws()
+    {
+        var (client, server) = CreatePair();
+        client.Start();
+        server.Start();
+        await Task.WhenAll(client.WaitForReadyAsync(), server.WaitForReadyAsync());
+
+        string overMaxId = new('x', 1025);
+
+        Assert.Throws<ArgumentException>(() => client.OpenChannel(overMaxId));
+
+        await client.DisposeAsync();
+        await server.DisposeAsync();
+    }
+
+    [Fact]
+    public async Task OpenChannel_OverMaxUnicodeUtf8Id_Throws()
+    {
+        var (client, server) = CreatePair();
+        client.Start();
+        server.Start();
+        await Task.WhenAll(client.WaitForReadyAsync(), server.WaitForReadyAsync());
+
+        string overMaxId = string.Concat(Enumerable.Repeat("🚀", 257));
+
+        Assert.Throws<ArgumentException>(() => client.OpenChannel(overMaxId));
+
+        await client.DisposeAsync();
+        await server.DisposeAsync();
+    }
+
+    [Fact]
+    public async Task OpenChannel_InvalidId_DoesNotRegisterOrIncrementStats()
+    {
+        var (client, server) = CreatePair();
+        client.Start();
+        server.Start();
+        await Task.WhenAll(client.WaitForReadyAsync(), server.WaitForReadyAsync());
+
+        string overMaxId = new('x', 1025);
+
+        Assert.Throws<ArgumentException>(() => client.OpenChannel(overMaxId));
+
+        Assert.Empty(client.ActiveChannelIds);
+        Assert.Equal(0, client.ActiveChannelCount);
+        Assert.Equal(0, client.Stats.OpenChannels);
+        Assert.Equal(0, client.Stats.TotalChannelsOpened);
+
+        await client.DisposeAsync();
+        await server.DisposeAsync();
+    }
+
+    [Fact]
+    public async Task AcceptChannel_OverMaxUtf8Id_Throws()
+    {
+        var (client, server) = CreatePair();
+        client.Start();
+        server.Start();
+        await Task.WhenAll(client.WaitForReadyAsync(), server.WaitForReadyAsync());
+
+        string overMaxId = new('x', 1025);
+
+        Assert.Throws<ArgumentException>(() => server.AcceptChannel(overMaxId));
 
         await client.DisposeAsync();
         await server.DisposeAsync();
