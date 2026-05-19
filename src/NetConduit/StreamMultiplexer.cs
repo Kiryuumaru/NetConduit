@@ -188,7 +188,6 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IChannelOwner
 
         Interlocked.Increment(ref _stats._openChannels);
         Interlocked.Increment(ref _stats._totalChannelsOpened);
-        RaiseEvent(ChannelOpened, new ChannelEventArgs(options.ChannelId));
 
         return channel;
     }
@@ -550,6 +549,14 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IChannelOwner
                 _readyChannels.Add(channel);
         }
         _readySignal.Signal();
+    }
+
+    void IChannelOwner.NotifyChannelOpened(string channelId)
+    {
+        // Only raise the public event for user-registered write channels —
+        // the internal control channel is not part of the registry.
+        if (_registry.GetWriteChannelById(channelId) is null) return;
+        RaiseEvent(ChannelOpened, new ChannelEventArgs(channelId));
     }
 
     void IChannelOwner.NotifyChannelCompleted(ushort channelIndex, string channelId)
