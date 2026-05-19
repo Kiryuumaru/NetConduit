@@ -19,6 +19,8 @@ internal sealed class ReadChannel : Stream, IReadChannel, IValueTaskSource<int>
     private readonly Memory<byte> _slabMemory;
     private ushort _channelIndex;
     private readonly int _slabSize;
+    private readonly int _ackThresholdHigh;  // 25% of slab — used on the receive path to batch ACKs
+    private readonly int _ackThresholdLow;   // 6.25% of slab — used when reader drains to empty
     private readonly object _lock = new();
     private readonly TaskCompletionSource _readyTcs = new(TaskCreationOptions.RunContinuationsAsynchronously);
     private readonly IChannelOwner? _owner;
@@ -120,6 +122,8 @@ internal sealed class ReadChannel : Stream, IReadChannel, IValueTaskSource<int>
         _channelIndex = channelIndex;
         Priority = priority;
         _slabSize = slabSize;
+        _ackThresholdHigh = slabSize / 4;
+        _ackThresholdLow = slabSize / 16;
         _owner = owner;
 
         _slab = ArrayPool<byte>.Shared.Rent(slabSize);
@@ -187,6 +191,12 @@ internal sealed class ReadChannel : Stream, IReadChannel, IValueTaskSource<int>
             if (_state == ChannelState.Closed)
                 return new ValueTask<int>(0); // EOF
 
+            // Reader has caught up to the writer: nothing buffered locally.
+            // Use the low ACK threshold before parking so the writer can
+            // compact its slab even when traffic hasn't crossed the high
+            // threshold yet.
+            TrySendAck(_ackThresholdLow);
+
             // Slow path: register for direct delivery
             _pendingUserBuffer = buffer;
             _readCompletion.Core.Reset();
@@ -245,7 +255,7 @@ internal sealed class ReadChannel : Stream, IReadChannel, IValueTaskSource<int>
                     _frameBytesReceived += frameBytes;
                     if (!TryDirectDeliver(payload))
                         BufferInSlab(payload);
-                    MaybeSendAck();
+                    TrySendAck(_ackThresholdHigh);
                 }
                 break;
 
@@ -324,15 +334,14 @@ internal sealed class ReadChannel : Stream, IReadChannel, IValueTaskSource<int>
         _consumedPos = 0;
     }
 
-    // Send an ACK once at least 25% of the slab has been received since the
-    // last ACK. The reported value is cumulative frame bytes received, which
-    // matches the writer's slab position exactly so OnAck can apply it as a
-    // monotonic position without any unit conversion.
-    private void MaybeSendAck()
+    // Single ACK dispatch: sends a cumulative frame-bytes-received position
+    // to the writer when the unacked delta meets the given threshold. Two
+    // thresholds exist (_ackThresholdHigh and _ackThresholdLow) to balance
+    // ACK frequency against slab-pinning risk at different call sites.
+    private void TrySendAck(int threshold)
     {
         if (_owner is null) return;
-        long delta = _frameBytesReceived - _ackSentFrameBytes;
-        if (delta >= _slabSize / 4)
+        if (_frameBytesReceived - _ackSentFrameBytes >= threshold)
         {
             _owner.SendAck(_channelIndex, (uint)_frameBytesReceived);
             _ackSentFrameBytes = _frameBytesReceived;

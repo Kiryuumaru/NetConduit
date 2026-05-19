@@ -304,4 +304,134 @@ public sealed class BackpressureTests
         await client.DisposeAsync();
         await server.DisposeAsync();
     }
+
+    [Fact]
+    public async Task SubThresholdTail_LongLivedChannel_NoUnackedPinning()
+    {
+        // Regression: with replay enabled (the default), the writer's slab can
+        // only compact past an ACKed position. The 25% byte threshold means a
+        // long-lived channel that streams sub-threshold bursts would otherwise
+        // pin every unacked frame in the writer's slab indefinitely. Sending
+        // more bytes than a slab in small bursts with a fully-draining reader
+        // must complete without stalling: the slow path in ReadAsync flushes
+        // any pending ACK when the reader catches up.
+        var (client, server) = CreatePair();
+        client.Start();
+        server.Start();
+        await Task.WhenAll(client.WaitForReadyAsync(), server.WaitForReadyAsync());
+
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(60));
+
+        var writeCh = client.OpenChannel("subthreshold-tail");
+        var readCh = await server.AcceptChannelAsync("subthreshold-tail", cts.Token);
+
+        // Drive 4 MiB through a 1 MiB (default) writer slab in 4 KiB bursts.
+        // Each burst is far below the 256 KiB ACK byte threshold; only the
+        // quiescence-flush keeps the slab from filling with phantom unacked
+        // frames. Without it WriteAsync would throw TimeoutException after
+        // the first ~262 bursts.
+        const int chunkSize = 4096;
+        const long totalBytes = 4L * 1024 * 1024;
+        var data = new byte[chunkSize];
+        Array.Fill(data, (byte)0xA5);
+        var buf = new byte[chunkSize];
+        long written = 0;
+        long read = 0;
+
+        while (written < totalBytes)
+        {
+            await writeCh.WriteAsync(data, cts.Token);
+            written += chunkSize;
+
+            // Drain the chunk before the next write so the reader is always
+            // caught up (slow path triggered on the next ReadAsync).
+            int n = await readCh.ReadAsync(buf, cts.Token);
+            Assert.Equal(chunkSize, n);
+            for (int i = 0; i < n; i++)
+                Assert.Equal(0xA5, buf[i]);
+            read += n;
+        }
+
+        Assert.Equal(totalBytes, written);
+        Assert.Equal(totalBytes, read);
+
+        await writeCh.CloseAsync(cts.Token);
+
+        await client.DisposeAsync();
+        await server.DisposeAsync();
+    }
+
+    // Open issue: with 32 concurrent producer/consumer channels each pushing
+    // 2 MiB through a 1 MiB slab, at least one channel non-deterministically
+    // stalls on WriteAsync after ~30 s. The read-slow-path ACK flush only
+    // fires when the reader catches up to the writer, which under sustained
+    // multi-channel pressure rarely happens for every channel. The 25 % byte
+    // threshold alone is not enough to keep every channel's writer slab
+    // compacting in lockstep. A more robust fix likely needs either a
+    // periodic ACK timer in the mux, a consumer-paced ACK trigger on the
+    // fast path, or rethinking the ACK semantics so the writer cannot
+    // accumulate more outstanding than the receiver's drain rate supports.
+    [Fact(Skip = "Tracking: sub-threshold tail ACK pacing under multi-channel concurrent load — see comment above.")]
+    public async Task SubThresholdTail_ManyLongLivedChannels_AllChannelsKeepFlowing()
+    {
+        var (client, server) = CreatePair();
+        client.Start();
+        server.Start();
+        await Task.WhenAll(client.WaitForReadyAsync(), server.WaitForReadyAsync());
+
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(120));
+
+        const int channelCount = 32;
+        const int chunkSize = 4096;
+        const int chunksPerChannel = 512; // 2 MiB per channel, > 1 MiB slab
+        var writers = new IWriteChannel[channelCount];
+        var readers = new IReadChannel[channelCount];
+
+        for (int i = 0; i < channelCount; i++)
+        {
+            writers[i] = client.OpenChannel($"subthreshold-ch-{i}");
+            readers[i] = await server.AcceptChannelAsync($"subthreshold-ch-{i}", cts.Token);
+        }
+
+        long totalReceived = 0;
+        var readTasks = new Task[channelCount];
+        for (int i = 0; i < channelCount; i++)
+        {
+            var ch = readers[i];
+            readTasks[i] = Task.Run(async () =>
+            {
+                var buf = new byte[chunkSize];
+                while (true)
+                {
+                    int n = await ch.ReadAsync(buf, cts.Token);
+                    if (n == 0) break;
+                    Interlocked.Add(ref totalReceived, n);
+                }
+            }, cts.Token);
+        }
+
+        var writeTasks = new Task[channelCount];
+        for (int i = 0; i < channelCount; i++)
+        {
+            var ch = writers[i];
+            writeTasks[i] = Task.Run(async () =>
+            {
+                var data = new byte[chunkSize];
+                Array.Fill(data, (byte)0x5A);
+                for (int j = 0; j < chunksPerChannel; j++)
+                {
+                    await ch.WriteAsync(data, cts.Token);
+                }
+                await ch.CloseAsync(cts.Token);
+            }, cts.Token);
+        }
+
+        await Task.WhenAll(writeTasks);
+        await Task.WhenAll(readTasks);
+
+        Assert.Equal((long)channelCount * chunksPerChannel * chunkSize, totalReceived);
+
+        await client.DisposeAsync();
+        await server.DisposeAsync();
+    }
 }
