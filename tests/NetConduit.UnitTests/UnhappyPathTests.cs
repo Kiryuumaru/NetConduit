@@ -1,4 +1,5 @@
 using System.Text.Json;
+using NetConduit.Constants;
 using NetConduit.Internal;
 using Xunit;
 
@@ -348,6 +349,117 @@ public sealed class UnhappyPathTests
 
         // Should propagate NullReferenceException (handshake fails on null transport)
         await Assert.ThrowsAnyAsync<Exception>(() => mux.WaitForReadyAsync());
+
+        await mux.DisposeAsync();
+    }
+
+    [Fact]
+    public async Task HandshakeTransportFailure_WithBoundedRetries_ExhaustsConfiguredAttempts()
+    {
+        int attempts = 0;
+        var mux = StreamMultiplexer.Create(new MultiplexerOptions
+        {
+            StreamFactory = _ =>
+            {
+                Interlocked.Increment(ref attempts);
+                return Task.FromResult<IStreamPair>(new StaticReadStreamPair(ReadOnlyMemory<byte>.Empty));
+            },
+            MaxAutoReconnectAttempts = 2,
+            AutoReconnectDelay = TimeSpan.FromMilliseconds(1),
+            PingInterval = TimeSpan.Zero,
+        });
+        mux.Start();
+
+        var ex = await Assert.ThrowsAsync<HandshakeTransportException>(() => mux.WaitForReadyAsync());
+        Assert.IsType<EndOfStreamException>(ex.InnerException);
+        Assert.Equal(2, attempts);
+
+        await mux.DisposeAsync();
+    }
+
+    [Fact]
+    public async Task HandshakeTransportFailure_WithUnboundedRetries_EventuallySucceeds()
+    {
+        int attempts = 0;
+        var duplex = new DuplexMemoryStream();
+        var client = StreamMultiplexer.Create(new MultiplexerOptions
+        {
+            StreamFactory = _ =>
+            {
+                int current = Interlocked.Increment(ref attempts);
+                IStreamPair pair = current <= 4
+                    ? new StaticReadStreamPair(ReadOnlyMemory<byte>.Empty)
+                    : duplex.SideA;
+                return Task.FromResult(pair);
+            },
+            MaxAutoReconnectAttempts = -1,
+            AutoReconnectDelay = TimeSpan.FromMilliseconds(1),
+            PingInterval = TimeSpan.Zero,
+        });
+        var server = StreamMultiplexer.Create(new MultiplexerOptions
+        {
+            StreamFactory = _ => Task.FromResult<IStreamPair>(duplex.SideB),
+            PingInterval = TimeSpan.Zero,
+        });
+        client.Start();
+        server.Start();
+
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+        await Task.WhenAll(client.WaitForReadyAsync(cts.Token), server.WaitForReadyAsync(cts.Token));
+        Assert.Equal(5, attempts);
+
+        await client.DisposeAsync();
+        await server.DisposeAsync();
+    }
+
+    [Fact]
+    public async Task HandshakeProtocolError_DoesNotRetry()
+    {
+        int attempts = 0;
+        byte[] invalidHandshake = new byte[24];
+        var mux = StreamMultiplexer.Create(new MultiplexerOptions
+        {
+            StreamFactory = _ =>
+            {
+                Interlocked.Increment(ref attempts);
+                return Task.FromResult<IStreamPair>(new StaticReadStreamPair(invalidHandshake));
+            },
+            MaxAutoReconnectAttempts = -1,
+            AutoReconnectDelay = TimeSpan.FromMilliseconds(1),
+            PingInterval = TimeSpan.Zero,
+        });
+        mux.Start();
+
+        var ex = await Assert.ThrowsAsync<MultiplexerException>(() => mux.WaitForReadyAsync());
+        Assert.Equal(ErrorCode.ProtocolError, ex.ErrorCode);
+        Assert.Equal(1, attempts);
+
+        await mux.DisposeAsync();
+    }
+
+    [Fact]
+    public async Task InitialHandshake_AcceptsReconnectFrameFromPeerThatAlreadyCompletedSession()
+    {
+        int attempts = 0;
+        Guid remoteSessionId = Guid.NewGuid();
+        byte[] reconnectHandshake = BuildReconnectHandshakeFrame(remoteSessionId);
+        var mux = StreamMultiplexer.Create(new MultiplexerOptions
+        {
+            StreamFactory = _ =>
+            {
+                Interlocked.Increment(ref attempts);
+                return Task.FromResult<IStreamPair>(new StaticReadStreamPair(reconnectHandshake));
+            },
+            MaxAutoReconnectAttempts = 0,
+            PingInterval = TimeSpan.Zero,
+        });
+        mux.Start();
+
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+        await mux.WaitForReadyAsync(cts.Token);
+
+        Assert.Equal(remoteSessionId, mux.RemoteSessionId);
+        Assert.Equal(1, attempts);
 
         await mux.DisposeAsync();
     }
@@ -849,5 +961,27 @@ public sealed class UnhappyPathTests
     }
 
     #endregion
+
+    private sealed class StaticReadStreamPair(ReadOnlyMemory<byte> readBytes) : IStreamPair
+    {
+        public Stream ReadStream { get; } = new MemoryStream(readBytes.ToArray(), writable: false);
+
+        public Stream WriteStream { get; } = Stream.Null;
+
+        public ValueTask DisposeAsync()
+        {
+            ReadStream.Dispose();
+            return ValueTask.CompletedTask;
+        }
+    }
+
+    private static byte[] BuildReconnectHandshakeFrame(Guid sessionId)
+    {
+        byte[] frame = new byte[FrameHeader.Size + 17];
+        FrameHeader.WriteTo(frame, ChannelConstants.ControlChannel, FrameFlags.Ctrl, 17);
+        frame[FrameHeader.Size] = CtrlSubtype.Reconnect;
+        sessionId.TryWriteBytes(frame.AsSpan(FrameHeader.Size + 1, 16));
+        return frame;
+    }
 }
 

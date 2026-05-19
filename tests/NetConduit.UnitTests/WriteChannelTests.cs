@@ -16,6 +16,7 @@ public sealed class WriteChannelTests
         }
 
         public void NotifyChannelCompleted(ushort channelIndex, string channelId) { }
+        public void SendAck(ushort channelIndex, uint consumedPosition) { }
     }
 
     private static WriteChannel CreateChannel(TestRouter? router = null, int slabSize = 64 * 1024)

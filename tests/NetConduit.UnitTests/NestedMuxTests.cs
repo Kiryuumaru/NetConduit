@@ -49,10 +49,12 @@ public sealed class NestedMuxTests
         var inner1 = StreamMultiplexer.Create(new MultiplexerOptions
         {
             StreamFactory = _ => Task.FromResult<IStreamPair>(transport1),
+            MaxAutoReconnectAttempts = 0,
         });
         var inner2 = StreamMultiplexer.Create(new MultiplexerOptions
         {
             StreamFactory = _ => Task.FromResult<IStreamPair>(transport2),
+            MaxAutoReconnectAttempts = 0,
         });
         return (inner1, inner2);
     }

@@ -34,6 +34,7 @@ internal sealed class WriteChannel : Stream, IWriteChannel
     private int _sentPos;
     private int _pendingPos;
     private int _writePos;
+    private long _compactionOffset; // cumulative bytes compacted away (converts global ACK to slab-relative)
     private bool _routerReading; // true between TakeReady and MarkSent — blocks compaction
     private int _completionNotified; // CAS guard: ensures NotifyChannelCompleted fires exactly once
     private int _slabReturned; // CAS guard: ensures slab is returned to pool exactly once
@@ -295,7 +296,9 @@ internal sealed class WriteChannel : Stream, IWriteChannel
     {
         lock (_posLock)
         {
-            _ackedPos = ackedPosition;
+            int slabRelative = (int)((long)ackedPosition - _compactionOffset);
+            if (slabRelative > _ackedPos)
+                _ackedPos = slabRelative;
         }
         // First ACK from remote confirms channel is open
         if (!_isReady)
@@ -400,6 +403,7 @@ internal sealed class WriteChannel : Stream, IWriteChannel
             _slab.AsSpan(acked, unackedLength).CopyTo(_slab.AsSpan(0, unackedLength));
         }
 
+        _compactionOffset += acked;
         _sentPos -= acked;
         _pendingPos -= acked;
         _writePos -= acked;

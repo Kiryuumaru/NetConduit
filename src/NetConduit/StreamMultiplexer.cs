@@ -17,6 +17,9 @@ namespace NetConduit;
 /// </summary>
 public sealed class StreamMultiplexer : IStreamMultiplexer, IChannelOwner
 {
+    private const int InitialHandshakePayloadLength = 16;
+    private const int ReconnectHandshakePayloadLength = 17;
+
     private readonly MultiplexerOptions _options;
     private readonly ChannelRegistry _registry;
     private readonly MultiplexerStats _stats = new();
@@ -256,6 +259,7 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IChannelOwner
     private async Task MainLoopAsync(CancellationToken ct)
     {
         bool hasConnectedBefore = false;
+        int handshakeAttempt = 0;
 
         try
         {
@@ -264,19 +268,53 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IChannelOwner
                 // Connect with retry (no delay on first attempt)
                 var transport = await ConnectWithRetryAsync(hasConnectedBefore, ct);
 
-                // Handshake: reconnect if we've connected before, initial otherwise
-                if (hasConnectedBefore)
+                // Handshake: reconnect if we've connected before, initial otherwise.
+                // Only transport I/O failures raised by the handshake path are retryable.
+                // Protocol errors, session mismatches, and timeouts fail fast because they
+                // indicate a configuration or peer fault, not route churn.
+                try
                 {
-                    await PerformReconnectHandshakeAsync(transport, ct);
+                    if (hasConnectedBefore)
+                    {
+                        await PerformReconnectHandshakeAsync(transport, ct);
 
-                    foreach (var ch in _registry.GetAllWriteChannels())
-                        ch.PrepareReplay();
+                        foreach (var ch in _registry.GetAllWriteChannels())
+                            ch.PrepareReplay();
+                    }
+                    else
+                    {
+                        _transport = transport;
+                        await PerformHandshakeAsync(ct);
+                    }
                 }
-                else
+                catch (OperationCanceledException) when (ct.IsCancellationRequested)
                 {
-                    _transport = transport;
-                    await PerformHandshakeAsync(ct);
+                    throw;
                 }
+                catch (HandshakeTransportException handshakeEx)
+                {
+                    handshakeAttempt++;
+                    _transport = null;
+                    try { await transport.DisposeAsync(); } catch { }
+
+                    RaiseEvent(Error, new Events.ErrorEventArgs(handshakeEx));
+
+                    if (!HasHandshakeRetryBudget(handshakeAttempt))
+                        throw;
+
+                    try
+                    {
+                        await Task.Delay(_options.AutoReconnectDelay, ct);
+                    }
+                    catch (OperationCanceledException) when (ct.IsCancellationRequested)
+                    {
+                        throw;
+                    }
+
+                    continue;
+                }
+
+                handshakeAttempt = 0;
 
                 _transport = transport;
                 _isConnected = true;
@@ -389,6 +427,12 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IChannelOwner
             // Fatal error (protocol error, exhausted retries) — notify waiters
             _readyTcs.TrySetException(ex);
         }
+    }
+
+    private bool HasHandshakeRetryBudget(int failedAttempts)
+    {
+        int maxAttempts = _options.MaxAutoReconnectAttempts;
+        return maxAttempts < 0 || failedAttempts < maxAttempts;
     }
 
     private async Task<IStreamPair> ConnectWithRetryAsync(bool isReconnect, CancellationToken ct)
@@ -834,27 +878,56 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IChannelOwner
         _controlChannel.WriteRawFrame(frame);
     }
 
+    void IChannelOwner.SendAck(ushort channelIndex, uint consumedPosition)
+    {
+        if (_controlChannel is null) return;
+
+        byte[] frame = new byte[FrameHeader.Size + 4];
+        FrameHeader.WriteTo(frame, channelIndex, FrameFlags.Ack, 4);
+        BinaryPrimitives.WriteUInt32BigEndian(frame.AsSpan(FrameHeader.Size, 4), consumedPosition);
+        _controlChannel.WriteRawFrame(frame);
+    }
+
     private async Task PerformHandshakeAsync(CancellationToken ct)
     {
         var transport = _transport ?? throw new InvalidOperationException("Transport not initialized.");
 
-        // Send our session ID
-        byte[] handshake = new byte[FrameHeader.Size + 16];
-        FrameHeader.WriteTo(handshake, ChannelConstants.ControlChannel, FrameFlags.Ctrl, 16);
+        byte[] handshake = new byte[FrameHeader.Size + InitialHandshakePayloadLength];
+        FrameHeader.WriteTo(handshake, ChannelConstants.ControlChannel, FrameFlags.Ctrl, InitialHandshakePayloadLength);
         _sessionId.TryWriteBytes(handshake.AsSpan(FrameHeader.Size));
 
-        await transport.WriteStream.WriteAsync(handshake, ct);
-        await transport.WriteStream.FlushAsync(ct);
+        FrameHeader remoteHeader;
+        byte[] remotePayload;
+        try
+        {
+            await transport.WriteStream.WriteAsync(handshake, ct);
+            await transport.WriteStream.FlushAsync(ct);
+            (remoteHeader, remotePayload) = await ReadHandshakeFrameAsync(transport.ReadStream, ct);
+        }
+        catch (HandshakeTransportException)
+        {
+            throw;
+        }
+        catch (IOException ex)
+        {
+            throw new HandshakeTransportException("Transport failed during initial handshake.", ex);
+        }
 
-        // Read remote session ID
-        byte[] remoteHandshake = new byte[FrameHeader.Size + 16];
-        await ReadExactAsync(transport.ReadStream, remoteHandshake, ct);
-
-        var remoteHeader = FrameHeader.Parse(remoteHandshake);
-        if (remoteHeader.Flags != FrameFlags.Ctrl || remoteHeader.PayloadLength != 16)
+        if (IsInitialHandshakeFrame(remoteHeader))
+        {
+            _remoteSessionId = new Guid(remotePayload.AsSpan(0, InitialHandshakePayloadLength));
+        }
+        else if (IsReconnectHandshakeFrame(remoteHeader, remotePayload))
+        {
+            // A peer can complete the first handshake and lose the route before this side
+            // receives its response. The next route is reconnect for that peer and initial
+            // for this peer, so both handshake forms must converge on the same session.
+            _remoteSessionId = new Guid(remotePayload.AsSpan(1, InitialHandshakePayloadLength));
+        }
+        else
+        {
             throw new MultiplexerException(ErrorCode.ProtocolError, "Invalid handshake from remote.");
-
-        _remoteSessionId = new Guid(remoteHandshake.AsSpan(FrameHeader.Size, 16));
+        }
 
         // Determine odd/even index allocation based on session ID comparison
         // Higher session ID gets odd indices
@@ -868,7 +941,7 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IChannelOwner
         // Same pattern as initial handshake (send session ID, read session ID).
 
         // Send reconnect frame: [CtrlSubtype.Reconnect][sessionId:16B]
-        byte[] reconnectPayload = new byte[1 + 16];
+        byte[] reconnectPayload = new byte[ReconnectHandshakePayloadLength];
         reconnectPayload[0] = CtrlSubtype.Reconnect;
         _sessionId.TryWriteBytes(reconnectPayload.AsSpan(1));
 
@@ -876,26 +949,71 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IChannelOwner
         FrameHeader.WriteTo(frame, ChannelConstants.ControlChannel, FrameFlags.Ctrl, reconnectPayload.Length);
         reconnectPayload.CopyTo(frame.AsSpan(FrameHeader.Size));
 
-        await transport.WriteStream.WriteAsync(frame, ct);
-        await transport.WriteStream.FlushAsync(ct);
+        FrameHeader remoteHeader;
+        byte[] remotePayload;
+        try
+        {
+            await transport.WriteStream.WriteAsync(frame, ct);
+            await transport.WriteStream.FlushAsync(ct);
+            (remoteHeader, remotePayload) = await ReadHandshakeFrameAsync(transport.ReadStream, ct);
+        }
+        catch (HandshakeTransportException)
+        {
+            throw;
+        }
+        catch (IOException ex)
+        {
+            throw new HandshakeTransportException("Transport failed during reconnect handshake.", ex);
+        }
 
-        // Read remote reconnect frame: [CtrlSubtype.Reconnect][sessionId:16B]
-        byte[] headerBuf = new byte[FrameHeader.Size];
-        await ReadExactAsync(transport.ReadStream, headerBuf, ct);
-        var header = FrameHeader.Parse(headerBuf);
-
-        if (header.Flags != FrameFlags.Ctrl || header.PayloadLength < 17)
+        Guid remoteSession;
+        if (IsReconnectHandshakeFrame(remoteHeader, remotePayload))
+        {
+            remoteSession = new Guid(remotePayload.AsSpan(1, InitialHandshakePayloadLength));
+        }
+        else if (IsInitialHandshakeFrame(remoteHeader))
+        {
+            // The remote peer may not have observed the first handshake completion before
+            // the route failed, while this side did. Treat the duplicate initial handshake
+            // as reconnect only when the session matches the established peer.
+            remoteSession = new Guid(remotePayload.AsSpan(0, InitialHandshakePayloadLength));
+        }
+        else
+        {
             throw new MultiplexerException(ErrorCode.ProtocolError, "Invalid reconnect frame.");
+        }
 
-        byte[] remotePayload = new byte[header.PayloadLength];
-        await ReadExactAsync(transport.ReadStream, remotePayload, ct);
-
-        if (remotePayload[0] != CtrlSubtype.Reconnect)
-            throw new MultiplexerException(ErrorCode.ProtocolError, "Expected reconnect subtype.");
-
-        var remoteSession = new Guid(remotePayload.AsSpan(1, 16));
         if (remoteSession != _remoteSessionId)
             throw new MultiplexerException(ErrorCode.SessionMismatch, "Remote session ID mismatch on reconnect.");
+    }
+
+    private static bool IsInitialHandshakeFrame(FrameHeader header)
+    {
+        return header.ChannelIndex == ChannelConstants.ControlChannel
+            && header.Flags == FrameFlags.Ctrl
+            && header.PayloadLength == InitialHandshakePayloadLength;
+    }
+
+    private static bool IsReconnectHandshakeFrame(FrameHeader header, ReadOnlySpan<byte> payload)
+    {
+        return header.ChannelIndex == ChannelConstants.ControlChannel
+            && header.Flags == FrameFlags.Ctrl
+            && header.PayloadLength == ReconnectHandshakePayloadLength
+            && payload.Length == ReconnectHandshakePayloadLength
+            && payload[0] == CtrlSubtype.Reconnect;
+    }
+
+    private static async Task<(FrameHeader Header, byte[] Payload)> ReadHandshakeFrameAsync(Stream stream, CancellationToken ct)
+    {
+        byte[] headerBuffer = new byte[FrameHeader.Size];
+        await ReadExactAsync(stream, headerBuffer, ct);
+        var header = FrameHeader.Parse(headerBuffer);
+        if (header.PayloadLength is not (InitialHandshakePayloadLength or ReconnectHandshakePayloadLength))
+            return (header, []);
+
+        byte[] payload = new byte[header.PayloadLength];
+        await ReadExactAsync(stream, payload, ct);
+        return (header, payload);
     }
 
     private static async Task ReadExactAsync(Stream stream, Memory<byte> buffer, CancellationToken ct)
@@ -905,7 +1023,9 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IChannelOwner
         {
             int read = await stream.ReadAsync(buffer[totalRead..], ct);
             if (read == 0)
-                throw new IOException("Transport stream closed unexpectedly.");
+                throw new HandshakeTransportException(
+                    "Transport stream closed before the handshake completed.",
+                    new EndOfStreamException("Transport stream closed unexpectedly."));
             totalRead += read;
         }
     }

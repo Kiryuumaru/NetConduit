@@ -43,7 +43,7 @@ public sealed record MultiplexerOptions
 
 ## Reconnect behavior
 
-- The default `MaxAutoReconnectAttempts = -1` reconnects forever with **replay buffer enabled**: open channels survive transport drops; unacked bytes are re-sent after reconnect.
+- The default `MaxAutoReconnectAttempts = -1` reconnects forever with **replay buffer enabled**: open channels survive transport drops; the writer replays its send slab after reconnect and the reader skips already-received bytes so no duplicates are delivered.
 - If `MaxAutoReconnectAttempts == 0`, no reconnect is attempted; the first transport failure raises terminal `Disconnected`. The **replay buffer is disabled**. Open channels are torn down with `ChannelCloseReason.TransportFailed`.
 - If `MaxAutoReconnectAttempts > 0`, the **replay buffer is enabled** for up to N attempts. After the configured limit is reached, channels close with `ChannelCloseReason.TransportFailed`.
 

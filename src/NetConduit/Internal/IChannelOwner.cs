@@ -15,4 +15,11 @@ internal interface IChannelOwner
     /// The owner unregisters the channel and updates stats.
     /// </summary>
     void NotifyChannelCompleted(ushort channelIndex, string channelId);
+
+    /// <summary>
+    /// Sends a position-based ACK frame for the given channel back to the remote.
+    /// Used by ReadChannel to inform the remote WriteChannel how far the consumer
+    /// has consumed, so PrepareReplay on reconnect skips already-delivered bytes.
+    /// </summary>
+    void SendAck(ushort channelIndex, uint consumedPosition);
 }

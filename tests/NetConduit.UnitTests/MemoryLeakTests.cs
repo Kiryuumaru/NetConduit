@@ -1125,10 +1125,12 @@ public sealed class MemoryLeakTests
         var inner1 = StreamMultiplexer.Create(new MultiplexerOptions
         {
             StreamFactory = _ => Task.FromResult<IStreamPair>(transport1),
+            MaxAutoReconnectAttempts = 0,
         });
         var inner2 = StreamMultiplexer.Create(new MultiplexerOptions
         {
             StreamFactory = _ => Task.FromResult<IStreamPair>(transport2),
+            MaxAutoReconnectAttempts = 0,
         });
 
         inner1.Start();
@@ -1179,10 +1181,12 @@ public sealed class MemoryLeakTests
         var innerClient = StreamMultiplexer.Create(new MultiplexerOptions
         {
             StreamFactory = _ => Task.FromResult<IStreamPair>(transport1),
+            MaxAutoReconnectAttempts = 0,
         });
         var innerServer = StreamMultiplexer.Create(new MultiplexerOptions
         {
             StreamFactory = _ => Task.FromResult<IStreamPair>(transport2),
+            MaxAutoReconnectAttempts = 0,
         });
 
         innerClient.Start();
