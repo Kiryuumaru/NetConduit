@@ -136,4 +136,30 @@ public class TcpMultiplexerTests
         await Task.WhenAll(tasks);
         listener.Stop();
     }
+
+    [Fact(Timeout = 30000)]
+    public async Task ServerFactory_CancelledAccept_DoesNotConsumeOneShot()
+    {
+        int port = GetAvailablePort();
+        using var listener = new TcpListener(IPAddress.Loopback, port);
+        listener.Start();
+
+        var serverOptions = TcpMultiplexer.CreateServerOptions(listener);
+
+        using (var cancelled = new CancellationTokenSource())
+        {
+            await cancelled.CancelAsync();
+            await Assert.ThrowsAnyAsync<OperationCanceledException>(
+                async () => await serverOptions.StreamFactory(cancelled.Token));
+        }
+
+        using var client = new TcpClient();
+        await client.ConnectAsync(IPAddress.Loopback, port);
+
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+        await using var pair = await serverOptions.StreamFactory(cts.Token);
+
+        Assert.NotNull(pair);
+        listener.Stop();
+    }
 }
