@@ -749,9 +749,9 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IChannelOwner
         {
             // Could be an ACK for our write channel
             var writeChannel = _registry.GetWriteChannel(header.ChannelIndex);
-            if (writeChannel is not null && header.Flags == FrameFlags.Ack && payload.Length >= 4)
+            if (writeChannel is not null && header.Flags == FrameFlags.Ack && payload.Length >= 8)
             {
-                int ackPos = (int)BinaryPrimitives.ReadUInt32BigEndian(payload);
+                long ackPos = (long)BinaryPrimitives.ReadUInt64BigEndian(payload);
                 writeChannel.OnAck(ackPos);
                 return;
             }
@@ -872,19 +872,19 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IChannelOwner
         if (_controlChannel is null) return;
 
         // ACK frame on the opener's channel index with position 0 — signals channel established
-        byte[] frame = new byte[FrameHeader.Size + 4];
-        FrameHeader.WriteTo(frame, channelIndex, FrameFlags.Ack, 4);
-        BinaryPrimitives.WriteUInt32BigEndian(frame.AsSpan(FrameHeader.Size, 4), 0);
+        byte[] frame = new byte[FrameHeader.Size + 8];
+        FrameHeader.WriteTo(frame, channelIndex, FrameFlags.Ack, 8);
+        BinaryPrimitives.WriteUInt64BigEndian(frame.AsSpan(FrameHeader.Size, 8), 0);
         _controlChannel.WriteRawFrame(frame);
     }
 
-    void IChannelOwner.SendAck(ushort channelIndex, uint consumedPosition)
+    void IChannelOwner.SendAck(ushort channelIndex, ulong consumedPosition)
     {
         if (_controlChannel is null) return;
 
-        byte[] frame = new byte[FrameHeader.Size + 4];
-        FrameHeader.WriteTo(frame, channelIndex, FrameFlags.Ack, 4);
-        BinaryPrimitives.WriteUInt32BigEndian(frame.AsSpan(FrameHeader.Size, 4), consumedPosition);
+        byte[] frame = new byte[FrameHeader.Size + 8];
+        FrameHeader.WriteTo(frame, channelIndex, FrameFlags.Ack, 8);
+        BinaryPrimitives.WriteUInt64BigEndian(frame.AsSpan(FrameHeader.Size, 8), consumedPosition);
         _controlChannel.WriteRawFrame(frame);
     }
 

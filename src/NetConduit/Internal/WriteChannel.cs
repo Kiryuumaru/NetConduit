@@ -211,9 +211,9 @@ internal sealed class WriteChannel : Stream, IWriteChannel
         _owner.NotifyReady(this);
     }
 
-    internal void WriteAckFrame(uint receivedPosition)
+    internal void WriteAckFrame(ulong receivedPosition)
     {
-        int frameSize = FrameHeader.Size + 4;
+        int frameSize = FrameHeader.Size + 8;
         lock (_posLock)
         {
             TryCompactLocked();
@@ -221,8 +221,8 @@ internal sealed class WriteChannel : Stream, IWriteChannel
                 throw new InvalidOperationException("Slab full for ACK frame.");
 
             int frameStart = _writePos;
-            FrameHeader.WriteTo(_slab.AsSpan(frameStart, FrameHeader.Size), _channelIndex, FrameFlags.Ack, 4);
-            BinaryPrimitives.WriteUInt32BigEndian(_slab.AsSpan(frameStart + FrameHeader.Size, 4), receivedPosition);
+            FrameHeader.WriteTo(_slab.AsSpan(frameStart, FrameHeader.Size), _channelIndex, FrameFlags.Ack, 8);
+            BinaryPrimitives.WriteUInt64BigEndian(_slab.AsSpan(frameStart + FrameHeader.Size, 8), receivedPosition);
             _writePos = frameStart + frameSize;
             _pendingPos = _writePos;
         }
@@ -292,11 +292,11 @@ internal sealed class WriteChannel : Stream, IWriteChannel
         TryNotifyCompleted();
     }
 
-    internal void OnAck(int ackedPosition)
+    internal void OnAck(long ackedPosition)
     {
         lock (_posLock)
         {
-            int slabRelative = (int)((long)ackedPosition - _compactionOffset);
+            int slabRelative = (int)(ackedPosition - _compactionOffset);
             if (slabRelative > _ackedPos)
                 _ackedPos = slabRelative;
         }
