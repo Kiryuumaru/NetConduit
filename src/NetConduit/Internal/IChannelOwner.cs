@@ -10,6 +10,13 @@ internal interface IChannelOwner
     void NotifyReady(WriteChannel channel);
 
     /// <summary>
+    /// Called by a write channel the first time it transitions to ready
+    /// (init-ack received from the remote). The owner raises the public
+    /// <c>ChannelOpened</c> event.
+    /// </summary>
+    void NotifyChannelOpened(string channelId);
+
+    /// <summary>
     /// Called by a channel when it has fully completed its lifecycle
     /// (all frames sent for write channels, disposed for read channels).
     /// The owner unregisters the channel and updates stats.
