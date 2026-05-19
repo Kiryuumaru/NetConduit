@@ -57,8 +57,8 @@ Channel **indices** (u16) are an internal wire detail. Your code uses channel **
 | Value | Subtype | Purpose |
 | --- | --- | --- |
 | `0x01` | `GoAway` | Graceful shutdown signal. |
-| `0x02` | `Reconnect` | Resume an interrupted session (carries last-acked positions). |
-| `0x03` | `ReconnectAck` | Reply to a `Reconnect` confirming the resume. |
+| `0x02` | `Reconnect` | Resume an interrupted session (carries the 16-byte session ID). |
+| `0x03` | `ReconnectAck` | Reserved (unused in current protocol). |
 
 ## Handshake
 
@@ -68,11 +68,11 @@ On connect, both peers exchange a session identification frame on the control ch
 - `IsReady` becomes `true`.
 - The `Ready` event fires (once).
 
-On reconnect, the `Ctrl/Reconnect` exchange resumes the prior session if both sides still hold matching state.
+On reconnect, the `Ctrl/Reconnect` exchange verifies session ID continuity. If the remote session ID matches, both sides replay their write channel buffers and the reader skips already-received bytes.
 
 ## Flow control
 
-`Ack` frames carry a per-channel cumulative byte position. The sender uses these to advance the read pointer of the channel's slab and free buffer space. See [Backpressure](backpressure.md).
+`Ack` frames carry a per-channel cumulative byte position (4 bytes, big-endian). The initial `Ack` (position 0) sent on channel creation confirms the channel is open. Runtime `Ack` frames can advance the write-side compaction pointer to free slab space; however, when reconnection replay is enabled, the writer retains all sent data for replay and slab compaction relies on successful acknowledgement. See [Backpressure](backpressure.md).
 
 ## Errors
 

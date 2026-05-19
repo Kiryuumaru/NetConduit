@@ -6,8 +6,8 @@ NetConduit uses **per-channel slab buffers with credit-based flow control**. Slo
 
 Every channel has a fixed-size ring buffer ("slab") on each side:
 
-- **Writer side.** `WriteAsync` copies your bytes into the slab and queues a `Data` frame. If the slab is full, `WriteAsync` waits — up to `SendTimeout` — for the consumer's `Ack` to free space.
-- **Reader side.** Incoming `Data` frames land in the slab. `ReadAsync` drains it. As bytes are consumed, the multiplexer emits `Ack` frames back to the writer advancing the read position.
+- **Writer side.** `WriteAsync` copies your bytes into the slab and queues a `Data` frame. If the slab is full, `WriteAsync` waits — up to `SendTimeout` — for space to free up.
+- **Reader side.** Incoming `Data` frames land in the slab. `ReadAsync` drains it. When reconnection replay is disabled (`MaxAutoReconnectAttempts = 0`), the writer treats sent data as acknowledged immediately, freeing slab space as frames leave the wire. When replay is enabled, the writer retains sent data for replay and slab space is bounded by the slab size.
 
 Because each channel has its own slab, a stalled `chat` channel can't block an `uploads` channel that's still draining.
 
