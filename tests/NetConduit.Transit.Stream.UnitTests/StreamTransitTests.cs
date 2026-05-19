@@ -663,5 +663,31 @@ public sealed class StreamTransitTests
         await server.DisposeAsync();
     }
 
+    [Fact]
+    public async Task StreamTransit_SyncDispose_DeliversEofToReader()
+    {
+        var (client, server) = await CreateReadyPairAsync();
+
+        var writer = client.OpenStream("sync-dispose-fin");
+        await using var reader = await server.AcceptStreamAsync("sync-dispose-fin");
+        await writer.WaitForReadyAsync();
+
+        byte[] payload = [1, 2, 3];
+        await writer.WriteAsync(payload);
+
+        var received = new byte[payload.Length];
+        int firstRead = await reader.ReadAsync(received).AsTask().WaitAsync(TimeSpan.FromSeconds(5));
+        Assert.Equal(payload.Length, firstRead);
+
+        // Synchronous Dispose must deliver EOF, matching DisposeAsync semantics.
+        writer.Dispose();
+
+        int eofRead = await reader.ReadAsync(new byte[1]).AsTask().WaitAsync(TimeSpan.FromSeconds(5));
+        Assert.Equal(0, eofRead);
+
+        await client.DisposeAsync();
+        await server.DisposeAsync();
+    }
+
     #endregion
 }

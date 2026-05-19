@@ -442,7 +442,14 @@ internal sealed class WriteChannel : Stream, IWriteChannel
     {
         if (disposing && _state is not ChannelState.Closed)
         {
+            // Send FIN so the peer observes EOF, matching DisposeAsync semantics.
+            if (_state is not ChannelState.Closing)
+            {
+                _state = ChannelState.Closing;
+                WriteFinFrame();
+            }
             SetClosed(ChannelCloseReason.LocalClose);
+            _spaceAvailable.Dispose();
         }
         base.Dispose(disposing);
     }
