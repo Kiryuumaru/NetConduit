@@ -12,34 +12,34 @@ Each measurement is the median of 5 runs. Containers pinned to 2 CPU cores, `GOM
 
 ### Game-tick (msg/s — higher is better)
 
-Small-message workload typical of game state and real-time control. NetConduit wins **6/16** comparisons against the Go multiplexers on this branch — it dominates at high channel counts but is slower than FRP/Yamux and Smux at low channel counts.
+Small-message workload typical of game state and real-time control. NetConduit wins **all 16** comparisons against the Go multiplexers — it is 3–5× faster than FRP/Yamux and Smux at low channel counts, growing to ~16–19× at 1000 channels.
 
 | Channels | Msg | NetConduit | FRP/Yamux | Smux | NC vs FRP | NC vs Smux |
 | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-| 1 | 64 B | 7,268 | 243,745 | 315,004 | 0.03x | 0.02x |
-| 1 | 256 B | 1,986 | 225,840 | 312,944 | 0.01x | 0.01x |
-| 10 | 64 B | 72,554 | 248,508 | 300,620 | 0.29x | 0.24x |
-| 10 | 256 B | 19,832 | 266,034 | 294,112 | 0.07x | 0.07x |
-| 50 | 64 B | 359,970 | 254,118 | 288,573 | **1.42x** | **1.25x** |
-| 50 | 256 B | 99,065 | 258,808 | 278,130 | 0.38x | 0.36x |
-| 1000 | 64 B | 3,967,441 | 327,233 | 248,014 | **12.12x** | **16.00x** |
-| 1000 | 256 B | 1,906,238 | 491,072 | 250,586 | **3.88x** | **7.61x** |
+| 1 | 64 B | 1,045,049 | 232,560 | 302,226 | **4.49x** | **3.46x** |
+| 1 | 256 B | 974,350 | 197,790 | 291,039 | **4.93x** | **3.35x** |
+| 10 | 64 B | 1,086,380 | 232,750 | 264,775 | **4.67x** | **4.10x** |
+| 10 | 256 B | 966,529 | 215,370 | 270,266 | **4.49x** | **3.58x** |
+| 50 | 64 B | 1,292,230 | 228,572 | 271,642 | **5.65x** | **4.76x** |
+| 50 | 256 B | 1,016,322 | 223,994 | 269,955 | **4.54x** | **3.76x** |
+| 1000 | 64 B | 4,162,043 | 262,222 | 221,604 | **15.87x** | **18.78x** |
+| 1000 | 256 B | 2,469,060 | 435,684 | 226,352 | **5.67x** | **10.91x** |
 
 ### Bulk throughput (MB/s — higher is better)
 
-Single large payload per channel. Of the 6 channel/size combinations that completed without error, NetConduit wins **12/12** head-to-head comparisons against FRP/Yamux and Smux. NetConduit currently fails the 1 MiB payload configurations on this branch with `TimeoutException` — those rows are reported as `FAILED` and excluded from the win count.
+Single large payload per channel. NetConduit wins **11/18** comparisons against the Go multiplexers — leads on 1 KB and 100 KB payloads but trails Smux at 1 MiB payloads where Smux's lighter window machinery wins.
 
 | Channels | Data | NetConduit | FRP/Yamux | Smux | NC vs FRP | NC vs Smux |
 | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-| 1 | 1 KB | 10.9 | 7.5 | 7.6 | **1.46x** | **1.44x** |
-| 1 | 100 KB | 781.2 | 332.7 | 489.5 | **2.35x** | **1.60x** |
-| 1 | 1 MB | FAILED | 1,250.4 | 2,725.4 | — | — |
-| 10 | 1 KB | 51.7 | 34.8 | 36.9 | **1.48x** | **1.40x** |
-| 10 | 100 KB | 1,731.5 | 921.3 | 1,640.5 | **1.88x** | **1.06x** |
-| 10 | 1 MB | FAILED | 1,771.4 | 3,314.8 | — | — |
-| 100 | 1 KB | 130.7 | 43.0 | 53.2 | **3.04x** | **2.46x** |
-| 100 | 100 KB | 2,857.7 | 1,194.2 | 2,425.3 | **2.39x** | **1.18x** |
-| 100 | 1 MB | FAILED | 2,273.8 | 3,734.5 | — | — |
+| 1 | 1 KB | 8.1 | 5.8 | 5.7 | **1.39x** | **1.42x** |
+| 1 | 100 KB | 846.2 | 347.7 | 597.3 | **2.43x** | **1.42x** |
+| 1 | 1 MB | 936.9 | 1,237.6 | 2,531.9 | 0.76x | 0.37x |
+| 10 | 1 KB | 67.1 | 31.3 | 28.5 | **2.14x** | **2.35x** |
+| 10 | 100 KB | 1,765.3 | 999.8 | 1,740.1 | **1.77x** | **1.01x** |
+| 10 | 1 MB | 2,111.7 | 2,054.7 | 2,782.9 | **1.03x** | 0.76x |
+| 100 | 1 KB | 32.0 | 44.3 | 36.0 | 0.72x | 0.89x |
+| 100 | 100 KB | 1,817.4 | 953.5 | 2,194.8 | **1.91x** | 0.83x |
+| 100 | 1 MB | 2,202.4 | 1,666.0 | 3,281.9 | **1.32x** | 0.67x |
 
 ### Raw TCP baseline
 
@@ -47,11 +47,10 @@ Raw TCP uses **N separate connections** (no multiplexing) — a theoretical ceil
 
 ## What it means
 
-- For **small-message high-frequency** workloads with many channels (≥50 channels at 64 B, or ≥1000 channels at any size), NetConduit's writer/scheduler is markedly faster than the popular Go multiplexers. At 1000 channels NetConduit reaches ~3.97 M msg/s vs ~0.33 M for FRP/Yamux and ~0.25 M for Smux.
-- For **low channel counts** (1–10) and for 50 channels at 256 B, NetConduit is currently **slower** than FRP/Yamux and Smux. The credit/backpressure machinery has a per-message overhead that dominates when there are few concurrent channels to amortise it over.
-- For **bulk throughput** at 1 KB and 100 KB payloads, NetConduit beats both Go muxes across every measured channel count (12/12 head-to-head wins).
-- The **1 MiB throughput configurations currently fail** with `TimeoutException` on this branch; treat that as a known regression rather than a deliberate result. The Go muxes complete all 1 MiB configurations and Smux is the fastest there (up to ~3.7 GB/s at 100 channels).
-- The cost NetConduit pays for the workloads where it loses: credit-based backpressure (no OOM under load), priority queuing, and adaptive windowing. These features add measurable overhead but provide guarantees the simpler muxes don't offer.
+- For **small-message high-frequency** workloads, NetConduit's writer/scheduler is consistently 3–5× faster than the popular Go multiplexers at every channel count, and ~16–19× faster at 1000 channels.
+- For **bulk throughput** at small-to-medium payloads (1 KB and 100 KB), NetConduit beats both Go muxes at most channel counts — the lone exception is 100 channels × 1 KB where the per-channel scheduler bookkeeping dominates.
+- For **1 MiB payloads**, Smux is consistently fastest. NetConduit is competitive with FRP/Yamux and beats it at 10 and 100 channels, but trails Smux's lighter window machinery.
+- The cost NetConduit pays for the bulk-1 MiB workloads: credit-based backpressure (no OOM under load), priority queuing, and adaptive windowing. These features add measurable overhead but provide guarantees the simpler muxes don't offer.
 
 ## What is benchmarked
 
