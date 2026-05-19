@@ -7,7 +7,7 @@
     "totalBytes": 0,
     "durationMs": 0,
     "throughputMBps": 0,
-    "messagesPerSec": 2543321.955145518,
+    "messagesPerSec": 2501827.753178655,
     "allocMB": 0
   },
   {
@@ -18,7 +18,7 @@
     "totalBytes": 0,
     "durationMs": 0,
     "throughputMBps": 0,
-    "messagesPerSec": 984173.9899812733,
+    "messagesPerSec": 930050.6961477745,
     "allocMB": 0
   },
   {
@@ -29,7 +29,7 @@
     "totalBytes": 0,
     "durationMs": 0,
     "throughputMBps": 0,
-    "messagesPerSec": 2360661.6723222886,
+    "messagesPerSec": 1995135.805181152,
     "allocMB": 0
   },
   {
@@ -40,7 +40,7 @@
     "totalBytes": 0,
     "durationMs": 0,
     "throughputMBps": 0,
-    "messagesPerSec": 783030.6373648418,
+    "messagesPerSec": 799238.6328404122,
     "allocMB": 0
   },
   {
@@ -51,7 +51,18 @@
     "totalBytes": 0,
     "durationMs": 0,
     "throughputMBps": 0,
-    "messagesPerSec": 1055822.9175277886,
+    "messagesPerSec": 1033646.0789064475,
+    "allocMB": 0
+  },
+  {
+    "implementation": "Raw TCP (.NET)",
+    "scenario": "game-tick",
+    "channels": 10,
+    "dataSizeBytes": 256,
+    "totalBytes": 0,
+    "durationMs": 0,
+    "throughputMBps": 0,
+    "messagesPerSec": 3485830.011995405,
     "allocMB": 0
   },
   {
@@ -62,18 +73,7 @@
     "totalBytes": 0,
     "durationMs": 0,
     "throughputMBps": 0,
-    "messagesPerSec": 854120.6300604949,
-    "allocMB": 0
-  },
-  {
-    "implementation": "Raw TCP (.NET)",
-    "scenario": "game-tick",
-    "channels": 50,
-    "dataSizeBytes": 64,
-    "totalBytes": 0,
-    "durationMs": 0,
-    "throughputMBps": 0,
-    "messagesPerSec": 4693547.669427568,
+    "messagesPerSec": 782272.5159193192,
     "allocMB": 0
   },
   {
@@ -84,18 +84,7 @@
     "totalBytes": 0,
     "durationMs": 0,
     "throughputMBps": 0,
-    "messagesPerSec": 1310109.0288312028,
-    "allocMB": 0
-  },
-  {
-    "implementation": "Raw TCP (.NET)",
-    "scenario": "game-tick",
-    "channels": 50,
-    "dataSizeBytes": 256,
-    "totalBytes": 0,
-    "durationMs": 0,
-    "throughputMBps": 0,
-    "messagesPerSec": 2306467.926334715,
+    "messagesPerSec": 1203728.4027209324,
     "allocMB": 0
   },
   {
@@ -106,7 +95,7 @@
     "totalBytes": 0,
     "durationMs": 0,
     "throughputMBps": 0,
-    "messagesPerSec": 911868.3335096742,
+    "messagesPerSec": 846810.7037515701,
     "allocMB": 0
   },
   {
@@ -117,7 +106,7 @@
     "totalBytes": 0,
     "durationMs": 0,
     "throughputMBps": 0,
-    "messagesPerSec": 5309228.080473214,
+    "messagesPerSec": 4942147.362956273,
     "allocMB": 0
   },
   {
@@ -128,7 +117,7 @@
     "totalBytes": 0,
     "durationMs": 0,
     "throughputMBps": 0,
-    "messagesPerSec": 4082784.1043633725,
+    "messagesPerSec": 4184496.574777319,
     "allocMB": 0
   },
   {
@@ -139,7 +128,7 @@
     "totalBytes": 0,
     "durationMs": 0,
     "throughputMBps": 0,
-    "messagesPerSec": 3796885.4963464793,
+    "messagesPerSec": 3854962.8355873115,
     "allocMB": 0
   },
   {
@@ -150,7 +139,7 @@
     "totalBytes": 0,
     "durationMs": 0,
     "throughputMBps": 0,
-    "messagesPerSec": 2507965.2209429103,
+    "messagesPerSec": 2524668.998191165,
     "allocMB": 0
   }
 ]
