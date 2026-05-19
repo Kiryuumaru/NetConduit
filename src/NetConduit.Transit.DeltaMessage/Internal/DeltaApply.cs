@@ -18,7 +18,8 @@ internal static class DeltaApply
     {
         if (op.Path.Length == 0)
         {
-            throw new InvalidOperationException("Cannot apply operation to root node with empty path. Use full state replacement instead.");
+            ApplyRootOperation(root, op);
+            return;
         }
 
         switch (op.Op)
@@ -92,6 +93,56 @@ internal static class DeltaApply
 
             default:
                 throw new InvalidOperationException($"Unknown delta operation: {op.Op}");
+        }
+    }
+
+    private static void ApplyRootOperation(JsonNode root, DeltaOperation op)
+    {
+        switch (op.Op)
+        {
+            case DeltaOp.ArrayInsert:
+            {
+                if (root is JsonArray arr && op.Index is int idx)
+                {
+                    arr.Insert(idx, op.Value?.DeepClone());
+                    break;
+                }
+
+                throw new InvalidOperationException($"Root ArrayInsert requires array root and index. Got {root.GetType().Name}");
+            }
+
+            case DeltaOp.ArrayRemove:
+            {
+                if (root is JsonArray arr && op.Index is int idx)
+                {
+                    arr.RemoveAt(idx);
+                    break;
+                }
+
+                throw new InvalidOperationException($"Root ArrayRemove requires array root and index. Got {root.GetType().Name}");
+            }
+
+            case DeltaOp.ArrayReplace:
+            {
+                if (root is JsonArray arr && op.Value is JsonArray replacement)
+                {
+                    for (var i = arr.Count - 1; i >= 0; i--)
+                    {
+                        arr.RemoveAt(i);
+                    }
+
+                    foreach (var item in replacement)
+                    {
+                        arr.Add(item?.DeepClone());
+                    }
+                    break;
+                }
+
+                throw new InvalidOperationException($"Root ArrayReplace requires array root and array value. Got {root.GetType().Name}");
+            }
+
+            default:
+                throw new InvalidOperationException("Cannot apply root replacement delta in place. Use full state replacement instead.");
         }
     }
 
