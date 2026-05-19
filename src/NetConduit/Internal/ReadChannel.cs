@@ -256,9 +256,9 @@ internal sealed class ReadChannel : Stream, IReadChannel, IValueTaskSource<int>
                 break;
 
             case FrameFlags.Ack:
-                if (payload.Length >= 4)
+                if (payload.Length >= 8)
                 {
-                    var ackPos = (int)BinaryPrimitives.ReadUInt32BigEndian(payload);
+                    long ackPos = (long)BinaryPrimitives.ReadUInt64BigEndian(payload);
                     _ackChannel?.OnAck(ackPos);
                 }
                 break;
@@ -342,7 +342,7 @@ internal sealed class ReadChannel : Stream, IReadChannel, IValueTaskSource<int>
         long delta = _frameBytesReceived - _ackSentFrameBytes;
         if (delta >= _slabSize / 16)
         {
-            _owner.SendAck(_channelIndex, (uint)_frameBytesReceived);
+            _owner.SendAck(_channelIndex, (ulong)_frameBytesReceived);
             _ackSentFrameBytes = _frameBytesReceived;
         }
     }

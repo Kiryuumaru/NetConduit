@@ -78,6 +78,6 @@ public sealed class ReconnectionTests
         public int NotifyCount;
         public void NotifyReady(WriteChannel channel) => Interlocked.Increment(ref NotifyCount);
         public void NotifyChannelCompleted(ushort channelIndex, string channelId) { }
-        public void SendAck(ushort channelIndex, uint consumedPosition) { }
+        public void SendAck(ushort channelIndex, ulong consumedPosition) { }
     }
 }
