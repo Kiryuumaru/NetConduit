@@ -17,6 +17,14 @@ internal sealed class ChannelRegistry
     private readonly ConcurrentDictionary<string, TaskCompletionSource<ReadChannel>> _pendingAccepts = new();
     private readonly ConcurrentDictionary<string, ReadChannel> _pendingAcceptChannels = new();
     private readonly Channel<ReadChannel> _acceptQueue = Channel.CreateUnbounded<ReadChannel>();
+    private readonly object _prefixSubscriptionsLock = new();
+    private readonly List<PrefixSubscription> _prefixSubscriptions = new();
+
+    private sealed class PrefixSubscription(string prefix)
+    {
+        public string Prefix { get; } = prefix;
+        public Channel<ReadChannel> Queue { get; } = Channel.CreateUnbounded<ReadChannel>();
+    }
 
     /// <summary>
     /// Serializes the compound "register pending + read existing" sequences in
@@ -130,6 +138,18 @@ internal sealed class ChannelRegistry
             tcs.TrySetResult(channel);
             return;
         }
+        // Then check prefix subscriptions (overlay protocols claiming a namespace).
+        lock (_prefixSubscriptionsLock)
+        {
+            foreach (var sub in _prefixSubscriptions)
+            {
+                if (channel.ChannelId.StartsWith(sub.Prefix, StringComparison.Ordinal))
+                {
+                    sub.Queue.Writer.TryWrite(channel);
+                    return;
+                }
+            }
+        }
         // Otherwise queue for generic AcceptChannelsAsync
         _acceptQueue.Writer.TryWrite(channel);
     }
@@ -161,9 +181,26 @@ internal sealed class ChannelRegistry
         return await tcs.Task;
     }
 
-    internal IAsyncEnumerable<ReadChannel> AcceptChannelsAsync(CancellationToken ct)
+    internal IAsyncEnumerable<ReadChannel> AcceptChannelsAsync(string? channelIdPrefix, CancellationToken ct)
     {
-        return _acceptQueue.Reader.ReadAllAsync(ct);
+        if (channelIdPrefix is null)
+            return _acceptQueue.Reader.ReadAllAsync(ct);
+
+        PrefixSubscription sub;
+        lock (_prefixSubscriptionsLock)
+        {
+            var existing = _prefixSubscriptions.FirstOrDefault(s => s.Prefix == channelIdPrefix);
+            if (existing is not null)
+            {
+                sub = existing;
+            }
+            else
+            {
+                sub = new PrefixSubscription(channelIdPrefix);
+                _prefixSubscriptions.Add(sub);
+            }
+        }
+        return sub.Queue.Reader.ReadAllAsync(ct);
     }
 
     internal void CancelAllPendingAccepts()
@@ -174,6 +211,12 @@ internal sealed class ChannelRegistry
         }
         _pendingAccepts.Clear();
         _acceptQueue.Writer.TryComplete();
+        lock (_prefixSubscriptionsLock)
+        {
+            foreach (var sub in _prefixSubscriptions)
+                sub.Queue.Writer.TryComplete();
+            _prefixSubscriptions.Clear();
+        }
     }
 
     internal void AbortAllChannels(ChannelCloseReason reason, Exception? exception = null)

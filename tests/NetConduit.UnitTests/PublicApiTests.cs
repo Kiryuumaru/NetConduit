@@ -530,7 +530,7 @@ public sealed class PublicApiTests
 
         client.OpenChannel("yield-test");
 
-        await foreach (var ch in server.AcceptChannelsAsync(cts.Token))
+        await foreach (var ch in server.AcceptChannelsAsync(ct: cts.Token))
         {
             Assert.IsAssignableFrom<IReadChannel>(ch);
             break;

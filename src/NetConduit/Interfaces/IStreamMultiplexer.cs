@@ -79,8 +79,16 @@ public interface IStreamMultiplexer : IAsyncDisposable
     /// <summary>Accept an inbound channel with the given ID. Returns immediately in pending state.</summary>
     IReadChannel AcceptChannel(string channelId);
 
-    /// <summary>Accept all inbound channels as they arrive.</summary>
-    IAsyncEnumerable<IReadChannel> AcceptChannelsAsync(CancellationToken ct = default);
+    /// <summary>
+    /// Accept inbound channels as they arrive. When <paramref name="channelIdPrefix"/>
+    /// is <c>null</c>, yields every inbound channel not claimed by a specific
+    /// <see cref="AcceptChannel"/> call. When a prefix is supplied, only channels
+    /// whose ID starts with it are yielded; matched channels are routed exclusively
+    /// to this enumeration and are NOT yielded by the unfiltered (null prefix)
+    /// overload. This lets an overlay protocol (e.g. mesh routing) share the
+    /// multiplexer with the host application by subscribing to a reserved prefix.
+    /// </summary>
+    IAsyncEnumerable<IReadChannel> AcceptChannelsAsync(string? channelIdPrefix = null, CancellationToken ct = default);
 
     /// <summary>Get an outbound channel by its ID, or null if not found.</summary>
     IWriteChannel? GetWriteChannel(string channelId);

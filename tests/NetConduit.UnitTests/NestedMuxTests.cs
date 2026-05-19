@@ -229,7 +229,7 @@ public sealed class NestedMuxTests
         var acceptTask = Task.Run(async () =>
         {
             int count = 0;
-            await foreach (var ch in innerServer.AcceptChannelsAsync(cts.Token))
+            await foreach (var ch in innerServer.AcceptChannelsAsync(ct: cts.Token))
             {
                 var idx = int.Parse(ch.ChannelId.Replace("ch-", ""));
                 var received = new byte[dataSize];

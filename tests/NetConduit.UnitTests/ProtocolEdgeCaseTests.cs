@@ -327,7 +327,7 @@ public sealed class ProtocolEdgeCaseTests
         var acceptedIds = new List<string>();
         var acceptTask = Task.Run(async () =>
         {
-            await foreach (var ch in server.AcceptChannelsAsync(cts.Token))
+            await foreach (var ch in server.AcceptChannelsAsync(ct: cts.Token))
             {
                 acceptedIds.Add(ch.ChannelId);
                 if (acceptedIds.Count >= 5) break;

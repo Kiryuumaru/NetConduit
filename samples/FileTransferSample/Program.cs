@@ -104,7 +104,7 @@ async Task HandleClientAsync(StreamMultiplexer connection, string outputDir, Can
         var receiveTasks = new List<Task>();
         
         // Accept all incoming file channels
-        await foreach (var channel in connection.AcceptChannelsAsync(ct))
+        await foreach (var channel in connection.AcceptChannelsAsync(ct: ct))
         {
             var task = ReceiveFileAsync(channel, outputDir, ct);
             receiveTasks.Add(task);

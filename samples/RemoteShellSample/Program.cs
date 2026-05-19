@@ -126,7 +126,7 @@ async Task HandleClientAsync(TcpClient tcp, string endpoint, CancellationToken s
         using var acceptCts = CancellationTokenSource.CreateLinkedTokenSource(cts.Token);
         acceptCts.CancelAfter(5000);
 
-        await foreach (var ch in mux.AcceptChannelsAsync(acceptCts.Token))
+        await foreach (var ch in mux.AcceptChannelsAsync(ct: acceptCts.Token))
         {
             if (ch.ChannelId == "cmd") cmdCh = ch;
             else if (ch.ChannelId == "ctrl") ctrlCh = ch;
@@ -295,7 +295,7 @@ async Task RunClientAsync(string host, int port)
     using var acceptCts = CancellationTokenSource.CreateLinkedTokenSource(mainCts.Token);
     acceptCts.CancelAfter(5000);
 
-    await foreach (var ch in mux.AcceptChannelsAsync(acceptCts.Token))
+    await foreach (var ch in mux.AcceptChannelsAsync(ct: acceptCts.Token))
     {
         if (ch.ChannelId == "out") { outCh = ch; break; }
     }

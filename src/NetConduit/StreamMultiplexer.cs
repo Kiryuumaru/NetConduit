@@ -210,9 +210,9 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IChannelOwner
     }
 
     /// <inheritdoc />
-    public IAsyncEnumerable<IReadChannel> AcceptChannelsAsync(CancellationToken ct = default)
+    public IAsyncEnumerable<IReadChannel> AcceptChannelsAsync(string? channelIdPrefix = null, CancellationToken ct = default)
     {
-        return _registry.AcceptChannelsAsync(ct);
+        return _registry.AcceptChannelsAsync(channelIdPrefix, ct);
     }
 
     /// <inheritdoc />
