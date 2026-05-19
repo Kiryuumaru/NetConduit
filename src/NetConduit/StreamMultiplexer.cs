@@ -48,6 +48,24 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IChannelOwner
     private Guid _remoteSessionId;
     private TaskCompletionSource? _pendingPong;
 
+    private static byte[] EncodeValidatedChannelId(string channelId, string paramName)
+    {
+        ArgumentNullException.ThrowIfNull(channelId, paramName);
+
+        if (channelId.Length == 0)
+        {
+            throw new ArgumentException("Channel ID must not be empty.", paramName);
+        }
+
+        int byteCount = Encoding.UTF8.GetByteCount(channelId);
+        if (byteCount > ChannelConstants.MaxChannelIdLength)
+        {
+            throw new ArgumentException($"Channel ID must be at most {ChannelConstants.MaxChannelIdLength} UTF-8 bytes.", paramName);
+        }
+
+        return Encoding.UTF8.GetBytes(channelId);
+    }
+
     /// <inheritdoc />
     public MultiplexerOptions Options => _options;
 
@@ -142,6 +160,9 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IChannelOwner
     /// <inheritdoc />
     public IWriteChannel OpenChannel(ChannelOptions options)
     {
+        ArgumentNullException.ThrowIfNull(options);
+        byte[] channelIdBytes = EncodeValidatedChannelId(options.ChannelId, nameof(options));
+
         if (!_isRunning)
             throw new InvalidOperationException("Multiplexer has not been started.");
 
@@ -159,7 +180,6 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IChannelOwner
         _registry.RegisterWriteChannel(index, channel);
 
         // Send INIT frame (channel does it itself — builds the frame in its slab)
-        byte[] channelIdBytes = Encoding.UTF8.GetBytes(options.ChannelId);
         channel.WriteInitFrame(channelIdBytes);
         // Channel stays in Opening/Pending state until remote ACKs the INIT
 
@@ -176,6 +196,8 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IChannelOwner
     /// <inheritdoc />
     public IReadChannel AcceptChannel(string channelId)
     {
+        _ = EncodeValidatedChannelId(channelId, nameof(channelId));
+
         if (!_isRunning)
             throw new InvalidOperationException("Multiplexer has not been started.");
 

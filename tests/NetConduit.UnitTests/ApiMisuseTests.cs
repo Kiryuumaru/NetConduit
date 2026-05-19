@@ -339,13 +339,11 @@ public sealed class ApiMisuseTests
     }
 
     [Fact]
-    public async Task AcceptChannel_EmptyStringId_IsAccepted()
+    public async Task AcceptChannel_EmptyStringId_Throws()
     {
         var (client, server) = await CreateReadyPairAsync();
 
-        // API does not currently validate empty channel IDs
-        var ch = server.AcceptChannel("");
-        Assert.NotNull(ch);
+        Assert.Throws<ArgumentException>(() => server.AcceptChannel(""));
 
         await client.DisposeAsync();
         await server.DisposeAsync();
@@ -356,27 +354,23 @@ public sealed class ApiMisuseTests
     #region OpenChannel Misuse
 
     [Fact]
-    public async Task OpenChannel_EmptyStringId_IsAccepted()
+    public async Task OpenChannel_EmptyStringId_Throws()
     {
         var (client, server) = await CreateReadyPairAsync();
 
-        // API does not currently validate empty channel IDs
-        var ch = client.OpenChannel(new ChannelOptions { ChannelId = "" });
-        Assert.NotNull(ch);
+        Assert.Throws<ArgumentException>(() => client.OpenChannel(new ChannelOptions { ChannelId = "" }));
 
         await client.DisposeAsync();
         await server.DisposeAsync();
     }
 
     [Fact]
-    public async Task OpenChannel_VeryLongId_IsAccepted()
+    public async Task OpenChannel_VeryLongId_Throws()
     {
         var (client, server) = await CreateReadyPairAsync();
 
-        // API does not currently validate channel ID length
         var longId = new string('x', 100_000);
-        var ch = client.OpenChannel(new ChannelOptions { ChannelId = longId });
-        Assert.NotNull(ch);
+        Assert.Throws<ArgumentException>(() => client.OpenChannel(new ChannelOptions { ChannelId = longId }));
 
         await client.DisposeAsync();
         await server.DisposeAsync();

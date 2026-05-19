@@ -2,16 +2,20 @@ namespace NetConduit.UnitTests;
 
 public sealed class PublicApiTests
 {
-    private static (StreamMultiplexer Client, StreamMultiplexer Server) CreatePair()
+    private static (StreamMultiplexer Client, StreamMultiplexer Server) CreatePair(
+        DefaultChannelOptions? clientDefaultChannelOptions = null,
+        DefaultChannelOptions? serverDefaultChannelOptions = null)
     {
         var duplex = new DuplexMemoryStream();
         var client = StreamMultiplexer.Create(new MultiplexerOptions
         {
             StreamFactory = _ => Task.FromResult<IStreamPair>(duplex.SideA),
+            DefaultChannelOptions = clientDefaultChannelOptions ?? new DefaultChannelOptions(),
         });
         var server = StreamMultiplexer.Create(new MultiplexerOptions
         {
             StreamFactory = _ => Task.FromResult<IStreamPair>(duplex.SideB),
+            DefaultChannelOptions = serverDefaultChannelOptions ?? new DefaultChannelOptions(),
         });
         return (client, server);
     }
@@ -694,14 +698,19 @@ public sealed class PublicApiTests
     [Fact]
     public async Task OpenChannel_StringExtension_UsesDefaultPriority()
     {
-        var (client, server) = CreatePair();
+        var (client, server) = CreatePair(clientDefaultChannelOptions: new DefaultChannelOptions
+        {
+            Priority = ChannelPriority.Highest,
+            SlabSize = 128 * 1024,
+            SendTimeout = TimeSpan.FromMilliseconds(1234),
+        });
         client.Start();
         server.Start();
         await Task.WhenAll(client.WaitForReadyAsync(), server.WaitForReadyAsync());
 
         var ch = client.OpenChannel("ext-defaults");
 
-        Assert.Equal(ChannelPriority.Normal, ch.Priority);
+        Assert.Equal(ChannelPriority.Highest, ch.Priority);
 
         await client.DisposeAsync();
         await server.DisposeAsync();
