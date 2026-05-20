@@ -88,6 +88,10 @@ await using var mux = StreamMultiplexer.Create(WebSocketMultiplexer.CreateServer
 mux.Start();
 ```
 
+## Reconnectable server
+
+`CreateServerOptions(webSocket)` wraps one already-accepted WebSocket. For a server that survives client churn from an `HttpListener`-based host, write a custom factory that re-accepts on every call. See [Reconnection → WebSocket (`HttpListener`)](../concepts/reconnection.md#websocket-httplistener) for a copy-paste snippet. ASP.NET Core hosts naturally spawn a fresh multiplexer per WebSocket upgrade, so the reconnect pattern is not used there.
+
 ## When WebSocket is the right pick
 
 - Browser clients.

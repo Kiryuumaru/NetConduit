@@ -67,6 +67,8 @@ var opts = TcpMultiplexer.CreateOptions("relay.example.com", 5000) with
 
 (The factory inside `opts` is a `StreamFactoryDelegate` — `MultiplexerOptions` is a `record` so `with` works for tuning.)
 
+For a *server* that survives client churn, see [Reconnection → TCP](../concepts/reconnection.md#tcp) for the copy-paste re-accepting factory pattern.
+
 ## Platform
 
 Windows, Linux, macOS, anywhere `System.Net.Sockets` is supported.
