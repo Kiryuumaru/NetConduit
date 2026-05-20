@@ -11,9 +11,14 @@ using NetConduit.Models;
 namespace NetConduit;
 
 /// <summary>
-/// The multiplexer — a pure router. Channels do all heavy lifting.
-/// The mux just picks up ready frames from channels and sends them, and routes
-/// incoming frames to the correct channel by reading the 8-byte header.
+/// The multiplexer. Owns the connection lifecycle (initial connect, retry/backoff,
+/// reconnect with replay), the wire-level handshake and reconnect handshake, the
+/// writer/flusher/reader/keepalive loops, control-frame processing (GoAway, ping/pong),
+/// channel-id validation, GoAway drain orchestration, and inbound-channel accept
+/// dispatch. Per-channel send/receive slabs, frame construction, flow control,
+/// and replay state live on the channels themselves (<see cref="IWriteChannel"/>,
+/// <see cref="IReadChannel"/>); this class routes frames between the transport
+/// and those channels and arbitrates session-level state.
 /// </summary>
 public sealed class StreamMultiplexer : IStreamMultiplexer, IChannelOwner
 {
