@@ -240,7 +240,7 @@ static async Task HandleRelayConnectionAsync(
         var ctrlSend = mux.OpenChannel("ctrl<<");
         IReadChannel? ctrlRecv = null;
 
-        await foreach (var ch in mux.AcceptChannelsAsync(ct))
+        await foreach (var ch in mux.AcceptChannelsAsync(ct: ct))
         {
             if (ch.ChannelId == "ctrl>>")
             {
@@ -405,7 +405,7 @@ static async Task<int> RunAgentAsync(string[] args, CancellationToken ct)
     var ctrlSend = mux.OpenChannel("ctrl>>");
 
     IReadChannel? ctrlRecv = null;
-    await foreach (var ch in mux.AcceptChannelsAsync(ct))
+    await foreach (var ch in mux.AcceptChannelsAsync(ct: ct))
     {
         if (ch.ChannelId == "ctrl<<")
         {
@@ -442,7 +442,7 @@ static async Task<int> RunAgentAsync(string[] args, CancellationToken ct)
     // Handle tunnel requests
     _ = Task.Run(async () =>
     {
-        await foreach (var readChannel in mux.AcceptChannelsAsync(ct))
+        await foreach (var readChannel in mux.AcceptChannelsAsync(ct: ct))
         {
             // Look for tunnel channels with >> suffix (outbound from relay)
             if (readChannel.ChannelId.StartsWith("tunnel:") && readChannel.ChannelId.EndsWith(">>"))
@@ -560,7 +560,7 @@ static async Task<int> RunForwardAsync(string[] args, CancellationToken ct)
     // Accept task runs continuously to handle both control and tunnel channels
     _ = Task.Run(async () =>
     {
-        await foreach (var readChannel in mux.AcceptChannelsAsync(ct))
+        await foreach (var readChannel in mux.AcceptChannelsAsync(ct: ct))
         {
             if (readChannel.ChannelId == "ctrl<<")
             {
@@ -739,7 +739,7 @@ static async Task<int> RunListAsync(string[] args, CancellationToken ct)
     using var acceptCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
     acceptCts.CancelAfter(TimeSpan.FromSeconds(5));
 
-    await foreach (var ch in mux.AcceptChannelsAsync(acceptCts.Token))
+    await foreach (var ch in mux.AcceptChannelsAsync(ct: acceptCts.Token))
     {
         if (ch.ChannelId == "ctrl<<")
         {

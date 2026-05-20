@@ -293,7 +293,7 @@ public sealed class UseCaseTests
         var acceptTask = Task.Run(async () =>
         {
             int count = 0;
-            await foreach (var ch in server.AcceptChannelsAsync(cts.Token))
+            await foreach (var ch in server.AcceptChannelsAsync(ct: cts.Token))
             {
                 var buf = new byte[256];
                 while (await ch.ReadAsync(buf, cts.Token) > 0) { }

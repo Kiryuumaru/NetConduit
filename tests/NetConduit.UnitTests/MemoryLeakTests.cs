@@ -68,7 +68,7 @@ public sealed class MemoryLeakTests
         var handlerTasks = new System.Collections.Concurrent.ConcurrentBag<Task>();
         var serverTask = Task.Run(async () =>
         {
-            await foreach (var ch in server.AcceptChannelsAsync(cts.Token))
+            await foreach (var ch in server.AcceptChannelsAsync(ct: cts.Token))
             {
                 var t = Task.Run(async () =>
                 {
@@ -213,7 +213,7 @@ public sealed class MemoryLeakTests
         // Server: accept and drain
         var serverTask = Task.Run(async () =>
         {
-            await foreach (var ch in server.AcceptChannelsAsync(cts.Token))
+            await foreach (var ch in server.AcceptChannelsAsync(ct: cts.Token))
             {
                 _ = Task.Run(async () =>
                 {
@@ -355,7 +355,7 @@ public sealed class MemoryLeakTests
                     var innerServerTask = Task.Run(async () =>
                     {
                         int count = 0;
-                        await foreach (var ch in innerServer.AcceptChannelsAsync(cts.Token))
+                        await foreach (var ch in innerServer.AcceptChannelsAsync(ct: cts.Token))
                         {
                             var buf = new byte[4096];
                             try
@@ -471,7 +471,7 @@ public sealed class MemoryLeakTests
         // Server: accept and drain channels sequentially
         var serverTask = Task.Run(async () =>
         {
-            await foreach (var ch in server.AcceptChannelsAsync(cts.Token))
+            await foreach (var ch in server.AcceptChannelsAsync(ct: cts.Token))
             {
                 try
                 {
@@ -584,7 +584,7 @@ public sealed class MemoryLeakTests
         var handlerTasks = new System.Collections.Concurrent.ConcurrentBag<Task>();
         var serverTask = Task.Run(async () =>
         {
-            await foreach (var ch in server.AcceptChannelsAsync(cts.Token))
+            await foreach (var ch in server.AcceptChannelsAsync(ct: cts.Token))
             {
                 var t = Task.Run(async () =>
                 {
@@ -722,7 +722,7 @@ public sealed class MemoryLeakTests
         var handlerTasks = new System.Collections.Concurrent.ConcurrentBag<Task>();
         var serverTask = Task.Run(async () =>
         {
-            await foreach (var ch in server.AcceptChannelsAsync(cts.Token))
+            await foreach (var ch in server.AcceptChannelsAsync(ct: cts.Token))
             {
                 var t = Task.Run(async () =>
                 {
@@ -880,7 +880,7 @@ public sealed class MemoryLeakTests
         var handlerTasks = new System.Collections.Concurrent.ConcurrentBag<Task>();
         var serverTask = Task.Run(async () =>
         {
-            await foreach (var ch in server.AcceptChannelsAsync(cts.Token))
+            await foreach (var ch in server.AcceptChannelsAsync(ct: cts.Token))
             {
                 var t = Task.Run(async () =>
                 {
