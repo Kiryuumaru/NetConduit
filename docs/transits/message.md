@@ -9,7 +9,7 @@ Built on top of the same `>>` / `<<` channel pair convention as [DuplexStreamTra
 ## API
 
 ```csharp
-public sealed class MessageTransit<TSend, TReceive> : IMessageTransit<TSend, TReceive>
+public sealed class MessageTransit<TSend, TReceive> : ITransit
 {
     // AOT-safe constructor
     public MessageTransit(
