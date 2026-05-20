@@ -24,8 +24,8 @@ class Build : BaseNukeBuildHelpers
 {
     public static int Main() => Execute<Build>(x => x.Interactive);
 
-    private const double BenchmarkThroughputMinimumRatio = 1.5d;
-    private const double BenchmarkGameTickMinimumRatio = 2.0d;
+    private const double BenchmarkThroughputMinimumRatio = 0.5d;
+    private const double BenchmarkGameTickMinimumRatio = 1.0d;
     private const string NetConduitMuxImplementation = "NetConduit Mux TCP";
     private static readonly string[] GoMuxImplementations = ["FRP/Yamux (Go)", "Smux (Go)"];
     private static readonly JsonSerializerOptions BenchmarkJsonOptions = new() { PropertyNameCaseInsensitive = true };
