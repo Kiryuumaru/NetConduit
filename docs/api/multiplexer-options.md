@@ -62,5 +62,16 @@ Applied by `OpenChannel(string)` extension (no per-channel `ChannelOptions`).
 
 ## Validation
 
-- `DefaultChannelOptions.SlabSize` must be between 64 KiB and 64 MiB (`FrameConstants.MinSlabSize` / `MaxSlabSize`). Enforced in `StreamMultiplexer.Create` and again per-channel in `OpenChannel`.
+All validation is enforced in `StreamMultiplexer.Create`; invalid values throw `ArgumentOutOfRangeException` at the boundary.
+
 - `StreamFactory` is `required` — omitting it is a compile error.
+- `DefaultChannelOptions.SlabSize` must be between 64 KiB and 64 MiB (`FrameConstants.MinSlabSize` / `MaxSlabSize`). Enforced in `StreamMultiplexer.Create` and again per-channel in `OpenChannel`.
+- `MaxAutoReconnectAttempts` must be `-1` (unlimited), `0` (no reconnect), or a positive bound.
+- `PingInterval` must be non-negative. `TimeSpan.Zero` disables keepalive entirely (no ping/pong traffic, no missed-ping disconnect).
+- `PingTimeout` must be positive **when keepalive is enabled** (`PingInterval > TimeSpan.Zero`). Ignored when keepalive is disabled.
+- `MaxMissedPings` must be at least `1` **when keepalive is enabled**. Ignored when keepalive is disabled.
+- `GoAwayTimeout` must be non-negative. `TimeSpan.Zero` means no drain wait.
+- `AutoReconnectDelay` must be non-negative.
+- `MaxAutoReconnectDelay` must be greater than or equal to `AutoReconnectDelay` (the cap cannot be below the base).
+- `AutoReconnectBackoffMultiplier` must be greater than or equal to `1.0` (the term "backoff" implies non-shrinking delay). `NaN` is rejected.
+- `ConnectionTimeout` must be `Timeout.InfiniteTimeSpan`, `TimeSpan.Zero`, or positive. `InfiniteTimeSpan` and `TimeSpan.Zero` both disable per-attempt timeout enforcement.
