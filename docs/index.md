@@ -5,6 +5,7 @@ NetConduit is a transport-agnostic stream multiplexer for .NET. It carries any n
 ## Start here
 
 - [Getting started](getting-started.md) — install, write your first server and client.
+- [Scope](concepts/scope.md) — what NetConduit does and deliberately does not do.
 - [Packages](packages.md) — what each NuGet package contains and depends on.
 
 ## Learn the model
