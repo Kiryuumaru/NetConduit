@@ -885,6 +885,15 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IChannelOwner
         }
     }
 
+    void IChannelOwner.NotifyPendingAcceptCancelled(string channelId)
+    {
+        // Disposing a pending-accept channel cancels the accept. Removing the
+        // entry from the pending-accept map prevents DispatchToChannel from
+        // resurrecting the disposed instance when the peer's INIT eventually
+        // arrives. Idempotent — TryRemove is a no-op if already gone.
+        _registry.RemovePendingAcceptChannel(channelId);
+    }
+
     // =====================================================================
     // Writer Thread — THE DUMB ROUTER (send side)
     // Picks ready channels, writes their pre-built frames to the stream.
@@ -1049,8 +1058,18 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IChannelOwner
                 if (existing is not null)
                     return;
 
-                // Check if a pending accept channel was pre-created via AcceptChannel
+                // Check if a pending accept channel was pre-created via AcceptChannel.
+                // A pending entry whose state is already Closed was disposed by the
+                // caller before INIT arrived; treat it as if no pending exists and
+                // fall through to creating a fresh channel. Adopting the disposed
+                // instance would resurrect a channel whose slab has been returned
+                // to ArrayPool<byte>.Shared.
                 var pendingChannel = _registry.GetPendingAcceptChannel(channelId);
+                if (pendingChannel is not null && pendingChannel.State == ChannelState.Closed)
+                {
+                    _registry.RemovePendingAcceptChannel(channelId);
+                    pendingChannel = null;
+                }
 
                 if (pendingChannel is not null)
                 {

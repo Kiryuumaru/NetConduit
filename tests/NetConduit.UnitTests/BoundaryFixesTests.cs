@@ -16,6 +16,7 @@ public sealed class BoundaryFixesTests
 
         public void NotifyReady(WriteChannel channel) => Interlocked.Increment(ref NotifyReadyCount);
         public void NotifyChannelCompleted(ushort channelIndex, string channelId) { }
+        public void NotifyPendingAcceptCancelled(string channelId) { }
         public void NotifyChannelOpened(string channelId) { }
         public void SendAck(ushort channelIndex, ulong consumedPosition)
             => SentAcks.Add((channelIndex, consumedPosition));

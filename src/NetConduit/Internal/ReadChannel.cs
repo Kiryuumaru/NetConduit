@@ -44,6 +44,11 @@ internal sealed class ReadChannel : Stream, IReadChannel, IValueTaskSource<int>
     private Memory<byte>? _pendingUserBuffer;
     private readonly ValueTaskCompletionSource _readCompletion = new();
     private bool _readCompletionActive;
+    // Cancellation registration tied to the in-flight slow-path read.
+    // Stored so completion paths can unregister it and avoid an unbounded
+    // callback list on long-lived CancellationTokenSources. Reset to
+    // default whenever _readCompletionActive transitions to false.
+    private CancellationTokenRegistration _readCancelReg;
 
     private WriteChannel? _ackChannel;
 
@@ -131,6 +136,15 @@ internal sealed class ReadChannel : Stream, IReadChannel, IValueTaskSource<int>
 
     internal void MarkOpen()
     {
+        // Refuse to revive a Closed channel. A pending-accept channel that was
+        // disposed before the peer's INIT arrived has already returned its slab
+        // to ArrayPool<byte>.Shared; transitioning back to Open would let the
+        // next DATA frame write into pooled memory the channel no longer owns
+        // (use-after-free). The dispatcher detects this state under AcceptLock
+        // and falls through to creating a fresh channel; this is the
+        // defense-in-depth backstop.
+        if (_state == ChannelState.Closed)
+            return;
         _state = ChannelState.Open;
         if (!_isReady)
         {
@@ -203,7 +217,7 @@ internal sealed class ReadChannel : Stream, IReadChannel, IValueTaskSource<int>
             // Handle cancellation
             if (ct.CanBeCanceled)
             {
-                ct.Register(static state =>
+                _readCancelReg = ct.Register(static state =>
                 {
                     var self = (ReadChannel)state!;
                     lock (self._lock)
@@ -212,6 +226,7 @@ internal sealed class ReadChannel : Stream, IReadChannel, IValueTaskSource<int>
                         {
                             self._pendingUserBuffer = null;
                             self._readCompletionActive = false;
+                            self._readCancelReg = default;
                             self._readCompletion.Core.SetException(new OperationCanceledException());
                         }
                     }
@@ -292,6 +307,13 @@ internal sealed class ReadChannel : Stream, IReadChannel, IValueTaskSource<int>
             {
                 BufferInSlab(payload[toCopy..]);
             }
+
+            // Detach the cancellation callback now that the read has
+            // completed. Unregister is non-blocking so it is safe to call
+            // under the lock that the callback would otherwise contend on.
+            var reg = _readCancelReg;
+            _readCancelReg = default;
+            reg.Unregister();
 
             _readCompletion.Core.SetResult(toCopy);
             return true;
@@ -396,6 +418,9 @@ internal sealed class ReadChannel : Stream, IReadChannel, IValueTaskSource<int>
             {
                 _pendingUserBuffer = null;
                 _readCompletionActive = false;
+                var reg = _readCancelReg;
+                _readCancelReg = default;
+                reg.Unregister();
                 _readCompletion.Core.SetResult(0);
             }
         }
@@ -439,6 +464,12 @@ internal sealed class ReadChannel : Stream, IReadChannel, IValueTaskSource<int>
             SetClosed(ChannelCloseReason.LocalClose);
         }
         TryReturnSlab();
+        // A pending-accept channel disposed before the peer's INIT arrives
+        // (_channelIndex == 0, never wired) must remove itself from the
+        // pending-accept map so the dispatcher does not resurrect this
+        // disposed instance when INIT eventually arrives.
+        if (_channelIndex == 0)
+            _owner?.NotifyPendingAcceptCancelled(ChannelId);
         _owner?.NotifyChannelCompleted(_channelIndex, ChannelId);
         await base.DisposeAsync();
     }
@@ -453,6 +484,8 @@ internal sealed class ReadChannel : Stream, IReadChannel, IValueTaskSource<int>
                 SetClosed(ChannelCloseReason.LocalClose);
             }
             TryReturnSlab();
+            if (_channelIndex == 0)
+                _owner?.NotifyPendingAcceptCancelled(ChannelId);
             _owner?.NotifyChannelCompleted(_channelIndex, ChannelId);
         }
         base.Dispose(disposing);

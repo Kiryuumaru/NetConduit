@@ -24,6 +24,16 @@ internal interface IChannelOwner
     void NotifyChannelCompleted(ushort channelIndex, string channelId);
 
     /// <summary>
+    /// Called by a pending-accept <see cref="ReadChannel"/> (created via
+    /// <c>AcceptChannel(string)</c> but not yet wired to a remote channel
+    /// index) when it is disposed before the peer's INIT frame arrives.
+    /// The owner removes the channel from the pending-accept map so the
+    /// next inbound INIT for the same channel id is treated as a fresh
+    /// channel rather than resurrecting the disposed instance.
+    /// </summary>
+    void NotifyPendingAcceptCancelled(string channelId);
+
+    /// <summary>
     /// Sends a position-based ACK frame for the given channel back to the remote.
     /// Used by ReadChannel to inform the remote WriteChannel how far the consumer
     /// has consumed, so PrepareReplay on reconnect skips already-delivered bytes.
