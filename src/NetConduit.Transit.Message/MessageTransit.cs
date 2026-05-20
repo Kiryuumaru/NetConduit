@@ -16,7 +16,7 @@ namespace NetConduit.Transit.Message;
 /// </summary>
 /// <typeparam name="TSend">The type of messages to send.</typeparam>
 /// <typeparam name="TReceive">The type of messages to receive.</typeparam>
-public sealed class MessageTransit<TSend, TReceive> : IMessageTransit<TSend, TReceive>
+public sealed class MessageTransit<TSend, TReceive> : ITransit
 {
     private readonly IWriteChannel? _writeChannel;
     private readonly IReadChannel? _readChannel;
