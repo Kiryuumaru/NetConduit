@@ -10,16 +10,25 @@ using NukeBuildHelpers.Entry.Extensions;
 using NukeBuildHelpers.Runner.Abstraction;
 using Serilog;
 using System;
+using System.Collections.Generic;
+using System.Globalization;
 using System.IO;
 using System.Diagnostics;
 using System.Linq;
 using System.Reflection;
 using System.Runtime.Loader;
+using System.Text.Json;
 using System.Xml.Linq;
 
 class Build : BaseNukeBuildHelpers
 {
     public static int Main() => Execute<Build>(x => x.Interactive);
+
+    private const double BenchmarkThroughputMinimumRatio = 1.5d;
+    private const double BenchmarkGameTickMinimumRatio = 2.0d;
+    private const string NetConduitMuxImplementation = "NetConduit Mux TCP";
+    private static readonly string[] GoMuxImplementations = ["FRP/Yamux (Go)", "Smux (Go)"];
+    private static readonly JsonSerializerOptions BenchmarkJsonOptions = new() { PropertyNameCaseInsensitive = true };
 
     public override string[] EnvironmentBranches { get; } = ["prerelease", "master"];
 
@@ -149,6 +158,22 @@ class Build : BaseNukeBuildHelpers
                         .SetConfiguration("Release"));
                 }
             }));
+
+    TestEntry BenchmarkTestEntry => _ => _
+        .RunnerOS(RunnerOS.Ubuntu2204)
+        .AppId("benchmark")
+        .WorkflowId("benchmark_test")
+        .DisplayName("Test Benchmarks")
+        .ExecuteBeforeBuild(true)
+        .Condition(context => context.Apps.Values.Any(app => app.RunType == RunType.PullRequest))
+        .Execute(context =>
+        {
+            RunProcess("bash", "benchmarks/docker/run-docker.sh", RootDirectory);
+
+            var resultsDirectory = RootDirectory / "benchmarks" / "docker" / "results";
+            AssertBenchmarkGate(resultsDirectory);
+            CopyBenchmarkResults(resultsDirectory, context.Apps.Values.First().OutputDirectory);
+        });
 
     BuildEntry BuildEntry => _ => _
         .RunnerOS(RunnerOS.Ubuntu2204)
@@ -364,6 +389,138 @@ class Build : BaseNukeBuildHelpers
             .SetConfiguration("Release"));
     }
 
+    private static void RunProcess(string fileName, string arguments, AbsolutePath workingDirectory)
+    {
+        using var process = Process.Start(new ProcessStartInfo(fileName, arguments)
+        {
+            WorkingDirectory = workingDirectory.ToString(),
+            UseShellExecute = false
+        }) ?? throw new InvalidOperationException($"Failed to start process '{fileName}'");
+
+        process.WaitForExit();
+        if (process.ExitCode != 0)
+            throw new InvalidOperationException($"Process '{fileName} {arguments}' failed with exit code {process.ExitCode}");
+    }
+
+    private static void AssertBenchmarkGate(AbsolutePath resultsDirectory)
+    {
+        var results = LoadBenchmarkResults(
+            resultsDirectory / "dotnet-gametick.json",
+            resultsDirectory / "dotnet-throughput.json",
+            resultsDirectory / "go-gametick.json",
+            resultsDirectory / "go-throughput.json");
+
+        var throughputPassed = AssertBenchmarkScenario(
+            results,
+            "throughput",
+            "throughputMBps",
+            BenchmarkThroughputMinimumRatio,
+            result => result.ThroughputMBps);
+        var gameTickPassed = AssertBenchmarkScenario(
+            results,
+            "game-tick",
+            "messagesPerSec",
+            BenchmarkGameTickMinimumRatio,
+            result => result.MessagesPerSec);
+
+        if (!throughputPassed || !gameTickPassed)
+            throw new InvalidOperationException("Benchmark performance gate failed");
+    }
+
+    private static BenchmarkResult[] LoadBenchmarkResults(params AbsolutePath[] resultFiles) =>
+        resultFiles
+            .SelectMany(path => JsonSerializer.Deserialize<BenchmarkResult[]>(File.ReadAllText(path), BenchmarkJsonOptions)
+                ?? throw new InvalidOperationException($"Could not read benchmark results from {path}"))
+            .ToArray();
+
+    private static bool AssertBenchmarkScenario(
+        BenchmarkResult[] results,
+        string scenario,
+        string metricName,
+        double minimumRatio,
+        Func<BenchmarkResult, double> getMetric)
+    {
+        var groups = results
+            .Where(result => string.Equals(result.Scenario, scenario, StringComparison.Ordinal))
+            .GroupBy(result => new BenchmarkKey(result.Channels, result.DataSizeBytes))
+            .OrderBy(group => group.Key.Channels)
+            .ThenBy(group => group.Key.DataSizeBytes)
+            .ToArray();
+        if (groups.Length == 0)
+            throw new InvalidOperationException($"No benchmark results found for scenario '{scenario}'");
+
+        Log.Information("Benchmark gate for {Scenario}: NetConduit / Go mux geometric mean must be >= {MinimumRatio:0.00}x", scenario, minimumRatio);
+        var passed = true;
+
+        foreach (var goMux in GoMuxImplementations)
+        {
+            var ratios = new List<double>();
+            foreach (var group in groups)
+            {
+                var implementations = group.ToDictionary(result => result.Implementation, StringComparer.Ordinal);
+                if (!implementations.TryGetValue(NetConduitMuxImplementation, out var netConduit))
+                    throw new InvalidOperationException($"Missing '{NetConduitMuxImplementation}' result for {scenario} channels={group.Key.Channels} size={group.Key.DataSizeBytes}");
+                if (!implementations.TryGetValue(goMux, out var competitor))
+                    throw new InvalidOperationException($"Missing '{goMux}' result for {scenario} channels={group.Key.Channels} size={group.Key.DataSizeBytes}");
+
+                var netConduitMetric = getMetric(netConduit);
+                var competitorMetric = getMetric(competitor);
+                if (netConduitMetric <= 0 || competitorMetric <= 0)
+                    throw new InvalidOperationException($"Invalid {metricName} result for {scenario} channels={group.Key.Channels} size={group.Key.DataSizeBytes}");
+
+                var ratio = netConduitMetric / competitorMetric;
+                ratios.Add(ratio);
+                Log.Information(
+                    "{Scenario} channels={Channels} size={DataSize}: NetConduit={NetConduitMetric} {MetricName}, {Competitor}={CompetitorMetric} {MetricName}, ratio={Ratio:0.00}x",
+                    scenario,
+                    group.Key.Channels,
+                    FormatBenchmarkSize(group.Key.DataSizeBytes),
+                    FormatBenchmarkMetric(netConduitMetric),
+                    metricName,
+                    goMux,
+                    FormatBenchmarkMetric(competitorMetric),
+                    metricName,
+                    ratio);
+            }
+
+            var geometricMean = GeometricMean(ratios);
+            var comparisonPassed = geometricMean >= minimumRatio;
+            passed &= comparisonPassed;
+            Log.Information(
+                "{Scenario}: NetConduit vs {Competitor} geometric mean = {GeometricMean:0.000}x ({Status})",
+                scenario,
+                goMux,
+                geometricMean,
+                comparisonPassed ? "PASS" : "FAIL");
+        }
+
+        return passed;
+    }
+
+    private static double GeometricMean(IReadOnlyCollection<double> ratios) =>
+        Math.Exp(ratios.Sum(Math.Log) / ratios.Count);
+
+    private static string FormatBenchmarkSize(int bytes)
+    {
+        if (bytes >= 1_048_576)
+            return FormattableString.Invariant($"{bytes / 1_048_576}MB");
+        if (bytes >= 1024)
+            return FormattableString.Invariant($"{bytes / 1024}KB");
+        return FormattableString.Invariant($"{bytes}B");
+    }
+
+    private static string FormatBenchmarkMetric(double value) =>
+        value.ToString("N1", CultureInfo.InvariantCulture);
+
+    private static void CopyBenchmarkResults(AbsolutePath resultsDirectory, AbsolutePath outputDirectory)
+    {
+        Directory.CreateDirectory(outputDirectory.ToString());
+        foreach (var file in resultsDirectory.GetFiles("*.json").Concat(resultsDirectory.GetFiles("*.md")))
+        {
+            File.Copy(file.ToString(), (outputDirectory / file.Name).ToString(), overwrite: true);
+        }
+    }
+
     private string? NormalizeReleaseNotes(string? releaseNotes)
     {
         return releaseNotes?
@@ -380,4 +537,14 @@ class Build : BaseNukeBuildHelpers
     }
 
     private sealed record TestCategoryRun(string Category, int TestCount);
+
+    private sealed record BenchmarkResult(
+        string Implementation,
+        string Scenario,
+        int Channels,
+        int DataSizeBytes,
+        double ThroughputMBps,
+        double MessagesPerSec);
+
+    private readonly record struct BenchmarkKey(int Channels, int DataSizeBytes);
 }
