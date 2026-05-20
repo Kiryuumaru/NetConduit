@@ -54,7 +54,15 @@ public static class StreamTransitExtensions
         CancellationToken cancellationToken = default)
     {
         var transit = mux.AcceptStream(channelId);
-        await transit.WaitForReadyAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            await transit.WaitForReadyAsync(cancellationToken).ConfigureAwait(false);
+        }
+        catch
+        {
+            await transit.DisposeAsync().ConfigureAwait(false);
+            throw;
+        }
         return transit;
     }
 }

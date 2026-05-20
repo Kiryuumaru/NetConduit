@@ -725,4 +725,44 @@ public sealed class DuplexStreamTransitTests
     }
 
     #endregion
+
+    #region Cancellation cleanup
+
+    [Fact]
+    public async Task OpenDuplexStreamAsync_Cancelled_ReleasesChannelIds()
+    {
+        var (client, server) = await CreateReadyPairAsync();
+
+        using var alreadyCancelled = new CancellationTokenSource();
+        alreadyCancelled.Cancel();
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(async () =>
+            await client.OpenDuplexStreamAsync("cancel-leak", alreadyCancelled.Token));
+
+        // Retry with the same base channel ID must succeed; previously cancelled open leaked the channel registration.
+        await using var retry = client.OpenDuplexStream("cancel-leak");
+
+        await client.DisposeAsync();
+        await server.DisposeAsync();
+    }
+
+    [Fact]
+    public async Task AcceptDuplexStreamAsync_Cancelled_ReleasesChannelIds()
+    {
+        var (client, server) = await CreateReadyPairAsync();
+
+        using var alreadyCancelled = new CancellationTokenSource();
+        alreadyCancelled.Cancel();
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(async () =>
+            await server.AcceptDuplexStreamAsync("cancel-accept", alreadyCancelled.Token));
+
+        // Retry with the same base channel ID must succeed; previously cancelled accept leaked the channel registration.
+        await using var retry = server.AcceptDuplexStream("cancel-accept");
+
+        await client.DisposeAsync();
+        await server.DisposeAsync();
+    }
+
+    #endregion
 }

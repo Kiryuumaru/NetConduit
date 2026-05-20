@@ -27,6 +27,9 @@ internal sealed class WriteChannel : Stream, IWriteChannel
     private readonly TimeSpan _sendTimeout;
     private readonly bool _enableReplay;
     private readonly TaskCompletionSource _readyTcs = new(TaskCreationOptions.RunContinuationsAsynchronously);
+    // Completes once the channel has been removed from the owner's registry,
+    // so DisposeAsync can guarantee the channel ID is reusable when it returns.
+    private readonly TaskCompletionSource _unregisteredTcs = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
     // Position tracking — the slab is a linear buffer with compaction
     // All position fields are protected by _posLock
@@ -356,9 +359,16 @@ internal sealed class WriteChannel : Stream, IWriteChannel
         // When closed by AbortAllChannels (MuxDisposed), the registry handles cleanup via Clear().
         // Only self-unregister for graceful per-channel closes where MarkSent may have missed the window.
         if (reason != ChannelCloseReason.MuxDisposed)
+        {
             TryNotifyCompleted();
-        else if (!HasPendingData())
-            TryReturnSlab();
+        }
+        else
+        {
+            if (!HasPendingData())
+                TryReturnSlab();
+            // Registry cleared externally on mux dispose; unblock any DisposeAsync awaiters.
+            _unregisteredTcs.TrySetResult();
+        }
     }
 
     internal void Abort(ChannelCloseReason reason, Exception? exception = null)
@@ -376,11 +386,26 @@ internal sealed class WriteChannel : Stream, IWriteChannel
 
     private void TryNotifyCompleted()
     {
-        if (ChannelId is null) return;
-        if (_state != ChannelState.Closed || HasPendingData()) return;
-        if (Interlocked.CompareExchange(ref _completionNotified, 1, 0) != 0) return;
-        TryReturnSlab();
-        _owner.NotifyChannelCompleted(_channelIndex, ChannelId);
+        if (ChannelId is null)
+        {
+            // Never registered with the owner; nothing to unregister, unblock DisposeAsync.
+            _unregisteredTcs.TrySetResult();
+            return;
+        }
+        if (_state != ChannelState.Closed) return;
+        // Unregister exactly once. Channel ID becomes reusable immediately on close,
+        // regardless of whether the writer thread has finished draining queued frames.
+        // This prevents DisposeAsync from blocking when the writer loop is not running
+        // (e.g., the mux is still in handshake and will never drain the FIN).
+        if (Interlocked.CompareExchange(ref _completionNotified, 1, 0) == 0)
+        {
+            _owner.NotifyChannelCompleted(_channelIndex, ChannelId);
+            _unregisteredTcs.TrySetResult();
+        }
+        // Slab return is deferred until the writer has drained any in-flight frames,
+        // so it stays valid for any concurrent TakeReady/MarkSent in progress.
+        if (!HasPendingData())
+            TryReturnSlab();
     }
 
     private void TryReleaseSpaceSignal()
@@ -436,6 +461,10 @@ internal sealed class WriteChannel : Stream, IWriteChannel
             await CloseAsync();
             SetClosed(ChannelCloseReason.LocalClose);
         }
+        // Wait until the writer thread has drained the FIN frame and the channel
+        // has been removed from the owner's registry, so the channel ID is
+        // immediately reusable after DisposeAsync completes.
+        await _unregisteredTcs.Task.ConfigureAwait(false);
         _spaceAvailable.Dispose();
         await base.DisposeAsync();
     }
@@ -445,7 +474,14 @@ internal sealed class WriteChannel : Stream, IWriteChannel
     {
         if (disposing && _state is not ChannelState.Closed)
         {
+            // Send FIN so the peer observes EOF, matching DisposeAsync semantics.
+            if (_state is not ChannelState.Closing)
+            {
+                _state = ChannelState.Closing;
+                WriteFinFrame();
+            }
             SetClosed(ChannelCloseReason.LocalClose);
+            _spaceAvailable.Dispose();
         }
         base.Dispose(disposing);
     }
