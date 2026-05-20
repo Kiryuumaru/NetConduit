@@ -164,6 +164,7 @@ class Build : BaseNukeBuildHelpers
         .AppId([.. DeploymentApps.Select(a => a.AppId)])
         .WorkflowId("benchmark_test")
         .DisplayName("Test Benchmarks")
+        .ExecuteBeforeBuild(true)
         .Execute(context =>
         {
             RunProcess("bash", "benchmarks/docker/run-docker.sh", RootDirectory);
