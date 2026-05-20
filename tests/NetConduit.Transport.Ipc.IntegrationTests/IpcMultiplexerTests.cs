@@ -147,4 +147,30 @@ public class IpcMultiplexerTests
         if (!OperatingSystem.IsWindows() && File.Exists(endpoint))
             File.Delete(endpoint);
     }
+
+    [Fact(Timeout = 30000)]
+    public async Task CreateServerOptions_EndpointPathIsRegularFile_RefusesToOverwriteAndPreservesFile()
+    {
+        if (OperatingSystem.IsWindows())
+            return; // Unix-only code path (Windows uses TCP loopback, no filesystem entry).
+
+        var endpoint = Path.Combine(Path.GetTempPath(), $"nc-test-{Guid.NewGuid():N}.not-a-socket");
+        var sentinel = "DO_NOT_DELETE_ME"u8.ToArray();
+        await File.WriteAllBytesAsync(endpoint, sentinel);
+        try
+        {
+            var options = IpcMultiplexer.CreateServerOptions(endpoint);
+            using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+
+            await Assert.ThrowsAsync<IOException>(async () => await options.StreamFactory(cts.Token));
+
+            Assert.True(File.Exists(endpoint), "Non-socket file at IPC endpoint path must not be deleted.");
+            Assert.Equal(sentinel, await File.ReadAllBytesAsync(endpoint));
+        }
+        finally
+        {
+            if (File.Exists(endpoint))
+                File.Delete(endpoint);
+        }
+    }
 }

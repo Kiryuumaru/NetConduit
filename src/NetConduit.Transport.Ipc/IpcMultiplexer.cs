@@ -98,8 +98,7 @@ public static class IpcMultiplexer
                     }
                     else
                     {
-                        if (File.Exists(endpoint))
-                            File.Delete(endpoint);
+                        EnsureUnixEndpointWritable(endpoint);
 
                         var listenSocket = new Socket(AddressFamily.Unix, SocketType.Stream, ProtocolType.Unspecified);
                         try
@@ -137,5 +136,39 @@ public static class IpcMultiplexer
         var hash = SHA256.HashData(bytes);
         var value = (ushort)(hash[0] << 8 | hash[1]);
         return 49152 + (value % (65535 - 49152));
+    }
+
+    // Refuses to delete the endpoint path unless we can prove it is a stale Unix
+    // domain socket (one whose owning process is gone). A bare File.Delete here
+    // would silently destroy arbitrary user files when the endpoint is misconfigured.
+    private static void EnsureUnixEndpointWritable(string endpoint)
+    {
+        if (!File.Exists(endpoint))
+            return;
+
+        using var probe = new Socket(AddressFamily.Unix, SocketType.Stream, ProtocolType.Unspecified);
+        try
+        {
+            probe.Connect(new UnixDomainSocketEndPoint(endpoint));
+        }
+        catch (SocketException ex) when (ex.SocketErrorCode == SocketError.ConnectionRefused)
+        {
+            // Path is a Unix socket file with no live listener (stale from a prior
+            // crashed server). Safe to unlink and rebind.
+            File.Delete(endpoint);
+            return;
+        }
+        catch (SocketException)
+        {
+            // Path exists but is not a Unix domain socket — refuse to overwrite. This
+            // protects against accidental data loss when `endpoint` points at a
+            // regular file, FIFO, or symlink target.
+            throw new IOException(
+                $"IPC endpoint path '{endpoint}' exists and is not a Unix domain socket; refusing to overwrite.");
+        }
+
+        // Probe connected — another live listener owns the endpoint.
+        throw new IOException(
+            $"IPC endpoint '{endpoint}' is already in use by another listener.");
     }
 }
