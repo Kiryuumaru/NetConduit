@@ -63,19 +63,24 @@ public static class UdpMultiplexer
         int listenPort,
         ReliableUdpOptions? udpOptions = null)
     {
-        var accepted = false;
+        // 0 = idle, 1 = accepting, 2 = accepted
+        var state = 0;
         return new MultiplexerOptions
         {
             StreamFactory = async ct =>
             {
-                if (accepted)
+                var prev = Interlocked.CompareExchange(ref state, 1, 0);
+                if (prev == 2)
                 {
                     throw new InvalidOperationException(
                         "Server-side UDP multiplexer does not support reconnection. " +
                         "Create a new multiplexer instance to accept another connection.");
                 }
-
-                accepted = true;
+                if (prev == 1)
+                {
+                    throw new InvalidOperationException(
+                        "Server-side UDP multiplexer is already accepting a connection.");
+                }
 
                 var listener = new UdpClient(AddressFamily.InterNetworkV6);
                 try
@@ -93,11 +98,13 @@ public static class UdpMultiplexer
                     }
 
                     var reliable = new ReliableUdpStream(listener, udpOptions);
+                    Interlocked.Exchange(ref state, 2);
                     return new StreamPair(reliable);
                 }
                 catch
                 {
                     listener.Dispose();
+                    Interlocked.CompareExchange(ref state, 0, 1);
                     throw;
                 }
             }
