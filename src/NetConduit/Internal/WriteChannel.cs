@@ -136,6 +136,7 @@ internal sealed class WriteChannel : Stream, IWriteChannel
             _isReady = true;
             _readyTcs.TrySetResult();
             Ready?.Invoke(this, EventArgs.Empty);
+            _owner.NotifyChannelOpened(ChannelId);
         }
     }
 

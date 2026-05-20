@@ -8,10 +8,10 @@ GOMAXPROCS=2, `--network=none` (loopback only), identical Docker isolation.
 
 | Implementation | Language | Description |
 |---------------|----------|-------------|
-| **NetConduit** | C# | 1 TCP connection, N multiplexed channels — credit-based flow control, priority queuing, adaptive windowing |
-| **FRP/Yamux** | Go | HashiCorp Yamux — stream multiplexer used by FRP, Consul, Nomad |
+| **NetConduit** | C# | 1 TCP connection, N multiplexed channels â€” credit-based flow control, priority queuing, adaptive windowing |
+| **FRP/Yamux** | Go | HashiCorp Yamux â€” stream multiplexer used by FRP, Consul, Nomad |
 | **Smux** | Go | Popular Go stream multiplexer (xtaci/smux) |
-| Raw TCP | C# / Go | Baseline — N separate TCP connections (not a mux, shown for context) |
+| Raw TCP | C# / Go | Baseline â€” N separate TCP connections (not a mux, shown for context) |
 
 ---
 
@@ -26,15 +26,15 @@ Each channel sends one data payload. Higher = better.
 
 | Channels | Data Size | NetConduit | FRP/Yamux | Smux | NC vs FRP | NC vs Smux |
 |----------|-----------|----------:|----------:|-----:|----------:|----------:|
-| 1 | 1KB | 8.3 | 6.8 | 7.1 | **1.23x** | **1.17x** |
-| 1 | 100KB | 421.1 | 290.6 | 650.2 | **1.45x** | 0.65x |
-| 1 | 1MB | 992.3 | 1,265.6 | 2,269.0 | 0.78x | 0.44x |
-| 10 | 1KB | 28.7 | 34.9 | 26.1 | 0.82x | **1.10x** |
-| 10 | 100KB | 1,331.2 | 765.5 | 1,473.3 | **1.74x** | 0.90x |
-| 10 | 1MB | 1,742.1 | 1,660.0 | 2,967.1 | **1.05x** | 0.59x |
-| 100 | 1KB | 88.3 | 46.0 | 46.4 | **1.92x** | **1.90x** |
-| 100 | 100KB | 1,974.9 | 911.0 | 2,270.6 | **2.17x** | 0.87x |
-| 100 | 1MB | 1,808.6 | 1,580.3 | 3,014.2 | **1.14x** | 0.60x |
+| 1 | 1KB | 10.1 | 9.3 | 10.0 | **1.09x** | **1.01x** |
+| 1 | 100KB | 836.8 | 381.8 | 906.0 | **2.19x** | 0.92x |
+| 1 | 1MB | 1,201.9 | 1,555.6 | 3,354.4 | 0.77x | 0.36x |
+| 10 | 1KB | 54.6 | 37.7 | 37.4 | **1.45x** | **1.46x** |
+| 10 | 100KB | 1,562.5 | 1,126.8 | 1,818.8 | **1.39x** | 0.86x |
+| 10 | 1MB | 2,684.1 | 2,169.5 | 3,142.1 | **1.24x** | 0.85x |
+| 100 | 1KB | 89.3 | 35.5 | 39.9 | **2.52x** | **2.24x** |
+| 100 | 100KB | 1,641.6 | 1,154.6 | 2,388.9 | **1.42x** | 0.69x |
+| 100 | 1MB | 2,064.2 | 2,160.8 | 3,748.4 | 0.96x | 0.55x |
 
 ### Game-Tick Message Rate (msg/s)
 
@@ -42,14 +42,14 @@ Each channel sends many small messages (simulates game state updates). Higher = 
 
 | Channels | Msg Size | NetConduit | FRP/Yamux | Smux | NC vs FRP | NC vs Smux |
 |----------|----------|----------:|----------:|-----:|----------:|----------:|
-| 1 | 64B | 930,051 | 351,194 | 293,188 | **2.65x** | **3.17x** |
-| 1 | 256B | 799,239 | 193,536 | 285,792 | **4.13x** | **2.80x** |
-| 10 | 64B | 1,033,646 | 211,180 | 275,746 | **4.89x** | **3.75x** |
-| 10 | 256B | 782,273 | 220,450 | 253,201 | **3.55x** | **3.09x** |
-| 50 | 64B | 1,203,728 | 239,860 | 256,436 | **5.02x** | **4.69x** |
-| 50 | 256B | 846,811 | 232,512 | 250,835 | **3.64x** | **3.38x** |
-| 1000 | 64B | 4,184,497 | 270,917 | 212,524 | **15.45x** | **19.69x** |
-| 1000 | 256B | 2,524,669 | 483,099 | 219,942 | **5.23x** | **11.48x** |
+| 1 | 64B | 1,077,404 | 223,686 | 290,714 | **4.82x** | **3.71x** |
+| 1 | 256B | 899,690 | 209,745 | 312,957 | **4.29x** | **2.87x** |
+| 10 | 64B | 1,181,620 | 249,077 | 289,805 | **4.74x** | **4.08x** |
+| 10 | 256B | 900,995 | 240,971 | 270,887 | **3.74x** | **3.33x** |
+| 50 | 64B | 1,433,225 | 239,114 | 278,616 | **5.99x** | **5.14x** |
+| 50 | 256B | 997,521 | 259,510 | 295,642 | **3.84x** | **3.37x** |
+| 1000 | 64B | 4,113,140 | 300,088 | 254,160 | **13.71x** | **16.18x** |
+| 1000 | 256B | 2,522,902 | 484,079 | 245,792 | **5.21x** | **10.26x** |
 
 ---
 
@@ -57,7 +57,7 @@ Each channel sends many small messages (simulates game state updates). Higher = 
 
 **Bulk throughput:** NetConduit wins 10/18 comparisons against Go multiplexers.
 Credit-based flow control adds per-transfer overhead most visible in large bulk scenarios.
-NetConduit is competitive or faster for small-to-medium payloads (1KB–100KB).
+NetConduit is competitive or faster for small-to-medium payloads (1KBâ€“100KB).
 
 **Game-tick messaging:** NetConduit wins 16/16 comparisons against Go multiplexers.
 When per-message overhead dominates (not raw throughput), the credit system's cost
@@ -72,7 +72,7 @@ overhead but provide production safety guarantees that simpler muxes don't offer
 
 ## Raw TCP Baselines
 
-Raw TCP uses N separate connections (one per channel) — no multiplexing overhead.
+Raw TCP uses N separate connections (one per channel) â€” no multiplexing overhead.
 This is the theoretical ceiling, not a practical alternative (connection limits,
 no flow control, no channel management).
 
@@ -80,35 +80,35 @@ no flow control, no channel management).
 
 | Channels | Data Size | Raw TCP (Go) | FRP/Yamux (Go) | Smux (Go) | Raw TCP (.NET) | NetConduit Mux TCP |
 |----------|-----------|----------:|----------:|----------:|----------:|----------:|
-| 1 | 1KB | 3.7 | 6.8 | 7.1 | 2.2 | 8.3 |
-| 1 | 100KB | 326.4 | 290.6 | 650.2 | 272.3 | 421.1 |
-| 1 | 1MB | 2,200.8 | 1,265.6 | 2,269.0 | 2,031.7 | 992.3 |
-| 10 | 1KB | 18.1 | 34.9 | 26.1 | 8.1 | 28.7 |
-| 10 | 100KB | 1,688.7 | 765.5 | 1,473.3 | 1,059.2 | 1,331.2 |
-| 10 | 1MB | 6,615.6 | 1,660.0 | 2,967.1 | 2,986.1 | 1,742.1 |
-| 100 | 1KB | 23.9 | 46.0 | 46.4 | 17.2 | 88.3 |
-| 100 | 100KB | 2,019.8 | 911.0 | 2,270.6 | 1,885.3 | 1,974.9 |
-| 100 | 1MB | 7,578.3 | 1,580.3 | 3,014.2 | 4,175.9 | 1,808.6 |
+| 1 | 1KB | 4.1 | 9.3 | 10.0 | 2.3 | 10.1 |
+| 1 | 100KB | 417.6 | 381.8 | 906.0 | 296.1 | 836.8 |
+| 1 | 1MB | 3,024.5 | 1,555.6 | 3,354.4 | 3,023.0 | 1,201.9 |
+| 10 | 1KB | 22.5 | 37.7 | 37.4 | 8.2 | 54.6 |
+| 10 | 100KB | 2,056.3 | 1,126.8 | 1,818.8 | 960.2 | 1,562.5 |
+| 10 | 1MB | 7,465.2 | 2,169.5 | 3,142.1 | 2,963.5 | 2,684.1 |
+| 100 | 1KB | 25.0 | 35.5 | 39.9 | 26.5 | 89.3 |
+| 100 | 100KB | 2,650.6 | 1,154.6 | 2,388.9 | 1,975.3 | 1,641.6 |
+| 100 | 1MB | 8,756.6 | 2,160.8 | 3,748.4 | 4,719.5 | 2,064.2 |
 
 ### Game-Tick: All Implementations (msg/s)
 
 | Channels | Msg Size | Raw TCP (Go) | FRP/Yamux (Go) | Smux (Go) | Raw TCP (.NET) | NetConduit Mux TCP |
 |----------|----------|----------:|----------:|----------:|----------:|----------:|
-| 1 | 64B | 574,131 | 351,194 | 293,188 | 2,501,828 | 930,051 |
-| 1 | 256B | 1,190,878 | 193,536 | 285,792 | 1,995,136 | 799,239 |
-| 10 | 64B | 3,071,796 | 211,180 | 275,746 | — | 1,033,646 |
-| 10 | 256B | 3,358,212 | 220,450 | 253,201 | 3,485,830 | 782,273 |
-| 50 | 64B | 3,872,746 | 239,860 | 256,436 | — | 1,203,728 |
-| 50 | 256B | 3,391,106 | 232,512 | 250,835 | — | 846,811 |
-| 1000 | 64B | 3,652,634 | 270,917 | 212,524 | 4,942,147 | 4,184,497 |
-| 1000 | 256B | 3,221,584 | 483,099 | 219,942 | 3,854,963 | 2,524,669 |
+| 1 | 64B | 671,217 | 223,686 | 290,714 | 2,710,365 | 1,077,404 |
+| 1 | 256B | 1,162,392 | 209,745 | 312,957 | 2,491,920 | 899,690 |
+| 10 | 64B | 3,799,584 | 249,077 | 289,805 | â€” | 1,181,620 |
+| 10 | 256B | 3,467,796 | 240,971 | 270,887 | â€” | 900,995 |
+| 50 | 64B | 3,792,120 | 239,114 | 278,616 | â€” | 1,433,225 |
+| 50 | 256B | 3,643,688 | 259,510 | 295,642 | 2,560,303 | 997,521 |
+| 1000 | 64B | 4,013,993 | 300,088 | 254,160 | 4,847,030 | 4,113,140 |
+| 1000 | 256B | 3,505,552 | 484,079 | 245,792 | 3,378,084 | 2,522,902 |
 
 ---
 
 ## Multiplexer Overhead vs Raw TCP
 
 How much does multiplexing cost compared to raw connections?
-All multiplexers share this overhead — it's inherent to running N streams over 1 connection.
+All multiplexers share this overhead â€” it's inherent to running N streams over 1 connection.
 
 ### Throughput Overhead
 
@@ -116,15 +116,15 @@ Ratio = Raw TCP throughput / Mux throughput (how many times slower the mux is).
 
 | Channels | Data Size | NetConduit | FRP/Yamux | Smux |
 |----------|-----------|----------:|----------:|----------:|
-| 1 | 1KB | 0.3x | 0.6x | 0.5x |
-| 1 | 100KB | 0.6x | 1.1x | 0.5x |
-| 1 | 1MB | 2.0x | 1.7x | 1.0x |
-| 10 | 1KB | 0.3x | 0.5x | 0.7x |
-| 10 | 100KB | 0.8x | 2.2x | 1.1x |
-| 10 | 1MB | 1.7x | 4.0x | 2.2x |
-| 100 | 1KB | 0.2x | 0.5x | 0.5x |
-| 100 | 100KB | 1.0x | 2.2x | 0.9x |
-| 100 | 1MB | 2.3x | 4.8x | 2.5x |
+| 1 | 1KB | 0.2x | 0.4x | 0.4x |
+| 1 | 100KB | 0.4x | 1.1x | 0.5x |
+| 1 | 1MB | 2.5x | 1.9x | 0.9x |
+| 10 | 1KB | 0.1x | 0.6x | 0.6x |
+| 10 | 100KB | 0.6x | 1.8x | 1.1x |
+| 10 | 1MB | 1.1x | 3.4x | 2.4x |
+| 100 | 1KB | 0.3x | 0.7x | 0.6x |
+| 100 | 100KB | 1.2x | 2.3x | 1.1x |
+| 100 | 1MB | 2.3x | 4.1x | 2.3x |
 
 ### Game-Tick Overhead
 
@@ -132,14 +132,14 @@ Ratio = Raw TCP msg/s / Mux msg/s (how many times slower the mux is).
 
 | Channels | Msg Size | NetConduit | FRP/Yamux | Smux |
 |----------|----------|----------:|----------:|----------:|
-| 1 | 64B | 2.7x | 1.6x | 2.0x |
-| 1 | 256B | 2.5x | 6.2x | 4.2x |
-| 10 | 64B | 3.0x | 14.5x | 11.1x |
-| 10 | 256B | 4.5x | 15.2x | 13.3x |
-| 50 | 64B | 3.2x | 16.1x | 15.1x |
-| 50 | 256B | 4.0x | 14.6x | 13.5x |
-| 1000 | 64B | 1.2x | 13.5x | 17.2x |
-| 1000 | 256B | 1.5x | 6.7x | 14.6x |
+| 1 | 64B | 2.5x | 3.0x | 2.3x |
+| 1 | 256B | 2.8x | 5.5x | 3.7x |
+| 10 | 64B | 3.2x | 15.3x | 13.1x |
+| 10 | 256B | 3.8x | 14.4x | 12.8x |
+| 50 | 64B | 2.6x | 15.9x | 13.6x |
+| 50 | 256B | 2.6x | 14.0x | 12.3x |
+| 1000 | 64B | 1.2x | 13.4x | 15.8x |
+| 1000 | 256B | 1.3x | 7.2x | 14.3x |
 
 ---
 

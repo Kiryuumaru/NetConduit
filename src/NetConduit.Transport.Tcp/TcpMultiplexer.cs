@@ -65,23 +65,38 @@ public static class TcpMultiplexer
     {
         ArgumentNullException.ThrowIfNull(listener);
 
-        var accepted = false;
+        // 0 = idle, 1 = accepting, 2 = accepted
+        var state = 0;
         return new MultiplexerOptions
         {
             StreamFactory = async ct =>
             {
-                if (accepted)
+                var prev = Interlocked.CompareExchange(ref state, 1, 0);
+                if (prev == 2)
                 {
                     throw new InvalidOperationException(
                         "Server-side multiplexer does not support reconnection. " +
                         "Create a new multiplexer instance to accept another connection.");
                 }
+                if (prev == 1)
+                {
+                    throw new InvalidOperationException(
+                        "Server-side multiplexer is already accepting a connection.");
+                }
 
-                accepted = true;
-                var client = await listener.AcceptTcpClientAsync(ct).ConfigureAwait(false);
-                client.NoDelay = true;
-                var stream = client.GetStream();
-                return new StreamPair(stream, client);
+                try
+                {
+                    var client = await listener.AcceptTcpClientAsync(ct).ConfigureAwait(false);
+                    client.NoDelay = true;
+                    var stream = client.GetStream();
+                    Interlocked.Exchange(ref state, 2);
+                    return new StreamPair(stream, client);
+                }
+                catch
+                {
+                    Interlocked.CompareExchange(ref state, 0, 1);
+                    throw;
+                }
             }
         };
     }

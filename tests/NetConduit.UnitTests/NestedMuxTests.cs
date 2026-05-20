@@ -415,15 +415,12 @@ public sealed class NestedMuxTests
         await outerClient.DisposeAsync();
         await outerServer.DisposeAsync();
 
-        // Inner mux reads that depend on the outer transport
-        // will block until cancellation since the underlying
-        // streams are gone. Verify it does not return data.
         using var shortCts = new CancellationTokenSource(TimeSpan.FromSeconds(2));
         var postDisposeBuf = new byte[10];
-        await Assert.ThrowsAnyAsync<OperationCanceledException>(async () =>
-        {
-            await reader.ReadAsync(postDisposeBuf, shortCts.Token);
-        });
+        var postDisposeRead = await reader.ReadAsync(postDisposeBuf, shortCts.Token);
+
+        Assert.Equal(0, postDisposeRead);
+        Assert.Equal(ChannelCloseReason.TransportFailed, reader.CloseReason);
 
         await innerClient.DisposeAsync();
         await innerServer.DisposeAsync();

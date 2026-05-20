@@ -2,16 +2,20 @@ namespace NetConduit.UnitTests;
 
 public sealed class PublicApiTests
 {
-    private static (StreamMultiplexer Client, StreamMultiplexer Server) CreatePair()
+    private static (StreamMultiplexer Client, StreamMultiplexer Server) CreatePair(
+        DefaultChannelOptions? clientDefaultChannelOptions = null,
+        DefaultChannelOptions? serverDefaultChannelOptions = null)
     {
         var duplex = new DuplexMemoryStream();
         var client = StreamMultiplexer.Create(new MultiplexerOptions
         {
             StreamFactory = _ => Task.FromResult<IStreamPair>(duplex.SideA),
+            DefaultChannelOptions = clientDefaultChannelOptions ?? new DefaultChannelOptions(),
         });
         var server = StreamMultiplexer.Create(new MultiplexerOptions
         {
             StreamFactory = _ => Task.FromResult<IStreamPair>(duplex.SideB),
+            DefaultChannelOptions = serverDefaultChannelOptions ?? new DefaultChannelOptions(),
         });
         return (client, server);
     }
@@ -258,12 +262,63 @@ public sealed class PublicApiTests
         server.Start();
         await Task.WhenAll(client.WaitForReadyAsync(), server.WaitForReadyAsync());
 
-        string? openedId = null;
-        client.ChannelOpened += (_, e) => openedId = e.ChannelId;
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(60));
 
-        client.OpenChannel("event-channel");
+        string? openedId = null;
+        bool readyAtEvent = false;
+        client.ChannelOpened += (_, e) =>
+        {
+            openedId = e.ChannelId;
+            var ch = client.GetWriteChannel(e.ChannelId);
+            readyAtEvent = ch is not null && ch.IsReady;
+        };
+
+        var writeCh = client.OpenChannel("event-channel");
+        await server.AcceptChannelAsync("event-channel", cts.Token);
+        await writeCh.WaitForReadyAsync(cts.Token);
 
         Assert.Equal("event-channel", openedId);
+        Assert.True(readyAtEvent, "ChannelOpened must fire only after the channel is ready.");
+
+        await client.DisposeAsync();
+        await server.DisposeAsync();
+    }
+
+    [Fact]
+    public async Task OnChannelOpened_DoesNotFire_BeforeRemoteAccept()
+    {
+        var (client, server) = CreatePair();
+        client.Start();
+        server.Start();
+        await Task.WhenAll(client.WaitForReadyAsync(), server.WaitForReadyAsync());
+
+        bool fired = false;
+        client.ChannelOpened += (_, _) => fired = true;
+
+        var ch = client.OpenChannel("not-yet-accepted");
+
+        Assert.False(ch.IsReady);
+        Assert.False(fired, "ChannelOpened must not fire before the remote acknowledges the channel.");
+
+        await client.DisposeAsync();
+        await server.DisposeAsync();
+    }
+
+    [Fact]
+    public async Task Stats_Uptime_ReflectsElapsedMilliseconds()
+    {
+        var (client, server) = CreatePair();
+        client.Start();
+        server.Start();
+        await Task.WhenAll(client.WaitForReadyAsync(), server.WaitForReadyAsync());
+
+        await Task.Delay(500);
+
+        var uptime = client.Stats.Uptime;
+        Assert.True(uptime >= TimeSpan.FromMilliseconds(400),
+            $"Stats.Uptime ({uptime.TotalMilliseconds:F3} ms) is far below actual elapsed time.");
+        Assert.True(uptime < TimeSpan.FromMinutes(1),
+            $"Stats.Uptime ({uptime}) is implausibly large.");
 
         await client.DisposeAsync();
         await server.DisposeAsync();
@@ -694,14 +749,19 @@ public sealed class PublicApiTests
     [Fact]
     public async Task OpenChannel_StringExtension_UsesDefaultPriority()
     {
-        var (client, server) = CreatePair();
+        var (client, server) = CreatePair(clientDefaultChannelOptions: new DefaultChannelOptions
+        {
+            Priority = ChannelPriority.Highest,
+            SlabSize = 128 * 1024,
+            SendTimeout = TimeSpan.FromMilliseconds(1234),
+        });
         client.Start();
         server.Start();
         await Task.WhenAll(client.WaitForReadyAsync(), server.WaitForReadyAsync());
 
         var ch = client.OpenChannel("ext-defaults");
 
-        Assert.Equal(ChannelPriority.Normal, ch.Priority);
+        Assert.Equal(ChannelPriority.Highest, ch.Priority);
 
         await client.DisposeAsync();
         await server.DisposeAsync();

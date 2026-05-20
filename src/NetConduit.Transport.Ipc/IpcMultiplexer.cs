@@ -55,60 +55,77 @@ public static class IpcMultiplexer
     {
         ArgumentNullException.ThrowIfNull(endpoint);
 
-        var accepted = false;
+        // 0 = idle, 1 = accepting, 2 = accepted
+        var state = 0;
         return new MultiplexerOptions
         {
             StreamFactory = async ct =>
             {
-                if (accepted)
+                var prev = Interlocked.CompareExchange(ref state, 1, 0);
+                if (prev == 2)
                 {
                     throw new InvalidOperationException(
                         "Server-side IPC multiplexer does not support reconnection. " +
                         "Create a new multiplexer instance to accept another connection.");
                 }
-
-                accepted = true;
-
-                if (OperatingSystem.IsWindows())
+                if (prev == 1)
                 {
-                    var port = GetDeterministicPort(endpoint);
-                    var listener = new TcpListener(IPAddress.Loopback, port);
-                    listener.Start();
-
-                    TcpClient client;
-                    try
-                    {
-                        client = await listener.AcceptTcpClientAsync(ct).ConfigureAwait(false);
-                    }
-                    finally
-                    {
-                        listener.Stop();
-                    }
-
-                    var stream = client.GetStream();
-                    return new StreamPair(stream, client);
+                    throw new InvalidOperationException(
+                        "Server-side IPC multiplexer is already accepting a connection.");
                 }
-                else
+
+                try
                 {
-                    if (File.Exists(endpoint))
-                        File.Delete(endpoint);
-
-                    var listenSocket = new Socket(AddressFamily.Unix, SocketType.Stream, ProtocolType.Unspecified);
-                    try
+                    StreamPair pair;
+                    if (OperatingSystem.IsWindows())
                     {
-                        var endPoint = new UnixDomainSocketEndPoint(endpoint);
-                        listenSocket.Bind(endPoint);
-                        listenSocket.Listen(backlog: 1);
-                        var clientSocket = await listenSocket.AcceptAsync(ct).ConfigureAwait(false);
+                        var port = GetDeterministicPort(endpoint);
+                        var listener = new TcpListener(IPAddress.Loopback, port);
+                        listener.Start();
 
-                        var stream = new NetworkStream(clientSocket, ownsSocket: true);
-                        return new StreamPair(stream);
+                        TcpClient client;
+                        try
+                        {
+                            client = await listener.AcceptTcpClientAsync(ct).ConfigureAwait(false);
+                        }
+                        finally
+                        {
+                            listener.Stop();
+                        }
+
+                        var stream = client.GetStream();
+                        pair = new StreamPair(stream, client);
                     }
-                    finally
+                    else
                     {
-                        listenSocket.Dispose();
-                        try { File.Delete(endpoint); } catch { }
+                        if (File.Exists(endpoint))
+                            File.Delete(endpoint);
+
+                        var listenSocket = new Socket(AddressFamily.Unix, SocketType.Stream, ProtocolType.Unspecified);
+                        try
+                        {
+                            var endPoint = new UnixDomainSocketEndPoint(endpoint);
+                            listenSocket.Bind(endPoint);
+                            listenSocket.Listen(backlog: 1);
+                            var clientSocket = await listenSocket.AcceptAsync(ct).ConfigureAwait(false);
+
+                            var stream = new NetworkStream(clientSocket, ownsSocket: true);
+                            pair = new StreamPair(stream);
+                        }
+                        finally
+                        {
+                            listenSocket.Dispose();
+                            try { File.Delete(endpoint); } catch { }
+                        }
                     }
+
+                    Interlocked.Exchange(ref state, 2);
+                    return pair;
+                }
+                catch
+                {
+                    Interlocked.CompareExchange(ref state, 0, 1);
+                    throw;
                 }
             }
         };

@@ -46,7 +46,25 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IChannelOwner
     private DisconnectReason? _disconnectReason;
     private Guid _sessionId;
     private Guid _remoteSessionId;
-    private long _lastPongTicks;
+    private TaskCompletionSource? _pendingPong;
+
+    private static byte[] EncodeValidatedChannelId(string channelId, string paramName)
+    {
+        ArgumentNullException.ThrowIfNull(channelId, paramName);
+
+        if (channelId.Length == 0)
+        {
+            throw new ArgumentException("Channel ID must not be empty.", paramName);
+        }
+
+        int byteCount = Encoding.UTF8.GetByteCount(channelId);
+        if (byteCount > ChannelConstants.MaxChannelIdLength)
+        {
+            throw new ArgumentException($"Channel ID must be at most {ChannelConstants.MaxChannelIdLength} UTF-8 bytes.", paramName);
+        }
+
+        return Encoding.UTF8.GetBytes(channelId);
+    }
 
     /// <inheritdoc />
     public MultiplexerOptions Options => _options;
@@ -142,6 +160,9 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IChannelOwner
     /// <inheritdoc />
     public IWriteChannel OpenChannel(ChannelOptions options)
     {
+        ArgumentNullException.ThrowIfNull(options);
+        byte[] channelIdBytes = EncodeValidatedChannelId(options.ChannelId, nameof(options));
+
         if (!_isRunning)
             throw new InvalidOperationException("Multiplexer has not been started.");
 
@@ -159,7 +180,6 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IChannelOwner
         _registry.RegisterWriteChannel(index, channel);
 
         // Send INIT frame (channel does it itself — builds the frame in its slab)
-        byte[] channelIdBytes = Encoding.UTF8.GetBytes(options.ChannelId);
         channel.WriteInitFrame(channelIdBytes);
         // Channel stays in Opening/Pending state until remote ACKs the INIT
 
@@ -168,7 +188,6 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IChannelOwner
 
         Interlocked.Increment(ref _stats._openChannels);
         Interlocked.Increment(ref _stats._totalChannelsOpened);
-        RaiseEvent(ChannelOpened, new ChannelEventArgs(options.ChannelId));
 
         return channel;
     }
@@ -176,6 +195,8 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IChannelOwner
     /// <inheritdoc />
     public IReadChannel AcceptChannel(string channelId)
     {
+        _ = EncodeValidatedChannelId(channelId, nameof(channelId));
+
         if (!_isRunning)
             throw new InvalidOperationException("Multiplexer has not been started.");
 
@@ -337,8 +358,6 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IChannelOwner
                 _loopCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
                 var loopCt = _loopCts.Token;
 
-                _lastPongTicks = Environment.TickCount64;
-
                 _writerTask = Task.Factory.StartNew(
                     () => RunWriterLoop(loopCt),
                     loopCt,
@@ -425,8 +444,17 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IChannelOwner
         catch (Exception ex)
         {
             // Fatal error (protocol error, exhausted retries) — notify waiters
+            if (hasConnectedBefore)
+                AbortChannelsForTerminalTransportFailure(ex);
+
             _readyTcs.TrySetException(ex);
         }
+    }
+
+    private void AbortChannelsForTerminalTransportFailure(Exception exception)
+    {
+        _registry.AbortAllChannels(ChannelCloseReason.TransportFailed, exception);
+        _registry.CancelAllPendingAccepts();
     }
 
     private bool HasHandshakeRetryBudget(int failedAttempts)
@@ -440,6 +468,9 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IChannelOwner
         int maxAttempts = _options.MaxAutoReconnectAttempts;
         double delay = _options.AutoReconnectDelay.TotalMilliseconds;
         double maxDelay = _options.MaxAutoReconnectDelay.TotalMilliseconds;
+
+        if (isReconnect && maxAttempts == 0)
+            throw new MultiplexerException(ErrorCode.Internal, "Reconnect is disabled.");
 
         for (int attempt = 1; ; attempt++)
         {
@@ -518,6 +549,14 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IChannelOwner
                 _readyChannels.Add(channel);
         }
         _readySignal.Signal();
+    }
+
+    void IChannelOwner.NotifyChannelOpened(string channelId)
+    {
+        // Only raise the public event for user-registered write channels —
+        // the internal control channel is not part of the registry.
+        if (_registry.GetWriteChannelById(channelId) is null) return;
+        RaiseEvent(ChannelOpened, new ChannelEventArgs(channelId));
     }
 
     void IChannelOwner.NotifyChannelCompleted(ushort channelIndex, string channelId)
@@ -777,8 +816,7 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IChannelOwner
                 SendControlFrame(FrameFlags.Pong, payload);
                 break;
             case FrameFlags.Pong:
-                // Record pong receipt for keepalive tracking
-                Volatile.Write(ref _lastPongTicks, Environment.TickCount64);
+                Interlocked.Exchange(ref _pendingPong, null)?.TrySetResult();
                 break;
             case FrameFlags.Ctrl:
                 ProcessCtrlSubframe(payload);
@@ -814,41 +852,54 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IChannelOwner
     // =====================================================================
     private async Task RunKeepaliveLoopAsync(CancellationToken ct)
     {
-        using var timer = new PeriodicTimer(_options.PingInterval);
         int missedPings = 0;
         byte[] pingPayload = new byte[8];
 
         try
         {
-            while (await timer.WaitForNextTickAsync(ct))
+            while (!ct.IsCancellationRequested)
             {
-                // Check if we received a pong since last ping
-                long lastPong = Volatile.Read(ref _lastPongTicks);
-                long elapsed = Environment.TickCount64 - lastPong;
+                await Task.Delay(_options.PingInterval, ct);
 
-                if (elapsed > _options.PingTimeout.TotalMilliseconds)
-                {
-                    missedPings++;
-                    if (missedPings >= _options.MaxMissedPings)
-                    {
-                        throw new IOException(
-                            $"Keepalive timeout: {missedPings} missed pings (timeout: {_options.PingTimeout})");
-                    }
-                }
-                else
-                {
-                    missedPings = 0;
-                }
+                var pendingPong = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+                Interlocked.Exchange(ref _pendingPong, pendingPong);
 
-                // Send ping with 8-byte timestamp
                 BinaryPrimitives.WriteInt64BigEndian(pingPayload, Environment.TickCount64);
                 SendControlFrame(FrameFlags.Ping, pingPayload);
+
+                if (await WaitForPongAsync(pendingPong, ct))
+                {
+                    missedPings = 0;
+                    continue;
+                }
+
+                missedPings++;
+                if (missedPings >= _options.MaxMissedPings)
+                {
+                    throw new IOException(
+                        $"Keepalive timeout: {missedPings} missed pings (timeout: {_options.PingTimeout})");
+                }
             }
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
             // Normal shutdown
         }
+    }
+
+    private async Task<bool> WaitForPongAsync(TaskCompletionSource pendingPong, CancellationToken ct)
+    {
+        Task timeout = _options.PingTimeout > TimeSpan.Zero
+            ? Task.Delay(_options.PingTimeout, ct)
+            : Task.CompletedTask;
+
+        Task completed = await Task.WhenAny(pendingPong.Task, timeout);
+        if (completed == pendingPong.Task)
+            return true;
+
+        ct.ThrowIfCancellationRequested();
+        Interlocked.CompareExchange(ref _pendingPong, null, pendingPong);
+        return false;
     }
 
     private void SendControlFrame(FrameFlags flags, ReadOnlySpan<byte> payload)
