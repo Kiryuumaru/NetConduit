@@ -56,7 +56,7 @@ The provided transports come in two flavors:
 | `CreateOptions(...)` | Each call to the factory opens a **new** connection. Supports reconnection. |
 | `CreateServerOptions(...)` | The factory accepts **one** connection from the supplied listener / socket. Subsequent calls throw, so this multiplexer cannot reconnect. |
 
-For a server that needs to survive reconnects, write your own factory that re-accepts from a listener. The [Scoreboard sample](../../samples/ScoreboardSample/README.md) does this.
+For a server that needs to survive reconnects, write your own factory that re-accepts from a listener. The [Reconnection — Server-side reconnection](reconnection.md#server-side-reconnection) section has copy-paste snippets for TCP, QUIC, and WebSocket, plus notes on UDP and IPC. The [Scoreboard sample](../../samples/ScoreboardSample/README.md) is a working end-to-end example.
 
 ## Writing a custom transport
 
