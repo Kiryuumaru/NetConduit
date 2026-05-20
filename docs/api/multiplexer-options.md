@@ -9,7 +9,6 @@ public sealed record MultiplexerOptions
 {
     public required StreamFactoryDelegate StreamFactory { get; init; }
     public Guid?     SessionId                       { get; init; }
-    public int       DefaultSlabSize                 { get; init; } = 1 * 1024 * 1024;        // 1 MiB
     public TimeSpan  PingInterval                    { get; init; } = TimeSpan.FromSeconds(30);
     public TimeSpan  PingTimeout                     { get; init; } = TimeSpan.FromSeconds(10);
     public int       MaxMissedPings                  { get; init; } = 3;
@@ -29,7 +28,6 @@ public sealed record MultiplexerOptions
 | --- | --- | --- |
 | `StreamFactory` | (required) | Builds a fresh `IStreamPair` on connect and reconnect. |
 | `SessionId` | new GUID | Local session identity. Sticky across reconnects. |
-| `DefaultSlabSize` | 1 MiB | Bytes pre-allocated per channel for outbound frames. See [Backpressure](../concepts/backpressure.md). |
 | `PingInterval` | 30 s | Time between keepalive pings. |
 | `PingTimeout` | 10 s | Time to wait for a `Pong` before counting a missed ping. |
 | `MaxMissedPings` | 3 | After this many missed pings, the connection is declared dead. |
@@ -64,5 +62,5 @@ Applied by `OpenChannel(string)` extension (no per-channel `ChannelOptions`).
 
 ## Validation
 
-- `DefaultSlabSize` must be between 64 KiB and 64 MiB (`FrameConstants.MinSlabSize` / `MaxSlabSize`).
+- `DefaultChannelOptions.SlabSize` must be between 64 KiB and 64 MiB (`FrameConstants.MinSlabSize` / `MaxSlabSize`). Enforced in `StreamMultiplexer.Create` and again per-channel in `OpenChannel`.
 - `StreamFactory` is `required` — omitting it is a compile error.

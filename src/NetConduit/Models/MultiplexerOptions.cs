@@ -1,5 +1,3 @@
-using NetConduit.Constants;
-
 namespace NetConduit.Models;
 
 /// <summary>
@@ -12,9 +10,6 @@ public sealed record MultiplexerOptions
 
     /// <summary>Session identity. Auto-generated if null.</summary>
     public Guid? SessionId { get; init; }
-
-    /// <summary>Default slab size per channel in bytes.</summary>
-    public int DefaultSlabSize { get; init; } = FrameConstants.DefaultSlabSize;
 
     /// <summary>Interval between keepalive pings.</summary>
     public TimeSpan PingInterval { get; init; } = TimeSpan.FromSeconds(30);
