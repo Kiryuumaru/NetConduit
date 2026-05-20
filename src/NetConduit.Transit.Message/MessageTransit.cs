@@ -28,6 +28,11 @@ public sealed class MessageTransit<TSend, TReceive> : ITransit
     private readonly SemaphoreSlim _receiveLock = new(1, 1);
     private volatile bool _disposed;
     private volatile bool _readyFired;
+    // Set once when the inbound channel reaches EOF. ReceiveAllAsync consults
+    // this instead of `message is null`, which is always false for non-nullable
+    // value-type TReceive and would otherwise yield default(TReceive) forever
+    // after the channel closes (issue #177).
+    private volatile bool _receiveEof;
     private readonly object _readyLock = new();
 
     /// <summary>
@@ -207,7 +212,10 @@ public sealed class MessageTransit<TSend, TReceive> : ITransit
             {
                 var bytesRead = await ReadExactAsync(_readChannel, lengthBuffer.AsMemory(0, 4), cancellationToken).ConfigureAwait(false);
                 if (bytesRead == 0)
+                {
+                    _receiveEof = true;
                     return default;
+                }
 
                 var messageLength = BinaryPrimitives.ReadUInt32BigEndian(lengthBuffer);
 
@@ -224,7 +232,10 @@ public sealed class MessageTransit<TSend, TReceive> : ITransit
                 {
                     bytesRead = await ReadExactAsync(_readChannel, messageBuffer.AsMemory(0, (int)messageLength), cancellationToken).ConfigureAwait(false);
                     if (bytesRead == 0)
+                    {
+                        _receiveEof = true;
                         return default;
+                    }
 
                     if (_receiveTypeInfo is not null)
                     {
@@ -270,7 +281,13 @@ public sealed class MessageTransit<TSend, TReceive> : ITransit
                 yield break;
             }
 
-            if (message is null)
+            // EOF must be checked via an explicit flag rather than `message is null`:
+            // for non-nullable value-type TReceive, `default(TReceive) is null`
+            // is always false, so the null-pattern check would yield default
+            // forever after the channel closes (issue #177). The secondary
+            // `is null` guard preserves the original behavior for reference
+            // types that legitimately deserialize a JSON `null` payload.
+            if (_receiveEof || message is null)
                 yield break;
 
             yield return message;
