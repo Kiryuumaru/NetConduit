@@ -435,8 +435,12 @@ internal sealed class WriteChannel : Stream, IWriteChannel
         }
         else
         {
-            if (!HasPendingData())
-                TryReturnSlab();
+            // Writer loop is cancelled under MuxDisposed; no concurrent
+            // TakeReady/MarkSent can race with us, so the slab must be
+            // returned unconditionally. Gating on !HasPendingData() leaks
+            // the slab whenever the channel is torn down with bytes still
+            // queued (see issue #169).
+            TryReturnSlab();
             // Registry cleared externally on mux dispose; unblock any DisposeAsync awaiters.
             _unregisteredTcs.TrySetResult();
         }
@@ -475,8 +479,15 @@ internal sealed class WriteChannel : Stream, IWriteChannel
         }
         // Slab return is deferred until the writer has drained any in-flight frames,
         // so it stays valid for any concurrent TakeReady/MarkSent in progress.
-        if (!HasPendingData())
+        // Under terminal reasons (MuxDisposed / TransportFailed) the writer
+        // loop is cancelled and will never drain; in those cases the slab
+        // must be returned unconditionally or it leaks (issue #169).
+        if (!HasPendingData()
+            || _closeReason is ChannelCloseReason.MuxDisposed
+                            or ChannelCloseReason.TransportFailed)
+        {
             TryReturnSlab();
+        }
     }
 
     private void TryReleaseSpaceSignal()
