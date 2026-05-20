@@ -1,6 +1,7 @@
 using System.Buffers.Binary;
 using NetConduit.Constants;
 using NetConduit.Enums;
+using NetConduit.Exceptions;
 
 namespace NetConduit.Internal;
 
@@ -27,8 +28,11 @@ internal readonly struct FrameHeader
         ushort channelIndex = BinaryPrimitives.ReadUInt16BigEndian(source);
         var flags = (FrameFlags)source[2];
         // source[3] is reserved
-        int payloadLength = (int)BinaryPrimitives.ReadUInt32BigEndian(source[4..]);
-        return new FrameHeader(channelIndex, flags, payloadLength);
+        uint rawLength = BinaryPrimitives.ReadUInt32BigEndian(source[4..]);
+        if (rawLength > (uint)FrameConstants.MaxFramePayloadSize)
+            throw new MultiplexerException(ErrorCode.ProtocolError,
+                $"Frame payload exceeds maximum: {rawLength} > {FrameConstants.MaxFramePayloadSize}");
+        return new FrameHeader(channelIndex, flags, (int)rawLength);
     }
 
     internal static void WriteTo(Span<byte> destination, ushort channelIndex, FrameFlags flags, int payloadLength)
