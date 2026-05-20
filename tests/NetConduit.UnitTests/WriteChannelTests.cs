@@ -281,4 +281,45 @@ public sealed class WriteChannelTests
         Assert.Equal(ChannelState.Closed, channel.State);
         Assert.Equal(ChannelCloseReason.MuxDisposed, channel.CloseReason);
     }
+
+    [Fact]
+    public void SetClosed_MuxDisposed_WithPendingData_ReturnsSlab()
+    {
+        // Reproduces issue #169: under MuxDisposed the writer loop is
+        // cancelled and will never call MarkSent again. If HasPendingData()
+        // gates slab return, the slab is leaked because no other path runs.
+        var channel = CreateChannel();
+        channel.WriteRawFrame(new byte[FrameHeader.Size + 32]);
+        Assert.True(channel.HasPendingData());
+
+        channel.SetClosed(ChannelCloseReason.MuxDisposed);
+
+        Assert.True(SlabWasReturned(channel),
+            "Expected slab to be returned to the pool under MuxDisposed even when pending data exists.");
+    }
+
+    [Fact]
+    public void SetClosed_TransportFailed_WithPendingData_ReturnsSlab()
+    {
+        // Same structural bug via TryNotifyCompleted: if the writer thread is
+        // dead under a terminal transport failure, deferring slab return on
+        // HasPendingData leaks the slab.
+        var channel = CreateChannel();
+        channel.WriteRawFrame(new byte[FrameHeader.Size + 32]);
+        Assert.True(channel.HasPendingData());
+
+        channel.SetClosed(ChannelCloseReason.TransportFailed);
+
+        Assert.True(SlabWasReturned(channel),
+            "Expected slab to be returned to the pool under TransportFailed even when pending data exists.");
+    }
+
+    private static bool SlabWasReturned(WriteChannel channel)
+    {
+        var field = typeof(WriteChannel).GetField(
+            "_slabReturned",
+            System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic);
+        Assert.NotNull(field);
+        return (int)field!.GetValue(channel)! == 1;
+    }
 }
