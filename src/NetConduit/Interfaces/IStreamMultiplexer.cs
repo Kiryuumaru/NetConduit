@@ -77,6 +77,14 @@ public interface IStreamMultiplexer : IAsyncDisposable
     IWriteChannel OpenChannel(ChannelOptions options);
 
     /// <summary>Accept an inbound channel with the given ID. Returns immediately in pending state.</summary>
+    /// <remarks>
+    /// An exact-id accept always takes priority over a matching prefix subscription
+    /// registered through <see cref="AcceptChannelsAsync"/>. If a caller awaits
+    /// <c>AcceptChannel("x/specific")</c> while another caller is enumerating
+    /// <c>AcceptChannelsAsync("x/")</c>, the inbound channel <c>"x/specific"</c>
+    /// is delivered to the exact-id waiter; the prefix subscription does not
+    /// observe it. See <see cref="AcceptChannelsAsync"/> for the full dispatch order.
+    /// </remarks>
     IReadChannel AcceptChannel(string channelId);
 
     /// <summary>
@@ -110,6 +118,14 @@ public interface IStreamMultiplexer : IAsyncDisposable
     /// for the subscription but never consumed are re-routed to the unfiltered
     /// accept stream so the host application can observe them rather than have
     /// them silently dropped, and the prefix becomes available again.
+    /// </description></item>
+    /// <item><description>
+    /// Inbound channels are dispatched in a fixed priority order, which is part
+    /// of the public contract: (1) a caller awaiting <see cref="AcceptChannel"/>
+    /// for the exact channel id wins first; (2) otherwise, the first matching
+    /// prefix subscription wins (longest-or-first matching subscription per the
+    /// registration rules above); (3) otherwise, the unfiltered (null-prefix)
+    /// enumeration receives the channel as the catch-all.
     /// </description></item>
     /// </list>
     /// </remarks>

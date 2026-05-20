@@ -220,4 +220,46 @@ public sealed class PrefixSubscriptionTests
         catch (OperationCanceledException) { }
         catch (MultiplexerException) { }
     }
+
+    [Fact]
+    public async Task AcceptChannel_TakesPriorityOverMatchingPrefixSubscription()
+    {
+        var (client, server) = CreatePair();
+        client.Start(); server.Start();
+        await Task.WhenAll(client.WaitForReadyAsync(), server.WaitForReadyAsync());
+
+        using var prefixCts = new CancellationTokenSource(TestTimeout);
+        var prefixed = new List<string>();
+        var prefixEnumerable = server.AcceptChannelsAsync("x/", prefixCts.Token);
+
+        // Register the exact-id accept before the channel is opened.
+        var exactWaiter = server.AcceptChannel("x/specific");
+
+        var prefixTask = Task.Run(async () =>
+        {
+            await foreach (var ch in prefixEnumerable)
+                prefixed.Add(ch.ChannelId);
+        });
+
+        // Open both a channel that should match only the prefix, and the
+        // channel claimed by the exact-id waiter.
+        client.OpenChannel("x/other");
+        client.OpenChannel("x/specific");
+
+        // Wait for the prefix subscription to observe the non-claimed channel.
+        var deadline = DateTime.UtcNow + TestTimeout;
+        while (DateTime.UtcNow < deadline && prefixed.Count < 1)
+            await Task.Delay(20);
+
+        Assert.Equal("x/specific", exactWaiter.ChannelId);
+        Assert.Single(prefixed);
+        Assert.Equal("x/other", prefixed[0]);
+        Assert.DoesNotContain("x/specific", prefixed);
+
+        prefixCts.Cancel();
+        await SwallowAsync(prefixTask);
+
+        await client.DisposeAsync();
+        await server.DisposeAsync();
+    }
 }
