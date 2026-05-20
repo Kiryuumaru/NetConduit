@@ -60,8 +60,7 @@ public interface IStreamMultiplexer : IAsyncDisposable
     /// <see cref="ChannelCloseReason.TransportFailed"/>, or
     /// <see cref="ChannelCloseReason.MuxDisposed"/>. For a complete per-channel
     /// close stream with reason information, subscribe to
-    /// <see cref="IReadChannel.Closed"/> / <see cref="IWriteChannel.Closed"/>
-    /// on each channel instance.
+    /// <see cref="IChannel.Closed"/> on each channel instance.
     /// </summary>
     event EventHandler<ChannelClosedEventArgs>? ChannelClosed;
 
@@ -140,6 +139,58 @@ public interface IStreamMultiplexer : IAsyncDisposable
     /// </list>
     /// </remarks>
     IAsyncEnumerable<IReadChannel> AcceptChannelsAsync(string? channelIdPrefix = null, CancellationToken ct = default);
+
+    /// <summary>
+    /// Atomically register a group of channels. Either every registration is committed,
+    /// or none is — the multiplexer's registry is left untouched on failure and no INIT
+    /// frames are emitted on the wire for any rolled-back outbound registration.
+    /// <para>
+    /// Outbound registrations require a vacant channel id; any conflict (the id is
+    /// already bound to an existing write channel, read channel, or pending accept)
+    /// causes the entire call to roll back and return <c>false</c>.
+    /// </para>
+    /// <para>
+    /// Inbound registrations mirror the idempotent semantics of
+    /// <see cref="AcceptChannel"/>: if a read channel or pending accept for the same
+    /// id already exists, that channel is reused and returned in the result dictionary.
+    /// Only a pre-existing outbound binding on the same id is a collision for an
+    /// inbound registration. This is essential for composite transit patterns where
+    /// the peer's INIT for the inbound id may have arrived before the local batch runs.
+    /// </para>
+    /// </summary>
+    /// <param name="registrations">
+    /// The channels to register. Each entry specifies a channel id, a direction
+    /// (<see cref="Enums.ChannelDirection.Outbound"/> = open locally,
+    /// <see cref="Enums.ChannelDirection.Inbound"/> = accept locally), and optional
+    /// per-channel options (consulted only for outbound registrations). The same
+    /// (<c>ChannelId</c>, <c>Direction</c>) pair may not appear twice in a single batch.
+    /// </param>
+    /// <param name="channels">
+    /// On success, a dictionary mapping each input registration to the created
+    /// <see cref="IChannel"/> (cast to <see cref="IWriteChannel"/> for outbound or
+    /// <see cref="IReadChannel"/> for inbound by the caller). On failure, <c>null</c>.
+    /// </param>
+    /// <returns>
+    /// <c>true</c> if every channel was registered. <c>false</c> if any channel id was
+    /// already in use; in that case the registry is restored to its pre-call state.
+    /// </returns>
+    /// <exception cref="InvalidOperationException">
+    /// The multiplexer has not been started, or shutdown has been initiated.
+    /// </exception>
+    /// <exception cref="ArgumentException">
+    /// <paramref name="registrations"/> is empty, contains a null channel id, contains
+    /// an invalid channel id (empty or longer than the maximum permitted UTF-8 byte
+    /// length), contains a duplicate (<c>ChannelId</c>, <c>Direction</c>) pair, or an
+    /// outbound registration carries a <see cref="Models.ChannelOptions"/> whose
+    /// <see cref="Models.ChannelOptions.ChannelId"/> disagrees with the registration's
+    /// own <c>ChannelId</c>.
+    /// </exception>
+    /// <exception cref="ArgumentOutOfRangeException">
+    /// An outbound registration carries options with an out-of-range <c>SlabSize</c>.
+    /// </exception>
+    bool TryRegisterChannels(
+        ReadOnlySpan<ChannelRegistration> registrations,
+        out IReadOnlyDictionary<ChannelRegistration, IChannel> channels);
 
     /// <summary>Get an outbound channel by its ID, or null if not found.</summary>
     IWriteChannel? GetWriteChannel(string channelId);

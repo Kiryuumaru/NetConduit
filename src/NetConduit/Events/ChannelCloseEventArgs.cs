@@ -4,9 +4,9 @@ namespace NetConduit.Events;
 
 /// <summary>
 /// Event data raised by the channel-instance
-/// <see cref="Interfaces.IReadChannel.Closed"/> /
-/// <see cref="Interfaces.IWriteChannel.Closed"/> events when the channel itself
-/// closes for any reason.
+/// <see cref="Interfaces.IChannel.Closed"/> event (exposed via
+/// <see cref="Interfaces.IReadChannel"/> / <see cref="Interfaces.IWriteChannel"/>)
+/// when the channel itself closes for any reason.
 /// </summary>
 /// <remarks>
 /// This is the complete per-channel close stream: every value of
