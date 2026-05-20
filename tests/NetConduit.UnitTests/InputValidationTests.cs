@@ -357,4 +357,175 @@ public sealed class InputValidationTests
         await client.DisposeAsync();
         await server.DisposeAsync();
     }
+
+    // ---- SlabSize bound validation (arch-010) ----
+    //
+    // docs/api/channel-options.md states: "SlabSize must be between 64 KiB and 64 MiB."
+    // These tests pin that contract: the public constructor / factory rejects out-of-range
+    // values at the boundary instead of producing confusing downstream failures.
+
+    private const int MinSlabSize = 64 * 1024;
+    private const int MaxSlabSize = 64 * 1024 * 1024;
+
+    [Fact]
+    public void Create_DefaultChannelOptionsSlabSize_BelowMin_Throws()
+    {
+        var duplex = new DuplexMemoryStream();
+        Assert.Throws<ArgumentOutOfRangeException>(() =>
+            StreamMultiplexer.Create(new MultiplexerOptions
+            {
+                StreamFactory = _ => Task.FromResult<IStreamPair>(duplex.SideA),
+                DefaultChannelOptions = new DefaultChannelOptions { SlabSize = MinSlabSize - 1 },
+            }));
+    }
+
+    [Fact]
+    public void Create_DefaultChannelOptionsSlabSize_AboveMax_Throws()
+    {
+        var duplex = new DuplexMemoryStream();
+        Assert.Throws<ArgumentOutOfRangeException>(() =>
+            StreamMultiplexer.Create(new MultiplexerOptions
+            {
+                StreamFactory = _ => Task.FromResult<IStreamPair>(duplex.SideA),
+                DefaultChannelOptions = new DefaultChannelOptions { SlabSize = MaxSlabSize + 1 },
+            }));
+    }
+
+    [Fact]
+    public void Create_DefaultChannelOptionsSlabSize_Zero_Throws()
+    {
+        var duplex = new DuplexMemoryStream();
+        Assert.Throws<ArgumentOutOfRangeException>(() =>
+            StreamMultiplexer.Create(new MultiplexerOptions
+            {
+                StreamFactory = _ => Task.FromResult<IStreamPair>(duplex.SideA),
+                DefaultChannelOptions = new DefaultChannelOptions { SlabSize = 0 },
+            }));
+    }
+
+    [Fact]
+    public void Create_DefaultChannelOptionsSlabSize_Negative_Throws()
+    {
+        var duplex = new DuplexMemoryStream();
+        Assert.Throws<ArgumentOutOfRangeException>(() =>
+            StreamMultiplexer.Create(new MultiplexerOptions
+            {
+                StreamFactory = _ => Task.FromResult<IStreamPair>(duplex.SideA),
+                DefaultChannelOptions = new DefaultChannelOptions { SlabSize = -1 },
+            }));
+    }
+
+    [Fact]
+    public void Create_DefaultChannelOptionsSlabSize_ExactlyMin_Succeeds()
+    {
+        var duplex = new DuplexMemoryStream();
+        var mux = StreamMultiplexer.Create(new MultiplexerOptions
+        {
+            StreamFactory = _ => Task.FromResult<IStreamPair>(duplex.SideA),
+            DefaultChannelOptions = new DefaultChannelOptions { SlabSize = MinSlabSize },
+        });
+        Assert.NotNull(mux);
+    }
+
+    [Fact]
+    public void Create_DefaultChannelOptionsSlabSize_ExactlyMax_Succeeds()
+    {
+        var duplex = new DuplexMemoryStream();
+        var mux = StreamMultiplexer.Create(new MultiplexerOptions
+        {
+            StreamFactory = _ => Task.FromResult<IStreamPair>(duplex.SideA),
+            DefaultChannelOptions = new DefaultChannelOptions { SlabSize = MaxSlabSize },
+        });
+        Assert.NotNull(mux);
+    }
+
+    [Fact]
+    public async Task OpenChannel_SlabSize_BelowMin_Throws()
+    {
+        var (client, server) = CreatePair();
+        client.Start();
+        server.Start();
+        await Task.WhenAll(client.WaitForReadyAsync(), server.WaitForReadyAsync());
+
+        Assert.Throws<ArgumentOutOfRangeException>(() =>
+            client.OpenChannel(new ChannelOptions { ChannelId = "x", SlabSize = MinSlabSize - 1 }));
+
+        await client.DisposeAsync();
+        await server.DisposeAsync();
+    }
+
+    [Fact]
+    public async Task OpenChannel_SlabSize_AboveMax_Throws()
+    {
+        var (client, server) = CreatePair();
+        client.Start();
+        server.Start();
+        await Task.WhenAll(client.WaitForReadyAsync(), server.WaitForReadyAsync());
+
+        Assert.Throws<ArgumentOutOfRangeException>(() =>
+            client.OpenChannel(new ChannelOptions { ChannelId = "x", SlabSize = MaxSlabSize + 1 }));
+
+        await client.DisposeAsync();
+        await server.DisposeAsync();
+    }
+
+    [Fact]
+    public async Task OpenChannel_SlabSize_Zero_Throws()
+    {
+        var (client, server) = CreatePair();
+        client.Start();
+        server.Start();
+        await Task.WhenAll(client.WaitForReadyAsync(), server.WaitForReadyAsync());
+
+        Assert.Throws<ArgumentOutOfRangeException>(() =>
+            client.OpenChannel(new ChannelOptions { ChannelId = "x", SlabSize = 0 }));
+
+        await client.DisposeAsync();
+        await server.DisposeAsync();
+    }
+
+    [Fact]
+    public async Task OpenChannel_SlabSize_Negative_Throws()
+    {
+        var (client, server) = CreatePair();
+        client.Start();
+        server.Start();
+        await Task.WhenAll(client.WaitForReadyAsync(), server.WaitForReadyAsync());
+
+        Assert.Throws<ArgumentOutOfRangeException>(() =>
+            client.OpenChannel(new ChannelOptions { ChannelId = "x", SlabSize = -1 }));
+
+        await client.DisposeAsync();
+        await server.DisposeAsync();
+    }
+
+    [Fact]
+    public async Task OpenChannel_SlabSize_ExactlyMin_Succeeds()
+    {
+        var (client, server) = CreatePair();
+        client.Start();
+        server.Start();
+        await Task.WhenAll(client.WaitForReadyAsync(), server.WaitForReadyAsync());
+
+        var channel = client.OpenChannel(new ChannelOptions { ChannelId = "x", SlabSize = MinSlabSize });
+        Assert.NotNull(channel);
+
+        await client.DisposeAsync();
+        await server.DisposeAsync();
+    }
+
+    [Fact]
+    public async Task OpenChannel_SlabSize_ExactlyMax_Succeeds()
+    {
+        var (client, server) = CreatePair();
+        client.Start();
+        server.Start();
+        await Task.WhenAll(client.WaitForReadyAsync(), server.WaitForReadyAsync());
+
+        var channel = client.OpenChannel(new ChannelOptions { ChannelId = "x", SlabSize = MaxSlabSize });
+        Assert.NotNull(channel);
+
+        await client.DisposeAsync();
+        await server.DisposeAsync();
+    }
 }
