@@ -205,20 +205,21 @@ public sealed class BackpressureTests
     {
         var duplex = new DuplexMemoryStream();
 
-        // Very small slab to force backpressure quickly
+        // Small slab (the minimum documented value) to force backpressure quickly.
+        const int SmallSlab = 64 * 1024;
         var client = StreamMultiplexer.Create(new MultiplexerOptions
         {
             StreamFactory = _ => Task.FromResult<IStreamPair>(duplex.SideA),
             DefaultChannelOptions = new DefaultChannelOptions
             {
-                SlabSize = 1024,
+                SlabSize = SmallSlab,
                 SendTimeout = TimeSpan.FromMilliseconds(500),
             },
         });
         var server = StreamMultiplexer.Create(new MultiplexerOptions
         {
             StreamFactory = _ => Task.FromResult<IStreamPair>(duplex.SideB),
-            DefaultChannelOptions = new DefaultChannelOptions { SlabSize = 1024 },
+            DefaultChannelOptions = new DefaultChannelOptions { SlabSize = SmallSlab },
         });
 
         client.Start();
@@ -237,8 +238,8 @@ public sealed class BackpressureTests
         // eventually fires.
         try
         {
-            // Maximum payload per frame = SlabSize - FrameHeader.Size = 1016.
-            var fittingData = new byte[1016];
+            // Maximum payload per frame = SlabSize - FrameHeader.Size.
+            var fittingData = new byte[SmallSlab - 8];
             for (int i = 0; i < 1024; i++)
             {
                 await writeCh.WriteAsync(fittingData, cts.Token);
