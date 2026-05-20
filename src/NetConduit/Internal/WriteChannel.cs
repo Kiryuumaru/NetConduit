@@ -326,12 +326,18 @@ internal sealed class WriteChannel : Stream, IWriteChannel
     {
         lock (_posLock)
         {
-            // Clamp against the locally-observed upper bound to defend against
-            // a buggy or hostile peer that ACKs a position beyond what could
-            // possibly have been sent. Without this clamp, a single oversized
-            // ACK frame corrupts every slab position field and the next
-            // WriteAsync throws ArgumentOutOfRangeException from slab indexing.
-            long upper = _compactionOffset + _sentPos;
+            // Clamp against the slab high-water mark to defend against a buggy
+            // or hostile peer that ACKs a position beyond what was written.
+            // Without this clamp, a single oversized ACK frame corrupts every
+            // slab position field and the next WriteAsync throws
+            // ArgumentOutOfRangeException from slab indexing.
+            //
+            // _writePos is the upper bound — not _sentPos — because the writer
+            // thread can lag behind the local OnAck under high concurrency:
+            // ACK arrives before MarkSent updates _sentPos. Clamping against
+            // _sentPos would silently down-clamp legitimate ACKs and stall
+            // compaction, deadlocking WriteAsync at slab full.
+            long upper = _compactionOffset + _writePos;
             if (ackedPosition > upper)
                 ackedPosition = upper;
 
