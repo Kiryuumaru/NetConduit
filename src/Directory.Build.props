@@ -1,0 +1,18 @@
+<Project>
+
+  <!--
+    Centralizes the NetConduit core package version used by every optional
+    package (transits + transports) when UseLocalNetConduit=false (release
+    build / NuGet pack path). When UseLocalNetConduit=true (dev / test path),
+    this property is unused because each package switches to a
+    ProjectReference. Optional packages reference this as
+    Version="$(NetConduitPackageVersion)".
+
+    Bump this single property when a new NetConduit core release is published
+    so all optional packages line up on the same dependency contract.
+  -->
+  <PropertyGroup>
+    <NetConduitPackageVersion>3.0.1</NetConduitPackageVersion>
+  </PropertyGroup>
+
+</Project>
