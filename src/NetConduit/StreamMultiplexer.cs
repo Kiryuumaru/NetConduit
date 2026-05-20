@@ -146,6 +146,7 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IChannelOwner
                 "MaxAutoReconnectAttempts must be -1 (unlimited), 0 (no reconnect), or a positive bound.");
         }
         ValidateSlabSize(options.DefaultChannelOptions.SlabSize, $"{nameof(options)}.{nameof(MultiplexerOptions.DefaultChannelOptions)}.{nameof(DefaultChannelOptions.SlabSize)}");
+        ValidateTimingOptions(options);
         return new StreamMultiplexer(options, useOddIndices: true);
     }
 
@@ -158,6 +159,60 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IChannelOwner
                 slabSize,
                 $"SlabSize must be between {FrameConstants.MinSlabSize} ({FrameConstants.MinSlabSize / 1024} KiB) and {FrameConstants.MaxSlabSize} ({FrameConstants.MaxSlabSize / (1024 * 1024)} MiB) inclusive.");
         }
+    }
+
+    private static void ValidateTimingOptions(MultiplexerOptions options)
+    {
+        if (options.PingInterval < TimeSpan.Zero)
+            throw new ArgumentOutOfRangeException(
+                nameof(options),
+                options.PingInterval,
+                "PingInterval must be non-negative. Use TimeSpan.Zero to disable keepalive.");
+
+        if (options.PingInterval > TimeSpan.Zero)
+        {
+            if (options.PingTimeout <= TimeSpan.Zero)
+                throw new ArgumentOutOfRangeException(
+                    nameof(options),
+                    options.PingTimeout,
+                    "PingTimeout must be positive when keepalive is enabled (PingInterval > TimeSpan.Zero).");
+
+            if (options.MaxMissedPings < 1)
+                throw new ArgumentOutOfRangeException(
+                    nameof(options),
+                    options.MaxMissedPings,
+                    "MaxMissedPings must be at least 1 when keepalive is enabled (PingInterval > TimeSpan.Zero).");
+        }
+
+        if (options.GoAwayTimeout < TimeSpan.Zero)
+            throw new ArgumentOutOfRangeException(
+                nameof(options),
+                options.GoAwayTimeout,
+                "GoAwayTimeout must be non-negative.");
+
+        if (options.AutoReconnectDelay < TimeSpan.Zero)
+            throw new ArgumentOutOfRangeException(
+                nameof(options),
+                options.AutoReconnectDelay,
+                "AutoReconnectDelay must be non-negative.");
+
+        if (options.MaxAutoReconnectDelay < options.AutoReconnectDelay)
+            throw new ArgumentOutOfRangeException(
+                nameof(options),
+                options.MaxAutoReconnectDelay,
+                $"MaxAutoReconnectDelay ({options.MaxAutoReconnectDelay}) must be greater than or equal to AutoReconnectDelay ({options.AutoReconnectDelay}).");
+
+        if (double.IsNaN(options.AutoReconnectBackoffMultiplier) || options.AutoReconnectBackoffMultiplier < 1.0)
+            throw new ArgumentOutOfRangeException(
+                nameof(options),
+                options.AutoReconnectBackoffMultiplier,
+                "AutoReconnectBackoffMultiplier must be greater than or equal to 1.0.");
+
+        if (options.ConnectionTimeout != Timeout.InfiniteTimeSpan && options.ConnectionTimeout < TimeSpan.Zero)
+            throw new ArgumentOutOfRangeException(
+                nameof(options),
+                options.ConnectionTimeout,
+                "ConnectionTimeout must be non-negative, or Timeout.InfiniteTimeSpan to disable per-attempt timeout.");
     }
 
     /// <inheritdoc />

@@ -528,4 +528,224 @@ public sealed class InputValidationTests
         await client.DisposeAsync();
         await server.DisposeAsync();
     }
+
+    // ---- Timing / multiplier option validation (arch-012) ----
+    //
+    // docs/api/multiplexer-options.md Validation section: see "Timing options".
+    // Escape hatches preserved: PingInterval = Zero disables keepalive;
+    // ConnectionTimeout = InfiniteTimeSpan disables per-attempt timeout.
+
+    private static StreamFactoryDelegate AnyFactory() =>
+        _ => Task.FromResult<IStreamPair>(new DuplexMemoryStream().SideA);
+
+    [Fact]
+    public void Create_NegativePingInterval_Throws()
+    {
+        Assert.Throws<ArgumentOutOfRangeException>(() =>
+            StreamMultiplexer.Create(new MultiplexerOptions
+            {
+                StreamFactory = AnyFactory(),
+                PingInterval = TimeSpan.FromSeconds(-1),
+            }));
+    }
+
+    [Fact]
+    public void Create_ZeroPingInterval_DisablesKeepalive_Succeeds()
+    {
+        // Escape hatch: PingInterval = TimeSpan.Zero disables keepalive entirely.
+        // PingTimeout / MaxMissedPings are not validated in this mode.
+        var mux = StreamMultiplexer.Create(new MultiplexerOptions
+        {
+            StreamFactory = AnyFactory(),
+            PingInterval = TimeSpan.Zero,
+            PingTimeout = TimeSpan.Zero,
+            MaxMissedPings = 0,
+        });
+        Assert.NotNull(mux);
+    }
+
+    [Fact]
+    public void Create_ZeroPingTimeoutWithKeepaliveEnabled_Throws()
+    {
+        Assert.Throws<ArgumentOutOfRangeException>(() =>
+            StreamMultiplexer.Create(new MultiplexerOptions
+            {
+                StreamFactory = AnyFactory(),
+                PingInterval = TimeSpan.FromSeconds(30),
+                PingTimeout = TimeSpan.Zero,
+            }));
+    }
+
+    [Fact]
+    public void Create_NegativePingTimeoutWithKeepaliveEnabled_Throws()
+    {
+        Assert.Throws<ArgumentOutOfRangeException>(() =>
+            StreamMultiplexer.Create(new MultiplexerOptions
+            {
+                StreamFactory = AnyFactory(),
+                PingInterval = TimeSpan.FromSeconds(30),
+                PingTimeout = TimeSpan.FromSeconds(-1),
+            }));
+    }
+
+    [Fact]
+    public void Create_ZeroMaxMissedPingsWithKeepaliveEnabled_Throws()
+    {
+        Assert.Throws<ArgumentOutOfRangeException>(() =>
+            StreamMultiplexer.Create(new MultiplexerOptions
+            {
+                StreamFactory = AnyFactory(),
+                PingInterval = TimeSpan.FromSeconds(30),
+                MaxMissedPings = 0,
+            }));
+    }
+
+    [Fact]
+    public void Create_NegativeMaxMissedPingsWithKeepaliveEnabled_Throws()
+    {
+        Assert.Throws<ArgumentOutOfRangeException>(() =>
+            StreamMultiplexer.Create(new MultiplexerOptions
+            {
+                StreamFactory = AnyFactory(),
+                PingInterval = TimeSpan.FromSeconds(30),
+                MaxMissedPings = -1,
+            }));
+    }
+
+    [Fact]
+    public void Create_NegativeGoAwayTimeout_Throws()
+    {
+        Assert.Throws<ArgumentOutOfRangeException>(() =>
+            StreamMultiplexer.Create(new MultiplexerOptions
+            {
+                StreamFactory = AnyFactory(),
+                GoAwayTimeout = TimeSpan.FromSeconds(-1),
+            }));
+    }
+
+    [Fact]
+    public void Create_ZeroGoAwayTimeout_Succeeds()
+    {
+        var mux = StreamMultiplexer.Create(new MultiplexerOptions
+        {
+            StreamFactory = AnyFactory(),
+            GoAwayTimeout = TimeSpan.Zero,
+        });
+        Assert.NotNull(mux);
+    }
+
+    [Fact]
+    public void Create_NegativeAutoReconnectDelay_Throws()
+    {
+        Assert.Throws<ArgumentOutOfRangeException>(() =>
+            StreamMultiplexer.Create(new MultiplexerOptions
+            {
+                StreamFactory = AnyFactory(),
+                AutoReconnectDelay = TimeSpan.FromMilliseconds(-1),
+            }));
+    }
+
+    [Fact]
+    public void Create_MaxAutoReconnectDelayBelowBase_Throws()
+    {
+        Assert.Throws<ArgumentOutOfRangeException>(() =>
+            StreamMultiplexer.Create(new MultiplexerOptions
+            {
+                StreamFactory = AnyFactory(),
+                AutoReconnectDelay = TimeSpan.FromSeconds(30),
+                MaxAutoReconnectDelay = TimeSpan.FromSeconds(5),
+            }));
+    }
+
+    [Fact]
+    public void Create_BackoffMultiplierBelowOne_Throws()
+    {
+        Assert.Throws<ArgumentOutOfRangeException>(() =>
+            StreamMultiplexer.Create(new MultiplexerOptions
+            {
+                StreamFactory = AnyFactory(),
+                AutoReconnectBackoffMultiplier = 0.5,
+            }));
+    }
+
+    [Fact]
+    public void Create_ZeroBackoffMultiplier_Throws()
+    {
+        Assert.Throws<ArgumentOutOfRangeException>(() =>
+            StreamMultiplexer.Create(new MultiplexerOptions
+            {
+                StreamFactory = AnyFactory(),
+                AutoReconnectBackoffMultiplier = 0.0,
+            }));
+    }
+
+    [Fact]
+    public void Create_NegativeBackoffMultiplier_Throws()
+    {
+        Assert.Throws<ArgumentOutOfRangeException>(() =>
+            StreamMultiplexer.Create(new MultiplexerOptions
+            {
+                StreamFactory = AnyFactory(),
+                AutoReconnectBackoffMultiplier = -2.0,
+            }));
+    }
+
+    [Fact]
+    public void Create_NaNBackoffMultiplier_Throws()
+    {
+        Assert.Throws<ArgumentOutOfRangeException>(() =>
+            StreamMultiplexer.Create(new MultiplexerOptions
+            {
+                StreamFactory = AnyFactory(),
+                AutoReconnectBackoffMultiplier = double.NaN,
+            }));
+    }
+
+    [Fact]
+    public void Create_BackoffMultiplierExactlyOne_Succeeds()
+    {
+        // 1.0 means "no growth" - fixed-interval retry. Permitted.
+        var mux = StreamMultiplexer.Create(new MultiplexerOptions
+        {
+            StreamFactory = AnyFactory(),
+            AutoReconnectBackoffMultiplier = 1.0,
+        });
+        Assert.NotNull(mux);
+    }
+
+    [Fact]
+    public void Create_NegativeConnectionTimeoutThatIsNotInfinite_Throws()
+    {
+        Assert.Throws<ArgumentOutOfRangeException>(() =>
+            StreamMultiplexer.Create(new MultiplexerOptions
+            {
+                StreamFactory = AnyFactory(),
+                ConnectionTimeout = TimeSpan.FromMilliseconds(-100),
+            }));
+    }
+
+    [Fact]
+    public void Create_InfiniteConnectionTimeout_Succeeds()
+    {
+        // Escape hatch: Timeout.InfiniteTimeSpan disables per-attempt timeout.
+        var mux = StreamMultiplexer.Create(new MultiplexerOptions
+        {
+            StreamFactory = AnyFactory(),
+            ConnectionTimeout = Timeout.InfiniteTimeSpan,
+        });
+        Assert.NotNull(mux);
+    }
+
+    [Fact]
+    public void Create_ZeroConnectionTimeout_Succeeds()
+    {
+        // Zero also disables per-attempt timeout enforcement (matches the existing
+        // "> Zero && != Infinite" runtime gate).
+        var mux = StreamMultiplexer.Create(new MultiplexerOptions
+        {
+            StreamFactory = AnyFactory(),
+            ConnectionTimeout = TimeSpan.Zero,
+        });
+        Assert.NotNull(mux);
+    }
 }
