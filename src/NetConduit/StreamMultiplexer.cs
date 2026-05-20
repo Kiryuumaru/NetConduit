@@ -671,10 +671,6 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IChannelOwner
                 await ReadExactAsync(readStream, headerBuf, ct);
                 var header = FrameHeader.Parse(headerBuf);
 
-                if (header.PayloadLength > FrameConstants.MaxFramePayloadSize)
-                    throw new MultiplexerException(ErrorCode.ProtocolError,
-                        $"Frame payload exceeds maximum: {header.PayloadLength} > {FrameConstants.MaxFramePayloadSize}");
-
                 Interlocked.Add(ref _stats._bytesReceived, FrameHeader.Size + header.PayloadLength);
 
                 // 2. Read payload — use inline buffer for small frames, rent for large
