@@ -137,9 +137,11 @@ internal sealed class WriteChannel : Stream, IWriteChannel
         if (!_isReady)
         {
             _isReady = true;
-            _readyTcs.TrySetResult();
+            // Raise synchronous notifications first so handlers observe a ready channel,
+            // then complete the TCS so async awaiters resume only after handlers ran.
             Ready?.Invoke(this, EventArgs.Empty);
             _owner.NotifyChannelOpened(ChannelId);
+            _readyTcs.TrySetResult();
         }
     }
 

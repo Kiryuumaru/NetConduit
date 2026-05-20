@@ -391,8 +391,10 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IChannelOwner
                 if (!hasConnectedBefore)
                 {
                     _isReady = true;
-                    _readyTcs.TrySetResult();
+                    // Raise Ready synchronously first so handlers observe a ready multiplexer,
+                    // then complete the TCS so async awaiters resume only after handlers ran.
                     RaiseEvent(Ready);
+                    _readyTcs.TrySetResult();
                 }
                 hasConnectedBefore = true;
 
