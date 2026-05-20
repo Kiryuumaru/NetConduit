@@ -42,7 +42,16 @@ public static class DuplexStreamTransitExtensions
     {
         ValidateBaseChannelId(channelId);
         var writeChannel = mux.OpenChannel(channelId + OutboundSuffix);
-        var readChannel = mux.AcceptChannel(channelId + InboundSuffix);
+        IReadChannel readChannel;
+        try
+        {
+            readChannel = mux.AcceptChannel(channelId + InboundSuffix);
+        }
+        catch
+        {
+            SafeDispose(writeChannel);
+            throw;
+        }
         return new DuplexStreamTransit(writeChannel, readChannel);
     }
 
@@ -80,7 +89,16 @@ public static class DuplexStreamTransitExtensions
     {
         ValidateBaseChannelId(channelId);
         var readChannel = mux.AcceptChannel(channelId + OutboundSuffix);
-        var writeChannel = mux.OpenChannel(channelId + InboundSuffix);
+        IWriteChannel writeChannel;
+        try
+        {
+            writeChannel = mux.OpenChannel(channelId + InboundSuffix);
+        }
+        catch
+        {
+            SafeDispose(readChannel);
+            throw;
+        }
         return new DuplexStreamTransit(writeChannel, readChannel);
     }
 
@@ -118,7 +136,16 @@ public static class DuplexStreamTransitExtensions
         string readChannelId)
     {
         var writeChannel = mux.OpenChannel(writeChannelId);
-        var readChannel = mux.AcceptChannel(readChannelId);
+        IReadChannel readChannel;
+        try
+        {
+            readChannel = mux.AcceptChannel(readChannelId);
+        }
+        catch
+        {
+            SafeDispose(writeChannel);
+            throw;
+        }
         return new DuplexStreamTransit(writeChannel, readChannel);
     }
 
@@ -156,5 +183,14 @@ public static class DuplexStreamTransitExtensions
                 $"Base channel ID must not contain reserved suffix sequences \"{OutboundSuffix}\" or \"{InboundSuffix}\".",
                 nameof(channelId));
         }
+    }
+
+    // Best-effort cleanup on the exception path. The original exception from the
+    // failed second registration must surface to the caller, so a secondary
+    // failure during channel disposal is intentionally swallowed.
+    private static void SafeDispose(IDisposable channel)
+    {
+        try { channel.Dispose(); }
+        catch { }
     }
 }

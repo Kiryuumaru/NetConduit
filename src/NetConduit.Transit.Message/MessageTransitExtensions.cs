@@ -49,7 +49,16 @@ public static class MessageTransitExtensions
     {
         ValidateBaseChannelId(channelId);
         var writeChannel = mux.OpenChannel(channelId + OutboundSuffix);
-        var readChannel = mux.AcceptChannel(channelId + InboundSuffix);
+        IReadChannel readChannel;
+        try
+        {
+            readChannel = mux.AcceptChannel(channelId + InboundSuffix);
+        }
+        catch
+        {
+            SafeDispose(writeChannel);
+            throw;
+        }
         return new MessageTransit<TSend, TReceive>(writeChannel, readChannel, sendTypeInfo, receiveTypeInfo, maxMessageSize);
     }
 
@@ -87,7 +96,16 @@ public static class MessageTransitExtensions
     {
         ValidateBaseChannelId(channelId);
         var readChannel = mux.AcceptChannel(channelId + OutboundSuffix);
-        var writeChannel = mux.OpenChannel(channelId + InboundSuffix);
+        IWriteChannel writeChannel;
+        try
+        {
+            writeChannel = mux.OpenChannel(channelId + InboundSuffix);
+        }
+        catch
+        {
+            SafeDispose(readChannel);
+            throw;
+        }
         return new MessageTransit<TSend, TReceive>(writeChannel, readChannel, sendTypeInfo, receiveTypeInfo, maxMessageSize);
     }
 
@@ -174,7 +192,16 @@ public static class MessageTransitExtensions
         int maxMessageSize = 16 * 1024 * 1024)
     {
         var writeChannel = mux.OpenChannel(writeChannelId);
-        var readChannel = mux.AcceptChannel(readChannelId);
+        IReadChannel readChannel;
+        try
+        {
+            readChannel = mux.AcceptChannel(readChannelId);
+        }
+        catch
+        {
+            SafeDispose(writeChannel);
+            throw;
+        }
         return new MessageTransit<TSend, TReceive>(writeChannel, readChannel, sendTypeInfo, receiveTypeInfo, maxMessageSize);
     }
 
@@ -260,7 +287,16 @@ public static class MessageTransitExtensions
     {
         ValidateBaseChannelId(channelId);
         var writeChannel = mux.OpenChannel(channelId + OutboundSuffix);
-        var readChannel = mux.AcceptChannel(channelId + InboundSuffix);
+        IReadChannel readChannel;
+        try
+        {
+            readChannel = mux.AcceptChannel(channelId + InboundSuffix);
+        }
+        catch
+        {
+            SafeDispose(writeChannel);
+            throw;
+        }
         return new MessageTransit<TSend, TReceive>(writeChannel, readChannel, jsonOptions, maxMessageSize);
     }
 
@@ -297,7 +333,16 @@ public static class MessageTransitExtensions
     {
         ValidateBaseChannelId(channelId);
         var readChannel = mux.AcceptChannel(channelId + OutboundSuffix);
-        var writeChannel = mux.OpenChannel(channelId + InboundSuffix);
+        IWriteChannel writeChannel;
+        try
+        {
+            writeChannel = mux.OpenChannel(channelId + InboundSuffix);
+        }
+        catch
+        {
+            SafeDispose(readChannel);
+            throw;
+        }
         return new MessageTransit<TSend, TReceive>(writeChannel, readChannel, jsonOptions, maxMessageSize);
     }
 
@@ -387,7 +432,16 @@ public static class MessageTransitExtensions
         int maxMessageSize = 16 * 1024 * 1024)
     {
         var writeChannel = mux.OpenChannel(writeChannelId);
-        var readChannel = mux.AcceptChannel(readChannelId);
+        IReadChannel readChannel;
+        try
+        {
+            readChannel = mux.AcceptChannel(readChannelId);
+        }
+        catch
+        {
+            SafeDispose(writeChannel);
+            throw;
+        }
         return new MessageTransit<TSend, TReceive>(writeChannel, readChannel, jsonOptions, maxMessageSize);
     }
 
@@ -472,5 +526,14 @@ public static class MessageTransitExtensions
                 $"Base channel ID must not contain reserved suffix sequences \"{OutboundSuffix}\" or \"{InboundSuffix}\".",
                 nameof(channelId));
         }
+    }
+
+    // Best-effort cleanup on the exception path. The original exception from the
+    // failed second registration must surface to the caller, so a secondary
+    // failure during channel disposal is intentionally swallowed.
+    private static void SafeDispose(IDisposable channel)
+    {
+        try { channel.Dispose(); }
+        catch { }
     }
 }

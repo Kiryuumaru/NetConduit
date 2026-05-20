@@ -36,4 +36,34 @@ public sealed class DeltaMessageTransitChannelIdValidationTests
             mux.AcceptDeltaMessageTransit(channelId, JsonContext.Default.JsonObject));
         Assert.Equal("channelId", ex.ParamName);
     }
+
+    [Fact]
+    public async Task AcceptDeltaMessageTransit_WhenSecondStepThrows_DoesNotLeakReadChannel()
+    {
+        await using var mux = CreateStartedMux();
+
+        // Pre-occupy the inbound-suffix id so AcceptDeltaMessageTransit's second
+        // step (OpenChannel of base + InboundSuffix) collides in _idToIndex.
+        using var _ = mux.OpenChannel("delta" + DeltaMessageTransitExtensions.InboundSuffix);
+
+        var idsBefore = mux.ActiveChannelIds.ToArray();
+
+        Assert.Throws<MultiplexerException>(() =>
+            mux.AcceptDeltaMessageTransit("delta", JsonContext.Default.JsonObject));
+
+        var idsAfter = mux.ActiveChannelIds.ToArray();
+        Assert.Equal(idsBefore, idsAfter);
+        Assert.DoesNotContain("delta" + DeltaMessageTransitExtensions.OutboundSuffix, idsAfter);
+    }
+
+    private static StreamMultiplexer CreateStartedMux()
+    {
+        var duplex = new DuplexMemoryStream();
+        var mux = StreamMultiplexer.Create(new MultiplexerOptions
+        {
+            StreamFactory = _ => Task.FromResult<IStreamPair>(duplex.SideA),
+        });
+        mux.Start();
+        return mux;
+    }
 }
