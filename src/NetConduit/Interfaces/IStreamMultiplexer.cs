@@ -52,7 +52,17 @@ public interface IStreamMultiplexer : IAsyncDisposable
     /// <summary>Raised when an inbound channel is confirmed by the remote side.</summary>
     event EventHandler<ChannelEventArgs>? ChannelAccepted;
 
-    /// <summary>Raised when a channel is closed.</summary>
+    /// <summary>
+    /// Raised when the remote peer closes a channel via a FIN frame
+    /// (<see cref="ChannelCloseReason.RemoteFin"/>). This is a partial close stream:
+    /// it does <b>not</b> fire for <see cref="ChannelCloseReason.LocalClose"/>,
+    /// <see cref="ChannelCloseReason.RemoteError"/>,
+    /// <see cref="ChannelCloseReason.TransportFailed"/>, or
+    /// <see cref="ChannelCloseReason.MuxDisposed"/>. For a complete per-channel
+    /// close stream with reason information, subscribe to
+    /// <see cref="IReadChannel.Closed"/> / <see cref="IWriteChannel.Closed"/>
+    /// on each channel instance.
+    /// </summary>
     event EventHandler<ChannelClosedEventArgs>? ChannelClosed;
 
     /// <summary>Raised when an error occurs.</summary>
