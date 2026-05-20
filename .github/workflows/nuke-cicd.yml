@@ -132,6 +132,15 @@ jobs:
       NUKE_PRE_SETUP_NET_CONDUIT_MESH_TEST_CHECKOUT_FETCH_DEPTH: ${{ steps.NUKE_RUN.outputs.NUKE_PRE_SETUP_NET_CONDUIT_MESH_TEST_CHECKOUT_FETCH_DEPTH }}
       NUKE_PRE_SETUP_NET_CONDUIT_MESH_TEST_CHECKOUT_FETCH_TAGS: ${{ steps.NUKE_RUN.outputs.NUKE_PRE_SETUP_NET_CONDUIT_MESH_TEST_CHECKOUT_FETCH_TAGS }}
       NUKE_PRE_SETUP_NET_CONDUIT_MESH_TEST_CHECKOUT_SUBMODULES: ${{ steps.NUKE_RUN.outputs.NUKE_PRE_SETUP_NET_CONDUIT_MESH_TEST_CHECKOUT_SUBMODULES }}
+      NUKE_PRE_SETUP_BENCHMARK_TEST_CONDITION: ${{ steps.NUKE_RUN.outputs.NUKE_PRE_SETUP_BENCHMARK_TEST_CONDITION }}
+      NUKE_PRE_SETUP_BENCHMARK_TEST_RUNS_ON: ${{ steps.NUKE_RUN.outputs.NUKE_PRE_SETUP_BENCHMARK_TEST_RUNS_ON }}
+      NUKE_PRE_SETUP_BENCHMARK_TEST_RUN_SCRIPT: ${{ steps.NUKE_RUN.outputs.NUKE_PRE_SETUP_BENCHMARK_TEST_RUN_SCRIPT }}
+      NUKE_PRE_SETUP_BENCHMARK_TEST_CACHE_KEY: ${{ steps.NUKE_RUN.outputs.NUKE_PRE_SETUP_BENCHMARK_TEST_CACHE_KEY }}
+      NUKE_PRE_SETUP_BENCHMARK_TEST_CACHE_RESTORE_KEY: ${{ steps.NUKE_RUN.outputs.NUKE_PRE_SETUP_BENCHMARK_TEST_CACHE_RESTORE_KEY }}
+      NUKE_PRE_SETUP_BENCHMARK_TEST_CACHE_MAIN_RESTORE_KEY: ${{ steps.NUKE_RUN.outputs.NUKE_PRE_SETUP_BENCHMARK_TEST_CACHE_MAIN_RESTORE_KEY }}
+      NUKE_PRE_SETUP_BENCHMARK_TEST_CHECKOUT_FETCH_DEPTH: ${{ steps.NUKE_RUN.outputs.NUKE_PRE_SETUP_BENCHMARK_TEST_CHECKOUT_FETCH_DEPTH }}
+      NUKE_PRE_SETUP_BENCHMARK_TEST_CHECKOUT_FETCH_TAGS: ${{ steps.NUKE_RUN.outputs.NUKE_PRE_SETUP_BENCHMARK_TEST_CHECKOUT_FETCH_TAGS }}
+      NUKE_PRE_SETUP_BENCHMARK_TEST_CHECKOUT_SUBMODULES: ${{ steps.NUKE_RUN.outputs.NUKE_PRE_SETUP_BENCHMARK_TEST_CHECKOUT_SUBMODULES }}
       NUKE_PRE_SETUP_NET_CONDUIT_BUILD_CONDITION: ${{ steps.NUKE_RUN.outputs.NUKE_PRE_SETUP_NET_CONDUIT_BUILD_CONDITION }}
       NUKE_PRE_SETUP_NET_CONDUIT_BUILD_RUNS_ON: ${{ steps.NUKE_RUN.outputs.NUKE_PRE_SETUP_NET_CONDUIT_BUILD_RUNS_ON }}
       NUKE_PRE_SETUP_NET_CONDUIT_BUILD_RUN_SCRIPT: ${{ steps.NUKE_RUN.outputs.NUKE_PRE_SETUP_NET_CONDUIT_BUILD_RUN_SCRIPT }}
@@ -768,6 +777,46 @@ jobs:
     needs:
     - PRE_SETUP
     if: "! failure() && ! cancelled() && needs.PRE_SETUP.outputs.NUKE_PRE_SETUP_NET_CONDUIT_MESH_TEST_CONDITION == 'true'"
+    env:
+      NUKE_PRE_SETUP: ${{ needs.PRE_SETUP.outputs.NUKE_PRE_SETUP }}
+  BENCHMARK_TEST:
+    name: Test Benchmarks
+    runs-on: ${{ fromJson(needs.PRE_SETUP.outputs.NUKE_PRE_SETUP_BENCHMARK_TEST_RUNS_ON) }}
+    steps:
+    - uses: actions/checkout@v6
+      with:
+        fetch-depth: ${{ needs.PRE_SETUP.outputs.NUKE_PRE_SETUP_BENCHMARK_TEST_CHECKOUT_FETCH_DEPTH }}
+        fetch-tags: ${{ needs.PRE_SETUP.outputs.NUKE_PRE_SETUP_BENCHMARK_TEST_CHECKOUT_FETCH_TAGS }}
+        submodules: ${{ needs.PRE_SETUP.outputs.NUKE_PRE_SETUP_BENCHMARK_TEST_CHECKOUT_SUBMODULES }}
+        persist-credentials: true
+    - name: Cache Run
+      uses: actions/cache@v5
+      with:
+        path: ./.nuke/temp/cache
+        key: ${{ needs.PRE_SETUP.outputs.NUKE_PRE_SETUP_BENCHMARK_TEST_CACHE_KEY }}
+        restore-keys: |-
+          ${{ needs.PRE_SETUP.outputs.NUKE_PRE_SETUP_BENCHMARK_TEST_CACHE_RESTORE_KEY }}
+          ${{ needs.PRE_SETUP.outputs.NUKE_PRE_SETUP_BENCHMARK_TEST_CACHE_MAIN_RESTORE_KEY }}
+    - id: NUKE_RUN
+      name: Run Nuke benchmark_test
+      run: ${{ needs.PRE_SETUP.outputs.NUKE_PRE_SETUP_BENCHMARK_TEST_RUN_SCRIPT }} Run --args "benchmark_test"
+    - name: Upload benchmark pre_test artifacts
+      uses: actions/upload-artifact@v7
+      with:
+        name: pre_test___benchmark___BENCHMARK_TEST
+        path: ./.nuke/temp/artifacts-upload/benchmark/*
+        if-no-files-found: error
+        retention-days: 1
+    - name: Upload common pre_test artifacts
+      uses: actions/upload-artifact@v7
+      with:
+        name: pre_test___$common___BENCHMARK_TEST
+        path: ./.nuke/temp/artifacts-upload/$common/*
+        if-no-files-found: error
+        retention-days: 1
+    needs:
+    - PRE_SETUP
+    if: "! failure() && ! cancelled() && needs.PRE_SETUP.outputs.NUKE_PRE_SETUP_BENCHMARK_TEST_CONDITION == 'true'"
     env:
       NUKE_PRE_SETUP: ${{ needs.PRE_SETUP.outputs.NUKE_PRE_SETUP }}
   NET_CONDUIT_BUILD:
@@ -1857,6 +1906,7 @@ jobs:
     - NET_CONDUIT_TRANSPORT_IPC_TEST
     - NET_CONDUIT_TRANSPORT_QUIC_TEST
     - NET_CONDUIT_MESH_TEST
+    - BENCHMARK_TEST
     - NET_CONDUIT_BUILD
     - NET_CONDUIT_TRANSIT_STREAM_BUILD
     - NET_CONDUIT_TRANSIT_DUPLEX_STREAM_BUILD
@@ -1894,6 +1944,7 @@ jobs:
       NUKE_RUN_RESULT_GITHUB_NET_CONDUIT_TRANSPORT_IPC_TEST: ${{ needs.NET_CONDUIT_TRANSPORT_IPC_TEST.result }}
       NUKE_RUN_RESULT_GITHUB_NET_CONDUIT_TRANSPORT_QUIC_TEST: ${{ needs.NET_CONDUIT_TRANSPORT_QUIC_TEST.result }}
       NUKE_RUN_RESULT_GITHUB_NET_CONDUIT_MESH_TEST: ${{ needs.NET_CONDUIT_MESH_TEST.result }}
+      NUKE_RUN_RESULT_GITHUB_BENCHMARK_TEST: ${{ needs.BENCHMARK_TEST.result }}
       NUKE_RUN_RESULT_GITHUB_NET_CONDUIT_BUILD: ${{ needs.NET_CONDUIT_BUILD.result }}
       NUKE_RUN_RESULT_GITHUB_NET_CONDUIT_TRANSIT_STREAM_BUILD: ${{ needs.NET_CONDUIT_TRANSIT_STREAM_BUILD.result }}
       NUKE_RUN_RESULT_GITHUB_NET_CONDUIT_TRANSIT_DUPLEX_STREAM_BUILD: ${{ needs.NET_CONDUIT_TRANSIT_DUPLEX_STREAM_BUILD.result }}
