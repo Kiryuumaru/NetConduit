@@ -262,4 +262,79 @@ public sealed class PrefixSubscriptionTests
         await client.DisposeAsync();
         await server.DisposeAsync();
     }
+
+    [Fact]
+    public async Task PrefixSubscription_DiscardedEnumerable_CtCancelled_ReleasesSubscription()
+    {
+        var (client, server) = CreatePair();
+        client.Start(); server.Start();
+        await Task.WhenAll(client.WaitForReadyAsync(), server.WaitForReadyAsync());
+
+        // Obtain the enumerable and discard it without ever calling GetAsyncEnumerator.
+        using (var cts = new CancellationTokenSource())
+        {
+            _ = server.AcceptChannelsAsync("leak/", cts.Token);
+            cts.Cancel();
+        }
+        // Give the ct.Register callback a moment to run on the threadpool.
+        await Task.Delay(50);
+
+        // The prefix must be re-subscribable.
+        using var secondCts = new CancellationTokenSource(TestTimeout);
+        var secondEnumerator = server.AcceptChannelsAsync("leak/", secondCts.Token).GetAsyncEnumerator();
+        try
+        {
+            client.OpenChannel("leak/foo");
+            var moved = await secondEnumerator.MoveNextAsync().AsTask().WaitAsync(TestTimeout);
+            Assert.True(moved);
+            Assert.Equal("leak/foo", secondEnumerator.Current.ChannelId);
+        }
+        finally
+        {
+            secondCts.Cancel();
+            try { await secondEnumerator.DisposeAsync(); } catch (OperationCanceledException) { }
+        }
+
+        await client.DisposeAsync();
+        await server.DisposeAsync();
+    }
+
+    [Fact]
+    public async Task PrefixSubscription_DiscardedEnumerable_CtCancelled_DoesNotDropMatchingChannels()
+    {
+        var (client, server) = CreatePair();
+        client.Start(); server.Start();
+        await Task.WhenAll(client.WaitForReadyAsync(), server.WaitForReadyAsync());
+
+        using var cts = new CancellationTokenSource();
+        // Discard the enumerable without iterating.
+        _ = server.AcceptChannelsAsync("dropped/", cts.Token);
+
+        // Open a matching channel. With the bug, it would be silently queued
+        // into the orphan subscription's reader and never observed by anyone.
+        client.OpenChannel("dropped/x");
+        await Task.Delay(100);
+
+        // Cancel the discarded ct — this must release the subscription and
+        // re-route buffered channels into the default accept stream.
+        cts.Cancel();
+        await Task.Delay(100);
+
+        using var defaultCts = new CancellationTokenSource(TestTimeout);
+        var defaultEnumerator = server.AcceptChannelsAsync(ct: defaultCts.Token).GetAsyncEnumerator();
+        try
+        {
+            var moved = await defaultEnumerator.MoveNextAsync().AsTask().WaitAsync(TestTimeout);
+            Assert.True(moved);
+            Assert.Equal("dropped/x", defaultEnumerator.Current.ChannelId);
+        }
+        finally
+        {
+            defaultCts.Cancel();
+            try { await defaultEnumerator.DisposeAsync(); } catch (OperationCanceledException) { }
+        }
+
+        await client.DisposeAsync();
+        await server.DisposeAsync();
+    }
 }

@@ -227,29 +227,64 @@ internal sealed class ChannelRegistry
             sub = new PrefixSubscription(channelIdPrefix);
             _prefixSubscriptions.Add(sub);
         }
-        return EnumerateAndCleanupSubscriptionAsync(sub, ct);
+        // Wrap the iterator in an owner that releases the subscription on
+        // ct cancellation, enumerator disposal, OR finalization. This avoids
+        // the split-state lifecycle leak where the eager outer add was paired
+        // with a release that only ran if iteration actually started.
+        return new PrefixSubscriptionEnumerable(this, sub, ct);
     }
 
     /// <summary>
-    /// Bound the lifetime of <paramref name="sub"/> to a single enumeration:
-    /// when the consumer cancels <paramref name="ct"/> or disposes the
-    /// enumerator, the subscription is removed from the dispatch list, its
-    /// queue is closed, and any matching channels that were buffered but
-    /// never consumed are re-routed to the default accept stream so the host
-    /// application can observe them rather than have them silently dropped.
+    /// Owns a registered <see cref="PrefixSubscription"/> on behalf of an
+    /// <c>AcceptChannelsAsync(prefix, ct)</c> call. The subscription is
+    /// guaranteed to be released exactly once via the first of: outer ct
+    /// cancellation, enumerator <c>finally</c>, or finalizer (backstop when
+    /// the enumerable is discarded without iteration AND ct is uncancellable).
     /// </summary>
-    private async IAsyncEnumerable<ReadChannel> EnumerateAndCleanupSubscriptionAsync(
-        PrefixSubscription sub,
-        [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken ct)
+    private sealed class PrefixSubscriptionEnumerable : IAsyncEnumerable<ReadChannel>
     {
-        try
+        private readonly ChannelRegistry _registry;
+        private readonly PrefixSubscription _sub;
+        private CancellationTokenRegistration _ctRegistration;
+        private int _released;
+
+        public PrefixSubscriptionEnumerable(ChannelRegistry registry, PrefixSubscription sub, CancellationToken outerCt)
         {
-            await foreach (var channel in sub.Queue.Reader.ReadAllAsync(ct).ConfigureAwait(false))
-                yield return channel;
+            _registry = registry;
+            _sub = sub;
+            if (outerCt.CanBeCanceled)
+            {
+                _ctRegistration = outerCt.Register(
+                    static state => ((PrefixSubscriptionEnumerable)state!).Release(),
+                    this);
+            }
         }
-        finally
+
+        ~PrefixSubscriptionEnumerable() => Release();
+
+        public IAsyncEnumerator<ReadChannel> GetAsyncEnumerator(CancellationToken cancellationToken = default)
+            => EnumerateAsync(cancellationToken).GetAsyncEnumerator(cancellationToken);
+
+        private async IAsyncEnumerable<ReadChannel> EnumerateAsync(
+            [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken ct)
         {
-            RemovePrefixSubscription(sub);
+            try
+            {
+                await foreach (var channel in _sub.Queue.Reader.ReadAllAsync(ct).ConfigureAwait(false))
+                    yield return channel;
+            }
+            finally
+            {
+                Release();
+            }
+        }
+
+        private void Release()
+        {
+            if (Interlocked.Exchange(ref _released, 1) != 0) return;
+            _ctRegistration.Dispose();
+            _registry.RemovePrefixSubscription(_sub);
+            GC.SuppressFinalize(this);
         }
     }
 
