@@ -4,6 +4,7 @@ Read these in order, or jump to the topic you need.
 
 | Topic | Summary |
 | --- | --- |
+| [Scope](scope.md) | What NetConduit does, what it deliberately does not, and the trust model. |
 | [Multiplexer](multiplexer.md) | What `StreamMultiplexer` is, its lifecycle, ready vs. connected, sessions. |
 | [Channels](channels.md) | Channel IDs, open vs. accept, state transitions, write/read split. |
 | [Transports](transports.md) | The role of `IStreamPair` and the `StreamFactoryDelegate`. |
