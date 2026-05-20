@@ -202,17 +202,15 @@ public sealed class ApiMisuseTests
     #region GoAway + Channel Interactions
 
     [Fact]
-    public async Task OpenChannel_AfterGoAway_StillAllowed()
+    public async Task OpenChannel_AfterGoAway_Rejected()
     {
         var (client, server) = await CreateReadyPairAsync();
 
         await client.GoAwayAsync();
         await Task.Delay(200);
 
-        // OpenChannel only checks _isRunning, not _isShuttingDown
-        // Channel can be opened but won't be useful since transport is shutting down
-        var ch = client.OpenChannel("after-goaway");
-        Assert.NotNull(ch);
+        // Graceful shutdown rejects new outbound opens.
+        Assert.Throws<InvalidOperationException>(() => client.OpenChannel("after-goaway"));
 
         await client.DisposeAsync();
         await server.DisposeAsync();

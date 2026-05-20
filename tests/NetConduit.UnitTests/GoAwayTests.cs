@@ -77,4 +77,84 @@ public sealed class GoAwayTests
         await client.DisposeAsync();
         await server.DisposeAsync();
     }
+
+    [Fact]
+    public async Task GoAway_WaitsForOpenChannelsThenAbortsOnTimeout()
+    {
+        var duplex = new DuplexMemoryStream();
+        var client = StreamMultiplexer.Create(new MultiplexerOptions
+        {
+            StreamFactory = _ => Task.FromResult<IStreamPair>(duplex.SideA),
+            PingInterval = TimeSpan.Zero,
+            GoAwayTimeout = TimeSpan.FromMilliseconds(500),
+        });
+        var server = StreamMultiplexer.Create(new MultiplexerOptions
+        {
+            StreamFactory = _ => Task.FromResult<IStreamPair>(duplex.SideB),
+            PingInterval = TimeSpan.Zero,
+        });
+        client.Start(); server.Start();
+        await Task.WhenAll(client.WaitForReadyAsync(), server.WaitForReadyAsync());
+
+        var writer = client.OpenChannel("draining");
+        await server.AcceptChannelAsync("draining", CancellationToken.None);
+        await writer.WaitForReadyAsync();
+
+        var stopwatch = System.Diagnostics.Stopwatch.StartNew();
+        await client.GoAwayAsync();
+        stopwatch.Stop();
+
+        Assert.True(stopwatch.Elapsed >= TimeSpan.FromMilliseconds(400),
+            $"GoAwayAsync returned in {stopwatch.ElapsedMilliseconds} ms, but should have waited the drain timeout.");
+        Assert.Equal(ChannelState.Closed, writer.State);
+        Assert.Equal(ChannelCloseReason.MuxDisposed, writer.CloseReason);
+
+        await client.DisposeAsync();
+        await server.DisposeAsync();
+    }
+
+    [Fact]
+    public async Task GoAway_ReturnsImmediatelyWhenChannelsAlreadyClosed()
+    {
+        var duplex = new DuplexMemoryStream();
+        var client = StreamMultiplexer.Create(new MultiplexerOptions
+        {
+            StreamFactory = _ => Task.FromResult<IStreamPair>(duplex.SideA),
+            PingInterval = TimeSpan.Zero,
+            GoAwayTimeout = TimeSpan.FromSeconds(30),
+        });
+        var server = StreamMultiplexer.Create(new MultiplexerOptions
+        {
+            StreamFactory = _ => Task.FromResult<IStreamPair>(duplex.SideB),
+            PingInterval = TimeSpan.Zero,
+        });
+        client.Start(); server.Start();
+        await Task.WhenAll(client.WaitForReadyAsync(), server.WaitForReadyAsync());
+
+        var stopwatch = System.Diagnostics.Stopwatch.StartNew();
+        await client.GoAwayAsync();
+        stopwatch.Stop();
+
+        // No channels open => drain returns immediately without waiting the 30 s timeout.
+        Assert.True(stopwatch.Elapsed < TimeSpan.FromSeconds(2),
+            $"GoAwayAsync with no open channels took {stopwatch.ElapsedMilliseconds} ms; should be near-zero.");
+
+        await client.DisposeAsync();
+        await server.DisposeAsync();
+    }
+
+    [Fact]
+    public async Task GoAway_RejectsNewOpenChannel()
+    {
+        var (client, server) = CreatePair();
+        client.Start(); server.Start();
+        await Task.WhenAll(client.WaitForReadyAsync(), server.WaitForReadyAsync());
+
+        await client.GoAwayAsync();
+
+        Assert.Throws<InvalidOperationException>(() => client.OpenChannel("after-goaway"));
+
+        await client.DisposeAsync();
+        await server.DisposeAsync();
+    }
 }
