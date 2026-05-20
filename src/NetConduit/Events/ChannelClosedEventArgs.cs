@@ -9,8 +9,9 @@ namespace NetConduit.Events;
 /// only the remote-FIN case raises it today. For local-close, remote-error,
 /// transport-failure, and dispose cases (i.e. the other four values of
 /// <see cref="Enums.ChannelCloseReason"/>), subscribe to the channel-instance
-/// <see cref="Interfaces.IReadChannel.Closed"/> /
-/// <see cref="Interfaces.IWriteChannel.Closed"/> events instead. Those carry
+/// <see cref="Interfaces.IChannel.Closed"/> event on the channel instance
+/// (also exposed via <see cref="Interfaces.IReadChannel"/> /
+/// <see cref="Interfaces.IWriteChannel"/>) instead. Those carry
 /// <see cref="ChannelCloseEventArgs"/> with a populated
 /// <see cref="Enums.ChannelCloseReason"/>.
 /// </remarks>
@@ -24,8 +25,7 @@ public sealed class ChannelClosedEventArgs(string channelId, Exception? exceptio
     /// Reserved for forward compatibility. Currently always <c>null</c> —
     /// the only emission path (remote FIN) does not carry an exception.
     /// To observe close exceptions, subscribe to the channel-instance
-    /// <see cref="Interfaces.IReadChannel.Closed"/> /
-    /// <see cref="Interfaces.IWriteChannel.Closed"/> events.
+    /// <see cref="Interfaces.IChannel.Closed"/> event.
     /// </summary>
     public Exception? Exception { get; } = exception;
 }
