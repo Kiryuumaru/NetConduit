@@ -99,7 +99,10 @@ public interface IStreamMultiplexer : IAsyncDisposable
     /// throws <see cref="Exceptions.MultiplexerException"/> with
     /// <see cref="Enums.ErrorCode.ChannelExists"/> until the existing subscription
     /// is cancelled. This rejects ambiguous routing at registration time rather
-    /// than silently shadowing one subscription with another.
+    /// than silently shadowing one subscription with another. The overlap check
+    /// runs synchronously when this method is invoked (not lazily on first
+    /// enumeration), so the call itself — not the <c>await foreach</c> — is what
+    /// throws on conflict.
     /// </description></item>
     /// <item><description>
     /// When the consumer cancels <paramref name="ct"/> or disposes the
