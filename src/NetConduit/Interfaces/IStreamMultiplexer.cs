@@ -88,6 +88,28 @@ public interface IStreamMultiplexer : IAsyncDisposable
     /// overload. This lets an overlay protocol (e.g. mesh routing) share the
     /// multiplexer with the host application by subscribing to a reserved prefix.
     /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>Prefix routing rules:</b>
+    /// </para>
+    /// <list type="bullet">
+    /// <item><description>
+    /// Each namespace may have at most one active subscription. A second call
+    /// with an equal or mutually-prefixing <paramref name="channelIdPrefix"/>
+    /// throws <see cref="Exceptions.MultiplexerException"/> with
+    /// <see cref="Enums.ErrorCode.ChannelExists"/> until the existing subscription
+    /// is cancelled. This rejects ambiguous routing at registration time rather
+    /// than silently shadowing one subscription with another.
+    /// </description></item>
+    /// <item><description>
+    /// When the consumer cancels <paramref name="ct"/> or disposes the
+    /// enumerator, the subscription is released. Channels that were buffered
+    /// for the subscription but never consumed are re-routed to the unfiltered
+    /// accept stream so the host application can observe them rather than have
+    /// them silently dropped, and the prefix becomes available again.
+    /// </description></item>
+    /// </list>
+    /// </remarks>
     IAsyncEnumerable<IReadChannel> AcceptChannelsAsync(string? channelIdPrefix = null, CancellationToken ct = default);
 
     /// <summary>Get an outbound channel by its ID, or null if not found.</summary>
