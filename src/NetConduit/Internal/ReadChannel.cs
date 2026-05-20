@@ -136,6 +136,15 @@ internal sealed class ReadChannel : Stream, IReadChannel, IValueTaskSource<int>
 
     internal void MarkOpen()
     {
+        // Refuse to revive a Closed channel. A pending-accept channel that was
+        // disposed before the peer's INIT arrived has already returned its slab
+        // to ArrayPool<byte>.Shared; transitioning back to Open would let the
+        // next DATA frame write into pooled memory the channel no longer owns
+        // (use-after-free). The dispatcher detects this state under AcceptLock
+        // and falls through to creating a fresh channel; this is the
+        // defense-in-depth backstop.
+        if (_state == ChannelState.Closed)
+            return;
         _state = ChannelState.Open;
         if (!_isReady)
         {
@@ -455,6 +464,12 @@ internal sealed class ReadChannel : Stream, IReadChannel, IValueTaskSource<int>
             SetClosed(ChannelCloseReason.LocalClose);
         }
         TryReturnSlab();
+        // A pending-accept channel disposed before the peer's INIT arrives
+        // (_channelIndex == 0, never wired) must remove itself from the
+        // pending-accept map so the dispatcher does not resurrect this
+        // disposed instance when INIT eventually arrives.
+        if (_channelIndex == 0)
+            _owner?.NotifyPendingAcceptCancelled(ChannelId);
         _owner?.NotifyChannelCompleted(_channelIndex, ChannelId);
         await base.DisposeAsync();
     }
@@ -469,6 +484,8 @@ internal sealed class ReadChannel : Stream, IReadChannel, IValueTaskSource<int>
                 SetClosed(ChannelCloseReason.LocalClose);
             }
             TryReturnSlab();
+            if (_channelIndex == 0)
+                _owner?.NotifyPendingAcceptCancelled(ChannelId);
             _owner?.NotifyChannelCompleted(_channelIndex, ChannelId);
         }
         base.Dispose(disposing);
