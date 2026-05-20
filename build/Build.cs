@@ -161,11 +161,10 @@ class Build : BaseNukeBuildHelpers
 
     TestEntry BenchmarkTestEntry => _ => _
         .RunnerOS(RunnerOS.Ubuntu2204)
-        .AppId("net_conduit")
+        .AppId([.. DeploymentApps.Select(a => a.AppId)])
         .WorkflowId("benchmark_test")
         .DisplayName("Test Benchmarks")
         .ExecuteBeforeBuild(true)
-        .Condition(context => context.Apps.Values.Any(app => app.RunType == RunType.PullRequest))
         .Execute(context =>
         {
             RunProcess("bash", "benchmarks/docker/run-docker.sh", RootDirectory);
