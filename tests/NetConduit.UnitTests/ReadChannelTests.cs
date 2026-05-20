@@ -205,4 +205,75 @@ public sealed class ReadChannelTests
 
         await Assert.ThrowsAsync<OperationCanceledException>(() => readTask);
     }
+
+    [Fact]
+    public async Task ReadAsync_UnregistersCancellationCallback_OnSuccess()
+    {
+        var channel = CreateChannel();
+        using var cts = new CancellationTokenSource();
+
+        byte[] buffer = new byte[10];
+        var readTask = channel.ReadAsync(buffer, cts.Token).AsTask();
+        channel.ReceivePayload(FrameFlags.Data, [1, 2, 3]);
+        await readTask;
+
+        var field = typeof(ReadChannel).GetField(
+            "_readCancelReg",
+            System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic);
+        Assert.NotNull(field);
+        var reg = (CancellationTokenRegistration)field!.GetValue(channel)!;
+        Assert.Equal(default, reg);
+    }
+
+    [Fact]
+    public async Task ReadAsync_UnregistersCancellationCallback_OnClose()
+    {
+        var channel = CreateChannel();
+        using var cts = new CancellationTokenSource();
+
+        byte[] buffer = new byte[10];
+        var readTask = channel.ReadAsync(buffer, cts.Token).AsTask();
+        channel.SetClosed(ChannelCloseReason.LocalClose);
+        await readTask;
+
+        var field = typeof(ReadChannel).GetField(
+            "_readCancelReg",
+            System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic);
+        Assert.NotNull(field);
+        var reg = (CancellationTokenRegistration)field!.GetValue(channel)!;
+        Assert.Equal(default, reg);
+    }
+
+    [Fact]
+    public async Task ReadAsync_DoesNotLeakRegistrations_OnSharedLongLivedToken()
+    {
+        // Leaked registrations keep ReadChannels alive on the CTS. With the
+        // fix, completed reads remove their callback so the channel is
+        // collectable even while the CTS is still alive.
+        using var cts = new CancellationTokenSource();
+        var refs = new List<WeakReference>();
+
+        await Populate(refs, cts);
+
+        GC.Collect();
+        GC.WaitForPendingFinalizers();
+        GC.Collect();
+
+        int alive = refs.Count(r => r.IsAlive);
+        Assert.True(alive == 0, $"Expected all ReadChannels to be collectable; {alive}/{refs.Count} still alive (registration leak).");
+
+        [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
+        static async Task Populate(List<WeakReference> refs, CancellationTokenSource cts)
+        {
+            for (int i = 0; i < 200; i++)
+            {
+                var channel = CreateChannel();
+                byte[] buffer = new byte[4];
+                var task = channel.ReadAsync(buffer, cts.Token).AsTask();
+                channel.ReceivePayload(FrameFlags.Data, [(byte)i]);
+                await task;
+                refs.Add(new WeakReference(channel));
+            }
+        }
+    }
 }

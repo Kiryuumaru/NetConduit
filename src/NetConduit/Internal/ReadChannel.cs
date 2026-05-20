@@ -44,6 +44,11 @@ internal sealed class ReadChannel : Stream, IReadChannel, IValueTaskSource<int>
     private Memory<byte>? _pendingUserBuffer;
     private readonly ValueTaskCompletionSource _readCompletion = new();
     private bool _readCompletionActive;
+    // Cancellation registration tied to the in-flight slow-path read.
+    // Stored so completion paths can unregister it and avoid an unbounded
+    // callback list on long-lived CancellationTokenSources. Reset to
+    // default whenever _readCompletionActive transitions to false.
+    private CancellationTokenRegistration _readCancelReg;
 
     private WriteChannel? _ackChannel;
 
@@ -212,7 +217,7 @@ internal sealed class ReadChannel : Stream, IReadChannel, IValueTaskSource<int>
             // Handle cancellation
             if (ct.CanBeCanceled)
             {
-                ct.Register(static state =>
+                _readCancelReg = ct.Register(static state =>
                 {
                     var self = (ReadChannel)state!;
                     lock (self._lock)
@@ -221,6 +226,7 @@ internal sealed class ReadChannel : Stream, IReadChannel, IValueTaskSource<int>
                         {
                             self._pendingUserBuffer = null;
                             self._readCompletionActive = false;
+                            self._readCancelReg = default;
                             self._readCompletion.Core.SetException(new OperationCanceledException());
                         }
                     }
@@ -301,6 +307,13 @@ internal sealed class ReadChannel : Stream, IReadChannel, IValueTaskSource<int>
             {
                 BufferInSlab(payload[toCopy..]);
             }
+
+            // Detach the cancellation callback now that the read has
+            // completed. Unregister is non-blocking so it is safe to call
+            // under the lock that the callback would otherwise contend on.
+            var reg = _readCancelReg;
+            _readCancelReg = default;
+            reg.Unregister();
 
             _readCompletion.Core.SetResult(toCopy);
             return true;
@@ -405,6 +418,9 @@ internal sealed class ReadChannel : Stream, IReadChannel, IValueTaskSource<int>
             {
                 _pendingUserBuffer = null;
                 _readCompletionActive = false;
+                var reg = _readCancelReg;
+                _readCancelReg = default;
+                reg.Unregister();
                 _readCompletion.Core.SetResult(0);
             }
         }
