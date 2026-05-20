@@ -292,6 +292,7 @@ internal sealed class WriteChannel : Stream, IWriteChannel
 
     internal void MarkSent(int bytes)
     {
+        bool finDrained;
         lock (_posLock)
         {
             _routerReading = false;
@@ -301,13 +302,24 @@ internal sealed class WriteChannel : Stream, IWriteChannel
                 // Without reconnection replay, treat sent as acked to free slab space
                 _ackedPos = _sentPos;
             }
+            // If a graceful close queued a FIN, finalize the Closing -> Closed
+            // transition only after the writer thread has actually drained
+            // everything (including the FIN). Synchronously finalizing inside
+            // CloseAsync would unregister the channel before queued data frames
+            // reach the wire and the peer would never receive them.
+            finDrained = _state == ChannelState.Closing && _pendingPos <= _sentPos;
         }
         // Wake any blocked writer waiting for space
         TryReleaseSpaceSignal();
 
-        // Writer thread may drain FIN before SetClosed transitions state.
-        // Both MarkSent and SetClosed call TryNotifyCompleted — whichever runs last triggers unregistration.
-        TryNotifyCompleted();
+        if (finDrained)
+        {
+            SetClosed(ChannelCloseReason.LocalClose);
+        }
+        else
+        {
+            TryNotifyCompleted();
+        }
     }
 
     internal void OnAck(long ackedPosition)
@@ -352,12 +364,12 @@ internal sealed class WriteChannel : Stream, IWriteChannel
     }
 
     /// <summary>
-    /// Gracefully close this channel by sending a FIN frame.
-    /// Transitions the channel through Closing to Closed, fires the
-    /// <see cref="Closed"/> event, and releases the channel ID. The
-    /// FIN frame itself is best-effort: if the slab cannot fit it, the
-    /// channel still finalizes locally and the peer observes closure
-    /// when the multiplexer tears down.
+    /// Gracefully close this channel by queueing a FIN frame.
+    /// Transitions the channel through Closing to Closed once the writer
+    /// thread has drained the FIN (at which point the <see cref="Closed"/>
+    /// event fires and the channel ID is released). The FIN frame itself is
+    /// best-effort: if the slab cannot fit it, the channel finalizes locally
+    /// and the peer observes closure when the multiplexer tears down.
     /// </summary>
     public ValueTask CloseAsync(CancellationToken ct = default)
     {
@@ -365,13 +377,15 @@ internal sealed class WriteChannel : Stream, IWriteChannel
             return ValueTask.CompletedTask;
 
         _state = ChannelState.Closing;
-        TryWriteFinFrameSafe();
-        // Finalize the documented "Closing -> Closed" transition immediately so
-        // the Closed event fires, the channel ID is released, and consumers can
-        // safely re-open the same name. The writer thread still drains any
-        // queued FIN frame asynchronously; TryNotifyCompleted defers slab
-        // return until that drain completes.
-        SetClosed(ChannelCloseReason.LocalClose);
+        bool finQueued = TryWriteFinFrameSafe();
+        // If the FIN could not be queued (slab full, or the writer thread is
+        // not running) the caller must still observe a transition to Closed
+        // so the channel ID is released and Closed event fires. Finalize
+        // synchronously in that case.
+        if (!finQueued)
+        {
+            SetClosed(ChannelCloseReason.LocalClose);
+        }
         return ValueTask.CompletedTask;
     }
 
@@ -379,15 +393,18 @@ internal sealed class WriteChannel : Stream, IWriteChannel
     // is not running (e.g., handshake in flight) or if the caller filled the
     // slab. In that case the peer will still observe channel closure when the
     // multiplexer tears the transport down — the dispose path must not throw.
-    private void TryWriteFinFrameSafe()
+    // Returns true when the FIN was queued in the slab, false on slab-full.
+    private bool TryWriteFinFrameSafe()
     {
         try
         {
             WriteFinFrame();
+            return true;
         }
         catch (InvalidOperationException)
         {
             // Slab full — fall back to a best-effort skip.
+            return false;
         }
     }
 

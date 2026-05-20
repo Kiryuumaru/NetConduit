@@ -116,6 +116,14 @@ public sealed class BoundaryFixesTests
 
         await channel.CloseAsync();
 
+        // CloseAsync queues a FIN and sets state to Closing. The Closing -> Closed
+        // transition happens when the writer thread drains the FIN frame and
+        // calls MarkSent (simulated here).
+        Assert.Equal(ChannelState.Closing, channel.State);
+        var ready = channel.TakeReady();
+        Assert.Equal(FrameHeader.Size, ready.Length);
+        channel.MarkSent(ready.Length);
+
         Assert.Equal(ChannelState.Closed, channel.State);
         Assert.Equal(ChannelCloseReason.LocalClose, channel.CloseReason);
         Assert.Equal(ChannelCloseReason.LocalClose, observedReason);
@@ -138,6 +146,11 @@ public sealed class BoundaryFixesTests
         channel.Closed += (_, _) => Interlocked.Increment(ref closedFiredCount);
 
         await channel.CloseAsync();
+        // Simulate writer-thread drain of the FIN frame to finalize the close.
+        var ready = channel.TakeReady();
+        channel.MarkSent(ready.Length);
+
+        // Subsequent CloseAsync calls are no-ops.
         await channel.CloseAsync();
         await channel.CloseAsync();
 
