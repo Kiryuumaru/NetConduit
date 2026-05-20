@@ -42,6 +42,7 @@ public static class DeltaMessageTransitExtensions
         JsonTypeInfo<T> typeInfo,
         int maxMessageSize = 16 * 1024 * 1024)
     {
+        ValidateBaseChannelId(channelId);
         var writeChannel = mux.OpenChannel(channelId + OutboundSuffix);
         var readChannel = mux.AcceptChannel(channelId + InboundSuffix);
         return new DeltaMessageTransit<T>(writeChannel, readChannel, typeInfo, maxMessageSize);
@@ -77,6 +78,7 @@ public static class DeltaMessageTransitExtensions
         JsonTypeInfo<T> typeInfo,
         int maxMessageSize = 16 * 1024 * 1024)
     {
+        ValidateBaseChannelId(channelId);
         var readChannel = mux.AcceptChannel(channelId + OutboundSuffix);
         var writeChannel = mux.OpenChannel(channelId + InboundSuffix);
         return new DeltaMessageTransit<T>(writeChannel, readChannel, typeInfo, maxMessageSize);
@@ -145,5 +147,17 @@ public static class DeltaMessageTransitExtensions
         var transit = mux.AcceptReceiveOnlyDeltaMessageTransit(channelId, typeInfo, maxMessageSize);
         await transit.WaitForReadyAsync(cancellationToken).ConfigureAwait(false);
         return transit;
+    }
+
+    private static void ValidateBaseChannelId(string channelId)
+    {
+        ArgumentNullException.ThrowIfNull(channelId);
+        if (channelId.Contains(OutboundSuffix, StringComparison.Ordinal) ||
+            channelId.Contains(InboundSuffix, StringComparison.Ordinal))
+        {
+            throw new ArgumentException(
+                $"Base channel ID must not contain reserved suffix sequences \"{OutboundSuffix}\" or \"{InboundSuffix}\".",
+                nameof(channelId));
+        }
     }
 }
