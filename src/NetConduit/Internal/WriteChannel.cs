@@ -392,11 +392,20 @@ internal sealed class WriteChannel : Stream, IWriteChannel
             _unregisteredTcs.TrySetResult();
             return;
         }
-        if (_state != ChannelState.Closed || HasPendingData()) return;
-        if (Interlocked.CompareExchange(ref _completionNotified, 1, 0) != 0) return;
-        TryReturnSlab();
-        _owner.NotifyChannelCompleted(_channelIndex, ChannelId);
-        _unregisteredTcs.TrySetResult();
+        if (_state != ChannelState.Closed) return;
+        // Unregister exactly once. Channel ID becomes reusable immediately on close,
+        // regardless of whether the writer thread has finished draining queued frames.
+        // This prevents DisposeAsync from blocking when the writer loop is not running
+        // (e.g., the mux is still in handshake and will never drain the FIN).
+        if (Interlocked.CompareExchange(ref _completionNotified, 1, 0) == 0)
+        {
+            _owner.NotifyChannelCompleted(_channelIndex, ChannelId);
+            _unregisteredTcs.TrySetResult();
+        }
+        // Slab return is deferred until the writer has drained any in-flight frames,
+        // so it stays valid for any concurrent TakeReady/MarkSent in progress.
+        if (!HasPendingData())
+            TryReturnSlab();
     }
 
     private void TryReleaseSpaceSignal()
