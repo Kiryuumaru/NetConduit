@@ -53,6 +53,10 @@ await client.WaitForReadyAsync();
 - **No network exposure.** Useful for daemons that only need to talk to a CLI on the same box.
 - **Cross-platform path.** One package, three operating systems.
 
+## Reconnectable server
+
+The platform-specific bind/cleanup logic inside `CreateServerOptions` is not exposed publicly. For a server that survives client churn, dispose the multiplexer on `Disconnected` and create a new one rather than driving it from a custom `StreamFactory`. See [Reconnection → IPC](../concepts/reconnection.md#ipc) for the recommended pattern.
+
 ## Caveats
 
 - On Windows, two processes with the same endpoint name compete for the same loopback port. Pick distinct names per logical service.

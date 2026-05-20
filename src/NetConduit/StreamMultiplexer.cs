@@ -145,7 +145,19 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IChannelOwner
                 nameof(options),
                 "MaxAutoReconnectAttempts must be -1 (unlimited), 0 (no reconnect), or a positive bound.");
         }
+        ValidateSlabSize(options.DefaultChannelOptions.SlabSize, $"{nameof(options)}.{nameof(MultiplexerOptions.DefaultChannelOptions)}.{nameof(DefaultChannelOptions.SlabSize)}");
         return new StreamMultiplexer(options, useOddIndices: true);
+    }
+
+    private static void ValidateSlabSize(int slabSize, string paramName)
+    {
+        if (slabSize < FrameConstants.MinSlabSize || slabSize > FrameConstants.MaxSlabSize)
+        {
+            throw new ArgumentOutOfRangeException(
+                paramName,
+                slabSize,
+                $"SlabSize must be between {FrameConstants.MinSlabSize} ({FrameConstants.MinSlabSize / 1024} KiB) and {FrameConstants.MaxSlabSize} ({FrameConstants.MaxSlabSize / (1024 * 1024)} MiB) inclusive.");
+        }
     }
 
     /// <inheritdoc />
@@ -167,6 +179,7 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IChannelOwner
     {
         ArgumentNullException.ThrowIfNull(options);
         byte[] channelIdBytes = EncodeValidatedChannelId(options.ChannelId, nameof(options));
+        ValidateSlabSize(options.SlabSize, $"{nameof(options)}.{nameof(ChannelOptions.SlabSize)}");
 
         if (!_isRunning)
             throw new InvalidOperationException("Multiplexer has not been started.");

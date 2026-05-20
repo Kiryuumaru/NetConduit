@@ -60,6 +60,10 @@ await mux.WaitForReadyAsync();
 
 The first exchange is a small `NC_HELLO` / `NC_HELLO_ACK` to bind the server to the remote endpoint and verify the protocol version. After that, the multiplexer's normal handshake runs.
 
+## Reconnectable server
+
+UDP's reliable shim is bound to one remote peer per session. Surviving a peer change requires disposing the multiplexer and creating a new one — there is no copy-paste re-accepting factory equivalent to TCP. See [Reconnection → UDP](../concepts/reconnection.md#udp) for the recommended pattern.
+
 ## Tuning
 
 - **High-latency or lossy networks** — raise `RetransmitTimeout` and `MaxRetransmits`. Otherwise the shim will give up too quickly.

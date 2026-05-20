@@ -27,6 +27,8 @@ public sealed class ChannelClosedEventArgs(string channelId, Exception? exceptio
 
 Used by `IStreamMultiplexer.ChannelClosed`.
 
+> **Partial close stream.** This mux-level event fires **only when the remote peer closes a channel via a FIN frame** (i.e. `ChannelCloseReason.RemoteFin`). It does **not** fire for `LocalClose`, `RemoteError`, `TransportFailed`, or `MuxDisposed`. The `Exception` field is reserved and is currently always `null`. For a complete per-channel close stream with reason information, subscribe to the channel-instance `Closed` event documented below.
+
 ## `ChannelCloseEventArgs`
 
 ```csharp
@@ -38,6 +40,8 @@ public sealed class ChannelCloseEventArgs(ChannelCloseReason reason, Exception? 
 ```
 
 Used by `IWriteChannel.Closed` and `IReadChannel.Closed`.
+
+> **Complete close stream.** Every value of `ChannelCloseReason` raises this. The channel id is recoverable from `sender` (the channel instance). Use this — not `ChannelClosedEventArgs` — when you need full close visibility per channel.
 
 ## `DisconnectedEventArgs`
 
