@@ -427,11 +427,15 @@ class Build : BaseNukeBuildHelpers
             throw new InvalidOperationException("Benchmark performance gate failed");
     }
 
-    private static BenchmarkResult[] LoadBenchmarkResults(params AbsolutePath[] resultFiles) =>
-        resultFiles
+    private static BenchmarkResult[] LoadBenchmarkResults(params AbsolutePath[] resultFiles)
+    {
+        var gatedImplementations = new HashSet<string>(GoMuxImplementations, StringComparer.Ordinal) { NetConduitMuxImplementation };
+        return resultFiles
             .SelectMany(path => JsonSerializer.Deserialize<BenchmarkResult[]>(File.ReadAllText(path), BenchmarkJsonOptions)
                 ?? throw new InvalidOperationException($"Could not read benchmark results from {path}"))
+            .Where(result => gatedImplementations.Contains(result.Implementation))
             .ToArray();
+    }
 
     private static bool AssertBenchmarkScenario(
         BenchmarkResult[] results,
