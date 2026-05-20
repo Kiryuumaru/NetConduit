@@ -135,8 +135,10 @@ internal sealed class ReadChannel : Stream, IReadChannel, IValueTaskSource<int>
         if (!_isReady)
         {
             _isReady = true;
-            _readyTcs.TrySetResult();
+            // Raise synchronous Ready first so handlers observe a ready channel,
+            // then complete the TCS so async awaiters resume only after handlers ran.
             Ready?.Invoke(this, EventArgs.Empty);
+            _readyTcs.TrySetResult();
         }
     }
 

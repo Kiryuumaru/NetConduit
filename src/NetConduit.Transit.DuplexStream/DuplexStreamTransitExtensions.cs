@@ -56,7 +56,15 @@ public static class DuplexStreamTransitExtensions
         CancellationToken cancellationToken = default)
     {
         var transit = mux.OpenDuplexStream(channelId);
-        await transit.WaitForReadyAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            await transit.WaitForReadyAsync(cancellationToken).ConfigureAwait(false);
+        }
+        catch
+        {
+            await transit.DisposeAsync().ConfigureAwait(false);
+            throw;
+        }
         return transit;
     }
 
@@ -85,7 +93,15 @@ public static class DuplexStreamTransitExtensions
         CancellationToken cancellationToken = default)
     {
         var transit = mux.AcceptDuplexStream(channelId);
-        await transit.WaitForReadyAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            await transit.WaitForReadyAsync(cancellationToken).ConfigureAwait(false);
+        }
+        catch
+        {
+            await transit.DisposeAsync().ConfigureAwait(false);
+            throw;
+        }
         return transit;
     }
 
@@ -116,7 +132,15 @@ public static class DuplexStreamTransitExtensions
         CancellationToken cancellationToken = default)
     {
         var transit = mux.OpenDuplexStream(writeChannelId, readChannelId);
-        await transit.WaitForReadyAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            await transit.WaitForReadyAsync(cancellationToken).ConfigureAwait(false);
+        }
+        catch
+        {
+            await transit.DisposeAsync().ConfigureAwait(false);
+            throw;
+        }
         return transit;
     }
 }
