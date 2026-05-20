@@ -166,6 +166,9 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IChannelOwner
         if (!_isRunning)
             throw new InvalidOperationException("Multiplexer has not been started.");
 
+        if (_isShuttingDown)
+            throw new InvalidOperationException("Cannot open new channels after GoAwayAsync.");
+
         bool enableReplay = _options.MaxAutoReconnectAttempts != 0;
         ushort index = _registry.AllocateChannelIndex();
         var channel = new WriteChannel(
@@ -199,6 +202,9 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IChannelOwner
 
         if (!_isRunning)
             throw new InvalidOperationException("Multiplexer has not been started.");
+
+        if (_isShuttingDown)
+            throw new InvalidOperationException("Cannot accept new channels after GoAwayAsync.");
 
         // Atomically observe registry state and either return an existing channel
         // or commit a new pending channel that the reader will adopt when INIT arrives.
@@ -252,15 +258,22 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IChannelOwner
         ReadOnlySpan<byte> goAwayPayload = [CtrlSubtype.GoAway];
         SendControlFrame(FrameFlags.Ctrl, goAwayPayload);
 
-        // Allow the GoAway frame to be sent by the writer thread
+        // Wait up to GoAwayTimeout for already-open channels to drain. The caller token cancels the wait;
+        // GoAwayTimeout bounds it. Either path falls through to forced abort below.
+        using var drainCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        drainCts.CancelAfter(_options.GoAwayTimeout);
         try
         {
-            using var delayCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
-            delayCts.CancelAfter(_options.GoAwayTimeout);
-            // Wait briefly for the writer to flush the GoAway
-            await Task.Delay(100, delayCts.Token);
+            while (ActiveChannelCount > 0)
+            {
+                await Task.Delay(20, drainCts.Token).ConfigureAwait(false);
+            }
         }
-        catch (OperationCanceledException) { /* timeout or caller cancel is fine */ }
+        catch (OperationCanceledException) { /* timeout or caller cancel — proceed to terminal cleanup */ }
+
+        // Abort any channels that did not drain within the timeout so they observe MuxDisposed instead of Open.
+        _registry.AbortAllChannels(ChannelCloseReason.MuxDisposed);
+        _registry.CancelAllPendingAccepts();
 
         _disconnectReason = Enums.DisconnectReason.LocalDispose;
         _cts.Cancel();
