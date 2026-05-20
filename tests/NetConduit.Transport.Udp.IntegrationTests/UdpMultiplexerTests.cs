@@ -84,4 +84,37 @@ public class UdpMultiplexerTests
             await clientOptions.StreamFactory!(ctorCts.Token);
         });
     }
+
+    [Fact(Timeout = 30000)]
+    public async Task ServerFactory_CancelledAccept_DoesNotConsumeOneShot()
+    {
+        int port = GetAvailablePort();
+        var serverOptions = UdpMultiplexer.CreateServerOptions(port);
+
+        using (var cancelled = new CancellationTokenSource())
+        {
+            await cancelled.CancelAsync();
+            await Assert.ThrowsAnyAsync<OperationCanceledException>(
+                async () => await serverOptions.StreamFactory!(cancelled.Token));
+        }
+
+        using var helloClient = new UdpClient(AddressFamily.InterNetworkV6);
+        helloClient.Client.DualMode = true;
+        helloClient.Connect(new IPEndPoint(IPAddress.IPv6Loopback, port));
+
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+
+        var serverTask = serverOptions.StreamFactory!(cts.Token);
+
+        var helloBytes = "NC_HELLO"u8.ToArray();
+        while (!serverTask.IsCompleted && !cts.IsCancellationRequested)
+        {
+            await helloClient.SendAsync(helloBytes, cts.Token);
+            var delayTask = Task.Delay(100, cts.Token);
+            await Task.WhenAny(serverTask, delayTask);
+        }
+
+        await using var pair = await serverTask;
+        Assert.NotNull(pair);
+    }
 }
