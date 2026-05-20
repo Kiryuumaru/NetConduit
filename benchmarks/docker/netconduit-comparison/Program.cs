@@ -320,6 +320,10 @@ static async Task<double> RunGameTickRawTcpAsync(int channelCount, int msgSize, 
                     }
                 }
                 catch (OperationCanceledException) { }
+                // Peer-initiated socket close on cancellation is expected; both sides race
+                // to observe the bench token and tear down their sockets.
+                catch (IOException) { }
+                catch (SocketException) { }
             });
 
             var port = ((IPEndPoint)li.LocalEndpoint).Port;
@@ -337,6 +341,8 @@ static async Task<double> RunGameTickRawTcpAsync(int channelCount, int msgSize, 
                     }
                 }
                 catch (OperationCanceledException) { }
+                catch (IOException) { }
+                catch (SocketException) { }
             });
         }
 
