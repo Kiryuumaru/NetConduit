@@ -161,7 +161,7 @@ class Build : BaseNukeBuildHelpers
 
     TestEntry BenchmarkTestEntry => _ => _
         .RunnerOS(RunnerOS.Ubuntu2204)
-        .AppId("benchmark")
+        .AppId("net_conduit")
         .WorkflowId("benchmark_test")
         .DisplayName("Test Benchmarks")
         .ExecuteBeforeBuild(true)

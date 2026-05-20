@@ -733,11 +733,11 @@ jobs:
     - id: NUKE_RUN
       name: Run Nuke benchmark_test
       run: ${{ needs.PRE_SETUP.outputs.NUKE_PRE_SETUP_BENCHMARK_TEST_RUN_SCRIPT }} Run --args "benchmark_test"
-    - name: Upload benchmark pre_test artifacts
+    - name: Upload net_conduit pre_test artifacts
       uses: actions/upload-artifact@v7
       with:
-        name: pre_test___benchmark___BENCHMARK_TEST
-        path: ./.nuke/temp/artifacts-upload/benchmark/*
+        name: pre_test___net_conduit___BENCHMARK_TEST
+        path: ./.nuke/temp/artifacts-upload/net_conduit/*
         if-no-files-found: error
         retention-days: 1
     - name: Upload common pre_test artifacts
@@ -795,7 +795,8 @@ jobs:
     needs:
     - PRE_SETUP
     - NET_CONDUIT_TEST
-    if: "! failure() && ! cancelled() && needs.PRE_SETUP.outputs.NUKE_PRE_SETUP_NET_CONDUIT_BUILD_CONDITION == 'true' && needs.NET_CONDUIT_TEST.result == 'success'"
+    - BENCHMARK_TEST
+    if: "! failure() && ! cancelled() && needs.PRE_SETUP.outputs.NUKE_PRE_SETUP_NET_CONDUIT_BUILD_CONDITION == 'true' && needs.NET_CONDUIT_TEST.result == 'success' && needs.BENCHMARK_TEST.result == 'success'"
     env:
       NUKE_PRE_SETUP: ${{ needs.PRE_SETUP.outputs.NUKE_PRE_SETUP }}
   NET_CONDUIT_TRANSIT_STREAM_BUILD:
@@ -1258,8 +1259,9 @@ jobs:
     needs:
     - PRE_SETUP
     - NET_CONDUIT_TEST
+    - BENCHMARK_TEST
     - NET_CONDUIT_BUILD
-    if: "! failure() && ! cancelled() && needs.PRE_SETUP.outputs.NUKE_PRE_SETUP_NET_CONDUIT_PUBLISH_CONDITION == 'true' && needs.NET_CONDUIT_TEST.result == 'success' && needs.NET_CONDUIT_BUILD.result == 'success'"
+    if: "! failure() && ! cancelled() && needs.PRE_SETUP.outputs.NUKE_PRE_SETUP_NET_CONDUIT_PUBLISH_CONDITION == 'true' && needs.NET_CONDUIT_TEST.result == 'success' && needs.BENCHMARK_TEST.result == 'success' && needs.NET_CONDUIT_BUILD.result == 'success'"
     env:
       NUKE_PRE_SETUP: ${{ needs.PRE_SETUP.outputs.NUKE_PRE_SETUP }}
   NET_CONDUIT_TRANSIT_STREAM_PUBLISH:
