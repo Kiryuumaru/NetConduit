@@ -47,6 +47,7 @@ public static class MessageTransitExtensions
         JsonTypeInfo<TReceive> receiveTypeInfo,
         int maxMessageSize = 16 * 1024 * 1024)
     {
+        ValidateBaseChannelId(channelId);
         var writeChannel = mux.OpenChannel(channelId + OutboundSuffix);
         var readChannel = mux.AcceptChannel(channelId + InboundSuffix);
         return new MessageTransit<TSend, TReceive>(writeChannel, readChannel, sendTypeInfo, receiveTypeInfo, maxMessageSize);
@@ -84,6 +85,7 @@ public static class MessageTransitExtensions
         JsonTypeInfo<TReceive> receiveTypeInfo,
         int maxMessageSize = 16 * 1024 * 1024)
     {
+        ValidateBaseChannelId(channelId);
         var readChannel = mux.AcceptChannel(channelId + OutboundSuffix);
         var writeChannel = mux.OpenChannel(channelId + InboundSuffix);
         return new MessageTransit<TSend, TReceive>(writeChannel, readChannel, sendTypeInfo, receiveTypeInfo, maxMessageSize);
@@ -256,6 +258,7 @@ public static class MessageTransitExtensions
         JsonSerializerOptions? jsonOptions = null,
         int maxMessageSize = 16 * 1024 * 1024)
     {
+        ValidateBaseChannelId(channelId);
         var writeChannel = mux.OpenChannel(channelId + OutboundSuffix);
         var readChannel = mux.AcceptChannel(channelId + InboundSuffix);
         return new MessageTransit<TSend, TReceive>(writeChannel, readChannel, jsonOptions, maxMessageSize);
@@ -292,6 +295,7 @@ public static class MessageTransitExtensions
         JsonSerializerOptions? jsonOptions = null,
         int maxMessageSize = 16 * 1024 * 1024)
     {
+        ValidateBaseChannelId(channelId);
         var readChannel = mux.AcceptChannel(channelId + OutboundSuffix);
         var writeChannel = mux.OpenChannel(channelId + InboundSuffix);
         return new MessageTransit<TSend, TReceive>(writeChannel, readChannel, jsonOptions, maxMessageSize);
@@ -457,4 +461,16 @@ public static class MessageTransitExtensions
     }
 
     #endregion
+
+    private static void ValidateBaseChannelId(string channelId)
+    {
+        ArgumentNullException.ThrowIfNull(channelId);
+        if (channelId.Contains(OutboundSuffix, StringComparison.Ordinal) ||
+            channelId.Contains(InboundSuffix, StringComparison.Ordinal))
+        {
+            throw new ArgumentException(
+                $"Base channel ID must not contain reserved suffix sequences \"{OutboundSuffix}\" or \"{InboundSuffix}\".",
+                nameof(channelId));
+        }
+    }
 }
