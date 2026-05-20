@@ -171,6 +171,18 @@ internal sealed class WriteChannel : Stream, IWriteChannel
 
         int frameSize = FrameHeader.Size + payloadLength;
 
+        // A single frame must fit in the slab. There is no chunking and no
+        // possible state where a payload larger than the slab can be queued,
+        // so fail fast instead of stalling for the full SendTimeout.
+        int maxPayload = _slabSize - FrameHeader.Size;
+        if (payloadLength > maxPayload)
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(data),
+                $"Payload of {payloadLength} bytes exceeds the per-frame budget of {maxPayload} bytes for channel '{ChannelId}' (slab size {_slabSize}). " +
+                $"Configure a larger ChannelOptions.SlabSize or split the payload before writing.");
+        }
+
         // Wait for space in the slab if needed
         while (true)
         {
@@ -302,6 +314,15 @@ internal sealed class WriteChannel : Stream, IWriteChannel
     {
         lock (_posLock)
         {
+            // Clamp against the locally-observed upper bound to defend against
+            // a buggy or hostile peer that ACKs a position beyond what could
+            // possibly have been sent. Without this clamp, a single oversized
+            // ACK frame corrupts every slab position field and the next
+            // WriteAsync throws ArgumentOutOfRangeException from slab indexing.
+            long upper = _compactionOffset + _sentPos;
+            if (ackedPosition > upper)
+                ackedPosition = upper;
+
             int slabRelative = (int)(ackedPosition - _compactionOffset);
             if (slabRelative > _ackedPos)
                 _ackedPos = slabRelative;
@@ -332,6 +353,11 @@ internal sealed class WriteChannel : Stream, IWriteChannel
 
     /// <summary>
     /// Gracefully close this channel by sending a FIN frame.
+    /// Transitions the channel through Closing to Closed, fires the
+    /// <see cref="Closed"/> event, and releases the channel ID. The
+    /// FIN frame itself is best-effort: if the slab cannot fit it, the
+    /// channel still finalizes locally and the peer observes closure
+    /// when the multiplexer tears down.
     /// </summary>
     public ValueTask CloseAsync(CancellationToken ct = default)
     {
@@ -339,8 +365,30 @@ internal sealed class WriteChannel : Stream, IWriteChannel
             return ValueTask.CompletedTask;
 
         _state = ChannelState.Closing;
-        WriteFinFrame();
+        TryWriteFinFrameSafe();
+        // Finalize the documented "Closing -> Closed" transition immediately so
+        // the Closed event fires, the channel ID is released, and consumers can
+        // safely re-open the same name. The writer thread still drains any
+        // queued FIN frame asynchronously; TryNotifyCompleted defers slab
+        // return until that drain completes.
+        SetClosed(ChannelCloseReason.LocalClose);
         return ValueTask.CompletedTask;
+    }
+
+    // Best-effort FIN emit. The slab can be at capacity if the writer thread
+    // is not running (e.g., handshake in flight) or if the caller filled the
+    // slab. In that case the peer will still observe channel closure when the
+    // multiplexer tears the transport down — the dispose path must not throw.
+    private void TryWriteFinFrameSafe()
+    {
+        try
+        {
+            WriteFinFrame();
+        }
+        catch (InvalidOperationException)
+        {
+            // Slab full — fall back to a best-effort skip.
+        }
     }
 
     internal void SetClosed(ChannelCloseReason reason, Exception? exception = null)
@@ -475,10 +523,12 @@ internal sealed class WriteChannel : Stream, IWriteChannel
         if (disposing && _state is not ChannelState.Closed)
         {
             // Send FIN so the peer observes EOF, matching DisposeAsync semantics.
+            // Best-effort: if the slab cannot fit FIN, finalize the close anyway
+            // so Dispose never throws under normal conditions.
             if (_state is not ChannelState.Closing)
             {
                 _state = ChannelState.Closing;
-                WriteFinFrame();
+                TryWriteFinFrameSafe();
             }
             SetClosed(ChannelCloseReason.LocalClose);
             _spaceAvailable.Dispose();

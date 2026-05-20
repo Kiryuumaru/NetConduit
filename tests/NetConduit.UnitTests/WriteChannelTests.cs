@@ -244,7 +244,9 @@ public sealed class WriteChannelTests
 
         await channel.CloseAsync();
 
-        Assert.Equal(ChannelState.Closing, channel.State);
+        // CloseAsync transitions Closing -> Closed per the documented contract
+        // (docs/concepts/channels.md). The FIN frame is queued in the slab.
+        Assert.Equal(ChannelState.Closed, channel.State);
         var ready = channel.TakeReady();
         var header = FrameHeader.Parse(ready.Span);
         Assert.Equal(FrameFlags.Fin, header.Flags);
