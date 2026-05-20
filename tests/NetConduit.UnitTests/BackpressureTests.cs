@@ -230,12 +230,19 @@ public sealed class BackpressureTests
         var writeCh = client.OpenChannel("send-timeout");
         await server.AcceptChannelAsync("send-timeout", cts.Token);
 
-        // Don't read from server side - build up backpressure
-        // At some point write should time out or block
+        // Build up backpressure by writing fitting payloads in a tight loop
+        // while the receiver never reads. Each payload fits the per-frame
+        // budget; the slab fills and a subsequent write blocks waiting for
+        // ACK from the receiver (which is not reading), so SendTimeout
+        // eventually fires.
         try
         {
-            var largeData = new byte[1024 * 1024]; // 1MB with 1KB slab
-            await writeCh.WriteAsync(largeData, cts.Token);
+            // Maximum payload per frame = SlabSize - FrameHeader.Size = 1016.
+            var fittingData = new byte[1016];
+            for (int i = 0; i < 1024; i++)
+            {
+                await writeCh.WriteAsync(fittingData, cts.Token);
+            }
         }
         catch (TimeoutException)
         {
