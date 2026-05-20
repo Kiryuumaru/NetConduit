@@ -126,4 +126,25 @@ public class IpcMultiplexerTests
 
         await Task.WhenAll(tasks);
     }
+
+    [Fact(Timeout = 30000)]
+    public async Task ServerFactory_CancelledAccept_DoesNotConsumeOneShot()
+    {
+        var endpoint = GetUniqueEndpoint();
+        var serverOptions = IpcMultiplexer.CreateServerOptions(endpoint);
+
+        using (var cancelled = new CancellationTokenSource())
+        {
+            await cancelled.CancelAsync();
+            await Assert.ThrowsAnyAsync<OperationCanceledException>(
+                async () => await serverOptions.StreamFactory(cancelled.Token));
+        }
+
+        using var retryTimeout = new CancellationTokenSource(TimeSpan.FromSeconds(1));
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(
+            async () => await serverOptions.StreamFactory(retryTimeout.Token));
+
+        if (!OperatingSystem.IsWindows() && File.Exists(endpoint))
+            File.Delete(endpoint);
+    }
 }

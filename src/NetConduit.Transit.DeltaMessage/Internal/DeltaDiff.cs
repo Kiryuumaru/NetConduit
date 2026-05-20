@@ -139,6 +139,11 @@ internal static class DeltaDiff
 
         var (matchedPairs, unmatchedOld, unmatchedNew) = FindBestMatches(oldArr, newArr);
 
+        if (RequiresReorderFallback(matchedPairs))
+        {
+            return [new DeltaOperation(DeltaOp.ArrayReplace, basePath, newArr.DeepClone())];
+        }
+
         var sortedRemovals = unmatchedOld.OrderByDescending(i => i).ToList();
         foreach (var oldIdx in sortedRemovals)
         {
@@ -184,6 +189,23 @@ internal static class DeltaDiff
         }
 
         return ops;
+    }
+
+    private static bool RequiresReorderFallback(List<(int oldIdx, int newIdx)> matchedPairs)
+    {
+        var previousOldIndex = -1;
+
+        foreach (var (oldIdx, _) in matchedPairs.OrderBy(pair => pair.newIdx))
+        {
+            if (oldIdx < previousOldIndex)
+            {
+                return true;
+            }
+
+            previousOldIndex = oldIdx;
+        }
+
+        return false;
     }
 
     private static List<DeltaOperation> DiffPrimitiveArrays(JsonArray oldArr, JsonArray newArr, object[] basePath)

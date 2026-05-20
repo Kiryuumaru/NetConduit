@@ -201,7 +201,7 @@ public sealed class DeltaMessageTransit<T> : IAsyncDisposable
         else
         {
             var ops = DeltaDiff.ComputeDelta(_lastSentState, currentState);
-            if (ops.Count == 0)
+            if (ops.Count == 0 || RequiresFullState(ops))
             {
                 await SendFullAsync(currentState, cancellationToken).ConfigureAwait(false);
             }
@@ -233,7 +233,7 @@ public sealed class DeltaMessageTransit<T> : IAsyncDisposable
             else
             {
                 var ops = DeltaDiff.ComputeDelta(_lastSentState, currentState);
-                if (ops.Count > 0)
+                if (ops.Count > 0 && !RequiresFullState(ops))
                 {
                     DeltaApply.ApplyDelta(_lastSentState, ops);
                     combinedOps.AddRange(ops);
@@ -261,6 +261,9 @@ public sealed class DeltaMessageTransit<T> : IAsyncDisposable
             _lastSentState = finalState.DeepClone();
         }
     }
+
+    private static bool RequiresFullState(List<DeltaOperation> ops) =>
+        ops.Any(op => op.Path.Length == 0 && op.Op is DeltaOp.Set or DeltaOp.SetNull or DeltaOp.Remove);
 
     /// <summary>
     /// Receives the next state update. Automatically handles full state and delta messages.

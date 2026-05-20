@@ -99,4 +99,26 @@ public class QuicMultiplexerTests
         Assert.Equal(testData.Length, totalRead);
         Assert.Equal(testData, buffer);
     }
+
+    [Fact(Timeout = 30000)]
+    public async Task ServerFactory_CancelledAccept_DoesNotConsumeOneShot()
+    {
+        if (!QuicListener.IsSupported)
+            return;
+
+        using var cert = CreateSelfSignedCert();
+        await using var listener = await QuicMultiplexer.ListenAsync(new IPEndPoint(IPAddress.Loopback, 0), cert);
+        var serverOptions = QuicMultiplexer.CreateServerOptions(listener);
+
+        using (var cancelled = new CancellationTokenSource())
+        {
+            await cancelled.CancelAsync();
+            await Assert.ThrowsAnyAsync<OperationCanceledException>(
+                async () => await serverOptions.StreamFactory(cancelled.Token));
+        }
+
+        using var retryTimeout = new CancellationTokenSource(TimeSpan.FromSeconds(1));
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(
+            async () => await serverOptions.StreamFactory(retryTimeout.Token));
+    }
 }

@@ -100,6 +100,45 @@ public sealed class DeltaTransitEdgeTests
         Assert.Equal("BOB", a!["users"]![1]!["name"]!.GetValue<string>());
     }
 
+    [Fact]
+    public void ObjectArray_RemoveAndReorder_RoundTrips()
+    {
+        var a = JsonNode.Parse("""{"players":[{"id":1,"name":"player-1"},{"id":2,"name":"player-2"},{"id":3,"name":"player-3"}]}""");
+        var b = JsonNode.Parse("""{"players":[{"id":3,"name":"player-3"},{"id":1,"name":"player-1"}]}""");
+
+        var ops = DeltaDiff.ComputeDelta(a!, b!);
+        DeltaApply.ApplyDelta(a!, ops);
+
+        Assert.Equal("3,1", PlayerIds(a!["players"]!.AsArray()));
+        Assert.True(DeltaDiff.DeepEquals(a, b));
+    }
+
+    [Fact]
+    public void ObjectArray_InsertAndReorder_RoundTrips()
+    {
+        var a = JsonNode.Parse("""{"players":[{"id":1,"name":"player-1"},{"id":2,"name":"player-2"},{"id":3,"name":"player-3"}]}""");
+        var b = JsonNode.Parse("""{"players":[{"id":4,"name":"player-4"},{"id":3,"name":"player-3"},{"id":1,"name":"player-1"}]}""");
+
+        var ops = DeltaDiff.ComputeDelta(a!, b!);
+        DeltaApply.ApplyDelta(a!, ops);
+
+        Assert.Equal("4,3,1", PlayerIds(a!["players"]!.AsArray()));
+        Assert.True(DeltaDiff.DeepEquals(a, b));
+    }
+
+    [Fact]
+    public void ObjectArray_ReorderOnly_RoundTrips()
+    {
+        var a = JsonNode.Parse("""{"players":[{"id":1,"name":"player-1"},{"id":2,"name":"player-2"},{"id":3,"name":"player-3"}]}""");
+        var b = JsonNode.Parse("""{"players":[{"id":3,"name":"player-3"},{"id":1,"name":"player-1"},{"id":2,"name":"player-2"}]}""");
+
+        var ops = DeltaDiff.ComputeDelta(a!, b!);
+        DeltaApply.ApplyDelta(a!, ops);
+
+        Assert.Equal("3,1,2", PlayerIds(a!["players"]!.AsArray()));
+        Assert.True(DeltaDiff.DeepEquals(a, b));
+    }
+
     #endregion
 
     #region Deeply Nested Objects
@@ -453,6 +492,84 @@ public sealed class DeltaTransitEdgeTests
     }
 
     [Fact]
+    public async Task DeltaTransit_RootJsonArray_InsertDelta_RoundTrips()
+    {
+        var (client, server) = await CreateReadyPairAsync();
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(120));
+
+        var clientWrite = client.OpenChannel("dt-root-array-insert");
+        var serverRead = await server.AcceptChannelAsync("dt-root-array-insert", cts.Token);
+
+        var sender = new DeltaMessageTransit<JsonArray>(clientWrite, null);
+        var receiver = new DeltaMessageTransit<JsonArray>(null, serverRead);
+
+        await sender.SendAsync(Values(1, 2), cts.Token);
+        await receiver.ReceiveAsync(cts.Token);
+
+        await sender.SendAsync(Values(0, 1, 2), cts.Token);
+        var updated = await receiver.ReceiveAsync(cts.Token);
+
+        Assert.Equal("0,1,2", ValuesText(updated!));
+
+        await sender.DisposeAsync();
+        await receiver.DisposeAsync();
+        await client.DisposeAsync();
+        await server.DisposeAsync();
+    }
+
+    [Fact]
+    public async Task DeltaTransit_RootJsonArray_RemoveDelta_RoundTrips()
+    {
+        var (client, server) = await CreateReadyPairAsync();
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(120));
+
+        var clientWrite = client.OpenChannel("dt-root-array-remove");
+        var serverRead = await server.AcceptChannelAsync("dt-root-array-remove", cts.Token);
+
+        var sender = new DeltaMessageTransit<JsonArray>(clientWrite, null);
+        var receiver = new DeltaMessageTransit<JsonArray>(null, serverRead);
+
+        await sender.SendAsync(Values(1, 2, 3), cts.Token);
+        await receiver.ReceiveAsync(cts.Token);
+
+        await sender.SendAsync(Values(1, 3), cts.Token);
+        var updated = await receiver.ReceiveAsync(cts.Token);
+
+        Assert.Equal("1,3", ValuesText(updated!));
+
+        await sender.DisposeAsync();
+        await receiver.DisposeAsync();
+        await client.DisposeAsync();
+        await server.DisposeAsync();
+    }
+
+    [Fact]
+    public async Task DeltaTransit_RootJsonArray_ReplaceFallback_RoundTrips()
+    {
+        var (client, server) = await CreateReadyPairAsync();
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(120));
+
+        var clientWrite = client.OpenChannel("dt-root-array-replace");
+        var serverRead = await server.AcceptChannelAsync("dt-root-array-replace", cts.Token);
+
+        var sender = new DeltaMessageTransit<JsonArray>(clientWrite, null);
+        var receiver = new DeltaMessageTransit<JsonArray>(null, serverRead);
+
+        await sender.SendAsync(Values(1, 2, 3, 4, 5), cts.Token);
+        await receiver.ReceiveAsync(cts.Token);
+
+        await sender.SendAsync(Values(9, 8, 7), cts.Token);
+        var updated = await receiver.ReceiveAsync(cts.Token);
+
+        Assert.Equal("9,8,7", ValuesText(updated!));
+
+        await sender.DisposeAsync();
+        await receiver.DisposeAsync();
+        await client.DisposeAsync();
+        await server.DisposeAsync();
+    }
+
+    [Fact]
     public async Task DeltaTransit_ReceiveAll_EndsOnChannelClose()
     {
         var (client, server) = await CreateReadyPairAsync();
@@ -505,5 +622,19 @@ public sealed class DeltaTransitEdgeTests
         await Task.WhenAll(client.WaitForReadyAsync(), server.WaitForReadyAsync());
         return (client, server);
     }
+
+    private static JsonArray Values(params int[] values)
+    {
+        var array = new JsonArray();
+        foreach (var value in values)
+        {
+            array.Add(value);
+        }
+        return array;
+    }
+
+    private static string ValuesText(JsonArray array) => string.Join(",", array.Select(item => item!.GetValue<int>()));
+
+    private static string PlayerIds(JsonArray players) => string.Join(",", players.Select(player => player!["id"]!.GetValue<int>()));
 }
 

@@ -93,6 +93,7 @@ The certificate must have a private key. For dev, a self-signed cert works (clie
 ## Behavior notes
 
 - The transport opens **one** outbound bidirectional QUIC stream. The first byte (`0x01`) is a handshake marker so both ends synchronize.
+- Client hostnames that resolve to multiple addresses are attempted in parallel; the first successful QUIC connection is used and remaining attempts are cancelled.
 - `MaxInboundBidirectionalStreams` is set to 100 (room for future use); only one is actually used by the multiplexer.
 - TLS 1.3 only.
 
