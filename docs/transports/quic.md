@@ -90,6 +90,10 @@ await mux.WaitForReadyAsync();
 
 The certificate must have a private key. For dev, a self-signed cert works (clients then need `allowInsecure: true`).
 
+## Reconnectable server
+
+`CreateServerOptions(listener)` accepts one connection. For a server that survives client churn, write a custom factory that re-accepts from the `QuicListener` on every call. See [Reconnection → QUIC](../concepts/reconnection.md#quic) for a copy-paste snippet.
+
 ## Behavior notes
 
 - The transport opens **one** outbound bidirectional QUIC stream. The first byte (`0x01`) is a handshake marker so both ends synchronize.
