@@ -237,6 +237,12 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IChannelOwner
     }
 
     /// <inheritdoc />
+    public IAsyncEnumerable<IReadChannel> AcceptChannelsAsync(string channelIdPrefix, CancellationToken ct = default)
+    {
+        return _registry.AcceptChannelsAsync(channelIdPrefix, ct);
+    }
+
+    /// <inheritdoc />
     public IWriteChannel? GetWriteChannel(string channelId) => _registry.GetWriteChannelById(channelId);
 
     /// <inheritdoc />
@@ -434,7 +440,11 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IChannelOwner
                     break;
 
                 _disconnectedFired = true;
-                RaiseEvent(Disconnected, new DisconnectedEventArgs(Enums.DisconnectReason.TransportError, transportEx));
+                // Mark transient if the loop will attempt to reconnect; consumers
+                // that hide reconnect cycles use WillRetry to suppress this event
+                // and wait for the terminal one fired from the catch block below.
+                bool willRetry = _options.MaxAutoReconnectAttempts != 0;
+                RaiseEvent(Disconnected, new DisconnectedEventArgs(Enums.DisconnectReason.TransportError, transportEx, willRetry));
             }
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
@@ -448,6 +458,14 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IChannelOwner
                 AbortChannelsForTerminalTransportFailure(ex);
 
             _readyTcs.TrySetException(ex);
+
+            // If we haven't already announced a terminal disconnect, fire one
+            // now so consumers learn that no further reconnect will be attempted.
+            if (!ct.IsCancellationRequested && !_isShuttingDown)
+            {
+                _disconnectedFired = true;
+                RaiseEvent(Disconnected, new DisconnectedEventArgs(Enums.DisconnectReason.TransportError, ex, willRetry: false));
+            }
         }
     }
 

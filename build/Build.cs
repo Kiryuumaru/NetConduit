@@ -95,6 +95,12 @@ class Build : BaseNukeBuildHelpers
             AppId = "net_conduit_transport_quic",
             ProjectName = "NetConduit.Transport.Quic",
             ProjectTestName = "NetConduit.Transport.Quic.IntegrationTests"
+        },
+        new DeploymentAppSpec
+        {
+            AppId = "net_conduit_mesh",
+            ProjectName = "NetConduit.Mesh",
+            ProjectTestName = "NetConduit.Mesh.IntegrationTests"
         }
     ];
 
@@ -126,37 +132,33 @@ class Build : BaseNukeBuildHelpers
                     settingsArg +
                     "-- " +
                     "RunConfiguration.CollectSourceInformation=true ";
-                if (spec.ProjectTestName == "NetConduit.UnitTests")
+                // Category-aware test batching: discover xUnit Category traits in the
+                // compiled test assembly and run each category in its own dotnet test
+                // invocation (uncategorized first, then categorized batches ordered by
+                // test count desc, then name asc). Applies uniformly to every test
+                // project; projects without categories run as a single batch.
+                var categories = DiscoverTestCategories(projectFile);
+                if (categories.Length == 0)
                 {
-                    var categories = DiscoverTestCategories(projectFile);
-                    if (categories.Length == 0)
-                    {
-                        RunDotNetTest(projectFile, null, baseArgs);
-                        return;
-                    }
-
-                    RunDotNetTest(projectFile, BuildUncategorizedFilter(categories), baseArgs);
-
-                    var categoryRuns = categories
-                        .Select(category => new TestCategoryRun(category, CountTests(projectFile, $"Category={category}")))
-                        .Where(run => run.TestCount > 0)
-                        .OrderByDescending(run => run.TestCount)
-                        .ThenBy(run => run.Category, StringComparer.Ordinal)
-                        .ToArray();
-
-                    Log.Information("Discovered {Count} categorized unit test groups: {Groups}",
-                        categoryRuns.Length, string.Join(", ", categoryRuns.Select(run => $"{run.Category}={run.TestCount}")));
-
-                    foreach (var categoryRun in categoryRuns)
-                        RunDotNetTest(projectFile, $"Category={categoryRun.Category}", baseArgs);
+                    RunDotNetTest(projectFile, null, baseArgs);
+                    return;
                 }
-                else
-                {
-                    DotNetTasks.DotNetTest(_ => _
-                        .SetProcessAdditionalArguments(baseArgs)
-                        .SetProjectFile(projectFile)
-                        .SetConfiguration("Release"));
-                }
+
+                RunDotNetTest(projectFile, BuildUncategorizedFilter(categories), baseArgs);
+
+                var categoryRuns = categories
+                    .Select(category => new TestCategoryRun(category, CountTests(projectFile, $"Category={category}")))
+                    .Where(run => run.TestCount > 0)
+                    .OrderByDescending(run => run.TestCount)
+                    .ThenBy(run => run.Category, StringComparer.Ordinal)
+                    .ToArray();
+
+                Log.Information("Discovered {Count} categorized test groups in {Project}: {Groups}",
+                    categoryRuns.Length, spec.ProjectTestName,
+                    string.Join(", ", categoryRuns.Select(run => $"{run.Category}={run.TestCount}")));
+
+                foreach (var categoryRun in categoryRuns)
+                    RunDotNetTest(projectFile, $"Category={categoryRun.Category}", baseArgs);
             }));
 
     TestEntry BenchmarkTestEntry => _ => _
