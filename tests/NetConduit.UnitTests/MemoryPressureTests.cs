@@ -35,7 +35,7 @@ public sealed class MemoryPressureTests
         var acceptTask = Task.Run(async () =>
         {
             int count = 0;
-            await foreach (var ch in server.AcceptChannelsAsync(cts.Token))
+            await foreach (var ch in server.AcceptChannelsAsync(ct: cts.Token))
             {
                 // Read and discard
                 var buf = new byte[256];
@@ -74,7 +74,7 @@ public sealed class MemoryPressureTests
         var acceptTask = Task.Run(async () =>
         {
             int count = 0;
-            await foreach (var ch in server.AcceptChannelsAsync(cts.Token))
+            await foreach (var ch in server.AcceptChannelsAsync(ct: cts.Token))
             {
                 count++;
                 if (count >= 50) break;
@@ -198,7 +198,7 @@ public sealed class MemoryPressureTests
         var acceptTask = Task.Run(async () =>
         {
             int count = 0;
-            await foreach (var _ in server.AcceptChannelsAsync(cts.Token))
+            await foreach (var _ in server.AcceptChannelsAsync(ct: cts.Token))
             {
                 count++;
                 if (count >= 20) break;

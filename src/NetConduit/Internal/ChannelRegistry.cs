@@ -17,6 +17,36 @@ internal sealed class ChannelRegistry
     private readonly ConcurrentDictionary<string, TaskCompletionSource<ReadChannel>> _pendingAccepts = new();
     private readonly ConcurrentDictionary<string, ReadChannel> _pendingAcceptChannels = new();
     private readonly Channel<ReadChannel> _acceptQueue = Channel.CreateUnbounded<ReadChannel>();
+    private readonly object _prefixSubscriptionsLock = new();
+    private readonly List<PrefixSubscription> _prefixSubscriptions = new();
+
+    private sealed class PrefixSubscription(string prefix)
+    {
+        public string Prefix { get; } = prefix;
+        public Channel<ReadChannel> Queue { get; } = Channel.CreateUnbounded<ReadChannel>();
+    }
+
+    /// <summary>
+    /// Validates that <paramref name="candidate"/> does not collide with any
+    /// existing subscription. Two prefixes collide when one is a prefix of the
+    /// other (including equality): routing the inbound channel would otherwise
+    /// be ambiguous. Caller MUST hold <see cref="_prefixSubscriptionsLock"/>.
+    /// </summary>
+    private void ThrowIfPrefixConflictsLocked(string candidate)
+    {
+        foreach (var existing in _prefixSubscriptions)
+        {
+            if (existing.Prefix.StartsWith(candidate, StringComparison.Ordinal) ||
+                candidate.StartsWith(existing.Prefix, StringComparison.Ordinal))
+            {
+                throw new MultiplexerException(
+                    ErrorCode.ChannelExists,
+                    $"Prefix subscription '{candidate}' conflicts with existing subscription '{existing.Prefix}'. " +
+                    "Each prefix namespace may have at most one active subscriber; " +
+                    "the previous subscription must be cancelled before re-registering an overlapping prefix.");
+            }
+        }
+    }
 
     /// <summary>
     /// Serializes the compound "register pending + read existing" sequences in
@@ -130,6 +160,20 @@ internal sealed class ChannelRegistry
             tcs.TrySetResult(channel);
             return;
         }
+        // Then check prefix subscriptions (overlay protocols claiming a namespace).
+        // Prefixes are guaranteed non-overlapping by ThrowIfPrefixConflictsLocked,
+        // so at most one subscription can match — iteration order does not matter.
+        lock (_prefixSubscriptionsLock)
+        {
+            foreach (var sub in _prefixSubscriptions)
+            {
+                if (channel.ChannelId.StartsWith(sub.Prefix, StringComparison.Ordinal))
+                {
+                    sub.Queue.Writer.TryWrite(channel);
+                    return;
+                }
+            }
+        }
         // Otherwise queue for generic AcceptChannelsAsync
         _acceptQueue.Writer.TryWrite(channel);
     }
@@ -157,13 +201,81 @@ internal sealed class ChannelRegistry
             }
         }
 
-        await using var registration = ct.Register(() => tcs.TrySetCanceled(ct));
+        // On cancellation we must remove our entry from _pendingAccepts. Without
+        // this, a cancelled accept leaves a permanently-cancelled TCS in the
+        // dictionary; the next inbound INIT for the same channel ID gets routed
+        // to that dead TCS in EnqueueForAccept (TryRemove succeeds, TrySetResult
+        // is a no-op on a completed TCS) and the channel is silently dropped
+        // from the accept stream.
+        await using var registration = ct.Register(() =>
+        {
+            _pendingAccepts.TryRemove(channelId, out _);
+            tcs.TrySetCanceled(ct);
+        });
         return await tcs.Task;
     }
 
-    internal IAsyncEnumerable<ReadChannel> AcceptChannelsAsync(CancellationToken ct)
+    internal IAsyncEnumerable<ReadChannel> AcceptChannelsAsync(string? channelIdPrefix, CancellationToken ct)
     {
-        return _acceptQueue.Reader.ReadAllAsync(ct);
+        if (channelIdPrefix is null)
+            return _acceptQueue.Reader.ReadAllAsync(ct);
+
+        PrefixSubscription sub;
+        lock (_prefixSubscriptionsLock)
+        {
+            ThrowIfPrefixConflictsLocked(channelIdPrefix);
+            sub = new PrefixSubscription(channelIdPrefix);
+            _prefixSubscriptions.Add(sub);
+        }
+        return EnumerateAndCleanupSubscriptionAsync(sub, ct);
+    }
+
+    /// <summary>
+    /// Bound the lifetime of <paramref name="sub"/> to a single enumeration:
+    /// when the consumer cancels <paramref name="ct"/> or disposes the
+    /// enumerator, the subscription is removed from the dispatch list, its
+    /// queue is closed, and any matching channels that were buffered but
+    /// never consumed are re-routed to the default accept stream so the host
+    /// application can observe them rather than have them silently dropped.
+    /// </summary>
+    private async IAsyncEnumerable<ReadChannel> EnumerateAndCleanupSubscriptionAsync(
+        PrefixSubscription sub,
+        [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken ct)
+    {
+        try
+        {
+            await foreach (var channel in sub.Queue.Reader.ReadAllAsync(ct).ConfigureAwait(false))
+                yield return channel;
+        }
+        finally
+        {
+            RemovePrefixSubscription(sub);
+        }
+    }
+
+    private void RemovePrefixSubscription(PrefixSubscription sub)
+    {
+        bool removed;
+        lock (_prefixSubscriptionsLock)
+        {
+            removed = _prefixSubscriptions.Remove(sub);
+        }
+        if (!removed) return;
+
+        // Stop accepting new writes. Any concurrent EnqueueForAccept that already
+        // observed sub before this lock-release will not happen: that path holds
+        // _prefixSubscriptionsLock for its full foreach + TryWrite, so once
+        // Remove() returns under the same lock, no further EnqueueForAccept can
+        // pick this subscription.
+        sub.Queue.Writer.TryComplete();
+
+        // Re-route any channels that were buffered for this subscription but
+        // never enumerated (e.g. cancelled before the consumer awaited them)
+        // back into the default accept stream. Dropping them silently would
+        // leak channel state on this side while the peer still believes the
+        // channel is open.
+        while (sub.Queue.Reader.TryRead(out var leftover))
+            _acceptQueue.Writer.TryWrite(leftover);
     }
 
     internal void CancelAllPendingAccepts()
@@ -174,6 +286,12 @@ internal sealed class ChannelRegistry
         }
         _pendingAccepts.Clear();
         _acceptQueue.Writer.TryComplete();
+        lock (_prefixSubscriptionsLock)
+        {
+            foreach (var sub in _prefixSubscriptions)
+                sub.Queue.Writer.TryComplete();
+            _prefixSubscriptions.Clear();
+        }
     }
 
     internal void AbortAllChannels(ChannelCloseReason reason, Exception? exception = null)

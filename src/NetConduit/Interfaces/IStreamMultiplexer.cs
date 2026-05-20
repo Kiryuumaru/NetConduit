@@ -79,8 +79,41 @@ public interface IStreamMultiplexer : IAsyncDisposable
     /// <summary>Accept an inbound channel with the given ID. Returns immediately in pending state.</summary>
     IReadChannel AcceptChannel(string channelId);
 
-    /// <summary>Accept all inbound channels as they arrive.</summary>
-    IAsyncEnumerable<IReadChannel> AcceptChannelsAsync(CancellationToken ct = default);
+    /// <summary>
+    /// Accept inbound channels as they arrive. When <paramref name="channelIdPrefix"/>
+    /// is <c>null</c>, yields every inbound channel not claimed by a specific
+    /// <see cref="AcceptChannel"/> call. When a prefix is supplied, only channels
+    /// whose ID starts with it are yielded; matched channels are routed exclusively
+    /// to this enumeration and are NOT yielded by the unfiltered (null prefix)
+    /// overload. This lets an overlay protocol (e.g. mesh routing) share the
+    /// multiplexer with the host application by subscribing to a reserved prefix.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>Prefix routing rules:</b>
+    /// </para>
+    /// <list type="bullet">
+    /// <item><description>
+    /// Each namespace may have at most one active subscription. A second call
+    /// with an equal or mutually-prefixing <paramref name="channelIdPrefix"/>
+    /// throws <see cref="Exceptions.MultiplexerException"/> with
+    /// <see cref="Enums.ErrorCode.ChannelExists"/> until the existing subscription
+    /// is cancelled. This rejects ambiguous routing at registration time rather
+    /// than silently shadowing one subscription with another. The overlap check
+    /// runs synchronously when this method is invoked (not lazily on first
+    /// enumeration), so the call itself — not the <c>await foreach</c> — is what
+    /// throws on conflict.
+    /// </description></item>
+    /// <item><description>
+    /// When the consumer cancels <paramref name="ct"/> or disposes the
+    /// enumerator, the subscription is released. Channels that were buffered
+    /// for the subscription but never consumed are re-routed to the unfiltered
+    /// accept stream so the host application can observe them rather than have
+    /// them silently dropped, and the prefix becomes available again.
+    /// </description></item>
+    /// </list>
+    /// </remarks>
+    IAsyncEnumerable<IReadChannel> AcceptChannelsAsync(string? channelIdPrefix = null, CancellationToken ct = default);
 
     /// <summary>Get an outbound channel by its ID, or null if not found.</summary>
     IWriteChannel? GetWriteChannel(string channelId);

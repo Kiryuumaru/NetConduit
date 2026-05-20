@@ -189,7 +189,7 @@ public sealed class NegativeTests
         tasks.Add(Task.Run(async () =>
         {
             int accepted = 0;
-            await foreach (var ch in server.AcceptChannelsAsync(cts.Token))
+            await foreach (var ch in server.AcceptChannelsAsync(ct: cts.Token))
             {
                 var buf = new byte[4];
                 while (await ch.ReadAsync(buf, cts.Token) > 0) { }

@@ -38,7 +38,7 @@ public sealed class ChaosRobustnessTests
         var acceptTask = Task.Run(async () =>
         {
             int count = 0;
-            await foreach (var ch in server.AcceptChannelsAsync(cts.Token))
+            await foreach (var ch in server.AcceptChannelsAsync(ct: cts.Token))
             {
                 _ = Task.Run(async () =>
                 {
@@ -349,7 +349,7 @@ public sealed class ChaosRobustnessTests
         var acceptTask = Task.Run(async () =>
         {
             int count = 0;
-            await foreach (var ch in server.AcceptChannelsAsync(cts.Token))
+            await foreach (var ch in server.AcceptChannelsAsync(ct: cts.Token))
             {
                 var buf = new byte[16];
                 _ = await ch.ReadAsync(buf, cts.Token);
