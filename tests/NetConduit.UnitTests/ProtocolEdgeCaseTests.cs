@@ -379,4 +379,113 @@ public sealed class ProtocolEdgeCaseTests
     }
 
     #endregion
+
+    #region Frame Header Validation (#116)
+
+    [Fact]
+    public void FrameHeader_OversizedPayloadLength_ThrowsProtocolError()
+    {
+        // 0xFFFFFFFF would wrap to -1 if cast to int without validation.
+        byte[] header = new byte[NetConduit.Internal.FrameHeader.Size];
+        header[0] = 0; header[1] = 0;       // channel
+        header[2] = (byte)NetConduit.Enums.FrameFlags.Ctrl;
+        header[3] = 0;                       // reserved
+        header[4] = 0xFF; header[5] = 0xFF; header[6] = 0xFF; header[7] = 0xFF;
+
+        var ex = Assert.Throws<NetConduit.Exceptions.MultiplexerException>(() =>
+            NetConduit.Internal.FrameHeader.Parse(header));
+
+        Assert.Equal(NetConduit.Enums.ErrorCode.ProtocolError, ex.ErrorCode);
+    }
+
+    [Fact]
+    public void FrameHeader_MaxAllowedPayloadLength_Accepted()
+    {
+        byte[] header = new byte[NetConduit.Internal.FrameHeader.Size];
+        header[0] = 0; header[1] = 0;
+        header[2] = (byte)NetConduit.Enums.FrameFlags.Data;
+        header[3] = 0;
+        uint max = (uint)NetConduit.Constants.FrameConstants.MaxFramePayloadSize;
+        header[4] = (byte)(max >> 24);
+        header[5] = (byte)(max >> 16);
+        header[6] = (byte)(max >> 8);
+        header[7] = (byte)max;
+
+        var parsed = NetConduit.Internal.FrameHeader.Parse(header);
+        Assert.Equal(NetConduit.Constants.FrameConstants.MaxFramePayloadSize, parsed.PayloadLength);
+    }
+
+    #endregion
+
+    #region Slab Capacity Enforcement (#113)
+
+    [Fact]
+    public async Task ReceiverSmallerSlab_RejectsOversizedFrame()
+    {
+        var duplex = new DuplexMemoryStream();
+        await using var client = StreamMultiplexer.Create(new MultiplexerOptions
+        {
+            StreamFactory = _ => Task.FromResult<IStreamPair>(duplex.SideA),
+            PingInterval = TimeSpan.Zero,
+            MaxAutoReconnectAttempts = 0,
+        });
+        await using var server = StreamMultiplexer.Create(new MultiplexerOptions
+        {
+            StreamFactory = _ => Task.FromResult<IStreamPair>(duplex.SideB),
+            PingInterval = TimeSpan.Zero,
+            MaxAutoReconnectAttempts = 0,
+            DefaultChannelOptions = new NetConduit.Models.DefaultChannelOptions
+            {
+                SlabSize = 64 * 1024,
+            },
+        });
+
+        client.Start();
+        server.Start();
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        await Task.WhenAll(client.WaitForReadyAsync(cts.Token), server.WaitForReadyAsync(cts.Token));
+
+        var writer = client.OpenChannel(new NetConduit.Models.ChannelOptions
+        {
+            ChannelId = "oversize-frame",
+            SlabSize = 128 * 1024,
+            SendTimeout = TimeSpan.FromSeconds(2),
+        });
+        var reader = await server.AcceptChannelAsync("oversize-frame", cts.Token);
+        await writer.WaitForReadyAsync(cts.Token);
+
+        byte[] payload = new byte[96 * 1024];
+        await writer.WriteAsync(payload, cts.Token);
+        await writer.DisposeAsync();
+
+        // Wait for the oversized frame to be dispatched into the receiver slab
+        // before the reader parks; otherwise TryDirectDeliver would bypass the
+        // slab-capacity check.
+        await Task.Delay(TimeSpan.FromMilliseconds(200), cts.Token);
+
+        // Reader either gets a teardown signal (read returns 0) after the
+        // receiver mux disconnects with a protocol error, or it throws.
+        byte[] buf = new byte[payload.Length];
+        int total = 0;
+        try
+        {
+            while (total < buf.Length)
+            {
+                int n = await reader.ReadAsync(buf.AsMemory(total), cts.Token);
+                if (n == 0) break;
+                total += n;
+            }
+        }
+        catch
+        {
+            // Acceptable: protocol error surfaced as an exception.
+        }
+
+        Assert.True(total < payload.Length,
+            $"Receiver must not silently accept oversized frame, but delivered {total}/{payload.Length} bytes.");
+        Assert.False(server.IsConnected,
+            "Receiver must tear down the connection after a protocol violation.");
+    }
+
+    #endregion
 }

@@ -301,6 +301,16 @@ internal sealed class ReadChannel : Stream, IReadChannel, IValueTaskSource<int>
     {
         if (payload.IsEmpty) return;
 
+        // A single frame must fit in the receiver's slab. Sender must respect
+        // receiver's slab capacity via flow-control ACKs. Anything else is a
+        // protocol violation and silent truncation is not acceptable.
+        if (payload.Length > _slabSize)
+        {
+            throw new MultiplexerException(
+                ErrorCode.ProtocolError,
+                $"Frame payload ({payload.Length} bytes) exceeds receiver slab capacity ({_slabSize} bytes).");
+        }
+
         // Check if we have room, compact if needed
         int freeSpace = _slabSize - _receivedPos;
         if (freeSpace < payload.Length)
@@ -309,11 +319,18 @@ internal sealed class ReadChannel : Stream, IReadChannel, IValueTaskSource<int>
             freeSpace = _slabSize - _receivedPos;
         }
 
-        int toCopy = Math.Min(payload.Length, freeSpace);
-        if (toCopy <= 0) return; // slab full, applying backpressure
+        if (freeSpace < payload.Length)
+        {
+            // The sender exceeded the flow-control window. ACK-based
+            // backpressure cannot push these bytes back to the wire, so
+            // dropping them silently would corrupt the stream.
+            throw new MultiplexerException(
+                ErrorCode.ProtocolError,
+                $"Frame payload ({payload.Length} bytes) exceeds available slab space ({freeSpace} bytes); sender violated flow control.");
+        }
 
-        payload[..toCopy].CopyTo(_slab.AsSpan(_receivedPos, toCopy));
-        _receivedPos += toCopy;
+        payload.CopyTo(_slab.AsSpan(_receivedPos, payload.Length));
+        _receivedPos += payload.Length;
     }
 
     private void TryCompact()
