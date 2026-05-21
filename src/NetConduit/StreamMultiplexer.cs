@@ -674,7 +674,14 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IChannelOwner
                 _conn.ReaderTask = Task.Run(() => RunReaderLoopAsync(conn, loopCt), loopCt);
 
                 if (_options.PingInterval > TimeSpan.Zero)
-                    _conn.KeepaliveTask = Task.Run(() => RunKeepaliveLoopAsync(conn, loopCt), loopCt);
+                {
+                    var keepalive = new MuxKeepalive(
+                        conn,
+                        _options.PingInterval,
+                        _options.PingTimeout,
+                        _options.MaxMissedPings);
+                    _conn.KeepaliveTask = Task.Run(() => keepalive.RunAsync(loopCt), loopCt);
+                }
 
                 RaiseEvent(Connected);
 
@@ -1191,61 +1198,6 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IChannelOwner
         _isShuttingDown = true;
         _disconnectReason = Enums.DisconnectReason.GoAwayReceived;
         _cts.Cancel();
-    }
-
-    // =====================================================================
-    // Keepalive Loop — sends periodic PING frames, monitors PONG responses
-    // =====================================================================
-    private async Task RunKeepaliveLoopAsync(MuxConnection conn, CancellationToken ct)
-    {
-        int missedPings = 0;
-        byte[] pingPayload = new byte[8];
-
-        try
-        {
-            while (!ct.IsCancellationRequested)
-            {
-                await Task.Delay(_options.PingInterval, ct);
-
-                var pendingPong = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-                Interlocked.Exchange(ref conn.PendingPong, pendingPong);
-
-                BinaryPrimitives.WriteInt64BigEndian(pingPayload, Environment.TickCount64);
-                SendControlFrame(FrameFlags.Ping, pingPayload);
-
-                if (await WaitForPongAsync(conn, pendingPong, ct))
-                {
-                    missedPings = 0;
-                    continue;
-                }
-
-                missedPings++;
-                if (missedPings >= _options.MaxMissedPings)
-                {
-                    throw new IOException(
-                        $"Keepalive timeout: {missedPings} missed pings (timeout: {_options.PingTimeout})");
-                }
-            }
-        }
-        catch (OperationCanceledException) when (ct.IsCancellationRequested)
-        {
-            // Normal shutdown
-        }
-    }
-
-    private async Task<bool> WaitForPongAsync(MuxConnection conn, TaskCompletionSource pendingPong, CancellationToken ct)
-    {
-        Task timeout = _options.PingTimeout > TimeSpan.Zero
-            ? Task.Delay(_options.PingTimeout, ct)
-            : Task.CompletedTask;
-
-        Task completed = await Task.WhenAny(pendingPong.Task, timeout);
-        if (completed == pendingPong.Task)
-            return true;
-
-        ct.ThrowIfCancellationRequested();
-        Interlocked.CompareExchange(ref conn.PendingPong, null, pendingPong);
-        return false;
     }
 
     private void SendControlFrame(FrameFlags flags, ReadOnlySpan<byte> payload)
