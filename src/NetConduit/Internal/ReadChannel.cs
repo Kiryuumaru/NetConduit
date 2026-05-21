@@ -184,24 +184,37 @@ internal sealed class ReadChannel : Stream, IReadChannel, IValueTaskSource<int>
     {
         if (buffer.IsEmpty) return new ValueTask<int>(0);
 
-        lock (_lock)
+        bool returnSlabAfter = false;
+        try
         {
-            if (_state == ChannelState.Closed && _receivedPos <= _consumedPos)
-                return new ValueTask<int>(0); // EOF
-
-            // Fast path: data already buffered in slab
-            int buffered = _receivedPos - _consumedPos;
-            if (buffered > 0)
+            lock (_lock)
             {
-                int toCopy = Math.Min(buffered, buffer.Length);
-                _slabMemory.Span.Slice(_consumedPos, toCopy).CopyTo(buffer.Span);
-                _consumedPos += toCopy;
-                Interlocked.Add(ref Stats._bytesReceived, toCopy);
-                return new ValueTask<int>(toCopy);
-            }
+                if (_state == ChannelState.Closed && _receivedPos <= _consumedPos)
+                {
+                    returnSlabAfter = true;
+                    return new ValueTask<int>(0); // EOF
+                }
 
-            if (_state == ChannelState.Closed)
-                return new ValueTask<int>(0); // EOF
+                // Fast path: data already buffered in slab
+                int buffered = _receivedPos - _consumedPos;
+                if (buffered > 0)
+                {
+                    int toCopy = Math.Min(buffered, buffer.Length);
+                    _slabMemory.Span.Slice(_consumedPos, toCopy).CopyTo(buffer.Span);
+                    _consumedPos += toCopy;
+                    Interlocked.Add(ref Stats._bytesReceived, toCopy);
+                    // If the consumer just drained the last buffered bytes
+                    // after the channel closed, release the slab now.
+                    if (_state == ChannelState.Closed && _receivedPos <= _consumedPos)
+                        returnSlabAfter = true;
+                    return new ValueTask<int>(toCopy);
+                }
+
+                if (_state == ChannelState.Closed)
+                {
+                    returnSlabAfter = true;
+                    return new ValueTask<int>(0); // EOF
+                }
 
             // Reader caught up to the writer with no buffered data: a natural
             // moment to flush any sub-threshold ACK so the writer's slab can
@@ -234,6 +247,12 @@ internal sealed class ReadChannel : Stream, IReadChannel, IValueTaskSource<int>
             }
 
             return new ValueTask<int>(this, _readCompletion.Core.Version);
+        }
+        }
+        finally
+        {
+            if (returnSlabAfter)
+                TryReturnSlab();
         }
     }
 
@@ -402,6 +421,7 @@ internal sealed class ReadChannel : Stream, IReadChannel, IValueTaskSource<int>
 
     internal void SetClosed(ChannelCloseReason reason, Exception? exception = null)
     {
+        bool returnSlabNow = false;
         lock (_lock)
         {
             if (_state == ChannelState.Closed) return;
@@ -423,8 +443,31 @@ internal sealed class ReadChannel : Stream, IReadChannel, IValueTaskSource<int>
                 reg.Unregister();
                 _readCompletion.Core.SetResult(0);
             }
+
+            // Slab return policy on close:
+            // - MuxDisposed: the mux is gone, no further reads can succeed.
+            //   Drop any buffered data (zero positions so subsequent ReadAsync
+            //   returns EOF) and release the slab unconditionally. Mirrors
+            //   WriteChannel.SetClosed's MuxDisposed branch (issue #169).
+            // - Graceful close with no buffered data (Fin/Err/LocalClose):
+            //   no consumer drain is possible; release the slab immediately.
+            // - Graceful close with buffered data: preserve the slab so the
+            //   consumer can drain to EOF; ReadAsync returns the slab when
+            //   it observes EOF, and DisposeAsync catches any abandoned case.
+            if (reason == ChannelCloseReason.MuxDisposed)
+            {
+                _receivedPos = 0;
+                _consumedPos = 0;
+                returnSlabNow = true;
+            }
+            else if (_receivedPos <= _consumedPos)
+            {
+                returnSlabNow = true;
+            }
         }
         Closed?.Invoke(this, new ChannelCloseEventArgs(reason, exception));
+        if (returnSlabNow)
+            TryReturnSlab();
     }
 
     private void TryReturnSlab()

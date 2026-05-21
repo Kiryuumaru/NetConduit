@@ -35,6 +35,16 @@ public sealed class MessageTransit<TSend, TReceive> : ITransit
     private volatile bool _receiveEof;
     private readonly object _readyLock = new();
 
+    // Per-frame receive state. Survives a cancellation between the length-prefix
+    // read and the payload read so the underlying channel never sees a partial
+    // frame consume that would desync the next call's length prefix (#240).
+    // All access is serialized through _receiveLock.
+    private readonly byte[] _pendingLengthBytes = new byte[4];
+    private int _pendingLengthOffset;
+    private byte[]? _pendingPayloadBuffer;
+    private int _pendingPayloadOffset;
+    private int _pendingPayloadLength;
+
     /// <summary>
     /// Creates a new MessageTransit with both send and receive capabilities using AOT-safe JsonTypeInfo.
     /// </summary>
@@ -207,53 +217,93 @@ public sealed class MessageTransit<TSend, TReceive> : ITransit
         await _receiveLock.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
-            var lengthBuffer = ArrayPool<byte>.Shared.Rent(4);
-            try
+            // Read the 4-byte length prefix into the persistent buffer. If a
+            // prior ReceiveAsync was cancelled mid-prefix, _pendingLengthOffset
+            // preserves how many bytes were already consumed so this call
+            // resumes at the exact same byte boundary — preserving framing
+            // invariants across cancellation events (#240).
+            while (_pendingPayloadBuffer is null && _pendingLengthOffset < 4)
             {
-                var bytesRead = await ReadExactAsync(_readChannel, lengthBuffer.AsMemory(0, 4), cancellationToken).ConfigureAwait(false);
-                if (bytesRead == 0)
+                var n = await _readChannel.ReadAsync(
+                    _pendingLengthBytes.AsMemory(_pendingLengthOffset, 4 - _pendingLengthOffset),
+                    cancellationToken).ConfigureAwait(false);
+                if (n == 0)
                 {
-                    _receiveEof = true;
-                    return default;
-                }
-
-                var messageLength = BinaryPrimitives.ReadUInt32BigEndian(lengthBuffer);
-
-                if (messageLength > (uint)_maxMessageSize)
-                    throw new InvalidOperationException($"Received message size ({messageLength} bytes) exceeds maximum allowed ({_maxMessageSize} bytes).");
-
-                if (messageLength == 0)
-                {
-                    throw new InvalidOperationException("Received a message with zero-length payload.");
-                }
-
-                var messageBuffer = ArrayPool<byte>.Shared.Rent((int)messageLength);
-                try
-                {
-                    bytesRead = await ReadExactAsync(_readChannel, messageBuffer.AsMemory(0, (int)messageLength), cancellationToken).ConfigureAwait(false);
-                    if (bytesRead == 0)
+                    if (_pendingLengthOffset == 0)
                     {
                         _receiveEof = true;
                         return default;
                     }
-
-                    if (_receiveTypeInfo is not null)
-                    {
-                        return JsonSerializer.Deserialize(messageBuffer.AsSpan(0, (int)messageLength), _receiveTypeInfo);
-                    }
-                    else
-                    {
-                        return JsonSerializer.Deserialize<TReceive>(messageBuffer.AsSpan(0, (int)messageLength), _jsonOptions);
-                    }
+                    _pendingLengthOffset = 0;
+                    throw new EndOfStreamException("Unexpected end of stream while reading message length prefix.");
                 }
-                finally
+                _pendingLengthOffset += n;
+            }
+
+            // Length prefix complete: allocate (or reuse) the payload buffer.
+            if (_pendingPayloadBuffer is null)
+            {
+                var messageLength = BinaryPrimitives.ReadUInt32BigEndian(_pendingLengthBytes);
+
+                if (messageLength > (uint)_maxMessageSize)
                 {
-                    ArrayPool<byte>.Shared.Return(messageBuffer);
+                    _pendingLengthOffset = 0;
+                    throw new InvalidOperationException($"Received message size ({messageLength} bytes) exceeds maximum allowed ({_maxMessageSize} bytes).");
+                }
+
+                if (messageLength == 0)
+                {
+                    _pendingLengthOffset = 0;
+                    throw new InvalidOperationException("Received a message with zero-length payload.");
+                }
+
+                _pendingPayloadLength = (int)messageLength;
+                _pendingPayloadBuffer = ArrayPool<byte>.Shared.Rent(_pendingPayloadLength);
+                _pendingPayloadOffset = 0;
+            }
+
+            // Read the payload. If cancelled mid-payload, _pendingPayloadOffset
+            // preserves the progress so the next call resumes exactly here.
+            while (_pendingPayloadOffset < _pendingPayloadLength)
+            {
+                var n = await _readChannel.ReadAsync(
+                    _pendingPayloadBuffer.AsMemory(_pendingPayloadOffset, _pendingPayloadLength - _pendingPayloadOffset),
+                    cancellationToken).ConfigureAwait(false);
+                if (n == 0)
+                {
+                    var torn = _pendingPayloadBuffer;
+                    _pendingPayloadBuffer = null;
+                    _pendingPayloadOffset = 0;
+                    _pendingPayloadLength = 0;
+                    _pendingLengthOffset = 0;
+                    ArrayPool<byte>.Shared.Return(torn);
+                    throw new EndOfStreamException("Unexpected end of stream while reading message payload.");
+                }
+                _pendingPayloadOffset += n;
+            }
+
+            // Frame complete — capture, clear state, then deserialize.
+            var payload = _pendingPayloadBuffer;
+            var payloadLength = _pendingPayloadLength;
+            _pendingPayloadBuffer = null;
+            _pendingPayloadOffset = 0;
+            _pendingPayloadLength = 0;
+            _pendingLengthOffset = 0;
+
+            try
+            {
+                if (_receiveTypeInfo is not null)
+                {
+                    return JsonSerializer.Deserialize(payload.AsSpan(0, payloadLength), _receiveTypeInfo);
+                }
+                else
+                {
+                    return JsonSerializer.Deserialize<TReceive>(payload.AsSpan(0, payloadLength), _jsonOptions);
                 }
             }
             finally
             {
-                ArrayPool<byte>.Shared.Return(lengthBuffer);
+                ArrayPool<byte>.Shared.Return(payload);
             }
         }
         finally
@@ -281,31 +331,17 @@ public sealed class MessageTransit<TSend, TReceive> : ITransit
                 yield break;
             }
 
-            // EOF must be checked via an explicit flag rather than `message is null`:
-            // for non-nullable value-type TReceive, `default(TReceive) is null`
-            // is always false, so the null-pattern check would yield default
-            // forever after the channel closes (issue #177). The secondary
-            // `is null` guard preserves the original behavior for reference
-            // types that legitimately deserialize a JSON `null` payload.
-            if (_receiveEof || message is null)
+            // EOF is signalled exclusively via `_receiveEof`. Using
+            // `message is null` as a secondary terminator would conflate
+            // genuine end-of-stream with a peer that legitimately sends a
+            // JSON `null` payload (issue #220) — losing that message and
+            // every subsequent one. The flag is set inside ReceiveAsync
+            // when the length-prefix or payload read returns 0 bytes.
+            if (_receiveEof)
                 yield break;
 
-            yield return message;
+            yield return message!;
         }
-    }
-
-    private static async ValueTask<int> ReadExactAsync(IReadChannel channel, Memory<byte> buffer, CancellationToken cancellationToken)
-    {
-        var totalRead = 0;
-        while (totalRead < buffer.Length)
-        {
-            var bytesRead = await channel.ReadAsync(buffer[totalRead..], cancellationToken).ConfigureAwait(false);
-            if (bytesRead == 0)
-                return totalRead == 0 ? 0 : throw new EndOfStreamException("Unexpected end of stream while reading message.");
-
-            totalRead += bytesRead;
-        }
-        return totalRead;
     }
 
     /// <inheritdoc/>
@@ -324,6 +360,7 @@ public sealed class MessageTransit<TSend, TReceive> : ITransit
         if (_readChannel is not null)
             await _readChannel.DisposeAsync().ConfigureAwait(false);
 
+        ReturnPendingPayloadBuffer();
         _sendLock.Dispose();
         _receiveLock.Dispose();
     }
@@ -339,8 +376,22 @@ public sealed class MessageTransit<TSend, TReceive> : ITransit
         UnsubscribeFromChannelEvents();
         _writeChannel?.Dispose();
         _readChannel?.Dispose();
+        ReturnPendingPayloadBuffer();
         _sendLock.Dispose();
         _receiveLock.Dispose();
+    }
+
+    // Returns any payload buffer held across a cancelled mid-frame ReceiveAsync
+    // back to the array pool so dispose does not leak it.
+    private void ReturnPendingPayloadBuffer()
+    {
+        var buf = _pendingPayloadBuffer;
+        if (buf is null) return;
+        _pendingPayloadBuffer = null;
+        _pendingPayloadOffset = 0;
+        _pendingPayloadLength = 0;
+        _pendingLengthOffset = 0;
+        ArrayPool<byte>.Shared.Return(buf);
     }
 
     private void UnsubscribeFromChannelEvents()
