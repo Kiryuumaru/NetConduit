@@ -149,10 +149,19 @@ internal sealed class ReadChannel : Stream, IReadChannel, IValueTaskSource<int>
         // (use-after-free). The dispatcher detects this state under AcceptLock
         // and falls through to creating a fresh channel; this is the
         // defense-in-depth backstop.
-        if (_state == ChannelState.Closed)
-            return;
-        _state = ChannelState.Open;
-        if (!_isReady)
+        // Promote Opening → Open atomically under _lock so a concurrent
+        // SetClosed cannot land between the check and the write and leave the
+        // channel resurrected to Open after its slab/handlers were torn down
+        // (issue #163). Closing/Closed/Open are all no-ops; only Opening promotes.
+        bool promoted;
+        lock (_lock)
+        {
+            if (_state != ChannelState.Opening)
+                return;
+            _state = ChannelState.Open;
+            promoted = true;
+        }
+        if (promoted && !_isReady)
         {
             _isReady = true;
             // Raise synchronous Ready first so handlers observe a ready channel,
