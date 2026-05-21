@@ -39,4 +39,14 @@ internal interface IChannelOwner
     /// has consumed, so PrepareReplay on reconnect skips already-delivered bytes.
     /// </summary>
     void SendAck(ushort channelIndex, ulong consumedPosition);
+
+    /// <summary>
+    /// Called by a channel when one of its public events (Ready / Connected /
+    /// Disconnected / Closed) had a user handler throw a non-fatal exception.
+    /// The owner forwards the exception to its observability surface (the
+    /// multiplexer's Error event). Implementations MUST NOT throw — this is
+    /// invoked from inside the channel event raise loop and a throw here would
+    /// defeat the multicast safety the channel is trying to provide.
+    /// </summary>
+    void NotifyEventHandlerException(Exception exception);
 }

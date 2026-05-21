@@ -896,6 +896,14 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IChannelOwner
         _registry.RemovePendingAcceptChannel(channelId);
     }
 
+    void IChannelOwner.NotifyEventHandlerException(Exception exception)
+    {
+        // Forward channel-level event handler failures to the mux's Error
+        // event surface so they are observable without crashing the producer
+        // thread that raised the channel event (#286).
+        RaiseError(exception);
+    }
+
     // =====================================================================
     // Writer Thread — THE DUMB ROUTER (send side)
     // Picks ready channels, writes their pre-built frames to the stream.
