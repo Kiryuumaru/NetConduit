@@ -731,6 +731,14 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IChannelOwner
                 {
                     if (_disconnectReason == Enums.DisconnectReason.GoAwayReceived)
                     {
+                        // Remote-initiated GoAway: the local GoAwayAsync path drains
+                        // then aborts channels, but the remote path skips both. Without
+                        // this, local channels remain in Open state forever after the
+                        // peer disappears — ReadAsync hangs and WriteAsync stalls until
+                        // SendTimeout. Mirror GoAwayAsync's terminal abort so awaiting
+                        // reads see EOF and writers see ChannelClosedException promptly.
+                        _registry.AbortAllChannels(ChannelCloseReason.MuxDisposed);
+                        _registry.CancelAllPendingAccepts();
                         _disconnectedFired = true;
                         RaiseEvent(Disconnected, new DisconnectedEventArgs(Enums.DisconnectReason.GoAwayReceived, null));
                     }

@@ -323,4 +323,84 @@ public sealed class WriteChannelTests
         Assert.NotNull(field);
         return (int)field!.GetValue(channel)! == 1;
     }
+
+    private static WriteChannel CreateChannelWithShortTimeout(int slabSize, TimeSpan sendTimeout)
+    {
+        var router = new TestRouter();
+        var channel = new WriteChannel(
+            channelId: "test",
+            channelIndex: 1,
+            priority: ChannelPriority.Normal,
+            slabSize: slabSize,
+            sendTimeout: sendTimeout,
+            owner: router);
+        channel.MarkOpen();
+        return channel;
+    }
+
+    [Fact]
+    public async Task WriteAsync_ChannelClosedWhileParked_ThrowsChannelClosedException_PromptlyNotTimeout()
+    {
+        // Regression for #230: a writer parked in _spaceAvailable.WaitAsync
+        // must unwind with ChannelClosedException promptly when the channel
+        // closes, instead of stalling for the full SendTimeout and throwing
+        // TimeoutException.
+        var sendTimeout = TimeSpan.FromSeconds(10);
+        var channel = CreateChannelWithShortTimeout(slabSize: 256, sendTimeout: sendTimeout);
+
+        // Fill the slab so the next write parks.
+        int maxPayload = 256 - FrameHeader.Size;
+        await channel.WriteAsync(new byte[maxPayload]);
+
+        // Park a second writer.
+        var sw = System.Diagnostics.Stopwatch.StartNew();
+        var blocked = channel.WriteAsync(new byte[1]).AsTask();
+
+        // Give it a moment to actually park in WaitAsync.
+        await Task.Delay(50);
+        Assert.False(blocked.IsCompleted);
+
+        // Close concurrently.
+        channel.SetClosed(ChannelCloseReason.RemoteFin);
+
+        var ex = await Assert.ThrowsAsync<ChannelClosedException>(() => blocked);
+        sw.Stop();
+
+        Assert.True(sw.ElapsedMilliseconds < 2000,
+            $"Expected ChannelClosedException within ~2s, but write unwound after {sw.ElapsedMilliseconds} ms (SendTimeout was {sendTimeout.TotalSeconds}s).");
+        Assert.Equal(ChannelCloseReason.RemoteFin, ex.CloseReason);
+    }
+
+    [Fact]
+    public async Task WriteAsync_AbortDisposesSemaphore_ConvertedToChannelClosedException()
+    {
+        // Abort disposes the semaphore. A parked writer whose WaitAsync then
+        // throws ObjectDisposedException must surface as ChannelClosedException,
+        // not ObjectDisposedException.
+        var channel = CreateChannelWithShortTimeout(slabSize: 256, sendTimeout: TimeSpan.FromSeconds(10));
+
+        int maxPayload = 256 - FrameHeader.Size;
+        await channel.WriteAsync(new byte[maxPayload]);
+
+        var blocked = channel.WriteAsync(new byte[1]).AsTask();
+        await Task.Delay(50);
+        Assert.False(blocked.IsCompleted);
+
+        channel.Abort(ChannelCloseReason.TransportFailed);
+
+        var ex = await Assert.ThrowsAsync<ChannelClosedException>(() => blocked);
+        Assert.Equal(ChannelCloseReason.TransportFailed, ex.CloseReason);
+    }
+
+    [Fact]
+    public async Task WriteAsync_AfterClose_StateCheckThrowsChannelClosedException()
+    {
+        // Sanity: pre-existing top-of-method state check still fires for
+        // writes issued after the channel is already Closed.
+        var channel = CreateChannelWithShortTimeout(slabSize: 256, sendTimeout: TimeSpan.FromSeconds(60));
+        channel.SetClosed(ChannelCloseReason.LocalClose);
+
+        var ex = await Assert.ThrowsAsync<ChannelClosedException>(() => channel.WriteAsync(new byte[1]).AsTask());
+        Assert.Equal(ChannelCloseReason.LocalClose, ex.CloseReason);
+    }
 }
