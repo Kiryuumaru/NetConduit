@@ -103,10 +103,24 @@ public static class TcpMultiplexer
                 try
                 {
                     var client = await listener.AcceptTcpClientAsync(ct).ConfigureAwait(false);
-                    client.NoDelay = true;
-                    var stream = client.GetStream();
-                    Interlocked.Exchange(ref state, 2);
-                    return new StreamPair(stream, client);
+                    try
+                    {
+                        // NoDelay setter and GetStream() can both throw if the peer
+                        // RST'd in the window between accept and configuration
+                        // (e.g. SocketException(WSAECONNRESET) from NoDelay, or
+                        // InvalidOperationException from GetStream when Socket.Connected
+                        // is already false). Without an inner try, the accepted client
+                        // would leak its kernel socket handle until finalization (#267).
+                        client.NoDelay = true;
+                        var stream = client.GetStream();
+                        Interlocked.Exchange(ref state, 2);
+                        return new StreamPair(stream, client);
+                    }
+                    catch
+                    {
+                        client.Dispose();
+                        throw;
+                    }
                 }
                 catch
                 {
