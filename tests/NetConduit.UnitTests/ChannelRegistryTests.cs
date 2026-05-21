@@ -58,6 +58,6 @@ public sealed class ChannelRegistryTests
         public void NotifyPendingAcceptCancelled(string channelId) { }
         public void NotifyChannelOpened(string channelId) { }
         public void SendAck(ushort channelIndex, ulong consumedPosition) { }
-        public void NotifyEventHandlerException(Exception ex) { }
+        public void NotifyEventHandlerException(Exception exception) { }
     }
 }

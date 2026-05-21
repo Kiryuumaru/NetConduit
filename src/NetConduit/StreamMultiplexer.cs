@@ -32,6 +32,8 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IChannelOwner
     private readonly object _readyLock = new();
     private readonly List<WriteChannel> _readyChannels = [];
     private readonly MuxConnection _conn = new();
+    private readonly MuxConnectRetry _connectRetry;
+    private readonly ChannelBatchRegistrar _channelRegistrar;
 
     private volatile bool _isRunning;
     private volatile bool _isConnected;
@@ -40,7 +42,7 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IChannelOwner
     private volatile bool _disconnectedFired;
     private DisconnectReason? _disconnectReason;
 
-    private static byte[] EncodeValidatedChannelId(string channelId, string paramName)
+    internal static byte[] EncodeValidatedChannelId(string channelId, string paramName)
     {
         ArgumentNullException.ThrowIfNull(channelId, paramName);
 
@@ -118,6 +120,11 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IChannelOwner
         _options = options;
         _conn.SessionId = options.SessionId ?? Guid.NewGuid();
         _registry = new ChannelRegistry(useOddIndices);
+        _connectRetry = new MuxConnectRetry(
+            options,
+            args => RaiseEvent(Reconnecting, args),
+            RaiseError);
+        _channelRegistrar = new ChannelBatchRegistrar(_registry, _options, _stats, this);
     }
 
     /// <summary>
@@ -137,7 +144,7 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IChannelOwner
         return new StreamMultiplexer(options, useOddIndices: true);
     }
 
-    private static void ValidateSlabSize(int slabSize, string paramName)
+    internal static void ValidateSlabSize(int slabSize, string paramName)
     {
         if (slabSize < FrameConstants.MinSlabSize || slabSize > FrameConstants.MaxSlabSize)
         {
@@ -314,222 +321,8 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IChannelOwner
         if (registrations.IsEmpty)
             throw new ArgumentException("At least one registration is required.", nameof(registrations));
 
-        // Phase 1: validate every registration up-front. After this loop, the only
-        // remaining failure mode is an id-already-in-use collision detected in Phase 2.
-        // SlabSize is validated here so the Phase-3 INIT-frame write is infallible.
-        int count = registrations.Length;
-        var prepared = new PreparedRegistration[count];
-        var seenKeys = new HashSet<ChannelRegistration>(count);
-        bool enableReplay = _options.MaxAutoReconnectAttempts != 0;
-        var defaults = _options.DefaultChannelOptions;
-
-        for (int i = 0; i < count; i++)
-        {
-            var reg = registrations[i];
-            string paramPath = $"{nameof(registrations)}[{i}]";
-
-            if (reg.ChannelId is null)
-                throw new ArgumentException($"{paramPath}.{nameof(ChannelRegistration.ChannelId)} is null.", nameof(registrations));
-
-            byte[] idBytes = EncodeValidatedChannelId(reg.ChannelId, $"{paramPath}.{nameof(ChannelRegistration.ChannelId)}");
-
-            if (!seenKeys.Add(reg))
-                throw new ArgumentException(
-                    $"Duplicate registration for channel id '{reg.ChannelId}' in direction {reg.Direction} at index {i}.",
-                    nameof(registrations));
-
-            ChannelOptions effectiveOptions;
-            if (reg.Direction == ChannelDirection.Outbound)
-            {
-                if (reg.Options is not null)
-                {
-                    if (reg.Options.ChannelId != reg.ChannelId)
-                    {
-                        throw new ArgumentException(
-                            $"{paramPath}: registration ChannelId '{reg.ChannelId}' does not match Options.ChannelId '{reg.Options.ChannelId}'.",
-                            nameof(registrations));
-                    }
-                    ValidateSlabSize(reg.Options.SlabSize, $"{paramPath}.{nameof(ChannelRegistration.Options)}.{nameof(ChannelOptions.SlabSize)}");
-                    effectiveOptions = reg.Options;
-                }
-                else
-                {
-                    effectiveOptions = new ChannelOptions
-                    {
-                        ChannelId = reg.ChannelId,
-                        Priority = defaults.Priority,
-                        SlabSize = defaults.SlabSize,
-                        SendTimeout = defaults.SendTimeout,
-                    };
-                }
-            }
-            else
-            {
-                // Inbound: Options is not consulted; ReadChannel uses defaults today.
-                effectiveOptions = new ChannelOptions
-                {
-                    ChannelId = reg.ChannelId,
-                    Priority = defaults.Priority,
-                    SlabSize = defaults.SlabSize,
-                    SendTimeout = defaults.SendTimeout,
-                };
-            }
-
-            prepared[i] = new PreparedRegistration(reg, idBytes, effectiveOptions);
-        }
-
-        // Phase 2: commit under AcceptLock so the batch is serialized against
-        // single-channel AcceptChannel calls and against the reader thread's
-        // INIT-arrival adoption.
-        //
-        // Outbound registrations require a vacant id; any collision (write,
-        // read, or pending accept already present) rolls back every prior
-        // commit from this same batch before returning false.
-        //
-        // Inbound registrations mirror the idempotent semantics of
-        // AcceptChannel(string): an existing ReadChannel or pending accept
-        // for the same id is reused. This is essential for composite transit
-        // patterns where the peer's INIT for the inbound id may have arrived
-        // before the local batch runs.
-        var committedWrites = new List<(ushort Index, WriteChannel Channel)>(count);
-        var committedPendingAccepts = new List<ReadChannel>(count);
-        // Per-registration committed-channel handle, for Phase 3 assembly.
-        var perRegChannel = new IChannel?[count];
-
-        lock (_registry.AcceptLock)
-        {
-            for (int i = 0; i < count; i++)
-            {
-                var p = prepared[i];
-                string id = p.Reg.ChannelId;
-
-                if (p.Reg.Direction == ChannelDirection.Outbound)
-                {
-                    if (_registry.GetWriteChannelById(id) is not null ||
-                        _registry.GetReadChannelById(id) is not null ||
-                        _registry.GetPendingAcceptChannel(id) is not null)
-                    {
-                        RollbackPartialBatch(committedWrites, committedPendingAccepts);
-                        channels = null!;
-                        return false;
-                    }
-
-                    ushort idx = _registry.AllocateChannelIndex();
-                    var wc = new WriteChannel(
-                        id,
-                        idx,
-                        p.EffectiveOptions.Priority,
-                        p.EffectiveOptions.SlabSize,
-                        p.EffectiveOptions.SendTimeout,
-                        this,
-                        enableReplay);
-                    try
-                    {
-                        _registry.RegisterWriteChannel(idx, wc);
-                    }
-                    catch (MultiplexerException)
-                    {
-                        // Race with a concurrent single-channel OpenChannel (which does
-                        // not take AcceptLock). Treat as collision.
-                        RollbackPartialBatch(committedWrites, committedPendingAccepts);
-                        channels = null!;
-                        return false;
-                    }
-                    committedWrites.Add((idx, wc));
-                    perRegChannel[i] = wc;
-                }
-                else
-                {
-                    // Inbound: idempotent — adopt existing ReadChannel or pending accept
-                    // for the same id, otherwise create a new pending accept. A pre-existing
-                    // outbound channel with the same id is still a collision (the id is
-                    // bound to a write channel, not a read channel).
-                    if (_registry.GetWriteChannelById(id) is not null)
-                    {
-                        RollbackPartialBatch(committedWrites, committedPendingAccepts);
-                        channels = null!;
-                        return false;
-                    }
-
-                    var existing = _registry.GetReadChannelById(id) ?? _registry.GetPendingAcceptChannel(id);
-                    if (existing is not null)
-                    {
-                        perRegChannel[i] = existing;
-                    }
-                    else
-                    {
-                        var rc = new ReadChannel(
-                            id,
-                            0, // index assigned later when remote INIT arrives
-                            p.EffectiveOptions.Priority,
-                            p.EffectiveOptions.SlabSize,
-                            this);
-                        if (!_registry.TryRegisterPendingAcceptChannel(id, rc))
-                        {
-                            RollbackPartialBatch(committedWrites, committedPendingAccepts);
-                            channels = null!;
-                            return false;
-                        }
-                        committedPendingAccepts.Add(rc);
-                        perRegChannel[i] = rc;
-                    }
-                }
-            }
-        }
-
-        // Phase 3: post-commit side effects. SlabSize validated in Phase 1 makes
-        // WriteInitFrame infallible here, so no rollback can be necessary.
-        // Only freshly-committed write channels emit an INIT frame and bump open
-        // stats; reused inbound channels do nothing here.
-        var result = new Dictionary<ChannelRegistration, IChannel>(count);
-        int outboundCursor = 0;
-        for (int i = 0; i < count; i++)
-        {
-            var p = prepared[i];
-            var ch = perRegChannel[i]!;
-            if (p.Reg.Direction == ChannelDirection.Outbound)
-            {
-                var wc = committedWrites[outboundCursor++].Channel;
-                wc.WriteInitFrame(p.IdBytes);
-                if (_isConnected) wc.MarkConnected();
-                Interlocked.Increment(ref _stats._openChannels);
-                Interlocked.Increment(ref _stats._totalChannelsOpened);
-            }
-            else if (committedPendingAccepts.Contains((ReadChannel)ch))
-            {
-                // Freshly-committed pending accept: mark connected just like AcceptChannel does.
-                if (_isConnected) ((ReadChannel)ch).MarkConnected();
-            }
-            // else: reused existing inbound channel — no side effects.
-
-            result[p.Reg] = ch;
-        }
-
-        channels = result;
-        return true;
+        return _channelRegistrar.TryRegisterChannels(registrations, _isConnected, out channels);
     }
-
-    private void RollbackPartialBatch(
-        List<(ushort Index, WriteChannel Channel)> committedWrites,
-        List<ReadChannel> committedPendingAccepts)
-    {
-        // Caller holds AcceptLock. Unregister in reverse insertion order; channel
-        // indices are intentionally not reclaimed (allocation is monotonic).
-        for (int i = committedWrites.Count - 1; i >= 0; i--)
-        {
-            var (idx, ch) = committedWrites[i];
-            _registry.UnregisterChannel(idx, ch.ChannelId);
-        }
-        for (int i = committedPendingAccepts.Count - 1; i >= 0; i--)
-        {
-            _registry.RemovePendingAcceptChannel(committedPendingAccepts[i].ChannelId);
-        }
-    }
-
-    private readonly record struct PreparedRegistration(
-        ChannelRegistration Reg,
-        byte[] IdBytes,
-        ChannelOptions EffectiveOptions);
 
     /// <inheritdoc />
     public IWriteChannel? GetWriteChannel(string channelId) => _registry.GetWriteChannelById(channelId);
@@ -589,7 +382,7 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IChannelOwner
             while (!ct.IsCancellationRequested)
             {
                 // Connect with retry (no delay on first attempt)
-                var transport = await ConnectWithRetryAsync(hasConnectedBefore, ct);
+                var transport = await _connectRetry.ConnectWithRetryAsync(hasConnectedBefore, ct);
 
                 // Handshake: reconnect if we've connected before, initial otherwise.
                 // Only transport I/O failures raised by the handshake path are retryable.
@@ -622,7 +415,7 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IChannelOwner
 
                     RaiseError(handshakeEx);
 
-                    if (!HasHandshakeRetryBudget(handshakeAttempt))
+                    if (!_connectRetry.HasHandshakeRetryBudget(handshakeAttempt))
                         throw;
 
                     try
@@ -661,20 +454,30 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IChannelOwner
                 var loopCt = _conn.LoopCts.Token;
                 var conn = _conn;
 
+                var transportWriter = new MuxTransportWriter(
+                    conn, _readySignal, _flushSignal, _readyChannels, _readyLock, _stats);
+
                 _conn.WriterTask = Task.Factory.StartNew(
-                    () => RunWriterLoop(conn, loopCt),
+                    () => transportWriter.RunWriterLoop(loopCt),
                     loopCt,
                     TaskCreationOptions.LongRunning,
                     TaskScheduler.Default);
                 _conn.FlusherTask = Task.Factory.StartNew(
-                    () => RunFlusherLoop(conn, loopCt),
+                    () => transportWriter.RunFlusherLoop(loopCt),
                     loopCt,
                     TaskCreationOptions.LongRunning,
                     TaskScheduler.Default);
                 _conn.ReaderTask = Task.Run(() => RunReaderLoopAsync(conn, loopCt), loopCt);
 
                 if (_options.PingInterval > TimeSpan.Zero)
-                    _conn.KeepaliveTask = Task.Run(() => RunKeepaliveLoopAsync(conn, loopCt), loopCt);
+                {
+                    var keepalive = new MuxKeepalive(
+                        conn,
+                        _options.PingInterval,
+                        _options.PingTimeout,
+                        _options.MaxMissedPings);
+                    _conn.KeepaliveTask = Task.Run(() => keepalive.RunAsync(loopCt), loopCt);
+                }
 
                 RaiseEvent(Connected);
 
@@ -770,75 +573,6 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IChannelOwner
         _registry.CancelAllPendingAccepts();
     }
 
-    private bool HasHandshakeRetryBudget(int failedAttempts)
-    {
-        int maxAttempts = _options.MaxAutoReconnectAttempts;
-        return maxAttempts < 0 || failedAttempts < maxAttempts;
-    }
-
-    private async Task<IStreamPair> ConnectWithRetryAsync(bool isReconnect, CancellationToken ct)
-    {
-        int maxAttempts = _options.MaxAutoReconnectAttempts;
-        double delay = _options.AutoReconnectDelay.TotalMilliseconds;
-        double maxDelay = _options.MaxAutoReconnectDelay.TotalMilliseconds;
-
-        if (isReconnect && maxAttempts == 0)
-            throw new MultiplexerException(ErrorCode.Internal, "Reconnect is disabled.");
-
-        for (int attempt = 1; ; attempt++)
-        {
-            ct.ThrowIfCancellationRequested();
-
-            // Enforce max attempts. -1 = unlimited, 0 = single attempt (no retry),
-            // >0 = at most N total attempts.
-            if (maxAttempts > 0 && attempt > maxAttempts)
-                throw new MultiplexerException(ErrorCode.Internal,
-                    $"Connection failed after {maxAttempts} attempts.");
-
-            // Delay before retry (skip on first attempt of first connect)
-            if (attempt > 1 || isReconnect)
-            {
-                RaiseEvent(Reconnecting, new ReconnectingEventArgs(attempt));
-                await Task.Delay(TimeSpan.FromMilliseconds(delay), ct);
-                delay = Math.Min(delay * _options.AutoReconnectBackoffMultiplier, maxDelay);
-            }
-
-            try
-            {
-                if (_options.ConnectionTimeout > TimeSpan.Zero
-                    && _options.ConnectionTimeout != Timeout.InfiniteTimeSpan)
-                {
-                    using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
-                    timeoutCts.CancelAfter(_options.ConnectionTimeout);
-                    try
-                    {
-                        return await _options.StreamFactory(timeoutCts.Token);
-                    }
-                    catch (OperationCanceledException) when (!ct.IsCancellationRequested)
-                    {
-                        throw new TimeoutException(
-                            $"Connection timed out after {_options.ConnectionTimeout}");
-                    }
-                }
-
-                return await _options.StreamFactory(ct);
-            }
-            catch (OperationCanceledException) when (ct.IsCancellationRequested)
-            {
-                throw;
-            }
-            catch (Exception ex)
-            {
-                RaiseError(ex);
-
-                // maxAttempts == 0 means no retry: propagate the first failure immediately
-                // whether this is the initial connect or a reconnect after the link died.
-                if (maxAttempts == 0)
-                    throw;
-            }
-        }
-    }
-
     private async Task WaitForLoopsAsync()
     {
         Task[] loops = [_conn.WriterTask!, _conn.ReaderTask!, _conn.FlusherTask!];
@@ -902,81 +636,6 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IChannelOwner
         // event surface so they are observable without crashing the producer
         // thread that raised the channel event (#286).
         RaiseError(exception);
-    }
-
-    // =====================================================================
-    // Writer Thread — THE DUMB ROUTER (send side)
-    // Picks ready channels, writes their pre-built frames to the stream.
-    // Flush is handled by the separate flusher thread.
-    // Runs on a dedicated LongRunning thread; uses synchronous I/O so the
-    // hot path does not allocate Task continuations or hop ThreadPool threads.
-    // =====================================================================
-    private void RunWriterLoop(MuxConnection conn, CancellationToken ct)
-    {
-        var transport = conn.Transport ?? throw new InvalidOperationException("Transport not initialized.");
-        var writeStream = transport.WriteStream;
-
-        try
-        {
-            while (!ct.IsCancellationRequested)
-            {
-                _readySignal.Wait(ct);
-
-                // Snapshot and sort ready channels by priority (highest first)
-                WriteChannel[] snapshot;
-                lock (_readyLock)
-                {
-                    if (_readyChannels.Count == 0) continue;
-                    _readyChannels.Sort(static (a, b) => b.Priority.CompareTo(a.Priority));
-                    snapshot = _readyChannels.ToArray();
-                    _readyChannels.Clear();
-                }
-
-                bool anyWritten = false;
-                foreach (var channel in snapshot)
-                {
-                    Memory<byte> frames = channel.TakeReady();
-                    if (frames.IsEmpty) continue;
-
-                    writeStream.Write(frames.Span);
-                    channel.MarkSent(frames.Length);
-                    Interlocked.Add(ref _stats._bytesSent, frames.Length);
-                    anyWritten = true;
-                }
-
-                if (anyWritten)
-                    _flushSignal.Signal();
-            }
-        }
-        catch (OperationCanceledException) when (ct.IsCancellationRequested)
-        {
-            // Normal shutdown
-        }
-    }
-
-    // =====================================================================
-    // Flusher Thread — dedicated thread that flushes the transport stream.
-    // Decouples write batching from kernel flush syscall.
-    // =====================================================================
-    private void RunFlusherLoop(MuxConnection conn, CancellationToken ct)
-    {
-        var transport = conn.Transport ?? throw new InvalidOperationException("Transport not initialized.");
-        var writeStream = transport.WriteStream;
-
-        try
-        {
-            while (!ct.IsCancellationRequested)
-            {
-                _flushSignal.Wait(ct);
-                writeStream.Flush();
-            }
-        }
-        catch (OperationCanceledException) when (ct.IsCancellationRequested)
-        {
-            // Normal shutdown — do one final flush to push any remaining data
-            try { writeStream.Flush(); }
-            catch { /* transport may already be closed */ }
-        }
     }
 
     // =====================================================================
@@ -1050,74 +709,84 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IChannelOwner
     {
         if (header.Flags == FrameFlags.Init)
         {
-            if (payload.Length > ChannelConstants.MaxChannelIdLength)
-                return; // channel name too long — drop frame
-
-            string channelId = Encoding.UTF8.GetString(payload);
-            ReadChannel readChannel;
-            bool isNewlyAccepted;
-
-            // Atomic registration: serialized with AcceptChannel so we cannot
-            // race between adopting a pending channel and the test grabbing
-            // a transient _readChannels entry.
-            lock (_registry.AcceptLock)
-            {
-                // After reconnect, Init frames are replayed from the slab.
-                // If the channel already exists, skip re-registration.
-                var existing = _registry.GetReadChannel(header.ChannelIndex);
-                if (existing is not null)
-                    return;
-
-                // Check if a pending accept channel was pre-created via AcceptChannel.
-                // A pending entry whose state is already Closed was disposed by the
-                // caller before INIT arrived; treat it as if no pending exists and
-                // fall through to creating a fresh channel. Adopting the disposed
-                // instance would resurrect a channel whose slab has been returned
-                // to ArrayPool<byte>.Shared.
-                var pendingChannel = _registry.GetPendingAcceptChannel(channelId);
-                if (pendingChannel is not null && pendingChannel.State == ChannelState.Closed)
-                {
-                    _registry.RemovePendingAcceptChannel(channelId);
-                    pendingChannel = null;
-                }
-
-                if (pendingChannel is not null)
-                {
-                    readChannel = pendingChannel;
-                    readChannel.SetChannelIndex(header.ChannelIndex);
-                    _registry.RemovePendingAcceptChannel(channelId);
-                    isNewlyAccepted = true;
-                }
-                else
-                {
-                    readChannel = new ReadChannel(
-                        channelId,
-                        header.ChannelIndex,
-                        _options.DefaultChannelOptions.Priority,
-                        _options.DefaultChannelOptions.SlabSize,
-                        this);
-                    isNewlyAccepted = false;
-                }
-
-                _registry.RegisterReadChannel(header.ChannelIndex, readChannel);
-            }
-
-            readChannel.MarkOpen();
-            readChannel.MarkConnected();
-
-            // Send init-ack so the opener knows the channel is established
-            SendInitAck(header.ChannelIndex);
-
-            Interlocked.Increment(ref _stats._openChannels);
-            Interlocked.Increment(ref _stats._totalChannelsOpened);
-            RaiseEvent(ChannelAccepted, new ChannelEventArgs(channelId));
-
-            // Only enqueue for generic AcceptChannelsAsync if no specific accept claimed it.
-            if (!isNewlyAccepted)
-                _registry.EnqueueForAccept(readChannel);
+            HandleInitFrame(header, payload);
             return;
         }
 
+        DispatchExistingChannelFrame(header, payload);
+    }
+
+    private void HandleInitFrame(FrameHeader header, ReadOnlySpan<byte> payload)
+    {
+        if (payload.Length > ChannelConstants.MaxChannelIdLength)
+            return; // channel name too long — drop frame
+
+        string channelId = Encoding.UTF8.GetString(payload);
+        ReadChannel readChannel;
+        bool isNewlyAccepted;
+
+        // Atomic registration: serialized with AcceptChannel so we cannot
+        // race between adopting a pending channel and the test grabbing
+        // a transient _readChannels entry.
+        lock (_registry.AcceptLock)
+        {
+            // After reconnect, Init frames are replayed from the slab.
+            // If the channel already exists, skip re-registration.
+            var existing = _registry.GetReadChannel(header.ChannelIndex);
+            if (existing is not null)
+                return;
+
+            // Check if a pending accept channel was pre-created via AcceptChannel.
+            // A pending entry whose state is already Closed was disposed by the
+            // caller before INIT arrived; treat it as if no pending exists and
+            // fall through to creating a fresh channel. Adopting the disposed
+            // instance would resurrect a channel whose slab has been returned
+            // to ArrayPool<byte>.Shared.
+            var pendingChannel = _registry.GetPendingAcceptChannel(channelId);
+            if (pendingChannel is not null && pendingChannel.State == ChannelState.Closed)
+            {
+                _registry.RemovePendingAcceptChannel(channelId);
+                pendingChannel = null;
+            }
+
+            if (pendingChannel is not null)
+            {
+                readChannel = pendingChannel;
+                readChannel.SetChannelIndex(header.ChannelIndex);
+                _registry.RemovePendingAcceptChannel(channelId);
+                isNewlyAccepted = true;
+            }
+            else
+            {
+                readChannel = new ReadChannel(
+                    channelId,
+                    header.ChannelIndex,
+                    _options.DefaultChannelOptions.Priority,
+                    _options.DefaultChannelOptions.SlabSize,
+                    this);
+                isNewlyAccepted = false;
+            }
+
+            _registry.RegisterReadChannel(header.ChannelIndex, readChannel);
+        }
+
+        readChannel.MarkOpen();
+        readChannel.MarkConnected();
+
+        // Send init-ack so the opener knows the channel is established
+        SendInitAck(header.ChannelIndex);
+
+        Interlocked.Increment(ref _stats._openChannels);
+        Interlocked.Increment(ref _stats._totalChannelsOpened);
+        RaiseEvent(ChannelAccepted, new ChannelEventArgs(channelId));
+
+        // Only enqueue for generic AcceptChannelsAsync if no specific accept claimed it.
+        if (!isNewlyAccepted)
+            _registry.EnqueueForAccept(readChannel);
+    }
+
+    private void DispatchExistingChannelFrame(FrameHeader header, ReadOnlySpan<byte> payload)
+    {
         // Route data/ack/fin/err to existing channel
         var channel = _registry.GetReadChannel(header.ChannelIndex);
         if (channel is null)
@@ -1181,61 +850,6 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IChannelOwner
         _isShuttingDown = true;
         _disconnectReason = Enums.DisconnectReason.GoAwayReceived;
         _cts.Cancel();
-    }
-
-    // =====================================================================
-    // Keepalive Loop — sends periodic PING frames, monitors PONG responses
-    // =====================================================================
-    private async Task RunKeepaliveLoopAsync(MuxConnection conn, CancellationToken ct)
-    {
-        int missedPings = 0;
-        byte[] pingPayload = new byte[8];
-
-        try
-        {
-            while (!ct.IsCancellationRequested)
-            {
-                await Task.Delay(_options.PingInterval, ct);
-
-                var pendingPong = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-                Interlocked.Exchange(ref conn.PendingPong, pendingPong);
-
-                BinaryPrimitives.WriteInt64BigEndian(pingPayload, Environment.TickCount64);
-                SendControlFrame(FrameFlags.Ping, pingPayload);
-
-                if (await WaitForPongAsync(conn, pendingPong, ct))
-                {
-                    missedPings = 0;
-                    continue;
-                }
-
-                missedPings++;
-                if (missedPings >= _options.MaxMissedPings)
-                {
-                    throw new IOException(
-                        $"Keepalive timeout: {missedPings} missed pings (timeout: {_options.PingTimeout})");
-                }
-            }
-        }
-        catch (OperationCanceledException) when (ct.IsCancellationRequested)
-        {
-            // Normal shutdown
-        }
-    }
-
-    private async Task<bool> WaitForPongAsync(MuxConnection conn, TaskCompletionSource pendingPong, CancellationToken ct)
-    {
-        Task timeout = _options.PingTimeout > TimeSpan.Zero
-            ? Task.Delay(_options.PingTimeout, ct)
-            : Task.CompletedTask;
-
-        Task completed = await Task.WhenAny(pendingPong.Task, timeout);
-        if (completed == pendingPong.Task)
-            return true;
-
-        ct.ThrowIfCancellationRequested();
-        Interlocked.CompareExchange(ref conn.PendingPong, null, pendingPong);
-        return false;
     }
 
     private void SendControlFrame(FrameFlags flags, ReadOnlySpan<byte> payload)
