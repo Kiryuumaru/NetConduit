@@ -88,14 +88,24 @@ public static class UdpMultiplexer
                     listener.Client.DualMode = true;
                     listener.Client.Bind(new IPEndPoint(IPAddress.IPv6Any, listenPort));
 
-                    var result = await listener.ReceiveAsync(ct).ConfigureAwait(false);
-                    var remote = result.RemoteEndPoint;
-                    listener.Connect(remote);
-
-                    if (result.Buffer.AsSpan().SequenceEqual(HelloPayload))
+                    // Discard datagrams that are not NC_HELLO before latching the
+                    // socket. Without this loop a single stray UDP packet (port
+                    // scanner, leftover from a previous session, attacker probe,
+                    // health check) would Connect() the listener to a non-client
+                    // endpoint and permanently DoS the server (#303).
+                    IPEndPoint remote;
+                    while (true)
                     {
-                        await listener.SendAsync(HelloAckPayload, ct).ConfigureAwait(false);
+                        var result = await listener.ReceiveAsync(ct).ConfigureAwait(false);
+                        if (result.Buffer.AsSpan().SequenceEqual(HelloPayload))
+                        {
+                            remote = result.RemoteEndPoint;
+                            break;
+                        }
                     }
+
+                    listener.Connect(remote);
+                    await listener.SendAsync(HelloAckPayload, ct).ConfigureAwait(false);
 
                     var reliable = new ReliableUdpStream(listener, udpOptions);
                     Interlocked.Exchange(ref state, 2);
