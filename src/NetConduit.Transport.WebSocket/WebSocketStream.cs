@@ -67,6 +67,18 @@ internal sealed class WebSocketStream : Stream
                 return 0;
             }
 
+            // NetConduit's framing layer is binary. Any non-Binary data frame (Text,
+            // or future WebSocket message types) must be rejected here — otherwise its
+            // payload would be fed to FrameHeader.Parse and either tear down the mux
+            // with a misattributed ProtocolError or, worse, inject bytes into the
+            // wrong channel's read stream (issue #217).
+            if (result.MessageType != WebSocketMessageType.Binary)
+            {
+                throw new IOException(
+                    $"WebSocket peer sent unsupported message type {result.MessageType}; " +
+                    "NetConduit requires Binary frames only.");
+            }
+
             if (result.Count > 0)
             {
                 int bytesToCopy = Math.Min(buffer.Length, result.Count);
