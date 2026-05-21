@@ -531,6 +531,53 @@ public sealed class MessageTransitTests
         await server.DisposeAsync();
     }
 
+    /// <summary>
+    /// Regression for #278: when the receiver rejects a message because its
+    /// length prefix exceeds the receiver's _maxMessageSize, the over-max
+    /// payload bytes are still queued on the channel. The receiver MUST drain
+    /// those bytes before the next ReceiveAsync so framing resumes on a clean
+    /// boundary. Without this, every subsequent ReceiveAsync reads garbage
+    /// length prefixes from the middle of the abandoned payload and the
+    /// receive stream is permanently desynchronized.
+    /// </summary>
+    [Fact]
+    public async Task MessageTransit_OversizedReceive_DrainsPayload_AndRecoversFraming()
+    {
+        var (client, server) = await CreateReadyPairAsync();
+
+        var w = client.OpenChannel("m3-drain");
+        var r = await server.AcceptChannelAsync("m3-drain");
+
+#pragma warning disable IL2026, IL3050
+        // Sender accepts up to 1 MiB; receiver rejects anything over 1 KiB.
+        var sender = new MessageTransit<TestMessage, TestMessage>(w, null, maxMessageSize: 1 * 1024 * 1024);
+        var receiver = new MessageTransit<TestMessage, TestMessage>(null, r, maxMessageSize: 1024);
+#pragma warning restore IL2026, IL3050
+
+        // Big message: legit for sender, over-max for receiver.
+        await sender.SendAsync(new TestMessage { Name = new string('x', 8 * 1024), Value = 1 });
+        // Normal follow-up that the receiver MUST be able to recover and read.
+        await sender.SendAsync(new TestMessage { Name = "after", Value = 2 });
+
+        // First receive: rejects the over-max message.
+        var ex = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            receiver.ReceiveAsync().AsTask());
+        Assert.Contains("exceeds maximum", ex.Message);
+
+        // Second receive: must yield the follow-up cleanly, proving the
+        // abandoned over-max payload was drained instead of being parsed
+        // as the next length prefix.
+        var recovered = await receiver.ReceiveAsync();
+        Assert.NotNull(recovered);
+        Assert.Equal("after", recovered.Name);
+        Assert.Equal(2, recovered.Value);
+
+        await sender.DisposeAsync();
+        await receiver.DisposeAsync();
+        await client.DisposeAsync();
+        await server.DisposeAsync();
+    }
+
     #endregion
 
     #region ReceiveAllAsync
