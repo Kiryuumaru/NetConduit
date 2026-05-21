@@ -98,8 +98,7 @@ public static class IpcMultiplexer
                     }
                     else
                     {
-                        if (File.Exists(endpoint))
-                            File.Delete(endpoint);
+                        EnsureUnixEndpointWritable(endpoint);
 
                         var listenSocket = new Socket(AddressFamily.Unix, SocketType.Stream, ProtocolType.Unspecified);
                         try
@@ -137,5 +136,29 @@ public static class IpcMultiplexer
         var hash = SHA256.HashData(bytes);
         var value = (ushort)(hash[0] << 8 | hash[1]);
         return 49152 + (value % (65535 - 49152));
+    }
+
+    // Refuses to delete the endpoint path when it points at something the user did
+    // not put there as a Unix domain socket. A bare File.Delete here would silently
+    // destroy arbitrary user files when the endpoint is misconfigured.
+    //
+    // File.Exists on Unix explicitly checks S_IFREG, so it returns true only for
+    // regular files (and symlinks resolving to them) — Unix domain sockets, FIFOs,
+    // and devices all report false. That gives us the discriminator we need: if
+    // the path "exists" by File.Exists, it is provably not a socket and must not
+    // be deleted. For actual stale sockets, File.Exists is false and we fall
+    // through; Socket.Bind will surface EADDRINUSE which the caller can act on.
+    //
+    // Note: a connect(2) probe cannot be used as a type discriminator here.
+    // On Linux, connect(AF_UNIX, SOCK_STREAM) to a regular file returns
+    // ECONNREFUSED — the same error returned for a stale socket with no live
+    // listener — so the two cases are indistinguishable from the socket API.
+    private static void EnsureUnixEndpointWritable(string endpoint)
+    {
+        if (!File.Exists(endpoint))
+            return;
+
+        throw new IOException(
+            $"IPC endpoint path '{endpoint}' exists and is not a Unix domain socket; refusing to overwrite.");
     }
 }
