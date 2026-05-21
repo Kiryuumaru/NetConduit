@@ -281,16 +281,16 @@ public sealed class MessageTransit<TSend, TReceive> : ITransit
                 yield break;
             }
 
-            // EOF must be checked via an explicit flag rather than `message is null`:
-            // for non-nullable value-type TReceive, `default(TReceive) is null`
-            // is always false, so the null-pattern check would yield default
-            // forever after the channel closes (issue #177). The secondary
-            // `is null` guard preserves the original behavior for reference
-            // types that legitimately deserialize a JSON `null` payload.
-            if (_receiveEof || message is null)
+            // EOF is signalled exclusively via `_receiveEof`. Using
+            // `message is null` as a secondary terminator would conflate
+            // genuine end-of-stream with a peer that legitimately sends a
+            // JSON `null` payload (issue #220) — losing that message and
+            // every subsequent one. The flag is set inside ReceiveAsync
+            // when the length-prefix or payload read returns 0 bytes.
+            if (_receiveEof)
                 yield break;
 
-            yield return message;
+            yield return message!;
         }
     }
 
