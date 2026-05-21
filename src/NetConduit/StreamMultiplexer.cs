@@ -34,24 +34,14 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IChannelOwner
     private readonly CancellationTokenSource _cts = new();
     private readonly object _readyLock = new();
     private readonly List<WriteChannel> _readyChannels = [];
+    private readonly MuxConnection _conn = new();
 
-    private IStreamPair? _transport;
-    private Task? _mainLoopTask;
-    private Task? _writerTask;
-    private Task? _readerTask;
-    private Task? _flusherTask;
-    private Task? _keepaliveTask;
-    private CancellationTokenSource? _loopCts;
-    private WriteChannel? _controlChannel;
     private volatile bool _isRunning;
     private volatile bool _isConnected;
     private volatile bool _isReady;
     private volatile bool _isShuttingDown;
     private volatile bool _disconnectedFired;
     private DisconnectReason? _disconnectReason;
-    private Guid _sessionId;
-    private Guid _remoteSessionId;
-    private TaskCompletionSource? _pendingPong;
 
     private static byte[] EncodeValidatedChannelId(string channelId, string paramName)
     {
@@ -90,10 +80,10 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IChannelOwner
     public bool IsShuttingDown => _isShuttingDown;
 
     /// <inheritdoc />
-    public Guid SessionId => _sessionId;
+    public Guid SessionId => _conn.SessionId;
 
     /// <inheritdoc />
-    public Guid RemoteSessionId => _remoteSessionId;
+    public Guid RemoteSessionId => _conn.RemoteSessionId;
 
     /// <inheritdoc />
     public IReadOnlyCollection<string> ActiveChannelIds =>
@@ -129,7 +119,7 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IChannelOwner
     private StreamMultiplexer(MultiplexerOptions options, bool useOddIndices)
     {
         _options = options;
-        _sessionId = options.SessionId ?? Guid.NewGuid();
+        _conn.SessionId = options.SessionId ?? Guid.NewGuid();
         _registry = new ChannelRegistry(useOddIndices);
     }
 
@@ -223,7 +213,7 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IChannelOwner
 
         _isRunning = true;
         _stats._startTicks = Environment.TickCount64;
-        _mainLoopTask = Task.Run(() => MainLoopAsync(_cts.Token));
+        _conn.MainLoopTask = Task.Run(() => MainLoopAsync(_cts.Token));
     }
 
     /// <inheritdoc />
@@ -619,7 +609,7 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IChannelOwner
                     }
                     else
                     {
-                        _transport = transport;
+                        _conn.Transport = transport;
                         await PerformHandshakeAsync(ct);
                     }
                 }
@@ -630,7 +620,7 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IChannelOwner
                 catch (HandshakeTransportException handshakeEx)
                 {
                     handshakeAttempt++;
-                    _transport = null;
+                    _conn.Transport = null;
                     try { await transport.DisposeAsync(); } catch { }
 
                     RaiseEvent(Error, new Events.ErrorEventArgs(handshakeEx));
@@ -652,41 +642,42 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IChannelOwner
 
                 handshakeAttempt = 0;
 
-                _transport = transport;
+                _conn.Transport = transport;
                 _isConnected = true;
                 _disconnectReason = null;
 
                 // Create control channel on first connect
-                if (_controlChannel is null)
+                if (_conn.ControlChannel is null)
                 {
-                    _controlChannel = new WriteChannel(
+                    _conn.ControlChannel = new WriteChannel(
                         "__control__",
                         ChannelConstants.ControlChannel,
                         ChannelPriority.Highest,
                         FrameConstants.MinSlabSize,
                         TimeSpan.FromSeconds(5),
                         this);
-                    _controlChannel.MarkOpen();
+                    _conn.ControlChannel.MarkOpen();
                 }
 
                 // Start loops with a per-session CTS
-                _loopCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
-                var loopCt = _loopCts.Token;
+                _conn.LoopCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+                var loopCt = _conn.LoopCts.Token;
+                var conn = _conn;
 
-                _writerTask = Task.Factory.StartNew(
-                    () => RunWriterLoop(loopCt),
+                _conn.WriterTask = Task.Factory.StartNew(
+                    () => RunWriterLoop(conn, loopCt),
                     loopCt,
                     TaskCreationOptions.LongRunning,
                     TaskScheduler.Default);
-                _flusherTask = Task.Factory.StartNew(
-                    () => RunFlusherLoop(loopCt),
+                _conn.FlusherTask = Task.Factory.StartNew(
+                    () => RunFlusherLoop(conn, loopCt),
                     loopCt,
                     TaskCreationOptions.LongRunning,
                     TaskScheduler.Default);
-                _readerTask = Task.Run(() => RunReaderLoopAsync(loopCt), loopCt);
+                _conn.ReaderTask = Task.Run(() => RunReaderLoopAsync(conn, loopCt), loopCt);
 
                 if (_options.PingInterval > TimeSpan.Zero)
-                    _keepaliveTask = Task.Run(() => RunKeepaliveLoopAsync(loopCt), loopCt);
+                    _conn.KeepaliveTask = Task.Run(() => RunKeepaliveLoopAsync(conn, loopCt), loopCt);
 
                 RaiseEvent(Connected);
 
@@ -708,14 +699,14 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IChannelOwner
 
                 // Block until any loop faults (transport died)
                 var faulted = await Task.WhenAny(
-                    _writerTask,
-                    _readerTask,
-                    _flusherTask,
-                    _keepaliveTask ?? Task.Delay(Timeout.Infinite, ct));
+                    _conn.WriterTask!,
+                    _conn.ReaderTask!,
+                    _conn.FlusherTask!,
+                    _conn.KeepaliveTask ?? Task.Delay(Timeout.Infinite, ct));
 
                 // Transport is dead — cancel all loops and clean up
                 _isConnected = false;
-                _loopCts.Cancel();
+                _conn.LoopCts.Cancel();
 
                 // Notify all channels that transport is disconnected
                 foreach (var ch in _registry.GetAllWriteChannels())
@@ -724,8 +715,8 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IChannelOwner
                     ch.MarkDisconnected(Enums.DisconnectReason.TransportError, null);
 
                 await WaitForLoopsAsync();
-                _loopCts.Dispose();
-                _loopCts = null;
+                _conn.LoopCts.Dispose();
+                _conn.LoopCts = null;
 
                 // Capture the exception if any
                 Exception? transportEx = faulted.Exception?.InnerException;
@@ -734,7 +725,7 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IChannelOwner
 
                 // Dispose old transport
                 await transport.DisposeAsync();
-                _transport = null;
+                _conn.Transport = null;
 
                 if (_isShuttingDown)
                 {
@@ -845,9 +836,9 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IChannelOwner
 
     private async Task WaitForLoopsAsync()
     {
-        Task[] loops = [_writerTask!, _readerTask!, _flusherTask!];
-        if (_keepaliveTask is not null)
-            loops = [.. loops, _keepaliveTask];
+        Task[] loops = [_conn.WriterTask!, _conn.ReaderTask!, _conn.FlusherTask!];
+        if (_conn.KeepaliveTask is not null)
+            loops = [.. loops, _conn.KeepaliveTask];
 
         foreach (var loop in loops)
         {
@@ -907,9 +898,9 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IChannelOwner
     // Runs on a dedicated LongRunning thread; uses synchronous I/O so the
     // hot path does not allocate Task continuations or hop ThreadPool threads.
     // =====================================================================
-    private void RunWriterLoop(CancellationToken ct)
+    private void RunWriterLoop(MuxConnection conn, CancellationToken ct)
     {
-        var transport = _transport ?? throw new InvalidOperationException("Transport not initialized.");
+        var transport = conn.Transport ?? throw new InvalidOperationException("Transport not initialized.");
         var writeStream = transport.WriteStream;
 
         try
@@ -954,9 +945,9 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IChannelOwner
     // Flusher Thread — dedicated thread that flushes the transport stream.
     // Decouples write batching from kernel flush syscall.
     // =====================================================================
-    private void RunFlusherLoop(CancellationToken ct)
+    private void RunFlusherLoop(MuxConnection conn, CancellationToken ct)
     {
-        var transport = _transport ?? throw new InvalidOperationException("Transport not initialized.");
+        var transport = conn.Transport ?? throw new InvalidOperationException("Transport not initialized.");
         var writeStream = transport.WriteStream;
 
         try
@@ -979,9 +970,9 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IChannelOwner
     // Reader Thread — THE DISPATCHER (receive side)
     // Reads 8-byte header, routes payload to the correct channel.
     // =====================================================================
-    private async Task RunReaderLoopAsync(CancellationToken ct)
+    private async Task RunReaderLoopAsync(MuxConnection conn, CancellationToken ct)
     {
-        var transport = _transport ?? throw new InvalidOperationException("Transport not initialized.");
+        var transport = conn.Transport ?? throw new InvalidOperationException("Transport not initialized.");
         var readStream = transport.ReadStream;
         byte[] headerBuf = new byte[FrameHeader.Size];
 
@@ -1022,7 +1013,7 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IChannelOwner
                 // 3. Route to channel
                 if (header.ChannelIndex == ChannelConstants.ControlChannel)
                 {
-                    ProcessControlFrame(header, payload);
+                    ProcessControlFrame(conn, header, payload);
                 }
                 else
                 {
@@ -1139,7 +1130,7 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IChannelOwner
         }
     }
 
-    private void ProcessControlFrame(FrameHeader header, ReadOnlySpan<byte> payload)
+    private void ProcessControlFrame(MuxConnection conn, FrameHeader header, ReadOnlySpan<byte> payload)
     {
         switch (header.Flags)
         {
@@ -1148,7 +1139,7 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IChannelOwner
                 SendControlFrame(FrameFlags.Pong, payload);
                 break;
             case FrameFlags.Pong:
-                Interlocked.Exchange(ref _pendingPong, null)?.TrySetResult();
+                Interlocked.Exchange(ref conn.PendingPong, null)?.TrySetResult();
                 break;
             case FrameFlags.Ctrl:
                 ProcessCtrlSubframe(payload);
@@ -1182,7 +1173,7 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IChannelOwner
     // =====================================================================
     // Keepalive Loop — sends periodic PING frames, monitors PONG responses
     // =====================================================================
-    private async Task RunKeepaliveLoopAsync(CancellationToken ct)
+    private async Task RunKeepaliveLoopAsync(MuxConnection conn, CancellationToken ct)
     {
         int missedPings = 0;
         byte[] pingPayload = new byte[8];
@@ -1194,12 +1185,12 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IChannelOwner
                 await Task.Delay(_options.PingInterval, ct);
 
                 var pendingPong = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-                Interlocked.Exchange(ref _pendingPong, pendingPong);
+                Interlocked.Exchange(ref conn.PendingPong, pendingPong);
 
                 BinaryPrimitives.WriteInt64BigEndian(pingPayload, Environment.TickCount64);
                 SendControlFrame(FrameFlags.Ping, pingPayload);
 
-                if (await WaitForPongAsync(pendingPong, ct))
+                if (await WaitForPongAsync(conn, pendingPong, ct))
                 {
                     missedPings = 0;
                     continue;
@@ -1219,7 +1210,7 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IChannelOwner
         }
     }
 
-    private async Task<bool> WaitForPongAsync(TaskCompletionSource pendingPong, CancellationToken ct)
+    private async Task<bool> WaitForPongAsync(MuxConnection conn, TaskCompletionSource pendingPong, CancellationToken ct)
     {
         Task timeout = _options.PingTimeout > TimeSpan.Zero
             ? Task.Delay(_options.PingTimeout, ct)
@@ -1230,13 +1221,13 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IChannelOwner
             return true;
 
         ct.ThrowIfCancellationRequested();
-        Interlocked.CompareExchange(ref _pendingPong, null, pendingPong);
+        Interlocked.CompareExchange(ref conn.PendingPong, null, pendingPong);
         return false;
     }
 
     private void SendControlFrame(FrameFlags flags, ReadOnlySpan<byte> payload)
     {
-        if (_controlChannel is null) return;
+        if (_conn.ControlChannel is null) return;
 
         // Build the control frame in the control channel's slab — writer thread sends it
         int frameSize = FrameHeader.Size + payload.Length;
@@ -1247,37 +1238,37 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IChannelOwner
 
         // Write through the control channel's slab so the writer thread picks it up
         // The control channel uses ChannelIndex 0, so frames are stamped with channel 0
-        _controlChannel.WriteRawFrame(temp);
+        _conn.ControlChannel.WriteRawFrame(temp);
     }
 
     private void SendInitAck(ushort channelIndex)
     {
-        if (_controlChannel is null) return;
+        if (_conn.ControlChannel is null) return;
 
         // ACK frame on the opener's channel index with position 0 — signals channel established
         byte[] frame = new byte[FrameHeader.Size + 8];
         FrameHeader.WriteTo(frame, channelIndex, FrameFlags.Ack, 8);
         BinaryPrimitives.WriteUInt64BigEndian(frame.AsSpan(FrameHeader.Size, 8), 0);
-        _controlChannel.WriteRawFrame(frame);
+        _conn.ControlChannel.WriteRawFrame(frame);
     }
 
     void IChannelOwner.SendAck(ushort channelIndex, ulong consumedPosition)
     {
-        if (_controlChannel is null) return;
+        if (_conn.ControlChannel is null) return;
 
         byte[] frame = new byte[FrameHeader.Size + 8];
         FrameHeader.WriteTo(frame, channelIndex, FrameFlags.Ack, 8);
         BinaryPrimitives.WriteUInt64BigEndian(frame.AsSpan(FrameHeader.Size, 8), consumedPosition);
-        _controlChannel.WriteRawFrame(frame);
+        _conn.ControlChannel.WriteRawFrame(frame);
     }
 
     private async Task PerformHandshakeAsync(CancellationToken ct)
     {
-        var transport = _transport ?? throw new InvalidOperationException("Transport not initialized.");
+        var transport = _conn.Transport ?? throw new InvalidOperationException("Transport not initialized.");
 
         byte[] handshake = new byte[FrameHeader.Size + InitialHandshakePayloadLength];
         FrameHeader.WriteTo(handshake, ChannelConstants.ControlChannel, FrameFlags.Ctrl, InitialHandshakePayloadLength);
-        _sessionId.TryWriteBytes(handshake.AsSpan(FrameHeader.Size));
+        _conn.SessionId.TryWriteBytes(handshake.AsSpan(FrameHeader.Size));
 
         FrameHeader remoteHeader;
         byte[] remotePayload;
@@ -1298,14 +1289,14 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IChannelOwner
 
         if (IsInitialHandshakeFrame(remoteHeader))
         {
-            _remoteSessionId = new Guid(remotePayload.AsSpan(0, InitialHandshakePayloadLength));
+            _conn.RemoteSessionId = new Guid(remotePayload.AsSpan(0, InitialHandshakePayloadLength));
         }
         else if (IsReconnectHandshakeFrame(remoteHeader, remotePayload))
         {
             // A peer can complete the first handshake and lose the route before this side
             // receives its response. The next route is reconnect for that peer and initial
             // for this peer, so both handshake forms must converge on the same session.
-            _remoteSessionId = new Guid(remotePayload.AsSpan(1, InitialHandshakePayloadLength));
+            _conn.RemoteSessionId = new Guid(remotePayload.AsSpan(1, InitialHandshakePayloadLength));
         }
         else
         {
@@ -1314,7 +1305,7 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IChannelOwner
 
         // Determine odd/even index allocation based on session ID comparison
         // Higher session ID gets odd indices
-        bool useOdd = _sessionId.CompareTo(_remoteSessionId) > 0;
+        bool useOdd = _conn.SessionId.CompareTo(_conn.RemoteSessionId) > 0;
         _registry.SetIndexParity(useOdd);
     }
 
@@ -1326,7 +1317,7 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IChannelOwner
         // Send reconnect frame: [CtrlSubtype.Reconnect][sessionId:16B]
         byte[] reconnectPayload = new byte[ReconnectHandshakePayloadLength];
         reconnectPayload[0] = CtrlSubtype.Reconnect;
-        _sessionId.TryWriteBytes(reconnectPayload.AsSpan(1));
+        _conn.SessionId.TryWriteBytes(reconnectPayload.AsSpan(1));
 
         byte[] frame = new byte[FrameHeader.Size + reconnectPayload.Length];
         FrameHeader.WriteTo(frame, ChannelConstants.ControlChannel, FrameFlags.Ctrl, reconnectPayload.Length);
@@ -1366,7 +1357,7 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IChannelOwner
             throw new MultiplexerException(ErrorCode.ProtocolError, "Invalid reconnect frame.");
         }
 
-        if (remoteSession != _remoteSessionId)
+        if (remoteSession != _conn.RemoteSessionId)
             throw new MultiplexerException(ErrorCode.SessionMismatch, "Remote session ID mismatch on reconnect.");
     }
 
@@ -1416,7 +1407,7 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IChannelOwner
     /// <inheritdoc />
     public async ValueTask DisposeAsync()
     {
-        if (!_isRunning && _transport is null) return;
+        if (!_isRunning && _conn.Transport is null) return;
 
         _isRunning = false;
         _isConnected = false;
@@ -1427,26 +1418,26 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IChannelOwner
         _registry.AbortAllChannels(ChannelCloseReason.MuxDisposed);
         _registry.CancelAllPendingAccepts();
 
-        if (_mainLoopTask is not null)
+        if (_conn.MainLoopTask is not null)
         {
-            try { await _mainLoopTask; }
+            try { await _conn.MainLoopTask; }
             catch (OperationCanceledException) { }
             catch { /* swallow during dispose */ }
         }
 
-        if (_transport is not null)
+        if (_conn.Transport is not null)
         {
-            await _transport.DisposeAsync();
-            _transport = null;
+            await _conn.Transport.DisposeAsync();
+            _conn.Transport = null;
         }
 
-        if (_controlChannel is not null)
+        if (_conn.ControlChannel is not null)
         {
-            _controlChannel.Abort(ChannelCloseReason.MuxDisposed);
-            _controlChannel = null;
+            _conn.ControlChannel.Abort(ChannelCloseReason.MuxDisposed);
+            _conn.ControlChannel = null;
         }
 
-        _loopCts?.Dispose();
+        _conn.LoopCts?.Dispose();
         _readySignal.Dispose();
         _flushSignal.Dispose();
         _cts.Dispose();
