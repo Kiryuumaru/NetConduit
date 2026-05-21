@@ -677,14 +677,28 @@ public sealed class DeltaMessageTransit<T> : IAsyncDisposable
 
         UnsubscribeFromChannelEvents();
 
-        _sendLock.Dispose();
-        _receiveLock.Dispose();
-
+        // Aggregate per-step failures so a throw from one channel's dispose does not
+        // skip the other channel and leak its slab (#292, mirroring StreamPair PR #224
+        // / DuplexStreamTransit #305). Channels disposed first so semaphores remain
+        // valid until any in-flight send/receive observes ObjectDisposedException.
+        List<Exception>? errors = null;
         if (_writeChannel is not null)
-            await _writeChannel.DisposeAsync().ConfigureAwait(false);
-
+        {
+            try { await _writeChannel.DisposeAsync().ConfigureAwait(false); }
+            catch (Exception ex) { (errors ??= []).Add(ex); }
+        }
         if (_readChannel is not null)
-            await _readChannel.DisposeAsync().ConfigureAwait(false);
+        {
+            try { await _readChannel.DisposeAsync().ConfigureAwait(false); }
+            catch (Exception ex) { (errors ??= []).Add(ex); }
+        }
+        try { _sendLock.Dispose(); }
+        catch (Exception ex) { (errors ??= []).Add(ex); }
+        try { _receiveLock.Dispose(); }
+        catch (Exception ex) { (errors ??= []).Add(ex); }
+
+        if (errors is { Count: 1 }) throw errors[0];
+        if (errors is { Count: > 1 }) throw new AggregateException(errors);
     }
 
     private void UnsubscribeFromChannelEvents()
