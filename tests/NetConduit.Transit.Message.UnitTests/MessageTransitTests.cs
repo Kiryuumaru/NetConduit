@@ -603,6 +603,44 @@ public sealed class MessageTransitTests
         await server.DisposeAsync();
     }
 
+    [Fact]
+    public async Task MessageTransit_ReceiveAllAsync_YieldsLegitimateJsonNullPayload_AndContinues()
+    {
+        // Issue #220: ReceiveAllAsync used `message is null` as a secondary EOF
+        // sentinel, conflating a peer-sent JSON `null` payload with end-of-stream.
+        // The first legit null message terminated the loop and every subsequent
+        // message was silently lost. Fix: rely solely on `_receiveEof`; yield
+        // the deserialized value verbatim (including null for nullable TReceive).
+        var (client, server) = await CreateReadyPairAsync();
+
+        var w = client.OpenChannel("m4-null");
+        var r = await server.AcceptChannelAsync("m4-null");
+
+#pragma warning disable IL2026, IL3050
+        var sender = new MessageTransit<string?, string?>(w, null);
+        var receiver = new MessageTransit<string?, string?>(null, r);
+#pragma warning restore IL2026, IL3050
+
+        await sender.SendAsync("hello");
+        await sender.SendAsync(null);
+        await sender.SendAsync("world");
+        await sender.DisposeAsync();
+
+        var messages = new List<string?>();
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+        await foreach (var msg in receiver.ReceiveAllAsync(cts.Token))
+        {
+            messages.Add(msg);
+            if (messages.Count > 10) break;
+        }
+
+        Assert.Equal(new[] { "hello", null, "world" }, messages);
+
+        await receiver.DisposeAsync();
+        await client.DisposeAsync();
+        await server.DisposeAsync();
+    }
+
     #endregion
 
     #region Cancellation
