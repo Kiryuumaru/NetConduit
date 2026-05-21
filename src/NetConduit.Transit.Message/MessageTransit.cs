@@ -45,6 +45,14 @@ public sealed class MessageTransit<TSend, TReceive> : ITransit
     private int _pendingPayloadOffset;
     private int _pendingPayloadLength;
 
+    // Number of bytes still owed to an over-max message body that we already
+    // committed to consuming from the channel (length prefix was read and
+    // validated as too large). These bytes MUST be drained from the channel
+    // before the next length prefix can be parsed, or the framing desyncs
+    // permanently (#278). Survives cancellation: a cancelled drain resumes
+    // on the next ReceiveAsync call. uint covers the full 4-byte length range.
+    private uint _pendingDrainRemaining;
+
     /// <summary>
     /// Creates a new MessageTransit with both send and receive capabilities using AOT-safe JsonTypeInfo.
     /// </summary>
@@ -217,6 +225,15 @@ public sealed class MessageTransit<TSend, TReceive> : ITransit
         await _receiveLock.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
+            // Drain any payload bytes still owed to a previously-rejected
+            // over-max message so the next length prefix lands on a clean
+            // frame boundary (#278). If cancelled mid-drain, _pendingDrainRemaining
+            // preserves progress for the next call.
+            if (_pendingDrainRemaining > 0)
+            {
+                await DrainPendingAsync(cancellationToken).ConfigureAwait(false);
+            }
+
             // Read the 4-byte length prefix into the persistent buffer. If a
             // prior ReceiveAsync was cancelled mid-prefix, _pendingLengthOffset
             // preserves how many bytes were already consumed so this call
@@ -247,8 +264,15 @@ public sealed class MessageTransit<TSend, TReceive> : ITransit
 
                 if (messageLength > (uint)_maxMessageSize)
                 {
+                    // Mark the over-max payload bytes for drain on the next
+                    // ReceiveAsync so framing resumes on a clean boundary
+                    // instead of parsing payload bytes as the next length
+                    // prefix (#278). Clear the length-prefix progress; this
+                    // length has been fully consumed.
                     _pendingLengthOffset = 0;
-                    throw new InvalidOperationException($"Received message size ({messageLength} bytes) exceeds maximum allowed ({_maxMessageSize} bytes).");
+                    _pendingDrainRemaining = messageLength;
+                    throw new InvalidOperationException(
+                        $"Received message size ({messageLength} bytes) exceeds maximum allowed ({_maxMessageSize} bytes); the oversized payload will be discarded and the next ReceiveAsync call will return the following message.");
                 }
 
                 if (messageLength == 0)
@@ -309,6 +333,40 @@ public sealed class MessageTransit<TSend, TReceive> : ITransit
         finally
         {
             _receiveLock.Release();
+        }
+    }
+
+    /// <summary>
+    /// Reads and discards <see cref="_pendingDrainRemaining"/> bytes from the
+    /// inbound channel. Caller MUST hold <see cref="_receiveLock"/>. On
+    /// cancellation the remaining count is preserved so the next call resumes
+    /// the drain. On premature EOF an <see cref="EndOfStreamException"/> is
+    /// raised — there is no clean recovery once the channel closes mid-drain.
+    /// </summary>
+    private async ValueTask DrainPendingAsync(CancellationToken cancellationToken)
+    {
+        const int DrainChunk = 8192;
+        var buf = ArrayPool<byte>.Shared.Rent(DrainChunk);
+        try
+        {
+            while (_pendingDrainRemaining > 0)
+            {
+                var toRead = (int)Math.Min((uint)buf.Length, _pendingDrainRemaining);
+                var n = await _readChannel!.ReadAsync(buf.AsMemory(0, toRead), cancellationToken).ConfigureAwait(false);
+                if (n == 0)
+                {
+                    // Channel closed before the over-max payload finished
+                    // draining. The framing is unrecoverable; signal EOF.
+                    _pendingDrainRemaining = 0;
+                    _receiveEof = true;
+                    throw new EndOfStreamException("Unexpected end of stream while discarding oversized message payload.");
+                }
+                _pendingDrainRemaining -= (uint)n;
+            }
+        }
+        finally
+        {
+            ArrayPool<byte>.Shared.Return(buf);
         }
     }
 
