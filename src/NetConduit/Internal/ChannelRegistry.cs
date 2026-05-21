@@ -88,7 +88,15 @@ internal sealed class ChannelRegistry
         if (!_writeChannels.TryAdd(index, channel))
             throw new MultiplexerException(ErrorCode.ChannelExists, $"Write channel with index {index} already exists.");
         if (!_idToIndex.TryAdd(channel.ChannelId, index))
+        {
+            // Roll back the per-index insert so we do not leave an orphan
+            // WriteChannel reachable via GetWriteChannel(index) /
+            // GetAllWriteChannels() after the throw (#268). The caller has no
+            // way to undo this themselves: they never received a successful
+            // return and have no record of the allocated index.
+            _writeChannels.TryRemove(new KeyValuePair<ushort, WriteChannel>(index, channel));
             throw new MultiplexerException(ErrorCode.ChannelExists, $"A channel with ID '{channel.ChannelId}' already exists.");
+        }
     }
 
     internal void RegisterReadChannel(ushort index, ReadChannel channel)
@@ -96,7 +104,11 @@ internal sealed class ChannelRegistry
         if (!_readChannels.TryAdd(index, channel))
             throw new MultiplexerException(ErrorCode.ChannelExists, $"Read channel with index {index} already exists.");
         if (!_idToIndex.TryAdd(channel.ChannelId, index))
+        {
+            // Roll back the per-index insert (see RegisterWriteChannel; #268).
+            _readChannels.TryRemove(new KeyValuePair<ushort, ReadChannel>(index, channel));
             throw new MultiplexerException(ErrorCode.ChannelExists, $"A channel with ID '{channel.ChannelId}' already exists.");
+        }
     }
 
     internal WriteChannel? GetWriteChannel(ushort index)
