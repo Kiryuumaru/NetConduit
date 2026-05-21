@@ -216,26 +216,29 @@ public sealed class DeltaMessageTransit<T> : IAsyncDisposable
 
     private async ValueTask SendBatchCoreAsync(IEnumerable<T> states, CancellationToken cancellationToken)
     {
-        JsonNode? finalState = null;
+        // Stage all batched mutations on a local clone so an exception during the
+        // accumulated delta flush does not advance _lastSentState past what the peer
+        // actually received. _lastSentState is only committed after a successful send.
+        var stagedBaseline = _lastSentState?.DeepClone();
         var combinedOps = new List<DeltaOperation>();
 
         foreach (var state in states)
         {
             var currentState = ToJsonNode(state);
-            finalState = currentState;
 
-            if (_lastSentState is null)
+            if (stagedBaseline is null)
             {
                 await SendFullAsync(currentState, cancellationToken).ConfigureAwait(false);
+                stagedBaseline = currentState.DeepClone();
                 _lastSentState = currentState.DeepClone();
                 combinedOps.Clear();
             }
             else
             {
-                var ops = DeltaDiff.ComputeDelta(_lastSentState, currentState);
+                var ops = DeltaDiff.ComputeDelta(stagedBaseline, currentState);
                 if (ops.Count > 0 && !RequiresFullState(ops))
                 {
-                    DeltaApply.ApplyDelta(_lastSentState, ops);
+                    DeltaApply.ApplyDelta(stagedBaseline, ops);
                     combinedOps.AddRange(ops);
                 }
                 else
@@ -243,9 +246,11 @@ public sealed class DeltaMessageTransit<T> : IAsyncDisposable
                     if (combinedOps.Count > 0)
                     {
                         await SendDeltaAsync(combinedOps, cancellationToken).ConfigureAwait(false);
+                        _lastSentState = stagedBaseline.DeepClone();
                         combinedOps.Clear();
                     }
                     await SendFullAsync(currentState, cancellationToken).ConfigureAwait(false);
+                    stagedBaseline = currentState.DeepClone();
                     _lastSentState = currentState.DeepClone();
                 }
             }
@@ -254,11 +259,7 @@ public sealed class DeltaMessageTransit<T> : IAsyncDisposable
         if (combinedOps.Count > 0)
         {
             await SendDeltaAsync(combinedOps, cancellationToken).ConfigureAwait(false);
-        }
-
-        if (finalState is not null)
-        {
-            _lastSentState = finalState.DeepClone();
+            _lastSentState = stagedBaseline!.DeepClone();
         }
     }
 
