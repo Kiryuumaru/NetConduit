@@ -222,9 +222,19 @@ internal sealed class WriteChannel : Stream, IWriteChannel
             }
         }
 
-        // Build the complete frame in the slab (under lock to prevent races with TakeReady)
+        // Build the complete frame in the slab (under lock to prevent races with TakeReady).
+        // Re-check state INSIDE the lock to prevent the slab-use-after-free race in #258:
+        // a concurrent SetClosed/Abort can flip _state to Closed and return _slab to the
+        // ArrayPool while a writer is parked on _spaceAvailable.WaitAsync. Once the writer
+        // wakes (the close path releases the semaphore), the entry-state check at the top
+        // of WriteAsync no longer holds. SetClosed/Abort/TryNotifyCompleted now serialize
+        // their TryReturnSlab call under _posLock, so observing _state == Open here means
+        // the slab is still ours for the duration of this critical section.
         lock (_posLock)
         {
+            if (_state is not (ChannelState.Open or ChannelState.Opening))
+                throw new ChannelClosedException(ChannelId, _closeReason ?? ChannelCloseReason.LocalClose);
+
             int frameStart = _writePos;
             FrameHeader.WriteTo(_slab.AsSpan(frameStart, FrameHeader.Size), _channelIndex, FrameFlags.Data, payloadLength);
             data.Span.CopyTo(_slab.AsSpan(frameStart + FrameHeader.Size, payloadLength));
@@ -466,8 +476,10 @@ internal sealed class WriteChannel : Stream, IWriteChannel
             // TakeReady/MarkSent can race with us, so the slab must be
             // returned unconditionally. Gating on !HasPendingData() leaks
             // the slab whenever the channel is torn down with bytes still
-            // queued (see issue #169).
-            TryReturnSlab();
+            // queued (see issue #169). Serialize with _posLock so any
+            // in-flight WriteAsync commit completes before the slab is
+            // released to the pool (issue #258).
+            lock (_posLock) TryReturnSlab();
             // Registry cleared externally on mux dispose; unblock any DisposeAsync awaiters.
             _unregisteredTcs.TrySetResult();
         }
@@ -476,7 +488,9 @@ internal sealed class WriteChannel : Stream, IWriteChannel
     internal void Abort(ChannelCloseReason reason, Exception? exception = null)
     {
         SetClosed(reason, exception);
-        TryReturnSlab();
+        // Serialize with _posLock so any in-flight WriteAsync commit
+        // completes before the slab is released to the pool (issue #258).
+        lock (_posLock) TryReturnSlab();
         _spaceAvailable.Dispose();
     }
 
@@ -513,7 +527,9 @@ internal sealed class WriteChannel : Stream, IWriteChannel
             || _closeReason is ChannelCloseReason.MuxDisposed
                             or ChannelCloseReason.TransportFailed)
         {
-            TryReturnSlab();
+            // Serialize with _posLock so any in-flight WriteAsync commit
+            // completes before the slab is released to the pool (issue #258).
+            lock (_posLock) TryReturnSlab();
         }
     }
 

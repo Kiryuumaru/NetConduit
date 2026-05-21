@@ -13,6 +13,18 @@ public class WebSocketMultiplexerTests
     {
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
 
+        // Gate the request handler on an explicit signal — never on `cts` — so the
+        // test can deterministically dispose `serverMux` *while the HttpContext is
+        // still alive*, then release the handler. If the handler instead unwound
+        // on `cts` cancellation, ASP.NET Core would dispose the HttpContext (and
+        // its IFeatureCollection) before `serverMux.DisposeAsync()` ran, and the
+        // CTS-registered ManagedWebSocket dispose callback fired by the mux's
+        // internal Cancel would then call DefaultHttpContext.Abort() on a dead
+        // context, surfacing as ObjectDisposedException("IFeatureCollection has
+        // been disposed"). That race was the cause of the
+        // WebSocketMultiplexerTests.CreateOptions_ConnectsAndTransfersData flake.
+        var serverShutdownTcs = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+
         var builder = Microsoft.AspNetCore.Builder.WebApplication.CreateBuilder();
         var app = builder.Build();
         app.UseWebSockets();
@@ -38,9 +50,10 @@ public class WebSocketMultiplexerTests
                     totalRead += read;
                 }
 
-                // Keep connection alive until cancelled
-                try { await Task.Delay(Timeout.Infinite, cts.Token); }
-                catch (OperationCanceledException) { }
+                // Hold the HttpContext open until the test signals shutdown — the
+                // test must dispose serverMux *before* signaling, so the mux's
+                // teardown observes a live context.
+                await serverShutdownTcs.Task;
             }
         });
 
@@ -62,14 +75,13 @@ public class WebSocketMultiplexerTests
 
         Assert.True(client.IsConnected);
 
-        await cts.CancelAsync();
-        // Dispose server mux before stopping the host so its cancellation-token
-        // callbacks fire while HttpContext.Features is still alive. Reversing the
-        // order races with ASP.NET Core's feature disposal and surfaces as
-        // ObjectDisposedException("IFeatureCollection has been disposed") from
-        // _cts.Cancel() inside StreamMultiplexer.DisposeAsync on slower CI runners.
+        // Strict shutdown ordering:
+        //   1. Dispose serverMux while the HttpContext is still alive.
+        //   2. Release the handler so ASP.NET Core can tear down the context.
+        //   3. Stop the host.
         if (serverMux is not null)
             await serverMux.DisposeAsync();
+        serverShutdownTcs.TrySetResult();
         await app.StopAsync();
     }
 }
