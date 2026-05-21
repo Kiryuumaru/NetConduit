@@ -175,4 +175,88 @@ public class UdpMultiplexerTests
         Assert.Equal(testData.Length, totalRead);
         Assert.Equal(testData, buffer);
     }
+
+    [Fact(Timeout = 30000)]
+    public async Task ServerFactory_StrayNonHelloPacket_DoesNotHijackListener()
+    {
+        // #303: a single non-HELLO UDP datagram arriving before NC_HELLO must
+        // not latch listener.Connect() to the rogue endpoint and short-circuit
+        // the handshake. The factory must discard non-HELLO bytes and keep
+        // accepting until a real NC_HELLO arrives, sending NC_HELLO_ACK back
+        // to the legitimate sender.
+        int port = GetAvailablePort();
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(20));
+
+        var serverOptions = UdpMultiplexer.CreateServerOptions(port);
+
+        // Kick off the factory directly so the listener is bound before we send.
+        var serverTask = serverOptions.StreamFactory!(cts.Token);
+
+        // Send a stray non-HELLO datagram from an unrelated UDP socket. Without
+        // the fix this would latch listener.Connect() to this socket's ephemeral
+        // endpoint, and the legitimate HELLO below would never reach the
+        // listener (delivered to a Connected UDP socket only from the locked-in
+        // remote).
+        using (var rogue = new UdpClient(AddressFamily.InterNetworkV6))
+        {
+            rogue.Client.DualMode = true;
+            rogue.Connect(new IPEndPoint(IPAddress.IPv6Loopback, port));
+            for (int i = 0; i < 5; i++)
+            {
+                await rogue.SendAsync("garbage"u8.ToArray(), cts.Token);
+                await Task.Delay(20, cts.Token);
+            }
+        }
+
+        // Now send the real NC_HELLO from a different UDP socket and expect
+        // NC_HELLO_ACK back from the server.
+        using var legit = new UdpClient(AddressFamily.InterNetworkV6);
+        legit.Client.DualMode = true;
+        legit.Connect(new IPEndPoint(IPAddress.IPv6Loopback, port));
+
+        var helloBytes = "NC_HELLO"u8.ToArray();
+        var ackExpected = "NC_HELLO_ACK"u8.ToArray();
+
+        // Retransmit HELLO periodically until we either get the ACK or time out.
+        var ackReceived = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var ackTask = Task.Run(async () =>
+        {
+            try
+            {
+                while (!cts.IsCancellationRequested)
+                {
+                    var result = await legit.ReceiveAsync(cts.Token);
+                    if (result.Buffer.AsSpan().SequenceEqual(ackExpected))
+                    {
+                        ackReceived.TrySetResult(true);
+                        return;
+                    }
+                }
+            }
+            catch (OperationCanceledException) { ackReceived.TrySetResult(false); }
+        });
+
+        using var sendCts = CancellationTokenSource.CreateLinkedTokenSource(cts.Token);
+        var sendTask = Task.Run(async () =>
+        {
+            while (!sendCts.IsCancellationRequested)
+            {
+                try { await legit.SendAsync(helloBytes, sendCts.Token); }
+                catch (OperationCanceledException) { return; }
+                try { await Task.Delay(100, sendCts.Token); }
+                catch (OperationCanceledException) { return; }
+            }
+        });
+
+        var got = await ackReceived.Task.WaitAsync(TimeSpan.FromSeconds(10));
+        sendCts.Cancel();
+        try { await sendTask; } catch { }
+
+        Assert.True(got, "Legitimate client never received NC_HELLO_ACK — listener was hijacked by the stray packet.");
+
+        // Factory task should also complete successfully (with the pair pointing
+        // at the legitimate sender).
+        await using var pair = await serverTask.WaitAsync(TimeSpan.FromSeconds(5));
+        Assert.NotNull(pair);
+    }
 }
