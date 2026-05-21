@@ -661,13 +661,16 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IChannelOwner
                 var loopCt = _conn.LoopCts.Token;
                 var conn = _conn;
 
+                var transportWriter = new MuxTransportWriter(
+                    conn, _readySignal, _flushSignal, _readyChannels, _readyLock, _stats);
+
                 _conn.WriterTask = Task.Factory.StartNew(
-                    () => RunWriterLoop(conn, loopCt),
+                    () => transportWriter.RunWriterLoop(loopCt),
                     loopCt,
                     TaskCreationOptions.LongRunning,
                     TaskScheduler.Default);
                 _conn.FlusherTask = Task.Factory.StartNew(
-                    () => RunFlusherLoop(conn, loopCt),
+                    () => transportWriter.RunFlusherLoop(loopCt),
                     loopCt,
                     TaskCreationOptions.LongRunning,
                     TaskScheduler.Default);
@@ -909,81 +912,6 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IChannelOwner
         // event surface so they are observable without crashing the producer
         // thread that raised the channel event (#286).
         RaiseError(exception);
-    }
-
-    // =====================================================================
-    // Writer Thread — THE DUMB ROUTER (send side)
-    // Picks ready channels, writes their pre-built frames to the stream.
-    // Flush is handled by the separate flusher thread.
-    // Runs on a dedicated LongRunning thread; uses synchronous I/O so the
-    // hot path does not allocate Task continuations or hop ThreadPool threads.
-    // =====================================================================
-    private void RunWriterLoop(MuxConnection conn, CancellationToken ct)
-    {
-        var transport = conn.Transport ?? throw new InvalidOperationException("Transport not initialized.");
-        var writeStream = transport.WriteStream;
-
-        try
-        {
-            while (!ct.IsCancellationRequested)
-            {
-                _readySignal.Wait(ct);
-
-                // Snapshot and sort ready channels by priority (highest first)
-                WriteChannel[] snapshot;
-                lock (_readyLock)
-                {
-                    if (_readyChannels.Count == 0) continue;
-                    _readyChannels.Sort(static (a, b) => b.Priority.CompareTo(a.Priority));
-                    snapshot = _readyChannels.ToArray();
-                    _readyChannels.Clear();
-                }
-
-                bool anyWritten = false;
-                foreach (var channel in snapshot)
-                {
-                    Memory<byte> frames = channel.TakeReady();
-                    if (frames.IsEmpty) continue;
-
-                    writeStream.Write(frames.Span);
-                    channel.MarkSent(frames.Length);
-                    Interlocked.Add(ref _stats._bytesSent, frames.Length);
-                    anyWritten = true;
-                }
-
-                if (anyWritten)
-                    _flushSignal.Signal();
-            }
-        }
-        catch (OperationCanceledException) when (ct.IsCancellationRequested)
-        {
-            // Normal shutdown
-        }
-    }
-
-    // =====================================================================
-    // Flusher Thread — dedicated thread that flushes the transport stream.
-    // Decouples write batching from kernel flush syscall.
-    // =====================================================================
-    private void RunFlusherLoop(MuxConnection conn, CancellationToken ct)
-    {
-        var transport = conn.Transport ?? throw new InvalidOperationException("Transport not initialized.");
-        var writeStream = transport.WriteStream;
-
-        try
-        {
-            while (!ct.IsCancellationRequested)
-            {
-                _flushSignal.Wait(ct);
-                writeStream.Flush();
-            }
-        }
-        catch (OperationCanceledException) when (ct.IsCancellationRequested)
-        {
-            // Normal shutdown — do one final flush to push any remaining data
-            try { writeStream.Flush(); }
-            catch { /* transport may already be closed */ }
-        }
     }
 
     // =====================================================================
