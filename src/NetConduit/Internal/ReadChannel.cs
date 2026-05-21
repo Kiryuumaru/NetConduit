@@ -62,6 +62,19 @@ internal sealed class ReadChannel : Stream, IReadChannel, IValueTaskSource<int>
     private volatile bool _isConnected;
     private ChannelCloseReason? _closeReason;
     private Exception? _closeException;
+    // CAS guard: ensures the stats decrement and ChannelClosed event fire exactly once,
+    // regardless of whether the close path is the inbound FIN dispatcher or
+    // local DisposeAsync/Dispose. Issue #172.
+    private int _completionAccounted;
+
+    /// <summary>
+    /// Atomically claims the right to perform the one-shot close accounting
+    /// (stats decrement and <see cref="StreamMultiplexer.ChannelClosed"/>
+    /// event raise). Returns <c>true</c> exactly once across the lifetime of
+    /// the channel; subsequent callers receive <c>false</c>.
+    /// </summary>
+    internal bool TryClaimCompletionAccounting() =>
+        Interlocked.CompareExchange(ref _completionAccounted, 1, 0) == 0;
 
     /// <summary>The string identifier for this channel.</summary>
     public string ChannelId { get; }

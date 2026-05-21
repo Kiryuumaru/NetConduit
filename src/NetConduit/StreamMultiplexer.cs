@@ -608,16 +608,29 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IChannelOwner
 
     void IChannelOwner.NotifyChannelCompleted(ushort channelIndex, string channelId)
     {
-        // Write channels: stats decrement here (after FIN sent + no pending data).
-        // Read channels: stats already decremented at FIN receipt in DispatchToChannel.
-        bool isWriteChannel = _registry.GetWriteChannel(channelIndex) is not null;
+        // Capture role BEFORE unregistering, since GetWriteChannel/GetReadChannel
+        // return null after the registry mutation.
+        var writeChannel = _registry.GetWriteChannel(channelIndex);
+        var readChannel = writeChannel is null ? _registry.GetReadChannel(channelIndex) : null;
 
         _registry.UnregisterChannel(channelIndex, channelId);
 
-        if (isWriteChannel)
+        if (writeChannel is not null)
         {
+            // Write channels are always closed locally (FIN-out then drain),
+            // so this is the single accounting site. No CAS needed.
             Interlocked.Decrement(ref _stats._openChannels);
             Interlocked.Increment(ref _stats._totalChannelsClosed);
+        }
+        else if (readChannel is not null && readChannel.TryClaimCompletionAccounting())
+        {
+            // Read channels can be closed by inbound FIN, by local Dispose,
+            // or by mux-level abort — whichever runs first claims the accounting.
+            // Pre-fix this branch only fired on FIN, so a local-Dispose-before-FIN
+            // permanently inflated OpenChannels and skipped ChannelClosed (#172).
+            Interlocked.Decrement(ref _stats._openChannels);
+            Interlocked.Increment(ref _stats._totalChannelsClosed);
+            RaiseEvent(ChannelClosed, new ChannelClosedEventArgs(channelId, readChannel.CloseException));
         }
     }
 
@@ -806,9 +819,15 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IChannelOwner
 
         if (header.Flags == FrameFlags.Fin)
         {
-            Interlocked.Decrement(ref _stats._openChannels);
-            Interlocked.Increment(ref _stats._totalChannelsClosed);
-            RaiseEvent(ChannelClosed, new ChannelClosedEventArgs(channel.ChannelId, null));
+            // Single-decrement contract via CAS: whichever runs first
+            // (this FIN handler or NotifyChannelCompleted on local Dispose)
+            // claims the accounting; the other becomes a no-op. See #172.
+            if (channel.TryClaimCompletionAccounting())
+            {
+                Interlocked.Decrement(ref _stats._openChannels);
+                Interlocked.Increment(ref _stats._totalChannelsClosed);
+                RaiseEvent(ChannelClosed, new ChannelClosedEventArgs(channel.ChannelId, null));
+            }
         }
     }
 
