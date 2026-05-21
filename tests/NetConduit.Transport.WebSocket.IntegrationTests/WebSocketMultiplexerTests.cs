@@ -63,8 +63,13 @@ public class WebSocketMultiplexerTests
         Assert.True(client.IsConnected);
 
         await cts.CancelAsync();
-        await app.StopAsync();
+        // Dispose server mux before stopping the host so its cancellation-token
+        // callbacks fire while HttpContext.Features is still alive. Reversing the
+        // order races with ASP.NET Core's feature disposal and surfaces as
+        // ObjectDisposedException("IFeatureCollection has been disposed") from
+        // _cts.Cancel() inside StreamMultiplexer.DisposeAsync on slower CI runners.
         if (serverMux is not null)
             await serverMux.DisposeAsync();
+        await app.StopAsync();
     }
 }
