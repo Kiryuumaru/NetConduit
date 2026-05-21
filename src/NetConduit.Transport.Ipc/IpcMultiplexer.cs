@@ -138,37 +138,27 @@ public static class IpcMultiplexer
         return 49152 + (value % (65535 - 49152));
     }
 
-    // Refuses to delete the endpoint path unless we can prove it is a stale Unix
-    // domain socket (one whose owning process is gone). A bare File.Delete here
-    // would silently destroy arbitrary user files when the endpoint is misconfigured.
+    // Refuses to delete the endpoint path when it points at something the user did
+    // not put there as a Unix domain socket. A bare File.Delete here would silently
+    // destroy arbitrary user files when the endpoint is misconfigured.
+    //
+    // File.Exists on Unix explicitly checks S_IFREG, so it returns true only for
+    // regular files (and symlinks resolving to them) — Unix domain sockets, FIFOs,
+    // and devices all report false. That gives us the discriminator we need: if
+    // the path "exists" by File.Exists, it is provably not a socket and must not
+    // be deleted. For actual stale sockets, File.Exists is false and we fall
+    // through; Socket.Bind will surface EADDRINUSE which the caller can act on.
+    //
+    // Note: a connect(2) probe cannot be used as a type discriminator here.
+    // On Linux, connect(AF_UNIX, SOCK_STREAM) to a regular file returns
+    // ECONNREFUSED — the same error returned for a stale socket with no live
+    // listener — so the two cases are indistinguishable from the socket API.
     private static void EnsureUnixEndpointWritable(string endpoint)
     {
         if (!File.Exists(endpoint))
             return;
 
-        using var probe = new Socket(AddressFamily.Unix, SocketType.Stream, ProtocolType.Unspecified);
-        try
-        {
-            probe.Connect(new UnixDomainSocketEndPoint(endpoint));
-        }
-        catch (SocketException ex) when (ex.SocketErrorCode == SocketError.ConnectionRefused)
-        {
-            // Path is a Unix socket file with no live listener (stale from a prior
-            // crashed server). Safe to unlink and rebind.
-            File.Delete(endpoint);
-            return;
-        }
-        catch (SocketException)
-        {
-            // Path exists but is not a Unix domain socket — refuse to overwrite. This
-            // protects against accidental data loss when `endpoint` points at a
-            // regular file, FIFO, or symlink target.
-            throw new IOException(
-                $"IPC endpoint path '{endpoint}' exists and is not a Unix domain socket; refusing to overwrite.");
-        }
-
-        // Probe connected — another live listener owns the endpoint.
         throw new IOException(
-            $"IPC endpoint '{endpoint}' is already in use by another listener.");
+            $"IPC endpoint path '{endpoint}' exists and is not a Unix domain socket; refusing to overwrite.");
     }
 }
