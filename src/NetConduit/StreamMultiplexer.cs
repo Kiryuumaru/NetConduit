@@ -623,7 +623,7 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IChannelOwner
                     _conn.Transport = null;
                     try { await transport.DisposeAsync(); } catch { }
 
-                    RaiseEvent(Error, new Events.ErrorEventArgs(handshakeEx));
+                    RaiseError(handshakeEx);
 
                     if (!HasHandshakeRetryBudget(handshakeAttempt))
                         throw;
@@ -721,7 +721,7 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IChannelOwner
                 // Capture the exception if any
                 Exception? transportEx = faulted.Exception?.InnerException;
                 if (transportEx is not null)
-                    RaiseEvent(Error, new Events.ErrorEventArgs(transportEx));
+                    RaiseError(transportEx);
 
                 // Dispose old transport
                 await transport.DisposeAsync();
@@ -832,7 +832,7 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IChannelOwner
             }
             catch (Exception ex)
             {
-                RaiseEvent(Error, new Events.ErrorEventArgs(ex));
+                RaiseError(ex);
 
                 // maxAttempts == 0 means no retry: propagate the first failure immediately
                 // whether this is the initial connect or a reconnect after the link died.
@@ -1454,15 +1454,19 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IChannelOwner
             RaiseEvent(Disconnected, new DisconnectedEventArgs(_disconnectReason.Value, null));
     }
 
+    // Multicast-safe event raise. A throwing handler must not prevent the remaining
+    // handlers in the invocation list from running, nor crash the producer thread.
+    // Non-fatal exceptions from a handler are routed to the Error event so they are
+    // observable from outside the process. Fatal exceptions (OOM, AV) propagate.
     private void RaiseEvent<T>(EventHandler<T>? handler, T args) where T : EventArgs
-    {
-        try { handler?.Invoke(this, args); }
-        catch { }
-    }
+        => SafeEventRaiser.Raise(this, handler, args, RaiseError);
 
     private void RaiseEvent(EventHandler? handler)
-    {
-        try { handler?.Invoke(this, EventArgs.Empty); }
-        catch { }
-    }
+        => SafeEventRaiser.Raise(this, handler, RaiseError);
+
+    // Direct path for raising the Error event. Passes a null exception route to
+    // SafeEventRaiser so a throwing Error handler cannot recurse back into Error;
+    // its exception is dropped as the absolute last resort.
+    private void RaiseError(Exception exception)
+        => SafeEventRaiser.Raise(this, Error, new Events.ErrorEventArgs(exception), onHandlerException: null);
 }
