@@ -123,12 +123,62 @@ internal sealed class WebSocketStream : Stream
     public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();
     public override void SetLength(long value) => throw new NotSupportedException();
 
+    private static readonly TimeSpan CloseTimeout = TimeSpan.FromSeconds(5);
+
     protected override void Dispose(bool disposing)
     {
-        if (!_disposed)
+        if (_disposed)
         {
-            _disposed = true;
+            base.Dispose(disposing);
+            return;
+        }
+        _disposed = true;
+
+        if (disposing)
+        {
+            if (_webSocket.State == WebSocketState.Open)
+            {
+                try
+                {
+                    using var cts = new CancellationTokenSource(CloseTimeout);
+                    _webSocket
+                        .CloseOutputAsync(WebSocketCloseStatus.NormalClosure, null, cts.Token)
+                        .GetAwaiter().GetResult();
+                }
+                catch (WebSocketException) { }
+                catch (ObjectDisposedException) { }
+                catch (OperationCanceledException) { }
+                catch (InvalidOperationException) { }
+            }
+            _webSocket.Dispose();
         }
         base.Dispose(disposing);
+    }
+
+    public override async ValueTask DisposeAsync()
+    {
+        if (_disposed)
+        {
+            await base.DisposeAsync().ConfigureAwait(false);
+            return;
+        }
+        _disposed = true;
+
+        if (_webSocket.State == WebSocketState.Open)
+        {
+            try
+            {
+                using var cts = new CancellationTokenSource(CloseTimeout);
+                await _webSocket
+                    .CloseOutputAsync(WebSocketCloseStatus.NormalClosure, null, cts.Token)
+                    .ConfigureAwait(false);
+            }
+            catch (WebSocketException) { }
+            catch (ObjectDisposedException) { }
+            catch (OperationCanceledException) { }
+            catch (InvalidOperationException) { }
+        }
+        _webSocket.Dispose();
+        await base.DisposeAsync().ConfigureAwait(false);
     }
 }
