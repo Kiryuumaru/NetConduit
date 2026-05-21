@@ -44,32 +44,61 @@ public sealed class WebSocketMuxListener : IAsyncDisposable
         var completion = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var pair = new CompletionStreamPair(new StreamPair(stream, webSocket), completion);
 
-        if (sessionId.HasValue && _sessions.TryGetValue(sessionId.Value, out var entry))
+        // Until the pair is sitting inside a mux that has accepted ownership,
+        // HandleAsync is responsible for disposing it on any failure.
+        // After successful hand-off, the mux owns the pair lifetime.
+        var ownedByMux = false;
+        try
         {
-            await entry.ConnectionChannel.Writer.WriteAsync(pair, cancellationToken);
-        }
-        else
-        {
-            var connectionChannel = Channel.CreateBounded<CompletionStreamPair>(1);
-            await connectionChannel.Writer.WriteAsync(pair, cancellationToken);
-
-            StreamFactoryDelegate factory = async ct =>
-                await connectionChannel.Reader.ReadAsync(ct);
-
-            var options = new MultiplexerOptions { StreamFactory = factory };
-
-            if (_customize is not null)
+            if (sessionId.HasValue && _sessions.TryGetValue(sessionId.Value, out var entry))
             {
-                options = _customize(options) with { StreamFactory = factory };
+                await entry.ConnectionChannel.Writer.WriteAsync(pair, cancellationToken);
+                ownedByMux = true;
+            }
+            else
+            {
+                var connectionChannel = Channel.CreateBounded<CompletionStreamPair>(1);
+                await connectionChannel.Writer.WriteAsync(pair, cancellationToken);
+
+                StreamFactoryDelegate factory = async ct =>
+                    await connectionChannel.Reader.ReadAsync(ct);
+
+                var options = new MultiplexerOptions { StreamFactory = factory };
+
+                if (_customize is not null)
+                {
+                    options = _customize(options) with { StreamFactory = factory };
+                }
+
+                var mux = StreamMultiplexer.Create(options);
+                try
+                {
+                    // Publish to consumers FIRST so a cancellation between _sessions registration
+                    // and _newMuxChannel write cannot strand the mux in _sessions with no consumer.
+                    await _newMuxChannel.Writer.WriteAsync(mux, cancellationToken);
+                    _sessions[mux.SessionId] = new SessionEntry(mux, connectionChannel);
+                    ownedByMux = true;
+                }
+                catch
+                {
+                    // Mux never reached a consumer — tear it down. The pair still sitting in
+                    // connectionChannel is disposed by the outer catch via ownedByMux == false.
+                    connectionChannel.Writer.TryComplete();
+                    try { await mux.DisposeAsync(); } catch { }
+                    throw;
+                }
             }
 
-            var mux = StreamMultiplexer.Create(options);
-            _sessions[mux.SessionId] = new SessionEntry(mux, connectionChannel);
-
-            await _newMuxChannel.Writer.WriteAsync(mux, cancellationToken);
+            await completion.Task.WaitAsync(cancellationToken);
         }
-
-        await completion.Task.WaitAsync(cancellationToken);
+        catch
+        {
+            if (!ownedByMux)
+            {
+                try { await pair.DisposeAsync(); } catch { }
+            }
+            throw;
+        }
     }
 
     /// <summary>
@@ -100,7 +129,9 @@ public sealed class WebSocketMuxListener : IAsyncDisposable
 
     /// <summary>
     /// Creates multiplexer options for a client that reconnects through a WebSocketMuxListener.
-    /// On reconnection, the client includes the server's session ID as a query parameter.
+    /// On reconnection, the client appends the server's session ID as a <c>session=</c> query
+    /// parameter while preserving any other query parameters present on <paramref name="baseUri"/>
+    /// (e.g. auth tokens or tenant routing keys).
     /// </summary>
     /// <param name="baseUri">The WebSocket URI to connect to.</param>
     /// <param name="configureWebSocket">Optional action to configure each ClientWebSocket.Options.</param>
@@ -123,14 +154,20 @@ public sealed class WebSocketMuxListener : IAsyncDisposable
                 var uri = baseUri;
                 if (muxRef is { RemoteSessionId: var rid } && rid != Guid.Empty)
                 {
-                    var builder = new UriBuilder(baseUri);
-                    builder.Query = $"session={rid}";
-                    uri = builder.Uri;
+                    uri = BuildReconnectUri(baseUri, rid);
                 }
 
-                await ws.ConnectAsync(uri, ct).ConfigureAwait(false);
-                var stream = new WebSocketStream(ws);
-                return new StreamPair(stream, ws);
+                try
+                {
+                    await ws.ConnectAsync(uri, ct).ConfigureAwait(false);
+                    var stream = new WebSocketStream(ws);
+                    return new StreamPair(stream, ws);
+                }
+                catch
+                {
+                    ws.Dispose();
+                    throw;
+                }
             }
         };
 
@@ -143,6 +180,20 @@ public sealed class WebSocketMuxListener : IAsyncDisposable
         Action<System.Net.WebSockets.ClientWebSocketOptions>? configureWebSocket = null)
     {
         return CreateReconnectableClientOptions(new Uri(url), configureWebSocket);
+    }
+
+    /// <summary>
+    /// Appends a <c>session=</c> query parameter to <paramref name="baseUri"/> while preserving
+    /// any pre-existing query parameters (auth tokens, tenant ids, routing keys, etc.).
+    /// </summary>
+    internal static Uri BuildReconnectUri(Uri baseUri, Guid sessionId)
+    {
+        var builder = new UriBuilder(baseUri);
+        var existing = builder.Query.TrimStart('?');
+        builder.Query = existing.Length == 0
+            ? $"session={sessionId}"
+            : $"{existing}&session={sessionId}";
+        return builder.Uri;
     }
 
     /// <inheritdoc/>

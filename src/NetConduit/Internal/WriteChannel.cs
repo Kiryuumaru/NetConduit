@@ -191,8 +191,35 @@ internal sealed class WriteChannel : Stream, IWriteChannel
                 TryCompactLocked();
                 if (_slabSize - _writePos >= frameSize) break;
             }
-            if (!await _spaceAvailable.WaitAsync(_sendTimeout, ct))
+
+            // Re-check state before re-parking. SetClosed/Abort wake parked
+            // writers via TryReleaseSpaceSignal precisely so they can unwind
+            // here with ChannelClosedException instead of stalling for the
+            // full SendTimeout or surfacing ObjectDisposedException when the
+            // semaphore is disposed by Abort (issue #230).
+            if (_state is not (ChannelState.Open or ChannelState.Opening))
+                throw new ChannelClosedException(ChannelId, _closeReason ?? ChannelCloseReason.LocalClose);
+
+            bool acquired;
+            try
+            {
+                acquired = await _spaceAvailable.WaitAsync(_sendTimeout, ct).ConfigureAwait(false);
+            }
+            catch (ObjectDisposedException)
+            {
+                throw new ChannelClosedException(ChannelId, _closeReason ?? ChannelCloseReason.LocalClose);
+            }
+
+            if (!acquired)
+            {
+                // Distinguish "channel closed during the wait" from "no ACK
+                // arrived in time" — the close signal and the timeout race,
+                // and the caller should see ChannelClosedException whenever
+                // the close happened concurrently.
+                if (_state is not (ChannelState.Open or ChannelState.Opening))
+                    throw new ChannelClosedException(ChannelId, _closeReason ?? ChannelCloseReason.LocalClose);
                 throw new TimeoutException($"WriteChannel '{ChannelId}' timed out waiting for slab space.");
+            }
         }
 
         // Build the complete frame in the slab (under lock to prevent races with TakeReady)

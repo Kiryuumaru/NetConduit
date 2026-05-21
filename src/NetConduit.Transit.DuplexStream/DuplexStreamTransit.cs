@@ -55,7 +55,7 @@ public sealed class DuplexStreamTransit : Stream, ITransit
     public bool IsReady => !_disposed && _writeChannel.IsReady && _readChannel.IsReady;
 
     /// <inheritdoc/>
-    public bool IsConnected => !_disposed && (_writeChannel.IsConnected || _readChannel.IsConnected);
+    public bool IsConnected => !_disposed && _writeChannel.IsConnected && _readChannel.IsConnected;
 
     /// <inheritdoc/>
     public string? WriteChannelId => _writeChannel.ChannelId;
