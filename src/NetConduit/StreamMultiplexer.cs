@@ -847,9 +847,63 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IChannelOwner
 
     private void HandleRemoteGoAway()
     {
+        // If local already initiated shutdown (via GoAwayAsync or DisposeAsync),
+        // the existing path owns teardown. Don't double-drive it.
+        if (_isShuttingDown) return;
         _isShuttingDown = true;
         _disconnectReason = Enums.DisconnectReason.GoAwayReceived;
-        _cts.Cancel();
+
+        // Mirror GoAwayAsync's drain-then-cancel semantics on the remote-initiated
+        // path. Cancelling _cts immediately would wake the main loop, which then
+        // cancels _loopCts and aborts the writer mid-flush — frames already stamped
+        // into channel slabs by WriteAsync (which returned successfully to the caller)
+        // would be silently dropped on the wire (issue #165).
+        //
+        // Run the drain off-thread because this handler executes on the reader loop;
+        // the writer needs the reader to keep pumping inbound ACKs to release slab
+        // capacity while it finishes flushing.
+        _ = Task.Run(DrainAndCancelOnRemoteGoAwayAsync);
+    }
+
+    private async Task DrainAndCancelOnRemoteGoAwayAsync()
+    {
+        try
+        {
+            using var drainCts = new CancellationTokenSource(_options.GoAwayTimeout);
+            while (!drainCts.IsCancellationRequested)
+            {
+                bool anyPending = false;
+                foreach (var ch in _registry.GetAllWriteChannels())
+                {
+                    if (ch.HasPendingData())
+                    {
+                        anyPending = true;
+                        break;
+                    }
+                }
+                if (!anyPending) break;
+
+                try
+                {
+                    await Task.Delay(20, drainCts.Token).ConfigureAwait(false);
+                }
+                catch (OperationCanceledException)
+                {
+                    break;
+                }
+            }
+        }
+        catch
+        {
+            // Best-effort drain — fall through to cancel regardless. Any error here
+            // (e.g. registry mutation race during teardown) must not leave _cts
+            // un-cancelled or the main loop never observes the GoAway.
+        }
+        finally
+        {
+            try { _cts.Cancel(); }
+            catch (ObjectDisposedException) { /* DisposeAsync already ran */ }
+        }
     }
 
     private void SendControlFrame(FrameFlags flags, ReadOnlySpan<byte> payload)
