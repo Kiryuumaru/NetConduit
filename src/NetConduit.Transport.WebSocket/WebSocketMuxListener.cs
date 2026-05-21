@@ -200,12 +200,40 @@ public sealed class WebSocketMuxListener : IAsyncDisposable
     public async ValueTask DisposeAsync()
     {
         _newMuxChannel.Writer.TryComplete();
+
+        // Aggregate per-session dispose failures so a single bad mux cannot
+        // strand the remaining sessions or block _sessions.Clear() (#295).
+        List<Exception>? errors = null;
         foreach (var entry in _sessions.Values)
         {
-            entry.ConnectionChannel.Writer.TryComplete();
-            await entry.Mux.DisposeAsync();
+            try
+            {
+                entry.ConnectionChannel.Writer.TryComplete();
+            }
+            catch (Exception ex)
+            {
+                (errors ??= []).Add(ex);
+            }
+
+            try
+            {
+                await entry.Mux.DisposeAsync();
+            }
+            catch (Exception ex)
+            {
+                (errors ??= []).Add(ex);
+            }
         }
         _sessions.Clear();
+
+        if (errors is { Count: 1 })
+        {
+            throw errors[0];
+        }
+        if (errors is { Count: > 1 })
+        {
+            throw new AggregateException(errors);
+        }
     }
 
     private sealed record SessionEntry(IStreamMultiplexer Mux, Channel<CompletionStreamPair> ConnectionChannel);
