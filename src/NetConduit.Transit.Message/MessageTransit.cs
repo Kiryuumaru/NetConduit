@@ -115,7 +115,7 @@ public sealed class MessageTransit<TSend, TReceive> : ITransit
 
     /// <inheritdoc/>
     public bool IsConnected => !_disposed &&
-        (_writeChannel?.IsConnected ?? false) || (_readChannel?.IsConnected ?? false);
+        ((_writeChannel?.IsConnected ?? false) || (_readChannel?.IsConnected ?? false));
 
     /// <inheritdoc/>
     public string? WriteChannelId => _writeChannel?.ChannelId;

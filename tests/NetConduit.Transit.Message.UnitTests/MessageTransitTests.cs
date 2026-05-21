@@ -721,4 +721,84 @@ public sealed class MessageTransitTests
     }
 
     #endregion
+
+    #region IsConnected Precedence
+
+    private sealed class FakeChannel(bool isConnected) : IWriteChannel, IReadChannel
+    {
+        public string ChannelId => "fake";
+        public ChannelState State => ChannelState.Open;
+        public bool IsReady => true;
+        public bool IsConnected { get; set; } = isConnected;
+        public ChannelPriority Priority => ChannelPriority.Normal;
+        public ChannelStats Stats { get; } = new();
+        public ChannelCloseReason? CloseReason => null;
+        public Exception? CloseException => null;
+
+        public event EventHandler? Ready { add { } remove { } }
+        public event EventHandler? Connected { add { } remove { } }
+        public event EventHandler<DisconnectedEventArgs>? Disconnected { add { } remove { } }
+        public event EventHandler<ChannelCloseEventArgs>? Closed { add { } remove { } }
+
+        public Task WaitForReadyAsync(CancellationToken ct = default) => Task.CompletedTask;
+        public ValueTask CloseAsync(CancellationToken ct = default) => ValueTask.CompletedTask;
+        public Stream AsStream() => Stream.Null;
+        public ValueTask WriteAsync(ReadOnlyMemory<byte> data, CancellationToken ct = default) => ValueTask.CompletedTask;
+        public ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken ct = default) => new(0);
+        public ValueTask DisposeAsync() => ValueTask.CompletedTask;
+        public void Dispose() { }
+    }
+
+    [Fact]
+    public async Task MessageTransit_IsConnected_ReturnsFalse_AfterDispose_EvenWhenReadChannelStillConnected()
+    {
+        // Issue #166: MessageTransit.IsConnected was missing parentheses around
+        // the `||` group, so the read-channel disjunct bypassed the !_disposed
+        // guard. With a read channel that still reports IsConnected == true
+        // (e.g. during the window between flipping _disposed and the read
+        // channel's IsConnected clearing), IsConnected wrongly returned true
+        // for a disposed transit.
+        var write = new FakeChannel(isConnected: false);
+        var read = new FakeChannel(isConnected: true);
+
+#pragma warning disable IL2026, IL3050
+        var transit = new MessageTransit<TestMessage, TestMessage>(write, read);
+#pragma warning restore IL2026, IL3050
+
+        await transit.DisposeAsync();
+
+        Assert.False(transit.IsConnected);
+    }
+
+    [Fact]
+    public async Task MessageTransit_IsConnected_ReturnsFalse_AfterDispose_EvenWhenWriteChannelStillConnected()
+    {
+        var write = new FakeChannel(isConnected: true);
+        var read = new FakeChannel(isConnected: false);
+
+#pragma warning disable IL2026, IL3050
+        var transit = new MessageTransit<TestMessage, TestMessage>(write, read);
+#pragma warning restore IL2026, IL3050
+
+        await transit.DisposeAsync();
+
+        Assert.False(transit.IsConnected);
+    }
+
+    [Fact]
+    public void MessageTransit_IsConnected_ReturnsTrue_WhenOnlyReadChannelConnected_BeforeDispose()
+    {
+        // Sanity check: the disjunction itself is preserved — a live transit
+        // with only the read side connected still reports IsConnected.
+        var write = new FakeChannel(isConnected: false);
+        var read = new FakeChannel(isConnected: true);
+
+#pragma warning disable IL2026, IL3050
+        var transit = new MessageTransit<TestMessage, TestMessage>(write, read);
+#pragma warning restore IL2026, IL3050
+
+        Assert.True(transit.IsConnected);
+    }
+
+    #endregion
 }
