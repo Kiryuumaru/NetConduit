@@ -19,6 +19,7 @@ public sealed class WriteChannelTests
         public void NotifyPendingAcceptCancelled(string channelId) { }
         public void NotifyChannelOpened(string channelId) { }
         public void SendAck(ushort channelIndex, ulong consumedPosition) { }
+        public void NotifyEventHandlerException(Exception exception) { }
     }
 
     private static WriteChannel CreateChannel(TestRouter? router = null, int slabSize = 64 * 1024)

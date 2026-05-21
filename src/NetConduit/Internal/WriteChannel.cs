@@ -139,7 +139,9 @@ internal sealed class WriteChannel : Stream, IWriteChannel
             _isReady = true;
             // Raise synchronous notifications first so handlers observe a ready channel,
             // then complete the TCS so async awaiters resume only after handlers ran.
-            Ready?.Invoke(this, EventArgs.Empty);
+            // Multicast-safe: a throwing user handler must not prevent the remaining
+            // handlers from running nor crash the producer thread (#286).
+            SafeEventRaiser.Raise(this, Ready, _owner.NotifyEventHandlerException);
             _owner.NotifyChannelOpened(ChannelId);
             _readyTcs.TrySetResult();
         }
@@ -148,13 +150,13 @@ internal sealed class WriteChannel : Stream, IWriteChannel
     internal void MarkConnected()
     {
         _isConnected = true;
-        Connected?.Invoke(this, EventArgs.Empty);
+        SafeEventRaiser.Raise(this, Connected, _owner.NotifyEventHandlerException);
     }
 
     internal void MarkDisconnected(DisconnectReason reason, Exception? exception = null)
     {
         _isConnected = false;
-        Disconnected?.Invoke(this, new DisconnectedEventArgs(reason, exception));
+        SafeEventRaiser.Raise(this, Disconnected, new DisconnectedEventArgs(reason, exception), _owner.NotifyEventHandlerException);
     }
 
     /// <summary>
@@ -462,7 +464,7 @@ internal sealed class WriteChannel : Stream, IWriteChannel
         _readyTcs.TrySetException(new ChannelClosedException(ChannelId, reason));
         // Wake any blocked writers
         TryReleaseSpaceSignal();
-        Closed?.Invoke(this, new ChannelCloseEventArgs(reason, exception));
+        SafeEventRaiser.Raise(this, Closed, new ChannelCloseEventArgs(reason, exception), _owner.NotifyEventHandlerException);
 
         // When closed by AbortAllChannels (MuxDisposed), the registry handles cleanup via Clear().
         // Only self-unregister for graceful per-channel closes where MarkSent may have missed the window.
