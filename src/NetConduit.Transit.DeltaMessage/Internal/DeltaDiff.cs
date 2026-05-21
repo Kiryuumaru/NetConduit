@@ -30,12 +30,23 @@ internal static class DeltaDiff
         foreach (var prop in newObj)
         {
             var path = CreatePath(basePath, prop.Key);
-            var oldValue = oldObj[prop.Key];
             var newValue = prop.Value;
+
+            // ContainsKey distinguishes "key absent" from "key present with
+            // JSON null value" — JsonObject's indexer returns C# null for
+            // both, which silently dropped newly-added null-valued
+            // properties from the diff (issue #211).
+            if (!oldObj.ContainsKey(prop.Key))
+            {
+                ops.Add(new DeltaOperation(DeltaOp.Set, path, newValue?.DeepClone()));
+                continue;
+            }
+
+            var oldValue = oldObj[prop.Key];
 
             if (oldValue is null && newValue is not null)
             {
-                ops.Add(new DeltaOperation(DeltaOp.Set, path, newValue?.DeepClone()));
+                ops.Add(new DeltaOperation(DeltaOp.Set, path, newValue.DeepClone()));
             }
             else if (newValue is null && oldValue is not null)
             {
@@ -53,7 +64,7 @@ internal static class DeltaDiff
                 }
                 else
                 {
-                    ops.Add(new DeltaOperation(DeltaOp.Set, path, newValue?.DeepClone()));
+                    ops.Add(new DeltaOperation(DeltaOp.Set, path, newValue.DeepClone()));
                 }
             }
         }
