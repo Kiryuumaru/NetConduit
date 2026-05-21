@@ -1057,74 +1057,84 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IChannelOwner
     {
         if (header.Flags == FrameFlags.Init)
         {
-            if (payload.Length > ChannelConstants.MaxChannelIdLength)
-                return; // channel name too long — drop frame
-
-            string channelId = Encoding.UTF8.GetString(payload);
-            ReadChannel readChannel;
-            bool isNewlyAccepted;
-
-            // Atomic registration: serialized with AcceptChannel so we cannot
-            // race between adopting a pending channel and the test grabbing
-            // a transient _readChannels entry.
-            lock (_registry.AcceptLock)
-            {
-                // After reconnect, Init frames are replayed from the slab.
-                // If the channel already exists, skip re-registration.
-                var existing = _registry.GetReadChannel(header.ChannelIndex);
-                if (existing is not null)
-                    return;
-
-                // Check if a pending accept channel was pre-created via AcceptChannel.
-                // A pending entry whose state is already Closed was disposed by the
-                // caller before INIT arrived; treat it as if no pending exists and
-                // fall through to creating a fresh channel. Adopting the disposed
-                // instance would resurrect a channel whose slab has been returned
-                // to ArrayPool<byte>.Shared.
-                var pendingChannel = _registry.GetPendingAcceptChannel(channelId);
-                if (pendingChannel is not null && pendingChannel.State == ChannelState.Closed)
-                {
-                    _registry.RemovePendingAcceptChannel(channelId);
-                    pendingChannel = null;
-                }
-
-                if (pendingChannel is not null)
-                {
-                    readChannel = pendingChannel;
-                    readChannel.SetChannelIndex(header.ChannelIndex);
-                    _registry.RemovePendingAcceptChannel(channelId);
-                    isNewlyAccepted = true;
-                }
-                else
-                {
-                    readChannel = new ReadChannel(
-                        channelId,
-                        header.ChannelIndex,
-                        _options.DefaultChannelOptions.Priority,
-                        _options.DefaultChannelOptions.SlabSize,
-                        this);
-                    isNewlyAccepted = false;
-                }
-
-                _registry.RegisterReadChannel(header.ChannelIndex, readChannel);
-            }
-
-            readChannel.MarkOpen();
-            readChannel.MarkConnected();
-
-            // Send init-ack so the opener knows the channel is established
-            SendInitAck(header.ChannelIndex);
-
-            Interlocked.Increment(ref _stats._openChannels);
-            Interlocked.Increment(ref _stats._totalChannelsOpened);
-            RaiseEvent(ChannelAccepted, new ChannelEventArgs(channelId));
-
-            // Only enqueue for generic AcceptChannelsAsync if no specific accept claimed it.
-            if (!isNewlyAccepted)
-                _registry.EnqueueForAccept(readChannel);
+            HandleInitFrame(header, payload);
             return;
         }
 
+        DispatchExistingChannelFrame(header, payload);
+    }
+
+    private void HandleInitFrame(FrameHeader header, ReadOnlySpan<byte> payload)
+    {
+        if (payload.Length > ChannelConstants.MaxChannelIdLength)
+            return; // channel name too long — drop frame
+
+        string channelId = Encoding.UTF8.GetString(payload);
+        ReadChannel readChannel;
+        bool isNewlyAccepted;
+
+        // Atomic registration: serialized with AcceptChannel so we cannot
+        // race between adopting a pending channel and the test grabbing
+        // a transient _readChannels entry.
+        lock (_registry.AcceptLock)
+        {
+            // After reconnect, Init frames are replayed from the slab.
+            // If the channel already exists, skip re-registration.
+            var existing = _registry.GetReadChannel(header.ChannelIndex);
+            if (existing is not null)
+                return;
+
+            // Check if a pending accept channel was pre-created via AcceptChannel.
+            // A pending entry whose state is already Closed was disposed by the
+            // caller before INIT arrived; treat it as if no pending exists and
+            // fall through to creating a fresh channel. Adopting the disposed
+            // instance would resurrect a channel whose slab has been returned
+            // to ArrayPool<byte>.Shared.
+            var pendingChannel = _registry.GetPendingAcceptChannel(channelId);
+            if (pendingChannel is not null && pendingChannel.State == ChannelState.Closed)
+            {
+                _registry.RemovePendingAcceptChannel(channelId);
+                pendingChannel = null;
+            }
+
+            if (pendingChannel is not null)
+            {
+                readChannel = pendingChannel;
+                readChannel.SetChannelIndex(header.ChannelIndex);
+                _registry.RemovePendingAcceptChannel(channelId);
+                isNewlyAccepted = true;
+            }
+            else
+            {
+                readChannel = new ReadChannel(
+                    channelId,
+                    header.ChannelIndex,
+                    _options.DefaultChannelOptions.Priority,
+                    _options.DefaultChannelOptions.SlabSize,
+                    this);
+                isNewlyAccepted = false;
+            }
+
+            _registry.RegisterReadChannel(header.ChannelIndex, readChannel);
+        }
+
+        readChannel.MarkOpen();
+        readChannel.MarkConnected();
+
+        // Send init-ack so the opener knows the channel is established
+        SendInitAck(header.ChannelIndex);
+
+        Interlocked.Increment(ref _stats._openChannels);
+        Interlocked.Increment(ref _stats._totalChannelsOpened);
+        RaiseEvent(ChannelAccepted, new ChannelEventArgs(channelId));
+
+        // Only enqueue for generic AcceptChannelsAsync if no specific accept claimed it.
+        if (!isNewlyAccepted)
+            _registry.EnqueueForAccept(readChannel);
+    }
+
+    private void DispatchExistingChannelFrame(FrameHeader header, ReadOnlySpan<byte> payload)
+    {
         // Route data/ack/fin/err to existing channel
         var channel = _registry.GetReadChannel(header.ChannelIndex);
         if (channel is null)
