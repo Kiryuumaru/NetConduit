@@ -1237,37 +1237,24 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IChannelOwner
     {
         if (_conn.ControlChannel is null) return;
 
-        // Build the control frame in the control channel's slab — writer thread sends it
-        int frameSize = FrameHeader.Size + payload.Length;
-        byte[] temp = new byte[frameSize];
-        FrameHeader.WriteTo(temp, ChannelConstants.ControlChannel, flags, payload.Length);
-        if (!payload.IsEmpty)
-            payload.CopyTo(temp.AsSpan(FrameHeader.Size));
-
-        // Write through the control channel's slab so the writer thread picks it up
-        // The control channel uses ChannelIndex 0, so frames are stamped with channel 0
-        _conn.ControlChannel.WriteRawFrame(temp);
+        // Write through the control channel's slab so the writer thread picks it up.
+        // The control channel uses ChannelIndex 0, so frames are stamped with channel 0.
+        _conn.ControlChannel.WriteRawFrame(ControlFrameBuilder.BuildControlFrame(flags, payload));
     }
 
     private void SendInitAck(ushort channelIndex)
     {
         if (_conn.ControlChannel is null) return;
 
-        // ACK frame on the opener's channel index with position 0 — signals channel established
-        byte[] frame = new byte[FrameHeader.Size + 8];
-        FrameHeader.WriteTo(frame, channelIndex, FrameFlags.Ack, 8);
-        BinaryPrimitives.WriteUInt64BigEndian(frame.AsSpan(FrameHeader.Size, 8), 0);
-        _conn.ControlChannel.WriteRawFrame(frame);
+        // ACK frame on the opener's channel index with position 0 — signals channel established.
+        _conn.ControlChannel.WriteRawFrame(ControlFrameBuilder.BuildAckFrame(channelIndex, 0));
     }
 
     void IChannelOwner.SendAck(ushort channelIndex, ulong consumedPosition)
     {
         if (_conn.ControlChannel is null) return;
 
-        byte[] frame = new byte[FrameHeader.Size + 8];
-        FrameHeader.WriteTo(frame, channelIndex, FrameFlags.Ack, 8);
-        BinaryPrimitives.WriteUInt64BigEndian(frame.AsSpan(FrameHeader.Size, 8), consumedPosition);
-        _conn.ControlChannel.WriteRawFrame(frame);
+        _conn.ControlChannel.WriteRawFrame(ControlFrameBuilder.BuildAckFrame(channelIndex, consumedPosition));
     }
 
     private async Task PerformHandshakeAsync(CancellationToken ct)
