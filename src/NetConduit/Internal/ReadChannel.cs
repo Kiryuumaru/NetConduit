@@ -22,6 +22,11 @@ internal sealed class ReadChannel : Stream, IReadChannel, IValueTaskSource<int>
     private readonly object _lock = new();
     private readonly TaskCompletionSource _readyTcs = new(TaskCreationOptions.RunContinuationsAsynchronously);
     private readonly IChannelOwner? _owner;
+    // Cached method-group target for SafeEventRaiser so the channel event raise
+    // sites can pass a single Action<Exception>? without re-checking the
+    // nullable owner each time (#286). Null when the channel was constructed
+    // without an owner (some test/internal contexts).
+    private readonly Action<Exception>? _onHandlerException;
     private int _slabReturned; // CAS guard: ensures slab is returned to pool exactly once
 
     internal ushort ChannelIndex => _channelIndex;
@@ -126,6 +131,7 @@ internal sealed class ReadChannel : Stream, IReadChannel, IValueTaskSource<int>
         Priority = priority;
         _slabSize = slabSize;
         _owner = owner;
+        _onHandlerException = owner is null ? null : owner.NotifyEventHandlerException;
 
         _slab = ArrayPool<byte>.Shared.Rent(slabSize);
         _slabMemory = _slab.AsMemory();
@@ -151,7 +157,9 @@ internal sealed class ReadChannel : Stream, IReadChannel, IValueTaskSource<int>
             _isReady = true;
             // Raise synchronous Ready first so handlers observe a ready channel,
             // then complete the TCS so async awaiters resume only after handlers ran.
-            Ready?.Invoke(this, EventArgs.Empty);
+            // Multicast-safe: a throwing user handler must not crash the mux reader
+            // thread that drove MarkOpen (#286).
+            SafeEventRaiser.Raise(this, Ready, _onHandlerException);
             _readyTcs.TrySetResult();
         }
     }
@@ -159,7 +167,7 @@ internal sealed class ReadChannel : Stream, IReadChannel, IValueTaskSource<int>
     internal void MarkConnected()
     {
         _isConnected = true;
-        Connected?.Invoke(this, EventArgs.Empty);
+        SafeEventRaiser.Raise(this, Connected, _onHandlerException);
     }
 
     internal void MarkDisconnected(DisconnectReason reason, Exception? exception = null)
@@ -169,7 +177,7 @@ internal sealed class ReadChannel : Stream, IReadChannel, IValueTaskSource<int>
         // when it reconnects. Skip exactly those frame bytes so the user sees
         // each payload exactly once.
         _skipFrameBytes = _frameBytesReceived - _ackSentFrameBytes;
-        Disconnected?.Invoke(this, new DisconnectedEventArgs(reason, exception));
+        SafeEventRaiser.Raise(this, Disconnected, new DisconnectedEventArgs(reason, exception), _onHandlerException);
     }
 
     internal void SetAckChannel(WriteChannel ackChannel) => _ackChannel = ackChannel;
@@ -465,7 +473,7 @@ internal sealed class ReadChannel : Stream, IReadChannel, IValueTaskSource<int>
                 returnSlabNow = true;
             }
         }
-        Closed?.Invoke(this, new ChannelCloseEventArgs(reason, exception));
+        SafeEventRaiser.Raise(this, Closed, new ChannelCloseEventArgs(reason, exception), _onHandlerException);
         if (returnSlabNow)
             TryReturnSlab();
     }
