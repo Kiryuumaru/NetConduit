@@ -166,8 +166,20 @@ public sealed class DuplexStreamTransit : Stream, ITransit
         if (disposing)
         {
             UnsubscribeFromChannelEvents();
-            _writeChannel.Dispose();
-            _readChannel.Dispose();
+
+            // Aggregate inner-dispose failures so a throw from one half does not
+            // strand the other and leak its slab back to the pool (#305).
+            List<Exception>? errors = null;
+            try { _writeChannel.Dispose(); }
+            catch (Exception ex) { (errors ??= []).Add(ex); }
+            try { _readChannel.Dispose(); }
+            catch (Exception ex) { (errors ??= []).Add(ex); }
+
+            base.Dispose(disposing);
+
+            if (errors is { Count: 1 }) throw errors[0];
+            if (errors is { Count: > 1 }) throw new AggregateException(errors);
+            return;
         }
 
         base.Dispose(disposing);
@@ -183,10 +195,18 @@ public sealed class DuplexStreamTransit : Stream, ITransit
 
         UnsubscribeFromChannelEvents();
 
-        await _writeChannel.DisposeAsync().ConfigureAwait(false);
-        await _readChannel.DisposeAsync().ConfigureAwait(false);
+        // Aggregate inner-dispose failures so a throw from one half does not
+        // strand the other and leak its slab back to the pool (#305).
+        List<Exception>? errors = null;
+        try { await _writeChannel.DisposeAsync().ConfigureAwait(false); }
+        catch (Exception ex) { (errors ??= []).Add(ex); }
+        try { await _readChannel.DisposeAsync().ConfigureAwait(false); }
+        catch (Exception ex) { (errors ??= []).Add(ex); }
 
         await base.DisposeAsync().ConfigureAwait(false);
+
+        if (errors is { Count: 1 }) throw errors[0];
+        if (errors is { Count: > 1 }) throw new AggregateException(errors);
     }
 
     private void UnsubscribeFromChannelEvents()
