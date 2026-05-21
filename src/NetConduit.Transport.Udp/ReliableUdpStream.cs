@@ -155,7 +155,13 @@ internal sealed class ReliableUdpStream : Stream
                 var flags = span[0];
                 var seq = BinaryPrimitives.ReadUInt32BigEndian(span[1..5]);
                 var len = BinaryPrimitives.ReadUInt16BigEndian(span[5..7]);
-                var payload = span.Slice(7, Math.Min(len, span.Length - 7)).ToArray();
+
+                // Wire-declared length must match the actual datagram payload size.
+                // Mismatches are dropped without ACK so the sender retransmits — silently
+                // clamping with Math.Min would deliver a truncated payload while still
+                // ACKing, desynchronising the multiplexer byte stream (issue #187).
+                if (len != span.Length - 7)
+                    continue;
 
                 if ((flags & FlagAck) == FlagAck)
                 {
@@ -168,7 +174,7 @@ internal sealed class ReliableUdpStream : Stream
                     if (seq == _expectedSeq)
                     {
                         _expectedSeq++;
-                        _receiveChannel.Writer.TryWrite(payload);
+                        _receiveChannel.Writer.TryWrite(span.Slice(7, len).ToArray());
                     }
                     await SendAckAsync(seq, cancellationToken).ConfigureAwait(false);
                     continue;
