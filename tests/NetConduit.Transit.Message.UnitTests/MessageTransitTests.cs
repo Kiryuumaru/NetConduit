@@ -565,6 +565,44 @@ public sealed class MessageTransitTests
         await server.DisposeAsync();
     }
 
+    [Fact]
+    public async Task MessageTransit_ReceiveAllAsync_StopsOnChannelClose_WhenReceiveTypeIsValueType()
+    {
+        // Issue #177: ReceiveAllAsync used `message is null` to detect EOF,
+        // which is always false for non-nullable value types. The loop would
+        // yield default(int)=0 forever after the channel closed.
+        var (client, server) = await CreateReadyPairAsync();
+
+        var w = client.OpenChannel("m4i");
+        var r = await server.AcceptChannelAsync("m4i");
+
+#pragma warning disable IL2026, IL3050
+        var sender = new MessageTransit<int, int>(w, null);
+        var receiver = new MessageTransit<int, int>(null, r);
+#pragma warning restore IL2026, IL3050
+
+        await sender.SendAsync(42);
+        await sender.DisposeAsync();
+
+        var messages = new List<int>();
+        // Hard cap on iteration count: if the bug is present, ReceiveAllAsync
+        // produces unlimited 0s. Stop early so the test fails loudly with a
+        // helpful message instead of timing out.
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+        await foreach (var msg in receiver.ReceiveAllAsync(cts.Token))
+        {
+            messages.Add(msg);
+            if (messages.Count > 10) break;
+        }
+
+        Assert.Single(messages);
+        Assert.Equal(42, messages[0]);
+
+        await receiver.DisposeAsync();
+        await client.DisposeAsync();
+        await server.DisposeAsync();
+    }
+
     #endregion
 
     #region Cancellation
