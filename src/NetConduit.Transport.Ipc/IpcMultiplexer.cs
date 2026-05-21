@@ -29,17 +29,33 @@ public static class IpcMultiplexer
                 {
                     var port = GetDeterministicPort(endpoint);
                     var client = new TcpClient(AddressFamily.InterNetwork);
-                    await client.ConnectAsync(IPAddress.Loopback, port, ct).ConfigureAwait(false);
-                    var stream = client.GetStream();
-                    return new StreamPair(stream, client);
+                    try
+                    {
+                        await client.ConnectAsync(IPAddress.Loopback, port, ct).ConfigureAwait(false);
+                        var stream = client.GetStream();
+                        return new StreamPair(stream, client);
+                    }
+                    catch
+                    {
+                        client.Dispose();
+                        throw;
+                    }
                 }
                 else
                 {
                     var socket = new Socket(AddressFamily.Unix, SocketType.Stream, ProtocolType.Unspecified);
-                    var endPoint = new UnixDomainSocketEndPoint(endpoint);
-                    await socket.ConnectAsync(endPoint, ct).ConfigureAwait(false);
-                    var stream = new NetworkStream(socket, ownsSocket: true);
-                    return new StreamPair(stream);
+                    try
+                    {
+                        var endPoint = new UnixDomainSocketEndPoint(endpoint);
+                        await socket.ConnectAsync(endPoint, ct).ConfigureAwait(false);
+                        var stream = new NetworkStream(socket, ownsSocket: true);
+                        return new StreamPair(stream);
+                    }
+                    catch
+                    {
+                        socket.Dispose();
+                        throw;
+                    }
                 }
             }
         };
@@ -93,8 +109,16 @@ public static class IpcMultiplexer
                             listener.Stop();
                         }
 
-                        var stream = client.GetStream();
-                        pair = new StreamPair(stream, client);
+                        try
+                        {
+                            var stream = client.GetStream();
+                            pair = new StreamPair(stream, client);
+                        }
+                        catch
+                        {
+                            client.Dispose();
+                            throw;
+                        }
                     }
                     else
                     {
