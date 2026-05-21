@@ -100,7 +100,9 @@ public sealed class WebSocketMuxListener : IAsyncDisposable
 
     /// <summary>
     /// Creates multiplexer options for a client that reconnects through a WebSocketMuxListener.
-    /// On reconnection, the client includes the server's session ID as a query parameter.
+    /// On reconnection, the client appends the server's session ID as a <c>session=</c> query
+    /// parameter while preserving any other query parameters present on <paramref name="baseUri"/>
+    /// (e.g. auth tokens or tenant routing keys).
     /// </summary>
     /// <param name="baseUri">The WebSocket URI to connect to.</param>
     /// <param name="configureWebSocket">Optional action to configure each ClientWebSocket.Options.</param>
@@ -123,9 +125,7 @@ public sealed class WebSocketMuxListener : IAsyncDisposable
                 var uri = baseUri;
                 if (muxRef is { RemoteSessionId: var rid } && rid != Guid.Empty)
                 {
-                    var builder = new UriBuilder(baseUri);
-                    builder.Query = $"session={rid}";
-                    uri = builder.Uri;
+                    uri = BuildReconnectUri(baseUri, rid);
                 }
 
                 await ws.ConnectAsync(uri, ct).ConfigureAwait(false);
@@ -143,6 +143,20 @@ public sealed class WebSocketMuxListener : IAsyncDisposable
         Action<System.Net.WebSockets.ClientWebSocketOptions>? configureWebSocket = null)
     {
         return CreateReconnectableClientOptions(new Uri(url), configureWebSocket);
+    }
+
+    /// <summary>
+    /// Appends a <c>session=</c> query parameter to <paramref name="baseUri"/> while preserving
+    /// any pre-existing query parameters (auth tokens, tenant ids, routing keys, etc.).
+    /// </summary>
+    internal static Uri BuildReconnectUri(Uri baseUri, Guid sessionId)
+    {
+        var builder = new UriBuilder(baseUri);
+        var existing = builder.Query.TrimStart('?');
+        builder.Query = existing.Length == 0
+            ? $"session={sessionId}"
+            : $"{existing}&session={sessionId}";
+        return builder.Uri;
     }
 
     /// <inheritdoc/>
