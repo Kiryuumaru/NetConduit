@@ -1451,46 +1451,14 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IChannelOwner
     // Non-fatal exceptions from a handler are routed to the Error event so they are
     // observable from outside the process. Fatal exceptions (OOM, AV) propagate.
     private void RaiseEvent<T>(EventHandler<T>? handler, T args) where T : EventArgs
-    {
-        if (handler is null) return;
-        foreach (var target in handler.GetInvocationList())
-        {
-            try { ((EventHandler<T>)target).Invoke(this, args); }
-            catch (Exception ex) when (!ExceptionFilters.IsFatal(ex))
-            {
-                RaiseError(ex);
-            }
-        }
-    }
+        => SafeEventRaiser.Raise(this, handler, args, RaiseError);
 
     private void RaiseEvent(EventHandler? handler)
-    {
-        if (handler is null) return;
-        foreach (var target in handler.GetInvocationList())
-        {
-            try { ((EventHandler)target).Invoke(this, EventArgs.Empty); }
-            catch (Exception ex) when (!ExceptionFilters.IsFatal(ex))
-            {
-                RaiseError(ex);
-            }
-        }
-    }
+        => SafeEventRaiser.Raise(this, handler, RaiseError);
 
-    // Direct path for raising the Error event. Bypasses the routing in RaiseEvent so
-    // a throwing Error handler cannot recurse back into Error. As a last resort, an
-    // exception from an Error handler is dropped — there is nowhere else to send it.
+    // Direct path for raising the Error event. Passes a null exception route to
+    // SafeEventRaiser so a throwing Error handler cannot recurse back into Error;
+    // its exception is dropped as the absolute last resort.
     private void RaiseError(Exception exception)
-    {
-        var handler = Error;
-        if (handler is null) return;
-        var args = new Events.ErrorEventArgs(exception);
-        foreach (var target in handler.GetInvocationList())
-        {
-            try { ((EventHandler<Events.ErrorEventArgs>)target).Invoke(this, args); }
-            catch (Exception ex) when (!ExceptionFilters.IsFatal(ex))
-            {
-                // Error handler itself threw — nowhere to escalate.
-            }
-        }
-    }
+        => SafeEventRaiser.Raise(this, Error, new Events.ErrorEventArgs(exception), onHandlerException: null);
 }
