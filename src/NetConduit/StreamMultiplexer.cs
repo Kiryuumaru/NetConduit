@@ -32,6 +32,7 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IChannelOwner
     private readonly object _readyLock = new();
     private readonly List<WriteChannel> _readyChannels = [];
     private readonly MuxConnection _conn = new();
+    private readonly MuxConnectRetry _connectRetry;
 
     private volatile bool _isRunning;
     private volatile bool _isConnected;
@@ -118,6 +119,10 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IChannelOwner
         _options = options;
         _conn.SessionId = options.SessionId ?? Guid.NewGuid();
         _registry = new ChannelRegistry(useOddIndices);
+        _connectRetry = new MuxConnectRetry(
+            options,
+            args => RaiseEvent(Reconnecting, args),
+            RaiseError);
     }
 
     /// <summary>
@@ -589,7 +594,7 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IChannelOwner
             while (!ct.IsCancellationRequested)
             {
                 // Connect with retry (no delay on first attempt)
-                var transport = await ConnectWithRetryAsync(hasConnectedBefore, ct);
+                var transport = await _connectRetry.ConnectWithRetryAsync(hasConnectedBefore, ct);
 
                 // Handshake: reconnect if we've connected before, initial otherwise.
                 // Only transport I/O failures raised by the handshake path are retryable.
@@ -622,7 +627,7 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IChannelOwner
 
                     RaiseError(handshakeEx);
 
-                    if (!HasHandshakeRetryBudget(handshakeAttempt))
+                    if (!_connectRetry.HasHandshakeRetryBudget(handshakeAttempt))
                         throw;
 
                     try
@@ -778,75 +783,6 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IChannelOwner
     {
         _registry.AbortAllChannels(ChannelCloseReason.TransportFailed, exception);
         _registry.CancelAllPendingAccepts();
-    }
-
-    private bool HasHandshakeRetryBudget(int failedAttempts)
-    {
-        int maxAttempts = _options.MaxAutoReconnectAttempts;
-        return maxAttempts < 0 || failedAttempts < maxAttempts;
-    }
-
-    private async Task<IStreamPair> ConnectWithRetryAsync(bool isReconnect, CancellationToken ct)
-    {
-        int maxAttempts = _options.MaxAutoReconnectAttempts;
-        double delay = _options.AutoReconnectDelay.TotalMilliseconds;
-        double maxDelay = _options.MaxAutoReconnectDelay.TotalMilliseconds;
-
-        if (isReconnect && maxAttempts == 0)
-            throw new MultiplexerException(ErrorCode.Internal, "Reconnect is disabled.");
-
-        for (int attempt = 1; ; attempt++)
-        {
-            ct.ThrowIfCancellationRequested();
-
-            // Enforce max attempts. -1 = unlimited, 0 = single attempt (no retry),
-            // >0 = at most N total attempts.
-            if (maxAttempts > 0 && attempt > maxAttempts)
-                throw new MultiplexerException(ErrorCode.Internal,
-                    $"Connection failed after {maxAttempts} attempts.");
-
-            // Delay before retry (skip on first attempt of first connect)
-            if (attempt > 1 || isReconnect)
-            {
-                RaiseEvent(Reconnecting, new ReconnectingEventArgs(attempt));
-                await Task.Delay(TimeSpan.FromMilliseconds(delay), ct);
-                delay = Math.Min(delay * _options.AutoReconnectBackoffMultiplier, maxDelay);
-            }
-
-            try
-            {
-                if (_options.ConnectionTimeout > TimeSpan.Zero
-                    && _options.ConnectionTimeout != Timeout.InfiniteTimeSpan)
-                {
-                    using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
-                    timeoutCts.CancelAfter(_options.ConnectionTimeout);
-                    try
-                    {
-                        return await _options.StreamFactory(timeoutCts.Token);
-                    }
-                    catch (OperationCanceledException) when (!ct.IsCancellationRequested)
-                    {
-                        throw new TimeoutException(
-                            $"Connection timed out after {_options.ConnectionTimeout}");
-                    }
-                }
-
-                return await _options.StreamFactory(ct);
-            }
-            catch (OperationCanceledException) when (ct.IsCancellationRequested)
-            {
-                throw;
-            }
-            catch (Exception ex)
-            {
-                RaiseError(ex);
-
-                // maxAttempts == 0 means no retry: propagate the first failure immediately
-                // whether this is the initial connect or a reconnect after the link died.
-                if (maxAttempts == 0)
-                    throw;
-            }
-        }
     }
 
     private async Task WaitForLoopsAsync()
