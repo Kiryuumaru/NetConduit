@@ -143,4 +143,100 @@ public sealed class DeltaDiffTests
         Assert.Equal(DeltaOp.ArrayInsert, deserialized[2].Op);
         Assert.Equal(2, deserialized[2].Index);
     }
+
+    [Fact]
+    public void PropertyAddedWithNullValue_ProducesSetOp_AndApplyPreservesPresence()
+    {
+        // Regression for issue #211: a newly-added property with JSON null
+        // value was silently dropped from the diff because JsonObject's
+        // indexer returns C# null for both "key missing" and "key present
+        // with JSON null value".
+        var a = JsonNode.Parse("""{"a":1}""");
+        var b = JsonNode.Parse("""{"a":1,"b":null}""");
+
+        var ops = DeltaDiff.ComputeDelta(a!, b!);
+
+        Assert.Single(ops);
+        Assert.Equal(DeltaOp.Set, ops[0].Op);
+        Assert.Equal(new object[] { "b" }, ops[0].Path);
+        Assert.Null(ops[0].Value);
+
+        DeltaApply.ApplyDelta(a!, ops);
+        Assert.True(a!.AsObject().ContainsKey("b"));
+        Assert.Null(a.AsObject()["b"]);
+    }
+
+    [Fact]
+    public void PropertyAddedWithNullValue_RoundTrip_MatchesNewState()
+    {
+        var a = JsonNode.Parse("""{"a":1}""");
+        var b = JsonNode.Parse("""{"a":1,"b":null,"c":null}""");
+
+        var ops = DeltaDiff.ComputeDelta(a!, b!);
+        DeltaApply.ApplyDelta(a!, ops);
+
+        Assert.Equal(b!.ToJsonString(), a!.ToJsonString());
+    }
+
+    [Fact]
+    public void NullValuedPropertyRemoved_ProducesRemoveOp()
+    {
+        // Opposite direction must still work: removing a null-valued
+        // property must emit a Remove op, not be silently dropped.
+        var a = JsonNode.Parse("""{"a":1,"b":null}""");
+        var b = JsonNode.Parse("""{"a":1}""");
+
+        var ops = DeltaDiff.ComputeDelta(a!, b!);
+
+        Assert.Single(ops);
+        Assert.Equal(DeltaOp.Remove, ops[0].Op);
+        Assert.Equal(new object[] { "b" }, ops[0].Path);
+
+        DeltaApply.ApplyDelta(a!, ops);
+        Assert.False(a!.AsObject().ContainsKey("b"));
+    }
+
+    [Fact]
+    public void NullValuedPropertyUnchanged_ProducesNoOp()
+    {
+        var a = JsonNode.Parse("""{"a":1,"b":null}""");
+        var b = JsonNode.Parse("""{"a":1,"b":null}""");
+
+        var ops = DeltaDiff.ComputeDelta(a!, b!);
+        Assert.Empty(ops);
+    }
+
+    [Fact]
+    public void NullValuedPropertyChangedToValue_ProducesSetOp()
+    {
+        var a = JsonNode.Parse("""{"a":1,"b":null}""");
+        var b = JsonNode.Parse("""{"a":1,"b":42}""");
+
+        var ops = DeltaDiff.ComputeDelta(a!, b!);
+
+        Assert.Single(ops);
+        Assert.Equal(DeltaOp.Set, ops[0].Op);
+        Assert.Equal(new object[] { "b" }, ops[0].Path);
+
+        DeltaApply.ApplyDelta(a!, ops);
+        Assert.Equal(42, a!.AsObject()["b"]!.GetValue<int>());
+    }
+
+    [Fact]
+    public void NestedPropertyAddedWithNullValue_ProducesSetOp()
+    {
+        var a = JsonNode.Parse("""{"outer":{"a":1}}""");
+        var b = JsonNode.Parse("""{"outer":{"a":1,"b":null}}""");
+
+        var ops = DeltaDiff.ComputeDelta(a!, b!);
+
+        Assert.Single(ops);
+        Assert.Equal(DeltaOp.Set, ops[0].Op);
+        Assert.Equal(new object[] { "outer", "b" }, ops[0].Path);
+        Assert.Null(ops[0].Value);
+
+        DeltaApply.ApplyDelta(a!, ops);
+        Assert.True(a!.AsObject()["outer"]!.AsObject().ContainsKey("b"));
+        Assert.Null(a.AsObject()["outer"]!.AsObject()["b"]);
+    }
 }
