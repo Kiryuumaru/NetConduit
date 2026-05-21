@@ -75,6 +75,38 @@ internal sealed class ChannelRegistry
         _nextChannelIndex = useOddIndices ? 1 : 2;
     }
 
+    /// <summary>
+    /// True when <paramref name="index"/> matches the current allocation parity
+    /// (odd vs even). Used after the handshake's <see cref="SetIndexParity"/>
+    /// to identify pre-handshake-allocated indices that landed on the wrong
+    /// parity space and must be reassigned before any frame is transmitted
+    /// (#237).
+    /// </summary>
+    internal bool IsCurrentParity(ushort index)
+    {
+        bool useOdd = (Volatile.Read(ref _nextChannelIndex) & 1) == 1;
+        return ((index & 1) == 1) == useOdd;
+    }
+
+    /// <summary>
+    /// Atomically rekey a registered <see cref="WriteChannel"/> from
+    /// <paramref name="oldIndex"/> to <paramref name="newIndex"/>. Used by the
+    /// post-handshake reassignment for pre-handshake-allocated channels whose
+    /// indices need to move into the correct parity space (#237).
+    /// </summary>
+    internal void RekeyWriteChannel(ushort oldIndex, ushort newIndex, WriteChannel channel)
+    {
+        if (oldIndex == newIndex) return;
+        // Reserve the new slot first so a parallel allocation cannot land on it
+        // between the remove and the add.
+        if (!_writeChannels.TryAdd(newIndex, channel))
+            throw new MultiplexerException(
+                ErrorCode.Internal,
+                $"Cannot rekey write channel '{channel.ChannelId}' to index {newIndex}: slot already occupied.");
+        _writeChannels.TryRemove(new KeyValuePair<ushort, WriteChannel>(oldIndex, channel));
+        _idToIndex[channel.ChannelId] = newIndex;
+    }
+
     internal ushort AllocateChannelIndex()
     {
         int index = Interlocked.Add(ref _nextChannelIndex, _indexStep) - _indexStep;
