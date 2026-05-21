@@ -128,9 +128,17 @@ public sealed class WebSocketMuxListener : IAsyncDisposable
                     uri = BuildReconnectUri(baseUri, rid);
                 }
 
-                await ws.ConnectAsync(uri, ct).ConfigureAwait(false);
-                var stream = new WebSocketStream(ws);
-                return new StreamPair(stream, ws);
+                try
+                {
+                    await ws.ConnectAsync(uri, ct).ConfigureAwait(false);
+                    var stream = new WebSocketStream(ws);
+                    return new StreamPair(stream, ws);
+                }
+                catch
+                {
+                    ws.Dispose();
+                    throw;
+                }
             }
         };
 

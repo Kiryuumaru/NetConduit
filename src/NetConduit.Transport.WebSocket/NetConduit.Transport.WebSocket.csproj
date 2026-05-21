@@ -33,6 +33,10 @@
 		<InternalsVisibleTo Include="NetConduit.Transport.WebSocket.IntegrationTests" />
 	</ItemGroup>
 
+	<ItemGroup>
+		<InternalsVisibleTo Include="NetConduit.Transport.WebSocket.IntegrationTests" />
+	</ItemGroup>
+
 	<ItemGroup Condition="'$(UseLocalNetConduit)' == 'true'">
 		<ProjectReference Include="..\NetConduit\NetConduit.csproj" />
 	</ItemGroup>
