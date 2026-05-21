@@ -677,7 +677,14 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IChannelOwner
                 _conn.ReaderTask = Task.Run(() => RunReaderLoopAsync(conn, loopCt), loopCt);
 
                 if (_options.PingInterval > TimeSpan.Zero)
-                    _conn.KeepaliveTask = Task.Run(() => RunKeepaliveLoopAsync(conn, loopCt), loopCt);
+                {
+                    var keepalive = new MuxKeepalive(
+                        conn,
+                        _options.PingInterval,
+                        _options.PingTimeout,
+                        _options.MaxMissedPings);
+                    _conn.KeepaliveTask = Task.Run(() => keepalive.RunAsync(loopCt), loopCt);
+                }
 
                 RaiseEvent(Connected);
 
@@ -978,74 +985,84 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IChannelOwner
     {
         if (header.Flags == FrameFlags.Init)
         {
-            if (payload.Length > ChannelConstants.MaxChannelIdLength)
-                return; // channel name too long — drop frame
-
-            string channelId = Encoding.UTF8.GetString(payload);
-            ReadChannel readChannel;
-            bool isNewlyAccepted;
-
-            // Atomic registration: serialized with AcceptChannel so we cannot
-            // race between adopting a pending channel and the test grabbing
-            // a transient _readChannels entry.
-            lock (_registry.AcceptLock)
-            {
-                // After reconnect, Init frames are replayed from the slab.
-                // If the channel already exists, skip re-registration.
-                var existing = _registry.GetReadChannel(header.ChannelIndex);
-                if (existing is not null)
-                    return;
-
-                // Check if a pending accept channel was pre-created via AcceptChannel.
-                // A pending entry whose state is already Closed was disposed by the
-                // caller before INIT arrived; treat it as if no pending exists and
-                // fall through to creating a fresh channel. Adopting the disposed
-                // instance would resurrect a channel whose slab has been returned
-                // to ArrayPool<byte>.Shared.
-                var pendingChannel = _registry.GetPendingAcceptChannel(channelId);
-                if (pendingChannel is not null && pendingChannel.State == ChannelState.Closed)
-                {
-                    _registry.RemovePendingAcceptChannel(channelId);
-                    pendingChannel = null;
-                }
-
-                if (pendingChannel is not null)
-                {
-                    readChannel = pendingChannel;
-                    readChannel.SetChannelIndex(header.ChannelIndex);
-                    _registry.RemovePendingAcceptChannel(channelId);
-                    isNewlyAccepted = true;
-                }
-                else
-                {
-                    readChannel = new ReadChannel(
-                        channelId,
-                        header.ChannelIndex,
-                        _options.DefaultChannelOptions.Priority,
-                        _options.DefaultChannelOptions.SlabSize,
-                        this);
-                    isNewlyAccepted = false;
-                }
-
-                _registry.RegisterReadChannel(header.ChannelIndex, readChannel);
-            }
-
-            readChannel.MarkOpen();
-            readChannel.MarkConnected();
-
-            // Send init-ack so the opener knows the channel is established
-            SendInitAck(header.ChannelIndex);
-
-            Interlocked.Increment(ref _stats._openChannels);
-            Interlocked.Increment(ref _stats._totalChannelsOpened);
-            RaiseEvent(ChannelAccepted, new ChannelEventArgs(channelId));
-
-            // Only enqueue for generic AcceptChannelsAsync if no specific accept claimed it.
-            if (!isNewlyAccepted)
-                _registry.EnqueueForAccept(readChannel);
+            HandleInitFrame(header, payload);
             return;
         }
 
+        DispatchExistingChannelFrame(header, payload);
+    }
+
+    private void HandleInitFrame(FrameHeader header, ReadOnlySpan<byte> payload)
+    {
+        if (payload.Length > ChannelConstants.MaxChannelIdLength)
+            return; // channel name too long — drop frame
+
+        string channelId = Encoding.UTF8.GetString(payload);
+        ReadChannel readChannel;
+        bool isNewlyAccepted;
+
+        // Atomic registration: serialized with AcceptChannel so we cannot
+        // race between adopting a pending channel and the test grabbing
+        // a transient _readChannels entry.
+        lock (_registry.AcceptLock)
+        {
+            // After reconnect, Init frames are replayed from the slab.
+            // If the channel already exists, skip re-registration.
+            var existing = _registry.GetReadChannel(header.ChannelIndex);
+            if (existing is not null)
+                return;
+
+            // Check if a pending accept channel was pre-created via AcceptChannel.
+            // A pending entry whose state is already Closed was disposed by the
+            // caller before INIT arrived; treat it as if no pending exists and
+            // fall through to creating a fresh channel. Adopting the disposed
+            // instance would resurrect a channel whose slab has been returned
+            // to ArrayPool<byte>.Shared.
+            var pendingChannel = _registry.GetPendingAcceptChannel(channelId);
+            if (pendingChannel is not null && pendingChannel.State == ChannelState.Closed)
+            {
+                _registry.RemovePendingAcceptChannel(channelId);
+                pendingChannel = null;
+            }
+
+            if (pendingChannel is not null)
+            {
+                readChannel = pendingChannel;
+                readChannel.SetChannelIndex(header.ChannelIndex);
+                _registry.RemovePendingAcceptChannel(channelId);
+                isNewlyAccepted = true;
+            }
+            else
+            {
+                readChannel = new ReadChannel(
+                    channelId,
+                    header.ChannelIndex,
+                    _options.DefaultChannelOptions.Priority,
+                    _options.DefaultChannelOptions.SlabSize,
+                    this);
+                isNewlyAccepted = false;
+            }
+
+            _registry.RegisterReadChannel(header.ChannelIndex, readChannel);
+        }
+
+        readChannel.MarkOpen();
+        readChannel.MarkConnected();
+
+        // Send init-ack so the opener knows the channel is established
+        SendInitAck(header.ChannelIndex);
+
+        Interlocked.Increment(ref _stats._openChannels);
+        Interlocked.Increment(ref _stats._totalChannelsOpened);
+        RaiseEvent(ChannelAccepted, new ChannelEventArgs(channelId));
+
+        // Only enqueue for generic AcceptChannelsAsync if no specific accept claimed it.
+        if (!isNewlyAccepted)
+            _registry.EnqueueForAccept(readChannel);
+    }
+
+    private void DispatchExistingChannelFrame(FrameHeader header, ReadOnlySpan<byte> payload)
+    {
         // Route data/ack/fin/err to existing channel
         var channel = _registry.GetReadChannel(header.ChannelIndex);
         if (channel is null)
@@ -1109,61 +1126,6 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IChannelOwner
         _isShuttingDown = true;
         _disconnectReason = Enums.DisconnectReason.GoAwayReceived;
         _cts.Cancel();
-    }
-
-    // =====================================================================
-    // Keepalive Loop — sends periodic PING frames, monitors PONG responses
-    // =====================================================================
-    private async Task RunKeepaliveLoopAsync(MuxConnection conn, CancellationToken ct)
-    {
-        int missedPings = 0;
-        byte[] pingPayload = new byte[8];
-
-        try
-        {
-            while (!ct.IsCancellationRequested)
-            {
-                await Task.Delay(_options.PingInterval, ct);
-
-                var pendingPong = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-                Interlocked.Exchange(ref conn.PendingPong, pendingPong);
-
-                BinaryPrimitives.WriteInt64BigEndian(pingPayload, Environment.TickCount64);
-                SendControlFrame(FrameFlags.Ping, pingPayload);
-
-                if (await WaitForPongAsync(conn, pendingPong, ct))
-                {
-                    missedPings = 0;
-                    continue;
-                }
-
-                missedPings++;
-                if (missedPings >= _options.MaxMissedPings)
-                {
-                    throw new IOException(
-                        $"Keepalive timeout: {missedPings} missed pings (timeout: {_options.PingTimeout})");
-                }
-            }
-        }
-        catch (OperationCanceledException) when (ct.IsCancellationRequested)
-        {
-            // Normal shutdown
-        }
-    }
-
-    private async Task<bool> WaitForPongAsync(MuxConnection conn, TaskCompletionSource pendingPong, CancellationToken ct)
-    {
-        Task timeout = _options.PingTimeout > TimeSpan.Zero
-            ? Task.Delay(_options.PingTimeout, ct)
-            : Task.CompletedTask;
-
-        Task completed = await Task.WhenAny(pendingPong.Task, timeout);
-        if (completed == pendingPong.Task)
-            return true;
-
-        ct.ThrowIfCancellationRequested();
-        Interlocked.CompareExchange(ref conn.PendingPong, null, pendingPong);
-        return false;
     }
 
     private void SendControlFrame(FrameFlags flags, ReadOnlySpan<byte> payload)
