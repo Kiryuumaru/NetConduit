@@ -821,7 +821,22 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IChannelOwner
                 SendControlFrame(FrameFlags.Pong, payload);
                 break;
             case FrameFlags.Pong:
-                Interlocked.Exchange(ref conn.PendingPong, null)?.TrySetResult();
+                // Correlate the echoed 8-byte token to the currently outstanding ping.
+                // A late pong from a previous (timed-out) ping must not satisfy the
+                // *next* ping's TCS — that would mask real liveness failures by
+                // resetting the missed-ping counter (issue #293).
+                if (payload.Length >= 8)
+                {
+                    long echoedToken = BinaryPrimitives.ReadInt64BigEndian(payload);
+                    var pending = Volatile.Read(ref conn.PendingPong);
+                    if (pending is not null
+                        && pending.ExpectedToken == echoedToken
+                        && Interlocked.CompareExchange(ref conn.PendingPong, null, pending) == pending)
+                    {
+                        pending.Tcs.TrySetResult();
+                    }
+                    // else: stale or already-cleared — drop silently.
+                }
                 break;
             case FrameFlags.Ctrl:
                 ProcessCtrlSubframe(payload);
