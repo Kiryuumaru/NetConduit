@@ -44,32 +44,61 @@ public sealed class WebSocketMuxListener : IAsyncDisposable
         var completion = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var pair = new CompletionStreamPair(new StreamPair(stream, webSocket), completion);
 
-        if (sessionId.HasValue && _sessions.TryGetValue(sessionId.Value, out var entry))
+        // Until the pair is sitting inside a mux that has accepted ownership,
+        // HandleAsync is responsible for disposing it on any failure.
+        // After successful hand-off, the mux owns the pair lifetime.
+        var ownedByMux = false;
+        try
         {
-            await entry.ConnectionChannel.Writer.WriteAsync(pair, cancellationToken);
-        }
-        else
-        {
-            var connectionChannel = Channel.CreateBounded<CompletionStreamPair>(1);
-            await connectionChannel.Writer.WriteAsync(pair, cancellationToken);
-
-            StreamFactoryDelegate factory = async ct =>
-                await connectionChannel.Reader.ReadAsync(ct);
-
-            var options = new MultiplexerOptions { StreamFactory = factory };
-
-            if (_customize is not null)
+            if (sessionId.HasValue && _sessions.TryGetValue(sessionId.Value, out var entry))
             {
-                options = _customize(options) with { StreamFactory = factory };
+                await entry.ConnectionChannel.Writer.WriteAsync(pair, cancellationToken);
+                ownedByMux = true;
+            }
+            else
+            {
+                var connectionChannel = Channel.CreateBounded<CompletionStreamPair>(1);
+                await connectionChannel.Writer.WriteAsync(pair, cancellationToken);
+
+                StreamFactoryDelegate factory = async ct =>
+                    await connectionChannel.Reader.ReadAsync(ct);
+
+                var options = new MultiplexerOptions { StreamFactory = factory };
+
+                if (_customize is not null)
+                {
+                    options = _customize(options) with { StreamFactory = factory };
+                }
+
+                var mux = StreamMultiplexer.Create(options);
+                try
+                {
+                    // Publish to consumers FIRST so a cancellation between _sessions registration
+                    // and _newMuxChannel write cannot strand the mux in _sessions with no consumer.
+                    await _newMuxChannel.Writer.WriteAsync(mux, cancellationToken);
+                    _sessions[mux.SessionId] = new SessionEntry(mux, connectionChannel);
+                    ownedByMux = true;
+                }
+                catch
+                {
+                    // Mux never reached a consumer — tear it down. The pair still sitting in
+                    // connectionChannel is disposed by the outer catch via ownedByMux == false.
+                    connectionChannel.Writer.TryComplete();
+                    try { await mux.DisposeAsync(); } catch { }
+                    throw;
+                }
             }
 
-            var mux = StreamMultiplexer.Create(options);
-            _sessions[mux.SessionId] = new SessionEntry(mux, connectionChannel);
-
-            await _newMuxChannel.Writer.WriteAsync(mux, cancellationToken);
+            await completion.Task.WaitAsync(cancellationToken);
         }
-
-        await completion.Task.WaitAsync(cancellationToken);
+        catch
+        {
+            if (!ownedByMux)
+            {
+                try { await pair.DisposeAsync(); } catch { }
+            }
+            throw;
+        }
     }
 
     /// <summary>
