@@ -765,4 +765,68 @@ public sealed class DuplexStreamTransitTests
     }
 
     #endregion
+
+    #region IsConnected Both-Sides (#210)
+
+    private sealed class FakeChannel(bool isConnected) : IWriteChannel, IReadChannel
+    {
+        public string ChannelId => "fake";
+        public ChannelState State => ChannelState.Open;
+        public bool IsReady => true;
+        public bool IsConnected { get; set; } = isConnected;
+        public ChannelPriority Priority => ChannelPriority.Normal;
+        public ChannelStats Stats { get; } = new();
+        public ChannelCloseReason? CloseReason => null;
+        public Exception? CloseException => null;
+
+        public event EventHandler? Ready { add { } remove { } }
+        public event EventHandler? Connected { add { } remove { } }
+        public event EventHandler<DisconnectedEventArgs>? Disconnected { add { } remove { } }
+        public event EventHandler<ChannelCloseEventArgs>? Closed { add { } remove { } }
+
+        public Task WaitForReadyAsync(CancellationToken ct = default) => Task.CompletedTask;
+        public ValueTask CloseAsync(CancellationToken ct = default) => ValueTask.CompletedTask;
+        public System.IO.Stream AsStream() => System.IO.Stream.Null;
+        public ValueTask WriteAsync(ReadOnlyMemory<byte> data, CancellationToken ct = default) => ValueTask.CompletedTask;
+        public ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken ct = default) => new(0);
+        public ValueTask DisposeAsync() => ValueTask.CompletedTask;
+        public void Dispose() { }
+    }
+
+    [Fact]
+    public void DuplexStreamTransit_IsConnected_False_WhenOnlyWriteSideConnected()
+    {
+        // #210: IsConnected used OR, so a half-open duplex was reported connected.
+        // A duplex stream is only usable when BOTH directions are connected.
+        var write = new FakeChannel(isConnected: true);
+        var read = new FakeChannel(isConnected: false);
+
+        var transit = new DuplexStreamTransit(write, read);
+
+        Assert.False(transit.IsConnected);
+    }
+
+    [Fact]
+    public void DuplexStreamTransit_IsConnected_False_WhenOnlyReadSideConnected()
+    {
+        var write = new FakeChannel(isConnected: false);
+        var read = new FakeChannel(isConnected: true);
+
+        var transit = new DuplexStreamTransit(write, read);
+
+        Assert.False(transit.IsConnected);
+    }
+
+    [Fact]
+    public void DuplexStreamTransit_IsConnected_True_WhenBothSidesConnected()
+    {
+        var write = new FakeChannel(isConnected: true);
+        var read = new FakeChannel(isConnected: true);
+
+        var transit = new DuplexStreamTransit(write, read);
+
+        Assert.True(transit.IsConnected);
+    }
+
+    #endregion
 }
