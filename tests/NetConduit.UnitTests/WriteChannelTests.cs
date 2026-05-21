@@ -403,4 +403,41 @@ public sealed class WriteChannelTests
         var ex = await Assert.ThrowsAsync<ChannelClosedException>(() => channel.WriteAsync(new byte[1]).AsTask());
         Assert.Equal(ChannelCloseReason.LocalClose, ex.CloseReason);
     }
+
+    [Fact]
+    public async Task WriteAsync_ParkedWriter_StateClosedWhileSpaceFreed_ThrowsChannelClosedException()
+    {
+        // #258: When a parked writer wakes because SetClosed/Abort released the
+        // _spaceAvailable semaphore AND the slab has become compactable (e.g.,
+        // because the writer task drained and acked the buffer just before
+        // close), the writer would otherwise break out of the wait loop into
+        // the commit lock with no state recheck. Without the in-commit-lock
+        // state guard, the writer silently succeeds and writes a frame into
+        // a slab that the close path is about to return to the ArrayPool —
+        // corrupting any unrelated component that rents the same buffer.
+        var channel = CreateChannelWithShortTimeout(slabSize: 256, sendTimeout: TimeSpan.FromSeconds(10));
+
+        int maxPayload = 256 - FrameHeader.Size;
+        await channel.WriteAsync(new byte[maxPayload]);
+
+        var blocked = channel.WriteAsync(new byte[1]).AsTask();
+        await Task.Delay(50);
+        Assert.False(blocked.IsCompleted);
+
+        // Manually mark all bytes acked WITHOUT releasing the semaphore, so the
+        // writer stays parked but the slab is now compactable. When SetClosed
+        // releases the semaphore below, the writer wakes, the first-lock
+        // TryCompactLocked frees the entire slab, and the writer breaks out
+        // of the wait loop straight into the commit lock.
+        var ackedField = typeof(WriteChannel).GetField(
+            "_ackedPos",
+            System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic);
+        Assert.NotNull(ackedField);
+        ackedField!.SetValue(channel, maxPayload + FrameHeader.Size);
+
+        channel.SetClosed(ChannelCloseReason.LocalClose);
+
+        var ex = await Assert.ThrowsAsync<ChannelClosedException>(() => blocked);
+        Assert.Equal(ChannelCloseReason.LocalClose, ex.CloseReason);
+    }
 }
