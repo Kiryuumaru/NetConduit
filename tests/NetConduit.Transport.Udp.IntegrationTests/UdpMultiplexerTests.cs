@@ -1,3 +1,4 @@
+using System.Buffers.Binary;
 using System.Net;
 using System.Net.Sockets;
 using NetConduit.Transport.Udp;
@@ -116,5 +117,62 @@ public class UdpMultiplexerTests
 
         await using var pair = await serverTask;
         Assert.NotNull(pair);
+    }
+
+    [Fact(Timeout = 30000)]
+    public async Task SendsAndReceivesData_WhenAttackerInjectsTruncatedDataFrameMidStream()
+    {
+        // Regression for #187: a data frame whose wire-declared `len` exceeds the actual
+        // datagram payload size must NOT be silently truncated-and-ACKed. The receiver
+        // must drop it so the legitimate sender retransmits and the multiplexer byte
+        // stream stays aligned.
+        int port = GetAvailablePort();
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+
+        var serverOptions = UdpMultiplexer.CreateServerOptions(port);
+        await using var server = StreamMultiplexer.Create(serverOptions);
+
+        var clientOptions = UdpMultiplexer.CreateOptions("::1", port);
+        await using var client = StreamMultiplexer.Create(clientOptions);
+
+        server.Start();
+        client.Start();
+        await Task.WhenAll(client.WaitForReadyAsync(cts.Token), server.WaitForReadyAsync(cts.Token));
+
+        var writeChannel = client.OpenChannel("test");
+        var readChannel = await server.AcceptChannelAsync("test", cts.Token);
+
+        // Inject a malformed data frame at the server's UDP port. seq=99 is well beyond
+        // the legitimate stream's _expectedSeq cursor, so even if the frame were accepted
+        // the payload would not be delivered yet — but the strict-length check should
+        // reject it before that point.
+        using (var attacker = new UdpClient(AddressFamily.InterNetworkV6))
+        {
+            attacker.Client.DualMode = true;
+            attacker.Connect(new IPEndPoint(IPAddress.IPv6Loopback, port));
+
+            var malformed = new byte[7 + 4];
+            malformed[0] = 0x01; // FlagData
+            BinaryPrimitives.WriteUInt32BigEndian(malformed.AsSpan(1, 4), 99u);
+            BinaryPrimitives.WriteUInt16BigEndian(malformed.AsSpan(5, 2), 4096); // lying length
+            await attacker.SendAsync(malformed, cts.Token);
+        }
+
+        // Legitimate traffic must still flow end-to-end after the bogus packet was dropped.
+        var testData = "Hello, UDP Multiplexer!"u8.ToArray();
+        await writeChannel.WriteAsync(testData, cts.Token);
+        await writeChannel.CloseAsync(cts.Token);
+
+        var buffer = new byte[testData.Length];
+        int totalRead = 0;
+        while (totalRead < buffer.Length)
+        {
+            int read = await readChannel.ReadAsync(buffer.AsMemory(totalRead), cts.Token);
+            if (read == 0) break;
+            totalRead += read;
+        }
+
+        Assert.Equal(testData.Length, totalRead);
+        Assert.Equal(testData, buffer);
     }
 }
