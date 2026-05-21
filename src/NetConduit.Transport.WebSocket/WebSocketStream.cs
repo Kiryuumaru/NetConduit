@@ -67,6 +67,18 @@ internal sealed class WebSocketStream : Stream
                 return 0;
             }
 
+            // NetConduit's framing layer is binary. Any non-Binary data frame (Text,
+            // or future WebSocket message types) must be rejected here — otherwise its
+            // payload would be fed to FrameHeader.Parse and either tear down the mux
+            // with a misattributed ProtocolError or, worse, inject bytes into the
+            // wrong channel's read stream (issue #217).
+            if (result.MessageType != WebSocketMessageType.Binary)
+            {
+                throw new IOException(
+                    $"WebSocket peer sent unsupported message type {result.MessageType}; " +
+                    "NetConduit requires Binary frames only.");
+            }
+
             if (result.Count > 0)
             {
                 int bytesToCopy = Math.Min(buffer.Length, result.Count);
@@ -123,12 +135,62 @@ internal sealed class WebSocketStream : Stream
     public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();
     public override void SetLength(long value) => throw new NotSupportedException();
 
+    private static readonly TimeSpan CloseTimeout = TimeSpan.FromSeconds(5);
+
     protected override void Dispose(bool disposing)
     {
-        if (!_disposed)
+        if (_disposed)
         {
-            _disposed = true;
+            base.Dispose(disposing);
+            return;
+        }
+        _disposed = true;
+
+        if (disposing)
+        {
+            if (_webSocket.State == WebSocketState.Open)
+            {
+                try
+                {
+                    using var cts = new CancellationTokenSource(CloseTimeout);
+                    _webSocket
+                        .CloseOutputAsync(WebSocketCloseStatus.NormalClosure, null, cts.Token)
+                        .GetAwaiter().GetResult();
+                }
+                catch (WebSocketException) { }
+                catch (ObjectDisposedException) { }
+                catch (OperationCanceledException) { }
+                catch (InvalidOperationException) { }
+            }
+            _webSocket.Dispose();
         }
         base.Dispose(disposing);
+    }
+
+    public override async ValueTask DisposeAsync()
+    {
+        if (_disposed)
+        {
+            await base.DisposeAsync().ConfigureAwait(false);
+            return;
+        }
+        _disposed = true;
+
+        if (_webSocket.State == WebSocketState.Open)
+        {
+            try
+            {
+                using var cts = new CancellationTokenSource(CloseTimeout);
+                await _webSocket
+                    .CloseOutputAsync(WebSocketCloseStatus.NormalClosure, null, cts.Token)
+                    .ConfigureAwait(false);
+            }
+            catch (WebSocketException) { }
+            catch (ObjectDisposedException) { }
+            catch (OperationCanceledException) { }
+            catch (InvalidOperationException) { }
+        }
+        _webSocket.Dispose();
+        await base.DisposeAsync().ConfigureAwait(false);
     }
 }

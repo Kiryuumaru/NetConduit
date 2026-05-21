@@ -28,9 +28,17 @@ public static class WebSocketMultiplexer
             {
                 var webSocket = new ClientWebSocket();
                 clientOptions?.Invoke(webSocket.Options);
-                await webSocket.ConnectAsync(uri, ct).ConfigureAwait(false);
-                var stream = new WebSocketStream(webSocket);
-                return new StreamPair(stream, webSocket);
+                try
+                {
+                    await webSocket.ConnectAsync(uri, ct).ConfigureAwait(false);
+                    var stream = new WebSocketStream(webSocket);
+                    return new StreamPair(stream, webSocket);
+                }
+                catch
+                {
+                    webSocket.Dispose();
+                    throw;
+                }
             }
         };
     }
