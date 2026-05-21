@@ -662,21 +662,22 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IChannelOwner
                 // Start loops with a per-session CTS
                 _conn.LoopCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
                 var loopCt = _conn.LoopCts.Token;
+                var conn = _conn;
 
                 _conn.WriterTask = Task.Factory.StartNew(
-                    () => RunWriterLoop(loopCt),
+                    () => RunWriterLoop(conn, loopCt),
                     loopCt,
                     TaskCreationOptions.LongRunning,
                     TaskScheduler.Default);
                 _conn.FlusherTask = Task.Factory.StartNew(
-                    () => RunFlusherLoop(loopCt),
+                    () => RunFlusherLoop(conn, loopCt),
                     loopCt,
                     TaskCreationOptions.LongRunning,
                     TaskScheduler.Default);
-                _conn.ReaderTask = Task.Run(() => RunReaderLoopAsync(loopCt), loopCt);
+                _conn.ReaderTask = Task.Run(() => RunReaderLoopAsync(conn, loopCt), loopCt);
 
                 if (_options.PingInterval > TimeSpan.Zero)
-                    _conn.KeepaliveTask = Task.Run(() => RunKeepaliveLoopAsync(loopCt), loopCt);
+                    _conn.KeepaliveTask = Task.Run(() => RunKeepaliveLoopAsync(conn, loopCt), loopCt);
 
                 RaiseEvent(Connected);
 
@@ -897,9 +898,9 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IChannelOwner
     // Runs on a dedicated LongRunning thread; uses synchronous I/O so the
     // hot path does not allocate Task continuations or hop ThreadPool threads.
     // =====================================================================
-    private void RunWriterLoop(CancellationToken ct)
+    private void RunWriterLoop(MuxConnection conn, CancellationToken ct)
     {
-        var transport = _conn.Transport ?? throw new InvalidOperationException("Transport not initialized.");
+        var transport = conn.Transport ?? throw new InvalidOperationException("Transport not initialized.");
         var writeStream = transport.WriteStream;
 
         try
@@ -944,9 +945,9 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IChannelOwner
     // Flusher Thread — dedicated thread that flushes the transport stream.
     // Decouples write batching from kernel flush syscall.
     // =====================================================================
-    private void RunFlusherLoop(CancellationToken ct)
+    private void RunFlusherLoop(MuxConnection conn, CancellationToken ct)
     {
-        var transport = _conn.Transport ?? throw new InvalidOperationException("Transport not initialized.");
+        var transport = conn.Transport ?? throw new InvalidOperationException("Transport not initialized.");
         var writeStream = transport.WriteStream;
 
         try
@@ -969,9 +970,9 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IChannelOwner
     // Reader Thread — THE DISPATCHER (receive side)
     // Reads 8-byte header, routes payload to the correct channel.
     // =====================================================================
-    private async Task RunReaderLoopAsync(CancellationToken ct)
+    private async Task RunReaderLoopAsync(MuxConnection conn, CancellationToken ct)
     {
-        var transport = _conn.Transport ?? throw new InvalidOperationException("Transport not initialized.");
+        var transport = conn.Transport ?? throw new InvalidOperationException("Transport not initialized.");
         var readStream = transport.ReadStream;
         byte[] headerBuf = new byte[FrameHeader.Size];
 
@@ -1012,7 +1013,7 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IChannelOwner
                 // 3. Route to channel
                 if (header.ChannelIndex == ChannelConstants.ControlChannel)
                 {
-                    ProcessControlFrame(header, payload);
+                    ProcessControlFrame(conn, header, payload);
                 }
                 else
                 {
@@ -1129,7 +1130,7 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IChannelOwner
         }
     }
 
-    private void ProcessControlFrame(FrameHeader header, ReadOnlySpan<byte> payload)
+    private void ProcessControlFrame(MuxConnection conn, FrameHeader header, ReadOnlySpan<byte> payload)
     {
         switch (header.Flags)
         {
@@ -1138,7 +1139,7 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IChannelOwner
                 SendControlFrame(FrameFlags.Pong, payload);
                 break;
             case FrameFlags.Pong:
-                Interlocked.Exchange(ref _conn.PendingPong, null)?.TrySetResult();
+                Interlocked.Exchange(ref conn.PendingPong, null)?.TrySetResult();
                 break;
             case FrameFlags.Ctrl:
                 ProcessCtrlSubframe(payload);
@@ -1172,7 +1173,7 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IChannelOwner
     // =====================================================================
     // Keepalive Loop — sends periodic PING frames, monitors PONG responses
     // =====================================================================
-    private async Task RunKeepaliveLoopAsync(CancellationToken ct)
+    private async Task RunKeepaliveLoopAsync(MuxConnection conn, CancellationToken ct)
     {
         int missedPings = 0;
         byte[] pingPayload = new byte[8];
@@ -1184,12 +1185,12 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IChannelOwner
                 await Task.Delay(_options.PingInterval, ct);
 
                 var pendingPong = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-                Interlocked.Exchange(ref _conn.PendingPong, pendingPong);
+                Interlocked.Exchange(ref conn.PendingPong, pendingPong);
 
                 BinaryPrimitives.WriteInt64BigEndian(pingPayload, Environment.TickCount64);
                 SendControlFrame(FrameFlags.Ping, pingPayload);
 
-                if (await WaitForPongAsync(pendingPong, ct))
+                if (await WaitForPongAsync(conn, pendingPong, ct))
                 {
                     missedPings = 0;
                     continue;
@@ -1209,7 +1210,7 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IChannelOwner
         }
     }
 
-    private async Task<bool> WaitForPongAsync(TaskCompletionSource pendingPong, CancellationToken ct)
+    private async Task<bool> WaitForPongAsync(MuxConnection conn, TaskCompletionSource pendingPong, CancellationToken ct)
     {
         Task timeout = _options.PingTimeout > TimeSpan.Zero
             ? Task.Delay(_options.PingTimeout, ct)
@@ -1220,7 +1221,7 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IChannelOwner
             return true;
 
         ct.ThrowIfCancellationRequested();
-        Interlocked.CompareExchange(ref _conn.PendingPong, null, pendingPong);
+        Interlocked.CompareExchange(ref conn.PendingPong, null, pendingPong);
         return false;
     }
 
