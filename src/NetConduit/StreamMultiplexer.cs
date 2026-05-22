@@ -237,21 +237,29 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IChannelOwner
             throw new InvalidOperationException("Cannot open new channels after GoAwayAsync.");
 
         bool enableReplay = _options.MaxAutoReconnectAttempts != 0;
-        ushort index = _registry.AllocateChannelIndex();
-        var channel = new WriteChannel(
-            options.ChannelId,
-            index,
-            options.Priority,
-            options.SlabSize,
-            options.SendTimeout,
-            this,
-            enableReplay);
+        WriteChannel channel;
+        // Lock against ReassignPreHandshakeWriteChannelIndices: allocate +
+        // register + stamp the INIT frame as one atomic unit so a concurrent
+        // post-handshake reassign either sees this channel and rekeys it, or
+        // we observe the already-flipped parity and allocate correctly (#237).
+        lock (_registry.ChannelIndexLock)
+        {
+            ushort index = _registry.AllocateChannelIndex();
+            channel = new WriteChannel(
+                options.ChannelId,
+                index,
+                options.Priority,
+                options.SlabSize,
+                options.SendTimeout,
+                this,
+                enableReplay);
 
-        _registry.RegisterWriteChannel(index, channel);
+            _registry.RegisterWriteChannel(index, channel);
 
-        // Send INIT frame (channel does it itself — builds the frame in its slab)
-        channel.WriteInitFrame(channelIdBytes);
-        // Channel stays in Opening/Pending state until remote ACKs the INIT
+            // Send INIT frame (channel does it itself — builds the frame in its slab)
+            channel.WriteInitFrame(channelIdBytes);
+            // Channel stays in Opening/Pending state until remote ACKs the INIT
+        }
 
         if (_isConnected)
             channel.MarkConnected();

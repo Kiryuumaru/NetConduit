@@ -59,6 +59,23 @@ internal sealed class ChannelRegistry
     /// </summary>
     internal readonly object AcceptLock = new();
 
+    /// <summary>
+    /// Serializes pre-handshake index allocation against the post-handshake
+    /// parity reassignment walk (#237). Held by:
+    ///   1. OpenChannel / TryRegisterChannels around AllocateChannelIndex +
+    ///      RegisterWriteChannel + WriteInitFrame, so the channel is fully
+    ///      published (and its INIT frame stamped) before any concurrent
+    ///      reassign walk takes a snapshot.
+    ///   2. StreamMultiplexer.ReassignPreHandshakeWriteChannelIndices around
+    ///      its GetAllWriteChannels enumeration + rekey loop.
+    /// Without this lock there is a race: OpenChannel reads the pre-flip
+    /// _nextChannelIndex, the main loop runs SetIndexParity + the reassign
+    /// snapshot (missing the unregistered channel), then OpenChannel registers
+    /// + writes INIT with the wrong-parity index → INIT-ACK collision and
+    /// WriteChannel.WaitForReadyAsync hangs.
+    /// </summary>
+    internal readonly object ChannelIndexLock = new();
+
     private int _nextChannelIndex;
     private readonly int _indexStep = 2;
 

@@ -120,6 +120,16 @@ internal sealed class ChannelBatchRegistrar(
         // Per-registration committed-channel handle, for Phase 3 assembly.
         var perRegChannel = new IChannel?[count];
 
+        // Outer lock against StreamMultiplexer.ReassignPreHandshakeWriteChannelIndices
+        // (#237). Phase 2's AllocateChannelIndex + RegisterWriteChannel and
+        // Phase 3's WriteInitFrame must complete as one atomic unit against
+        // the post-handshake reassign walk: otherwise the reassign snapshot
+        // can miss a partially-published channel and the writer thread sends
+        // an INIT with the pre-handshake wrong-parity index. Lock ordering is
+        // ChannelIndexLock -> AcceptLock; ReassignPreHandshake takes only
+        // ChannelIndexLock so the ordering cannot deadlock.
+        lock (registry.ChannelIndexLock)
+        {
         lock (registry.AcceptLock)
         {
             for (int i = 0; i < count; i++)
@@ -231,6 +241,7 @@ internal sealed class ChannelBatchRegistrar(
 
         channels = result;
         return true;
+        }
     }
 
     private void RollbackPartialBatch(
