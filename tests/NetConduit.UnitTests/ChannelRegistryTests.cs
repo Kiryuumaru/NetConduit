@@ -178,6 +178,51 @@ public sealed class ChannelRegistryTests
     }
 
     /// <summary>
+    /// Regression for #228. UnregisterChannel must scope its _idToIndex removal
+    /// to the (channelId, index) pair: a call with a channelId that resolves to
+    /// a *different* index must NOT remove the legitimate mapping. Otherwise a
+    /// well-meaning cleanup of a failed registration (or any future caller that
+    /// passes a mismatched pair) silently breaks GetReadChannelById /
+    /// GetWriteChannelById for the channel that legitimately owns the ID.
+    /// </summary>
+    [Fact]
+    public void UnregisterChannel_MismatchedIndex_DoesNotRemoveLegitimateIdMapping()
+    {
+        var registry = new ChannelRegistry(useOddIndices: false);
+
+        var legitimate = new ReadChannel("shared-id", 2, ChannelPriority.Normal, 64 * 1024);
+        registry.RegisterReadChannel(2, legitimate);
+
+        // Mismatched call: index 4 was never registered for "shared-id". This can
+        // arise from a caller cleaning up after a failed RegisterReadChannel(4, ...)
+        // when the failure mode is the per-id race (index 4 was rolled back but
+        // _idToIndex still points at index 2).
+        registry.UnregisterChannel(4, "shared-id");
+
+        Assert.Same(legitimate, registry.GetReadChannel(2));
+        Assert.Same(legitimate, registry.GetReadChannelById("shared-id"));
+    }
+
+    /// <summary>
+    /// UnregisterChannel(index, channelId) with the channel's own (index, channelId)
+    /// pair must still remove the ID mapping — the scoping fix from #228 must not
+    /// regress the normal path.
+    /// </summary>
+    [Fact]
+    public void UnregisterChannel_MatchingPair_RemovesIdMapping()
+    {
+        var registry = new ChannelRegistry(useOddIndices: false);
+
+        var channel = new ReadChannel("own-id", 2, ChannelPriority.Normal, 64 * 1024);
+        registry.RegisterReadChannel(2, channel);
+
+        Assert.True(registry.UnregisterChannel(2, "own-id"));
+
+        Assert.Null(registry.GetReadChannel(2));
+        Assert.Null(registry.GetReadChannelById("own-id"));
+    }
+
+    /// <summary>
     /// Regression for #269. EnqueueForAccept loses the cancellation race against
     /// AcceptChannelAsync's ct.Register callback when both run after the dictionary
     /// TryRemove but before TrySetResult. The TCS in _pendingAccepts ends up in
@@ -258,7 +303,7 @@ public sealed class ChannelRegistryTests
         public void NotifyChannelCompleted(ushort channelIndex, string channelId) { }
         public void NotifyPendingAcceptCancelled(string channelId) { }
         public void NotifyChannelOpened(string channelId) { }
-        public void SendAck(ushort channelIndex, ulong consumedPosition) { }
+        public bool SendAck(ushort channelIndex, ulong consumedPosition) => true;
         public void NotifyEventHandlerException(Exception exception) { }
     }
 }

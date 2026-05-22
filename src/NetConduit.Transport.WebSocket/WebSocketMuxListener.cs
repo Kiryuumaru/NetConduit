@@ -1,6 +1,7 @@
 using System.Collections.Concurrent;
 using System.Runtime.CompilerServices;
 using System.Threading.Channels;
+using NetConduit.Events;
 using NetConduit.Interfaces;
 using NetConduit.Models;
 
@@ -50,6 +51,14 @@ public sealed class WebSocketMuxListener : IAsyncDisposable
         var ownedByMux = false;
         try
         {
+            // Reconnect routing: route into an existing session's connection channel.
+            // The Disconnected handler installed on each mux below evicts the entry
+            // from _sessions and completes the channel writer on terminal lifecycle
+            // (transport error / GoAway / dispose). If we observe TryGetValue success
+            // but the writer was already completed by a concurrent eviction, fall
+            // through to the new-session branch instead of throwing
+            // ChannelClosedException at the caller (issue #279).
+            bool routedToExistingSession = false;
             if (sessionId.HasValue)
             {
                 if (!_sessions.TryGetValue(sessionId.Value, out var entry))
@@ -76,10 +85,22 @@ public sealed class WebSocketMuxListener : IAsyncDisposable
                     return;
                 }
 
-                await entry.ConnectionChannel.Writer.WriteAsync(pair, cancellationToken);
-                ownedByMux = true;
+                try
+                {
+                    await entry.ConnectionChannel.Writer.WriteAsync(pair, cancellationToken);
+                    ownedByMux = true;
+                    routedToExistingSession = true;
+                }
+                catch (ChannelClosedException)
+                {
+                    // The mux for this session reached a terminal state between
+                    // TryGetValue and WriteAsync; its Disconnected handler has
+                    // already evicted the entry. Treat as if no sessionId was
+                    // supplied and start a fresh session below (#279).
+                }
             }
-            else
+
+            if (!routedToExistingSession)
             {
                 var connectionChannel = Channel.CreateBounded<CompletionStreamPair>(1);
                 await connectionChannel.Writer.WriteAsync(pair, cancellationToken);
@@ -95,20 +116,38 @@ public sealed class WebSocketMuxListener : IAsyncDisposable
                 }
 
                 var mux = StreamMultiplexer.Create(options);
+                var muxSessionId = mux.SessionId;
+                EventHandler<DisconnectedEventArgs> evictHandler =
+                    (_, _) => RemoveSession(muxSessionId);
                 try
                 {
-                    // Publish to consumers FIRST so a cancellation between _sessions registration
-                    // and _newMuxChannel write cannot strand the mux in _sessions with no consumer.
+                    // Install the eviction subscription *before* registering in
+                    // _sessions so any Disconnected event raised after registration
+                    // is guaranteed to be observed and clean up the entry.
+                    mux.Disconnected += evictHandler;
+
+                    // Register in _sessions BEFORE publishing so a consumer that
+                    // immediately calls Start() and triggers Disconnected can find
+                    // the entry to evict. If publish fails (cancellation), the
+                    // catch below disposes the mux which fires Disconnected which
+                    // invokes evictHandler → RemoveSession (idempotent TryRemove).
+                    _sessions[muxSessionId] = new SessionEntry(mux, connectionChannel);
+
                     await _newMuxChannel.Writer.WriteAsync(mux, cancellationToken);
-                    _sessions[mux.SessionId] = new SessionEntry(mux, connectionChannel);
                     ownedByMux = true;
                 }
                 catch
                 {
-                    // Mux never reached a consumer — tear it down. The pair still sitting in
-                    // connectionChannel is disposed by the outer catch via ownedByMux == false.
-                    connectionChannel.Writer.TryComplete();
+                    // Mux never reached a consumer — tear it down. The eviction
+                    // handler removes the _sessions entry and completes the
+                    // connection-channel writer; the pair sitting in
+                    // connectionChannel is disposed by the outer catch via
+                    // ownedByMux == false.
                     try { await mux.DisposeAsync(); } catch { }
+                    // Defensive: in the (theoretical) case where DisposeAsync
+                    // does not raise Disconnected (already-disposed early-return
+                    // path), evict directly so the entry cannot leak.
+                    RemoveSession(muxSessionId);
                     throw;
                 }
             }

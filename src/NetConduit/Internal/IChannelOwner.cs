@@ -37,8 +37,12 @@ internal interface IChannelOwner
     /// Sends a position-based ACK frame for the given channel back to the remote.
     /// Used by ReadChannel to inform the remote WriteChannel how far the consumer
     /// has consumed, so PrepareReplay on reconnect skips already-delivered bytes.
+    /// Returns <c>true</c> if the ACK was staged for transmission; <c>false</c> if
+    /// the control-channel slab cannot currently fit the frame. A <c>false</c>
+    /// return is non-fatal: the receive-side accumulator keeps growing and the
+    /// next ACK gate will retry with the latest cumulative position.
     /// </summary>
-    void SendAck(ushort channelIndex, ulong consumedPosition);
+    bool SendAck(ushort channelIndex, ulong consumedPosition);
 
     /// <summary>
     /// Called by a channel when one of its public events (Ready / Connected /
