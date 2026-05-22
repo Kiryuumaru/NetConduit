@@ -1,6 +1,7 @@
 using System.Collections.Concurrent;
 using System.Runtime.CompilerServices;
 using System.Threading.Channels;
+using NetConduit.Enums;
 using NetConduit.Interfaces;
 using NetConduit.Models;
 
@@ -12,9 +13,16 @@ namespace NetConduit.Transport.WebSocket;
 /// </summary>
 public sealed class WebSocketMuxListener : IAsyncDisposable
 {
+    // Poll interval for the per-session lifecycle watcher. The mux's terminal
+    // transitions (LocalDispose, reconnect-exhausted) do not raise a public
+    // event we can subscribe to, so a slow poll is the most reliable signal
+    // that does not require expanding the IStreamMultiplexer surface.
+    private static readonly TimeSpan SessionLivenessPollInterval = TimeSpan.FromSeconds(1);
+
     private readonly ConcurrentDictionary<Guid, SessionEntry> _sessions = new();
     private readonly Channel<IStreamMultiplexer> _newMuxChannel = Channel.CreateUnbounded<IStreamMultiplexer>();
     private readonly Func<MultiplexerOptions, MultiplexerOptions>? _customize;
+    private readonly CancellationTokenSource _listenerCts = new();
 
     /// <param name="customize">
     /// Optional transformation applied to each new multiplexer's options.
@@ -52,10 +60,25 @@ public sealed class WebSocketMuxListener : IAsyncDisposable
         {
             if (sessionId.HasValue && _sessions.TryGetValue(sessionId.Value, out var entry))
             {
-                await entry.ConnectionChannel.Writer.WriteAsync(pair, cancellationToken);
-                ownedByMux = true;
+                if (IsTerminallyDead(entry.Mux))
+                {
+                    // The cached session's mux is permanently dead (disposed or peer-initiated
+                    // GoAway completed). Evict the stale entry and treat this connection as a
+                    // brand-new session instead of black-holing the pair into a channel whose
+                    // StreamFactory will never be called again.
+                    if (_sessions.TryRemove(sessionId.Value, out var deadEntry))
+                    {
+                        deadEntry.ConnectionChannel.Writer.TryComplete();
+                    }
+                }
+                else
+                {
+                    await entry.ConnectionChannel.Writer.WriteAsync(pair, cancellationToken);
+                    ownedByMux = true;
+                }
             }
-            else
+
+            if (!ownedByMux)
             {
                 var connectionChannel = Channel.CreateBounded<CompletionStreamPair>(1);
                 await connectionChannel.Writer.WriteAsync(pair, cancellationToken);
@@ -77,6 +100,7 @@ public sealed class WebSocketMuxListener : IAsyncDisposable
                     // and _newMuxChannel write cannot strand the mux in _sessions with no consumer.
                     await _newMuxChannel.Writer.WriteAsync(mux, cancellationToken);
                     _sessions[mux.SessionId] = new SessionEntry(mux, connectionChannel);
+                    StartSessionLifecycleWatcher(mux);
                     ownedByMux = true;
                 }
                 catch
@@ -125,6 +149,49 @@ public sealed class WebSocketMuxListener : IAsyncDisposable
             return true;
         }
         return false;
+    }
+
+    // Starts a background watcher that evicts the session entry once the mux
+    // transitions to its terminal state. Covers natural disposal by the
+    // application and peer-initiated GoAway. The mux surface does not raise a
+    // public event for these terminal transitions, so a slow poll on the
+    // DisconnectReason property is the most reliable signal that does not
+    // require expanding the IStreamMultiplexer API.
+    private void StartSessionLifecycleWatcher(IStreamMultiplexer mux)
+    {
+        _ = Task.Run(async () =>
+        {
+            var ct = _listenerCts.Token;
+            try
+            {
+                while (!ct.IsCancellationRequested && !IsTerminallyDead(mux))
+                {
+                    await Task.Delay(SessionLivenessPollInterval, ct).ConfigureAwait(false);
+                }
+            }
+            catch (OperationCanceledException)
+            {
+                // Listener is disposing; DisposeAsync handles bulk eviction.
+                return;
+            }
+            catch
+            {
+                // Defensive: do not let an unexpected exception leak the entry.
+            }
+
+            RemoveSession(mux.SessionId);
+        });
+    }
+
+    // A mux is treated as terminally dead only once its DisconnectReason has
+    // settled on a non-recoverable value. Transient TransportError during a
+    // reconnect cycle is excluded so the listener does not evict a session
+    // that is actively trying to reconnect.
+    private static bool IsTerminallyDead(IStreamMultiplexer mux)
+    {
+        var reason = mux.DisconnectReason;
+        return reason is DisconnectReason.LocalDispose
+                       or DisconnectReason.GoAwayReceived;
     }
 
     /// <summary>
@@ -199,6 +266,7 @@ public sealed class WebSocketMuxListener : IAsyncDisposable
     /// <inheritdoc/>
     public async ValueTask DisposeAsync()
     {
+        _listenerCts.Cancel();
         _newMuxChannel.Writer.TryComplete();
 
         // Aggregate per-session dispose failures so a single bad mux cannot
@@ -225,6 +293,7 @@ public sealed class WebSocketMuxListener : IAsyncDisposable
             }
         }
         _sessions.Clear();
+        _listenerCts.Dispose();
 
         if (errors is { Count: 1 })
         {
