@@ -13,7 +13,10 @@ public sealed class DuplexStreamTransit : Stream, ITransit
     private readonly IReadChannel _readChannel;
     private volatile bool _disposed;
     private volatile bool _readyFired;
+    private volatile bool _connectedFired;
+    private volatile bool _disconnectedFired;
     private readonly object _readyLock = new();
+    private readonly object _stateLock = new();
 
     /// <summary>
     /// Creates a new DuplexStreamTransit from a write channel and read channel pair.
@@ -47,9 +50,31 @@ public sealed class DuplexStreamTransit : Stream, ITransit
         Ready?.Invoke(this, EventArgs.Empty);
     }
 
-    private void OnChannelConnected(object? sender, EventArgs e) => Connected?.Invoke(this, EventArgs.Empty);
+    // #191: Each underlying half (write + read) raises its own Connected and
+    // Disconnected events. Forwarding each one independently caused the
+    // transit to fire Connected twice and Disconnected twice. Connected fires
+    // once when BOTH halves are connected; Disconnected fires once on the
+    // first half going down.
+    private void OnChannelConnected(object? sender, EventArgs e)
+    {
+        if (!_writeChannel.IsConnected || !_readChannel.IsConnected) return;
+        lock (_stateLock)
+        {
+            if (_connectedFired) return;
+            _connectedFired = true;
+        }
+        Connected?.Invoke(this, EventArgs.Empty);
+    }
 
-    private void OnChannelDisconnected(object? sender, DisconnectedEventArgs e) => Disconnected?.Invoke(this, e);
+    private void OnChannelDisconnected(object? sender, DisconnectedEventArgs e)
+    {
+        lock (_stateLock)
+        {
+            if (_disconnectedFired) return;
+            _disconnectedFired = true;
+        }
+        Disconnected?.Invoke(this, e);
+    }
 
     /// <inheritdoc/>
     public bool IsReady => !_disposed && _writeChannel.IsReady && _readChannel.IsReady;
