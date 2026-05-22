@@ -88,4 +88,26 @@ public class WebSocketStreamTests
 
         Assert.Equal(0, read);
     }
+
+    [Fact]
+    public async Task ReadAsync_PeerSendsZeroLengthBinaryFrame_ThrowsIOException()
+    {
+        // Regression for #183: zero-length Binary frames are wire-legal per
+        // RFC 6455 §5.6 but the multiplexer never benefits from them (its writer
+        // always emits frames >= FrameHeader.Size). Pre-fix the read loop fell
+        // through both the Close branch and the Count > 0 branch, re-iterating
+        // immediately and pinning a CPU core when the peer floods empty frames.
+        // Post-fix a zero-length Binary frame surfaces as a transport IOException
+        // that StreamMultiplexer already handles by tearing the connection down.
+        var ws = new ScriptedWebSocket(([], WebSocketMessageType.Binary));
+        var stream = new WebSocketStream(ws);
+
+        var buffer = new byte[64];
+        var ex = await Assert.ThrowsAsync<IOException>(async () =>
+        {
+            _ = await stream.ReadAsync(buffer.AsMemory(), default);
+        });
+
+        Assert.Contains("zero-length", ex.Message);
+    }
 }

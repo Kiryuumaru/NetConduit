@@ -79,19 +79,29 @@ internal sealed class WebSocketStream : Stream
                     "NetConduit requires Binary frames only.");
             }
 
-            if (result.Count > 0)
+            // Zero-length Binary frames are wire-legal per RFC 6455 §5.6 but carry
+            // no stream bytes. Without this branch the loop re-iterates immediately
+            // and a peer flooding empty frames pins a CPU core while the mux reader
+            // never returns to its caller (issue #183). NetConduit's writer always
+            // emits frames >= FrameHeader.Size, so a zero-length data frame from the
+            // peer is always a protocol abuse and is treated as a transport error.
+            if (result.Count == 0)
             {
-                int bytesToCopy = Math.Min(buffer.Length, result.Count);
-                _receiveBuffer.AsSpan(0, bytesToCopy).CopyTo(buffer.Span);
-
-                if (result.Count > bytesToCopy)
-                {
-                    _receiveBufferOffset = bytesToCopy;
-                    _receiveBufferCount = result.Count - bytesToCopy;
-                }
-
-                return bytesToCopy;
+                throw new IOException(
+                    "WebSocket peer sent a zero-length Binary frame; " +
+                    "NetConduit does not accept empty data frames.");
             }
+
+            int bytesToCopy = Math.Min(buffer.Length, result.Count);
+            _receiveBuffer.AsSpan(0, bytesToCopy).CopyTo(buffer.Span);
+
+            if (result.Count > bytesToCopy)
+            {
+                _receiveBufferOffset = bytesToCopy;
+                _receiveBufferCount = result.Count - bytesToCopy;
+            }
+
+            return bytesToCopy;
         }
     }
 
