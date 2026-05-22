@@ -308,8 +308,21 @@ public sealed class WebSocketMuxListener : IAsyncDisposable
 
         public async ValueTask DisposeAsync()
         {
-            await inner.DisposeAsync();
-            completion.TrySetResult();
+            // The mux-release contract is that the mux is done with this transport
+            // once it calls DisposeAsync. The completion signal must fire regardless
+            // of whether the inner dispose succeeds or throws (e.g. StreamPair
+            // aggregating inner-stream dispose failures per #218/#224), otherwise
+            // HandleAsync hangs on completion.Task.WaitAsync until request
+            // cancellation. Inner-dispose exceptions still propagate to the mux's
+            // teardown path. See #353.
+            try
+            {
+                await inner.DisposeAsync();
+            }
+            finally
+            {
+                completion.TrySetResult();
+            }
         }
     }
 }
