@@ -1,5 +1,6 @@
 using System.Buffers;
 using System.Buffers.Binary;
+using NetConduit.Constants;
 using NetConduit.Enums;
 using NetConduit.Events;
 using NetConduit.Exceptions;
@@ -50,6 +51,11 @@ internal sealed class WriteChannel : Stream, IWriteChannel
     private volatile ChannelState _state = ChannelState.Opening;
     private volatile bool _isReady;
     private volatile bool _isConnected;
+    // One-way latch: set true the first time the channel observes a completed
+    // handshake (#358). Once true, _owner.PeerMaxRecvPayload reflects the
+    // last negotiated value and is safe to read across disconnect/reconnect
+    // windows; before then it is still the 1 MiB default and unsafe.
+    private volatile bool _peerCapNegotiated;
     private ChannelCloseReason? _closeReason;
     private Exception? _closeException;
 
@@ -164,6 +170,11 @@ internal sealed class WriteChannel : Stream, IWriteChannel
     internal void MarkConnected()
     {
         _isConnected = true;
+        // Latch: from this point on _owner.PeerMaxRecvPayload is a real
+        // negotiated value, not the 1 MiB default. Subsequent reconnects
+        // overwrite the field with the next handshake's value, so it stays
+        // accurate across disconnect/reconnect.
+        _peerCapNegotiated = true;
         SafeEventRaiser.Raise(this, Connected, _owner.NotifyEventHandlerException);
     }
 
@@ -193,18 +204,37 @@ internal sealed class WriteChannel : Stream, IWriteChannel
         // frame, throw MultiplexerException(ProtocolError) from BufferInSlab,
         // and fault its reader loop on every reconnect — replaying the same
         // oversize frame until MaxAutoReconnectAttempts is exhausted.
-        int peerMaxRecvPayload = _owner.PeerMaxRecvPayload;
+        //
+        // Pre-handshake (#358): _owner.PeerMaxRecvPayload defaults to
+        // FrameConstants.DefaultSlabSize (1 MiB) until the handshake completes
+        // and StreamMultiplexer.PerformHandshakeAsync assigns the negotiated
+        // value. A WriteAsync issued while the channel is still Opening — and
+        // therefore _isConnected == false — would pass the cap check using
+        // that 1 MiB default, buffer an oversize frame, and only fault later
+        // when the handshake lands a smaller peer cap and the drainer ships
+        // the frame. The peer then tears down the mux with ProtocolError on
+        // every reconnect attempt. Clamp pre-handshake to MinSlabSize: that
+        // is the smallest cap any peer is allowed to advertise (enforced by
+        // MuxHandshake.ReadPeerMaxRecvPayload validation), so it is always a
+        // safe lower bound. Callers that need full peer capacity should
+        // await IWriteChannel.WaitForReadyAsync() before writing large frames.
+        int peerMaxRecvPayload = _peerCapNegotiated
+            ? _owner.PeerMaxRecvPayload
+            : FrameConstants.MinSlabSize;
         int effectiveSlab = Math.Min(_slabSize, peerMaxRecvPayload);
         int maxPayload = effectiveSlab - FrameHeader.Size;
         if (payloadLength > maxPayload)
         {
-            string limitSource = peerMaxRecvPayload < _slabSize
-                ? $"remote peer's advertised receive slab ({peerMaxRecvPayload} bytes)"
-                : $"local slab size ({_slabSize} bytes)";
+            string limitSource = !_peerCapNegotiated
+                ? $"pre-handshake conservative cap ({peerMaxRecvPayload} bytes); the peer's actual cap is unknown until the handshake completes"
+                : peerMaxRecvPayload < _slabSize
+                    ? $"remote peer's advertised receive slab ({peerMaxRecvPayload} bytes)"
+                    : $"local slab size ({_slabSize} bytes)";
             throw new ArgumentOutOfRangeException(
                 nameof(data),
                 $"Payload of {payloadLength} bytes exceeds the per-frame budget of {maxPayload} bytes for channel '{ChannelId}' " +
-                $"(limited by {limitSource}). Configure a larger ChannelOptions.SlabSize on both peers or split the payload before writing.");
+                $"(limited by {limitSource}). Await IWriteChannel.WaitForReadyAsync() before writing large frames, " +
+                $"configure a larger ChannelOptions.SlabSize on both peers, or split the payload before writing.");
         }
 
         // Wait for space in the slab if needed
