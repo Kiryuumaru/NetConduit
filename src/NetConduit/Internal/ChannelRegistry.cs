@@ -140,7 +140,11 @@ internal sealed class ChannelRegistry
     internal bool UnregisterChannel(ushort index, string channelId)
     {
         bool removed = _writeChannels.TryRemove(index, out _) || _readChannels.TryRemove(index, out _);
-        _idToIndex.TryRemove(channelId, out _);
+        // Scope the _idToIndex removal to the (channelId, index) pair so a mismatched
+        // call — e.g. cleanup after a failed-to-commit registration where _idToIndex
+        // still points at a *different* (legitimate) channel under the same ChannelId
+        // — cannot tear down the legitimate mapping (#228).
+        _idToIndex.TryRemove(new KeyValuePair<string, ushort>(channelId, index));
         return removed;
     }
 
