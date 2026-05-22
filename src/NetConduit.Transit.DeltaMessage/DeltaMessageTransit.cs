@@ -36,6 +36,11 @@ public sealed class DeltaMessageTransit<T> : IAsyncDisposable
     // sender lock, and a cross-lock null write races with ComputeDelta and produces
     // either NRE or silent state divergence (issue #300).
     private int _resyncRequested;
+    // Bytes still owed by a previously-rejected over-max frame. ReadMessageAsync drains
+    // these from the read channel before reading the next length prefix so that one
+    // over-cap message does not permanently desync the framing for every subsequent
+    // message (#298). Mirrors the MessageTransit pattern established by #286.
+    private uint _pendingDrainRemaining;
     private volatile bool _disposed;
     private volatile bool _readyFired;
     private readonly object _readyLock = new();
@@ -447,7 +452,7 @@ public sealed class DeltaMessageTransit<T> : IAsyncDisposable
         var buffer = ArrayPool<byte>.Shared.Rent(totalLength);
         try
         {
-            BinaryPrimitives.WriteInt32BigEndian(buffer, data.Length);
+            BinaryPrimitives.WriteUInt32BigEndian(buffer, (uint)data.Length);
             data.CopyTo(buffer.AsMemory(4));
             await _writeChannel.WriteAsync(buffer.AsMemory(0, totalLength), cancellationToken).ConfigureAwait(false);
         }
@@ -461,6 +466,13 @@ public sealed class DeltaMessageTransit<T> : IAsyncDisposable
     {
         if (_readChannel is null) return (null, 0);
 
+        // Drain any bytes owed by a previously-rejected over-max frame so the next
+        // length prefix lines up with a real frame boundary on the wire (#298).
+        if (_pendingDrainRemaining > 0)
+        {
+            await DrainPendingAsync(cancellationToken).ConfigureAwait(false);
+        }
+
         var lengthPrefix = ArrayPool<byte>.Shared.Rent(4);
         try
         {
@@ -472,10 +484,28 @@ public sealed class DeltaMessageTransit<T> : IAsyncDisposable
                 prefixRead += bytesRead;
             }
 
-            var length = BinaryPrimitives.ReadInt32BigEndian(lengthPrefix.AsSpan(0, 4));
-            if (length <= 0 || length > _maxMessageSize)
-                throw new InvalidOperationException($"Invalid message length: {length}");
+            var messageLength = BinaryPrimitives.ReadUInt32BigEndian(lengthPrefix.AsSpan(0, 4));
 
+            if (messageLength > (uint)_maxMessageSize)
+            {
+                // Schedule the over-cap payload for drain on the next ReadMessageAsync
+                // so framing resumes on a clean boundary instead of parsing payload
+                // bytes as the next length prefix.
+                _pendingDrainRemaining = messageLength;
+                throw new InvalidOperationException(
+                    $"Received message size ({messageLength} bytes) exceeds maximum allowed ({_maxMessageSize} bytes); the oversized payload will be discarded and the next ReceiveAsync call will return the following message.");
+            }
+
+            if (messageLength == 0)
+            {
+                // Zero-length frame has no payload to drain and no message-type byte
+                // either — framing is unrecoverable. The caller decides whether to
+                // continue using the transit; subsequent reads will likely throw on
+                // the next misaligned prefix.
+                throw new InvalidOperationException("Received a message with zero-length payload.");
+            }
+
+            var length = (int)messageLength;
             var data = ArrayPool<byte>.Shared.Rent(length);
             try
             {
@@ -502,6 +532,32 @@ public sealed class DeltaMessageTransit<T> : IAsyncDisposable
         finally
         {
             ArrayPool<byte>.Shared.Return(lengthPrefix);
+        }
+    }
+
+    private async ValueTask DrainPendingAsync(CancellationToken cancellationToken)
+    {
+        const int DrainChunk = 8192;
+        var buf = ArrayPool<byte>.Shared.Rent(DrainChunk);
+        try
+        {
+            while (_pendingDrainRemaining > 0)
+            {
+                var toRead = (int)Math.Min((uint)buf.Length, _pendingDrainRemaining);
+                var n = await _readChannel!.ReadAsync(buf.AsMemory(0, toRead), cancellationToken).ConfigureAwait(false);
+                if (n == 0)
+                {
+                    // Channel closed before the over-max payload finished draining.
+                    // Framing is unrecoverable; surface as end-of-stream.
+                    _pendingDrainRemaining = 0;
+                    throw new EndOfStreamException("Unexpected end of stream while discarding oversized message payload.");
+                }
+                _pendingDrainRemaining -= (uint)n;
+            }
+        }
+        finally
+        {
+            ArrayPool<byte>.Shared.Return(buf);
         }
     }
 
