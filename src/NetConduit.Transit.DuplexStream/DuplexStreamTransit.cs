@@ -13,7 +13,10 @@ public sealed class DuplexStreamTransit : Stream, ITransit
     private readonly IReadChannel _readChannel;
     private volatile bool _disposed;
     private volatile bool _readyFired;
+    private volatile bool _connectedFired;
+    private volatile bool _disconnectedFired;
     private readonly object _readyLock = new();
+    private readonly object _stateLock = new();
 
     /// <summary>
     /// Creates a new DuplexStreamTransit from a write channel and read channel pair.
@@ -23,6 +26,11 @@ public sealed class DuplexStreamTransit : Stream, ITransit
         _writeChannel = writeChannel ?? throw new ArgumentNullException(nameof(writeChannel));
         _readChannel = readChannel ?? throw new ArgumentNullException(nameof(readChannel));
         SubscribeToChannelEvents();
+        // Channel.Ready is single-shot. If both underlying channels were already
+        // ready before we subscribed, the event we wired up will never fire.
+        // Synthesise the call so subscribers attached after construction still
+        // observe Ready exactly once (#266).
+        OnChannelReady(this, EventArgs.Empty);
     }
 
     private void SubscribeToChannelEvents()
@@ -39,17 +47,41 @@ public sealed class DuplexStreamTransit : Stream, ITransit
     {
         // Fire Ready only when BOTH channels are ready
         if (!_writeChannel.IsReady || !_readChannel.IsReady) return;
+        EventHandler? handlers;
         lock (_readyLock)
         {
             if (_readyFired) return;
             _readyFired = true;
+            handlers = _readyHandlers;
         }
-        Ready?.Invoke(this, EventArgs.Empty);
+        handlers?.Invoke(this, EventArgs.Empty);
     }
 
-    private void OnChannelConnected(object? sender, EventArgs e) => Connected?.Invoke(this, EventArgs.Empty);
+    // #191: Each underlying half (write + read) raises its own Connected and
+    // Disconnected events. Forwarding each one independently caused the
+    // transit to fire Connected twice and Disconnected twice. Connected fires
+    // once when BOTH halves are connected; Disconnected fires once on the
+    // first half going down.
+    private void OnChannelConnected(object? sender, EventArgs e)
+    {
+        if (!_writeChannel.IsConnected || !_readChannel.IsConnected) return;
+        lock (_stateLock)
+        {
+            if (_connectedFired) return;
+            _connectedFired = true;
+        }
+        Connected?.Invoke(this, EventArgs.Empty);
+    }
 
-    private void OnChannelDisconnected(object? sender, DisconnectedEventArgs e) => Disconnected?.Invoke(this, e);
+    private void OnChannelDisconnected(object? sender, DisconnectedEventArgs e)
+    {
+        lock (_stateLock)
+        {
+            if (_disconnectedFired) return;
+            _disconnectedFired = true;
+        }
+        Disconnected?.Invoke(this, e);
+    }
 
     /// <inheritdoc/>
     public bool IsReady => !_disposed && _writeChannel.IsReady && _readChannel.IsReady;
@@ -63,8 +95,32 @@ public sealed class DuplexStreamTransit : Stream, ITransit
     /// <inheritdoc/>
     public string? ReadChannelId => _readChannel.ChannelId;
 
+    private EventHandler? _readyHandlers;
+
     /// <inheritdoc/>
-    public event EventHandler? Ready;
+    /// <remarks>
+    /// Latching: subscribers attached after the transit has already become Ready are
+    /// invoked immediately on subscription, so callers that wait for channel readiness
+    /// before constructing the transit still observe the event exactly once (#266).
+    /// </remarks>
+    public event EventHandler? Ready
+    {
+        add
+        {
+            if (value is null) return;
+            bool fireImmediately;
+            lock (_readyLock)
+            {
+                _readyHandlers += value;
+                fireImmediately = _readyFired;
+            }
+            if (fireImmediately) value(this, EventArgs.Empty);
+        }
+        remove
+        {
+            lock (_readyLock) { _readyHandlers -= value; }
+        }
+    }
 
     /// <inheritdoc/>
     public event EventHandler? Connected;

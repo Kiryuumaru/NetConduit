@@ -40,14 +40,18 @@ public class WebSocketMuxListenerSessionEvictionTests
     }
 
     [Fact(Timeout = 30000)]
-    public async Task Reconnect_WithDeadSessionId_DoesNotHang_FallsThroughToNewSession()
+    public async Task Reconnect_WithDeadSessionId_IsRejectedAfterAutoEviction()
     {
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(20));
         await using var harness = await ListenerHarness.StartAsync(cts.Token);
 
         var sessions = GetSessionsDictionary(harness.Listener);
 
-        // 1. Open first session, capture sessionId, then dispose mux.
+        // 1. Open first session, capture sessionId, then dispose its server mux.
+        //    The auto-eviction from #279 removes the entry from _sessions; combined
+        //    with master's #236 (reject unknown session ids), a subsequent reconnect
+        //    using the same session id must be cleanly rejected rather than silently
+        //    promoted to a fresh session under a GUID the client never asked for.
         var (clientMux1, _) = await harness.OpenClientAsync(cts.Token);
         var serverMux1 = await harness.NextStartedServerMuxAsync(cts.Token);
         await PollUntilAsync(() => sessions.Count == 1, TimeSpan.FromSeconds(5), cts.Token);
@@ -60,18 +64,20 @@ public class WebSocketMuxListenerSessionEvictionTests
 
         try { await clientMux1.DisposeAsync(); } catch { }
 
-        // 2. Reconnect with the dead session id. Pre-fix: HandleAsync hangs
-        //    forever inside the dead session's full ConnectionChannel. Post-fix:
-        //    ChannelClosedException falls through to new-session branch.
-        var (clientMux2, _) = await harness.OpenClientAsync(cts.Token, reconnectSessionId: deadSessionId);
-        await using (clientMux2)
+        // 2. Reconnect with the dead session id. The server should refuse the
+        //    resume (PolicyViolation close) instead of hanging on the dead
+        //    ConnectionChannel — the listener must not be left in a stuck state.
+        //    The client connect attempt is expected to fail; what matters is that
+        //    the listener does not deadlock and never registers a new session
+        //    under the dead id.
+        await Assert.ThrowsAnyAsync<Exception>(async () =>
         {
-            var serverMux2 = await harness.NextStartedServerMuxAsync(cts.Token);
-            Assert.NotEqual(deadSessionId, serverMux2.SessionId);
+            var (clientMux2, _) = await harness.OpenClientAsync(cts.Token, reconnectSessionId: deadSessionId);
+            try { await clientMux2.DisposeAsync(); } catch { }
+        });
 
-            await serverMux2.DisposeAsync();
-            await PollUntilAsync(() => sessions.Count == 0, TimeSpan.FromSeconds(5), cts.Token);
-        }
+        await PollUntilAsync(() => sessions.Count == 0, TimeSpan.FromSeconds(5), cts.Token);
+        Assert.Empty(sessions);
     }
 
     [Fact(Timeout = 60000)]

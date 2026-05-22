@@ -59,8 +59,32 @@ public sealed class WebSocketMuxListener : IAsyncDisposable
             // through to the new-session branch instead of throwing
             // ChannelClosedException at the caller (issue #279).
             bool routedToExistingSession = false;
-            if (sessionId.HasValue && _sessions.TryGetValue(sessionId.Value, out var entry))
+            if (sessionId.HasValue)
             {
+                if (!_sessions.TryGetValue(sessionId.Value, out var entry))
+                {
+                    // Stale or unknown session id: the client is asking to resume a session
+                    // that this listener does not have. Silently spinning up a fresh mux
+                    // would (a) make the client's reconnect handshake fail with
+                    // SessionMismatch on a session GUID it never asked for, terminally
+                    // poisoning its mux, and (b) leak that fresh mux in _sessions under a
+                    // key the client cannot reach (#236). Refuse the resume cleanly so the
+                    // client can decide whether to fall back to a brand-new session.
+                    try
+                    {
+                        await webSocket.CloseOutputAsync(
+                            System.Net.WebSockets.WebSocketCloseStatus.PolicyViolation,
+                            "Unknown session id.",
+                            cancellationToken).ConfigureAwait(false);
+                    }
+                    catch
+                    {
+                        // Best effort: peer may already be gone.
+                    }
+                    try { await pair.DisposeAsync().ConfigureAwait(false); } catch { }
+                    return;
+                }
+
                 try
                 {
                     await entry.ConnectionChannel.Writer.WriteAsync(pair, cancellationToken);
@@ -72,7 +96,7 @@ public sealed class WebSocketMuxListener : IAsyncDisposable
                     // The mux for this session reached a terminal state between
                     // TryGetValue and WriteAsync; its Disconnected handler has
                     // already evicted the entry. Treat as if no sessionId was
-                    // supplied and start a fresh session below.
+                    // supplied and start a fresh session below (#279).
                 }
             }
 

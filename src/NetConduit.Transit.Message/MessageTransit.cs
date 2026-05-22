@@ -69,6 +69,7 @@ public sealed class MessageTransit<TSend, TReceive> : ITransit
         _receiveTypeInfo = receiveTypeInfo;
         _maxMessageSize = maxMessageSize;
         SubscribeToChannelEvents();
+        ReplayReadyIfChannelsAlreadyReady();
     }
 
     /// <summary>
@@ -88,6 +89,20 @@ public sealed class MessageTransit<TSend, TReceive> : ITransit
         _jsonOptions = jsonOptions;
         _maxMessageSize = maxMessageSize;
         SubscribeToChannelEvents();
+        ReplayReadyIfChannelsAlreadyReady();
+    }
+
+    // Channel.Ready is single-shot; if all configured channels were already
+    // ready before we subscribed, the event we wired up will never fire.
+    // Synthesise the call so subscribers attached after construction still
+    // observe Ready exactly once (#266). OnChannelReady's _readyFired guard
+    // makes the synthesised call race-safe against a concurrent genuine event.
+    private void ReplayReadyIfChannelsAlreadyReady()
+    {
+        var writeReady = _writeChannel?.IsReady ?? true;
+        var readReady = _readChannel?.IsReady ?? true;
+        if (writeReady && readReady)
+            OnChannelReady(this, EventArgs.Empty);
     }
 
     private void SubscribeToChannelEvents()
@@ -112,12 +127,14 @@ public sealed class MessageTransit<TSend, TReceive> : ITransit
         var writeReady = _writeChannel?.IsReady ?? true;
         var readReady = _readChannel?.IsReady ?? true;
         if (!writeReady || !readReady) return;
+        EventHandler? handlers;
         lock (_readyLock)
         {
             if (_readyFired) return;
             _readyFired = true;
+            handlers = _readyHandlers;
         }
-        Ready?.Invoke(this, EventArgs.Empty);
+        handlers?.Invoke(this, EventArgs.Empty);
     }
 
     private void OnChannelConnected(object? sender, EventArgs e) => Connected?.Invoke(this, EventArgs.Empty);
@@ -146,8 +163,32 @@ public sealed class MessageTransit<TSend, TReceive> : ITransit
     /// <inheritdoc/>
     public string? ReadChannelId => _readChannel?.ChannelId;
 
+    private EventHandler? _readyHandlers;
+
     /// <inheritdoc/>
-    public event EventHandler? Ready;
+    /// <remarks>
+    /// Latching: subscribers attached after the transit has already become Ready are
+    /// invoked immediately on subscription, so callers that wait for channel readiness
+    /// before constructing the transit still observe the event exactly once (#266).
+    /// </remarks>
+    public event EventHandler? Ready
+    {
+        add
+        {
+            if (value is null) return;
+            bool fireImmediately;
+            lock (_readyLock)
+            {
+                _readyHandlers += value;
+                fireImmediately = _readyFired;
+            }
+            if (fireImmediately) value(this, EventArgs.Empty);
+        }
+        remove
+        {
+            lock (_readyLock) { _readyHandlers -= value; }
+        }
+    }
 
     /// <inheritdoc/>
     public event EventHandler? Connected;
@@ -412,15 +453,29 @@ public sealed class MessageTransit<TSend, TReceive> : ITransit
 
         UnsubscribeFromChannelEvents();
 
+        // Aggregate per-step failures so a throw from one step does not skip the rest
+        // and leak the read channel slab, the pending payload buffer, or the lock
+        // semaphores (#292, mirroring StreamPair PR #224 / DuplexStreamTransit #305).
+        List<Exception>? errors = null;
         if (_writeChannel is not null)
-            await _writeChannel.DisposeAsync().ConfigureAwait(false);
-
+        {
+            try { await _writeChannel.DisposeAsync().ConfigureAwait(false); }
+            catch (Exception ex) { (errors ??= []).Add(ex); }
+        }
         if (_readChannel is not null)
-            await _readChannel.DisposeAsync().ConfigureAwait(false);
+        {
+            try { await _readChannel.DisposeAsync().ConfigureAwait(false); }
+            catch (Exception ex) { (errors ??= []).Add(ex); }
+        }
+        try { ReturnPendingPayloadBuffer(); }
+        catch (Exception ex) { (errors ??= []).Add(ex); }
+        try { _sendLock.Dispose(); }
+        catch (Exception ex) { (errors ??= []).Add(ex); }
+        try { _receiveLock.Dispose(); }
+        catch (Exception ex) { (errors ??= []).Add(ex); }
 
-        ReturnPendingPayloadBuffer();
-        _sendLock.Dispose();
-        _receiveLock.Dispose();
+        if (errors is { Count: 1 }) throw errors[0];
+        if (errors is { Count: > 1 }) throw new AggregateException(errors);
     }
 
     /// <inheritdoc/>
@@ -432,11 +487,22 @@ public sealed class MessageTransit<TSend, TReceive> : ITransit
         _disposed = true;
 
         UnsubscribeFromChannelEvents();
-        _writeChannel?.Dispose();
-        _readChannel?.Dispose();
-        ReturnPendingPayloadBuffer();
-        _sendLock.Dispose();
-        _receiveLock.Dispose();
+
+        // Aggregate per-step failures (#292).
+        List<Exception>? errors = null;
+        try { _writeChannel?.Dispose(); }
+        catch (Exception ex) { (errors ??= []).Add(ex); }
+        try { _readChannel?.Dispose(); }
+        catch (Exception ex) { (errors ??= []).Add(ex); }
+        try { ReturnPendingPayloadBuffer(); }
+        catch (Exception ex) { (errors ??= []).Add(ex); }
+        try { _sendLock.Dispose(); }
+        catch (Exception ex) { (errors ??= []).Add(ex); }
+        try { _receiveLock.Dispose(); }
+        catch (Exception ex) { (errors ??= []).Add(ex); }
+
+        if (errors is { Count: 1 }) throw errors[0];
+        if (errors is { Count: > 1 }) throw new AggregateException(errors);
     }
 
     // Returns any payload buffer held across a cancelled mid-frame ReceiveAsync
