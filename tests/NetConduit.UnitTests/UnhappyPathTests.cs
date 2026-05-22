@@ -977,10 +977,14 @@ public sealed class UnhappyPathTests
 
     private static byte[] BuildReconnectHandshakeFrame(Guid sessionId)
     {
-        byte[] frame = new byte[FrameHeader.Size + 17];
-        FrameHeader.WriteTo(frame, ChannelConstants.ControlChannel, FrameFlags.Ctrl, 17);
+        // Reconnect payload = [subtype:1][sessionId:16][channelCount:uint16-BE=0]
+        // (no per-channel position entries for a synthetic peer with no live channels).
+        const int payloadLength = 19;
+        byte[] frame = new byte[FrameHeader.Size + payloadLength];
+        FrameHeader.WriteTo(frame, ChannelConstants.ControlChannel, FrameFlags.Ctrl, payloadLength);
         frame[FrameHeader.Size] = CtrlSubtype.Reconnect;
         sessionId.TryWriteBytes(frame.AsSpan(FrameHeader.Size + 1, 16));
+        // bytes [FrameHeader.Size + 17 .. + 19) = uint16 channel count = 0 (already zero-initialized)
         return frame;
     }
 }
