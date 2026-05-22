@@ -360,6 +360,28 @@ internal sealed class WriteChannel : Stream, IWriteChannel
         _owner.NotifyReady(this);
     }
 
+    // Non-throwing variant of WriteRawFrame. Returns true if the frame was
+    // staged into the slab and the writer loop was signalled; false if the
+    // slab cannot currently fit the frame. Callers that produce coalescable
+    // or retry-able frames (e.g. position-based ACKs) use this so transient
+    // control-slab pressure cannot surface as a public exception or fault
+    // the mux reader thread (issue #291).
+    internal bool TryWriteRawFrame(ReadOnlySpan<byte> frame)
+    {
+        lock (_posLock)
+        {
+            TryCompactLocked();
+            if (_slabSize - _writePos < frame.Length)
+                return false;
+
+            frame.CopyTo(_slab.AsSpan(_writePos, frame.Length));
+            _writePos += frame.Length;
+            _pendingPos = _writePos;
+        }
+        _owner.NotifyReady(this);
+        return true;
+    }
+
     // Called by mux writer thread — returns a Memory<byte> slice of ready-to-send frames
     internal Memory<byte> TakeReady()
     {

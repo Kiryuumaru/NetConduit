@@ -457,8 +457,12 @@ internal sealed class ReadChannel : Stream, IReadChannel, IValueTaskSource<int>
         long delta = _frameBytesReceived - _ackSentFrameBytes;
         if (delta >= _slabSize / 16)
         {
-            _owner.SendAck(_channelIndex, (ulong)_frameBytesReceived);
-            _ackSentFrameBytes = _frameBytesReceived;
+            // Only advance the high-water mark when the ACK was actually
+            // staged. If the control-channel slab is currently full, retain
+            // the unacked accumulator so the next gate crossing retries with
+            // the latest cumulative position (issue #291).
+            if (_owner.SendAck(_channelIndex, (ulong)_frameBytesReceived))
+                _ackSentFrameBytes = _frameBytesReceived;
         }
     }
 

@@ -980,11 +980,16 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IChannelOwner
         _conn.ControlChannel.WriteRawFrame(ControlFrameBuilder.BuildAckFrame(channelIndex, 0));
     }
 
-    void IChannelOwner.SendAck(ushort channelIndex, ulong consumedPosition)
+    bool IChannelOwner.SendAck(ushort channelIndex, ulong consumedPosition)
     {
-        if (_conn.ControlChannel is null) return;
+        // Return false (without throwing) when the control channel is gone or
+        // its slab is currently full. The caller (ReadChannel.MaybeSendAck) is
+        // expected to retain its unacked accumulator and retry on the next
+        // gate crossing — see issue #291.
+        if (_conn.ControlChannel is null) return false;
 
-        _conn.ControlChannel.WriteRawFrame(ControlFrameBuilder.BuildAckFrame(channelIndex, consumedPosition));
+        return _conn.ControlChannel.TryWriteRawFrame(
+            ControlFrameBuilder.BuildAckFrame(channelIndex, consumedPosition));
     }
 
     private async Task PerformHandshakeAsync(CancellationToken ct)
