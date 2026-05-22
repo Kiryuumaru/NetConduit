@@ -17,7 +17,12 @@ internal sealed class WriteChannel : Stream, IWriteChannel
 {
     private readonly byte[] _slab;
     private readonly Memory<byte> _slabMemory;
-    private readonly ushort _channelIndex;
+    // Mutable to support post-handshake reassignment when a pre-handshake
+    // OpenChannel allocated this channel from the wrong default parity (#237).
+    // The mux walks queued frames in the slab and patches the index bytes
+    // before the writer thread starts; outside that single reassignment, the
+    // index is stable for the channel's lifetime.
+    private ushort _channelIndex;
     private readonly IChannelOwner _owner;
 
     internal ushort ChannelIndex => _channelIndex;
@@ -285,6 +290,34 @@ internal sealed class WriteChannel : Stream, IWriteChannel
         _owner.NotifyReady(this);
     }
 
+    /// <summary>
+    /// Reassigns this channel's wire index and rewrites the channel-index
+    /// bytes of every queued frame in the slab. Used by the multiplexer to
+    /// move a pre-handshake-allocated channel from the default-odd seed parity
+    /// into the post-handshake-decided parity space (#237). Must be called
+    /// before the writer thread starts transmitting from this slab and before
+    /// any frame from this channel has been observed by the peer.
+    /// </summary>
+    internal void RestampChannelIndex(ushort newIndex)
+    {
+        lock (_posLock)
+        {
+            // Walk every queued frame in [_sentPos.._writePos). Pre-handshake
+            // _sentPos is 0; in general the writer has not yet drained any
+            // frame at the time this is called, so this collapses to the
+            // whole [0.._writePos) range. We still scan from _sentPos to keep
+            // the invariant correct if the contract is ever loosened.
+            int pos = _sentPos;
+            while (pos + FrameHeader.Size <= _writePos)
+            {
+                BinaryPrimitives.WriteUInt16BigEndian(_slab.AsSpan(pos, 2), newIndex);
+                uint payloadLength = BinaryPrimitives.ReadUInt32BigEndian(_slab.AsSpan(pos + 4, 4));
+                pos += FrameHeader.Size + (int)payloadLength;
+            }
+            _channelIndex = newIndex;
+        }
+    }
+
     internal void WriteAckFrame(ulong receivedPosition)
     {
         int frameSize = FrameHeader.Size + 8;
@@ -333,6 +366,28 @@ internal sealed class WriteChannel : Stream, IWriteChannel
             _pendingPos = _writePos;
         }
         _owner.NotifyReady(this);
+    }
+
+    // Non-throwing variant of WriteRawFrame. Returns true if the frame was
+    // staged into the slab and the writer loop was signalled; false if the
+    // slab cannot currently fit the frame. Callers that produce coalescable
+    // or retry-able frames (e.g. position-based ACKs) use this so transient
+    // control-slab pressure cannot surface as a public exception or fault
+    // the mux reader thread (issue #291).
+    internal bool TryWriteRawFrame(ReadOnlySpan<byte> frame)
+    {
+        lock (_posLock)
+        {
+            TryCompactLocked();
+            if (_slabSize - _writePos < frame.Length)
+                return false;
+
+            frame.CopyTo(_slab.AsSpan(_writePos, frame.Length));
+            _writePos += frame.Length;
+            _pendingPos = _writePos;
+        }
+        _owner.NotifyReady(this);
+        return true;
     }
 
     // Called by mux writer thread — returns a Memory<byte> slice of ready-to-send frames
@@ -415,6 +470,31 @@ internal sealed class WriteChannel : Stream, IWriteChannel
             _sentPos = _ackedPos;
         }
         _owner.NotifyReady(this);
+    }
+
+    /// <summary>
+    /// Forcibly advance <c>_ackedPos</c> to reflect the peer's actual received position
+    /// reported during a reconnect handshake. Resolves the case where prior in-flight ACKs
+    /// never reached the writer (TCP RST, ungraceful close) and the writer would otherwise
+    /// replay bytes the peer already delivered to its reader.
+    /// </summary>
+    /// <remarks>
+    /// Clamped to <c>[_ackedPos, _sentPos]</c>: never moves backwards (would lose work)
+    /// and never advances past sent data (peer cannot have received unsent bytes).
+    /// </remarks>
+    internal void SetReplayBase(long peerReceivedPosition)
+    {
+        lock (_posLock)
+        {
+            long upper = _compactionOffset + _sentPos;
+            if (peerReceivedPosition > upper)
+                peerReceivedPosition = upper;
+
+            int slabRelative = (int)(peerReceivedPosition - _compactionOffset);
+            if (slabRelative > _ackedPos)
+                _ackedPos = slabRelative;
+        }
+        TryReleaseSpaceSignal();
     }
 
     internal bool HasPendingData()

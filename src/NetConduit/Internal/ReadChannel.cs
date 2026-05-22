@@ -62,6 +62,19 @@ internal sealed class ReadChannel : Stream, IReadChannel, IValueTaskSource<int>
     private volatile bool _isConnected;
     private ChannelCloseReason? _closeReason;
     private Exception? _closeException;
+    // CAS guard: ensures the stats decrement and ChannelClosed event fire exactly once,
+    // regardless of whether the close path is the inbound FIN dispatcher or
+    // local DisposeAsync/Dispose. Issue #172.
+    private int _completionAccounted;
+
+    /// <summary>
+    /// Atomically claims the right to perform the one-shot close accounting
+    /// (stats decrement and <see cref="StreamMultiplexer.ChannelClosed"/>
+    /// event raise). Returns <c>true</c> exactly once across the lifetime of
+    /// the channel; subsequent callers receive <c>false</c>.
+    /// </summary>
+    internal bool TryClaimCompletionAccounting() =>
+        Interlocked.CompareExchange(ref _completionAccounted, 1, 0) == 0;
 
     /// <summary>The string identifier for this channel.</summary>
     public string ChannelId { get; }
@@ -182,11 +195,36 @@ internal sealed class ReadChannel : Stream, IReadChannel, IValueTaskSource<int>
     internal void MarkDisconnected(DisconnectReason reason, Exception? exception = null)
     {
         _isConnected = false;
-        // Frames received but never acknowledged will be replayed by the writer
-        // when it reconnects. Skip exactly those frame bytes so the user sees
-        // each payload exactly once.
-        _skipFrameBytes = _frameBytesReceived - _ackSentFrameBytes;
+        // The reconnect handshake advertises this side's current _frameBytesReceived
+        // and the peer rewinds its writer to that exact position (see WriteChannel.SetReplayBase).
+        // Consequently the very next byte the peer sends is the one we expect next, so we
+        // never have to skip a replayed prefix. Computing skip from local-only state would
+        // be wrong: _ackSentFrameBytes is bumped on local enqueue of an ACK, not on peer
+        // delivery, so a lost ACK frame on the wire would yield a too-short skip and
+        // duplicate-deliver bytes to ReadAsync (issue #161).
+        _skipFrameBytes = 0;
         SafeEventRaiser.Raise(this, Disconnected, new DisconnectedEventArgs(reason, exception), _onHandlerException);
+    }
+
+    /// <summary>
+    /// Total frame bytes (header + payload) received on this channel across all sessions,
+    /// counting every frame type that consumes slab on the peer's writer — currently INIT
+    /// and DATA. Advertised in the reconnect handshake so the peer's writer can rewind its
+    /// replay base to exactly this position (issue #161).
+    /// </summary>
+    internal long FrameBytesReceived => _frameBytesReceived;
+
+    /// <summary>
+    /// Account for an inbound frame whose bytes were consumed off the wire for this
+    /// channel but did not reach <see cref="ReceivePayload"/> — namely the initial
+    /// <c>INIT</c> frame that the mux processes at channel registration time. The peer's
+    /// writer slab includes those bytes, so omitting them here would make the reconnect
+    /// handshake's replay-base land mid-frame and the writer would replay already-delivered
+    /// bytes.
+    /// </summary>
+    internal void AccountInboundFrame(int frameBytes)
+    {
+        _frameBytesReceived += frameBytes;
     }
 
     internal void SetAckChannel(WriteChannel ackChannel) => _ackChannel = ackChannel;
@@ -419,8 +457,12 @@ internal sealed class ReadChannel : Stream, IReadChannel, IValueTaskSource<int>
         long delta = _frameBytesReceived - _ackSentFrameBytes;
         if (delta >= _slabSize / 16)
         {
-            _owner.SendAck(_channelIndex, (ulong)_frameBytesReceived);
-            _ackSentFrameBytes = _frameBytesReceived;
+            // Only advance the high-water mark when the ACK was actually
+            // staged. If the control-channel slab is currently full, retain
+            // the unacked accumulator so the next gate crossing retries with
+            // the latest cumulative position (issue #291).
+            if (_owner.SendAck(_channelIndex, (ulong)_frameBytesReceived))
+                _ackSentFrameBytes = _frameBytesReceived;
         }
     }
 

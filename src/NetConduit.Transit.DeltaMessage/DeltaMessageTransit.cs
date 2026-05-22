@@ -36,6 +36,16 @@ public sealed class DeltaMessageTransit<T> : IAsyncDisposable
     // sender lock, and a cross-lock null write races with ComputeDelta and produces
     // either NRE or silent state divergence (issue #300).
     private int _resyncRequested;
+    // Bytes still owed by a previously-rejected over-max frame. ReadMessageAsync drains
+    // these from the read channel before reading the next length prefix so that one
+    // over-cap message does not permanently desync the framing for every subsequent
+    // message (#298). Mirrors the MessageTransit pattern established by #286.
+    private uint _pendingDrainRemaining;
+    // Set once when the inbound channel reaches real EOF (read returns 0 bytes).
+    // ReceiveAllAsync consults this — NOT IsConnected — so transient transport
+    // disconnects during auto-reconnect do not prematurely terminate the
+    // enumerable (#297). Mirrors the MessageTransit pattern established by #177.
+    private volatile bool _receiveEof;
     private volatile bool _disposed;
     private volatile bool _readyFired;
     private readonly object _readyLock = new();
@@ -74,6 +84,15 @@ public sealed class DeltaMessageTransit<T> : IAsyncDisposable
         }
 
         SubscribeToChannelEvents();
+        // Channel.Ready is single-shot; if all configured channels were already
+        // ready before we subscribed, the event we wired up will never fire.
+        // Synthesise the call so subscribers attached after construction still
+        // observe Ready exactly once (#266). OnChannelReady's _readyFired guard
+        // makes the synthesised call race-safe against a concurrent genuine event.
+        var writeReady = _writeChannel?.IsReady ?? true;
+        var readReady = _readChannel?.IsReady ?? true;
+        if (writeReady && readReady)
+            OnChannelReady(this, EventArgs.Empty);
     }
 
     private void SubscribeToChannelEvents()
@@ -98,12 +117,14 @@ public sealed class DeltaMessageTransit<T> : IAsyncDisposable
         var writeReady = _writeChannel?.IsReady ?? true;
         var readReady = _readChannel?.IsReady ?? true;
         if (!writeReady || !readReady) return;
+        EventHandler? handlers;
         lock (_readyLock)
         {
             if (_readyFired) return;
             _readyFired = true;
+            handlers = _readyHandlers;
         }
-        Ready?.Invoke(this, EventArgs.Empty);
+        handlers?.Invoke(this, EventArgs.Empty);
     }
 
     private void OnChannelConnected(object? sender, EventArgs e) => Connected?.Invoke(this, EventArgs.Empty);
@@ -132,8 +153,32 @@ public sealed class DeltaMessageTransit<T> : IAsyncDisposable
     /// <summary>Gets the read channel ID.</summary>
     public string? ReadChannelId => _readChannel?.ChannelId;
 
+    private EventHandler? _readyHandlers;
+
     /// <summary>Raised once when all channels are confirmed ready. Never fires again.</summary>
-    public event EventHandler? Ready;
+    /// <remarks>
+    /// Latching: subscribers attached after the transit has already become Ready are
+    /// invoked immediately on subscription, so callers that wait for channel readiness
+    /// before constructing the transit still observe the event exactly once (#266).
+    /// </remarks>
+    public event EventHandler? Ready
+    {
+        add
+        {
+            if (value is null) return;
+            bool fireImmediately;
+            lock (_readyLock)
+            {
+                _readyHandlers += value;
+                fireImmediately = _readyFired;
+            }
+            if (fireImmediately) value(this, EventArgs.Empty);
+        }
+        remove
+        {
+            lock (_readyLock) { _readyHandlers -= value; }
+        }
+    }
 
     /// <summary>Raised each time the underlying transport connects.</summary>
     public event EventHandler? Connected;
@@ -226,26 +271,29 @@ public sealed class DeltaMessageTransit<T> : IAsyncDisposable
     {
         ConsumeResyncRequest();
 
-        JsonNode? finalState = null;
+        // Stage all batched mutations on a local clone so an exception during the
+        // accumulated delta flush does not advance _lastSentState past what the peer
+        // actually received. _lastSentState is only committed after a successful send.
+        var stagedBaseline = _lastSentState?.DeepClone();
         var combinedOps = new List<DeltaOperation>();
 
         foreach (var state in states)
         {
             var currentState = ToJsonNode(state);
-            finalState = currentState;
 
-            if (_lastSentState is null)
+            if (stagedBaseline is null)
             {
                 await SendFullAsync(currentState, cancellationToken).ConfigureAwait(false);
+                stagedBaseline = currentState.DeepClone();
                 _lastSentState = currentState.DeepClone();
                 combinedOps.Clear();
             }
             else
             {
-                var ops = DeltaDiff.ComputeDelta(_lastSentState, currentState);
+                var ops = DeltaDiff.ComputeDelta(stagedBaseline, currentState);
                 if (ops.Count > 0 && !RequiresFullState(ops))
                 {
-                    DeltaApply.ApplyDelta(_lastSentState, ops);
+                    DeltaApply.ApplyDelta(stagedBaseline, ops);
                     combinedOps.AddRange(ops);
                 }
                 else
@@ -253,9 +301,11 @@ public sealed class DeltaMessageTransit<T> : IAsyncDisposable
                     if (combinedOps.Count > 0)
                     {
                         await SendDeltaAsync(combinedOps, cancellationToken).ConfigureAwait(false);
+                        _lastSentState = stagedBaseline.DeepClone();
                         combinedOps.Clear();
                     }
                     await SendFullAsync(currentState, cancellationToken).ConfigureAwait(false);
+                    stagedBaseline = currentState.DeepClone();
                     _lastSentState = currentState.DeepClone();
                 }
             }
@@ -264,11 +314,7 @@ public sealed class DeltaMessageTransit<T> : IAsyncDisposable
         if (combinedOps.Count > 0)
         {
             await SendDeltaAsync(combinedOps, cancellationToken).ConfigureAwait(false);
-        }
-
-        if (finalState is not null)
-        {
-            _lastSentState = finalState.DeepClone();
+            _lastSentState = stagedBaseline!.DeepClone();
         }
     }
 
@@ -322,7 +368,27 @@ public sealed class DeltaMessageTransit<T> : IAsyncDisposable
                         return default;
                     }
                     var ops = DeserializeDelta(payload.Span);
-                    DeltaApply.ApplyDelta(_lastReceivedState, ops);
+                    // Apply atomically: stage on a clone, swap on success. If any op
+                    // throws mid-batch (path not found, array index out of range,
+                    // incompatible parent type, ...), _lastReceivedState is left
+                    // untouched, then cleared and a resync is requested so the peer
+                    // re-sends full state. Without this, an earlier op's mutation
+                    // would leak into _lastReceivedState and every subsequent delta
+                    // would be applied to a corrupt baseline (#223).
+                    var staging = _lastReceivedState.DeepClone();
+                    try
+                    {
+                        DeltaApply.ApplyDelta(staging, ops);
+                    }
+                    catch (Exception ex)
+                    {
+                        _lastReceivedState = null;
+                        await RequestResyncAsync(cancellationToken).ConfigureAwait(false);
+                        throw new InvalidOperationException(
+                            "Delta apply failed; receiver state has been reset and a resync has been requested from the peer.",
+                            ex);
+                    }
+                    _lastReceivedState = staging;
                     return FromJsonNode(_lastReceivedState);
 
                 case 0x02: // Resync request
@@ -344,24 +410,49 @@ public sealed class DeltaMessageTransit<T> : IAsyncDisposable
     /// <summary>
     /// Receives all state updates as an async enumerable.
     /// </summary>
+    /// <remarks>
+    /// Termination conditions: the supplied <paramref name="cancellationToken"/> is
+    /// cancelled, the transit is disposed, or the inbound channel reaches real
+    /// end-of-stream. Transient transport disconnects do NOT terminate the
+    /// enumerable — when auto-reconnect is configured, iteration resumes after the
+    /// mux re-establishes the connection (#297).
+    /// </remarks>
     public async IAsyncEnumerable<T> ReceiveAllAsync([EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
-        while (!cancellationToken.IsCancellationRequested && IsConnected)
+        while (!cancellationToken.IsCancellationRequested && !_disposed)
         {
-            var state = await ReceiveAsync(cancellationToken).ConfigureAwait(false);
+            T? state;
+            try
+            {
+                state = await ReceiveAsync(cancellationToken).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException)
+            {
+                yield break;
+            }
+            catch (ObjectDisposedException)
+            {
+                yield break;
+            }
+
+            // EOF is signalled exclusively via _receiveEof. A null return is
+            // legitimate mid-stream control traffic (resync request received,
+            // delta-before-baseline triggering a resync request to the peer) —
+            // breaking on null would conflate control frames with real EOF and
+            // bail on every resync handshake (#297).
+            if (_receiveEof)
+                yield break;
+
             if (state is not null)
-            {
                 yield return state;
-            }
-            else if (!IsConnected)
-            {
-                break;
-            }
         }
     }
 
     /// <summary>
     /// Resets the local state, forcing full state transmission on next send.
+    /// Also clears the last received state so the next inbound delta will trigger
+    /// a resync request to the peer. Use this as a recovery API when the
+    /// application detects state corruption or wants to start a fresh sync.
     /// </summary>
     public void ResetState()
     {
@@ -447,7 +538,7 @@ public sealed class DeltaMessageTransit<T> : IAsyncDisposable
         var buffer = ArrayPool<byte>.Shared.Rent(totalLength);
         try
         {
-            BinaryPrimitives.WriteInt32BigEndian(buffer, data.Length);
+            BinaryPrimitives.WriteUInt32BigEndian(buffer, (uint)data.Length);
             data.CopyTo(buffer.AsMemory(4));
             await _writeChannel.WriteAsync(buffer.AsMemory(0, totalLength), cancellationToken).ConfigureAwait(false);
         }
@@ -461,6 +552,13 @@ public sealed class DeltaMessageTransit<T> : IAsyncDisposable
     {
         if (_readChannel is null) return (null, 0);
 
+        // Drain any bytes owed by a previously-rejected over-max frame so the next
+        // length prefix lines up with a real frame boundary on the wire (#298).
+        if (_pendingDrainRemaining > 0)
+        {
+            await DrainPendingAsync(cancellationToken).ConfigureAwait(false);
+        }
+
         var lengthPrefix = ArrayPool<byte>.Shared.Rent(4);
         try
         {
@@ -468,14 +566,36 @@ public sealed class DeltaMessageTransit<T> : IAsyncDisposable
             while (prefixRead < 4)
             {
                 var bytesRead = await _readChannel.ReadAsync(lengthPrefix.AsMemory(prefixRead, 4 - prefixRead), cancellationToken).ConfigureAwait(false);
-                if (bytesRead == 0) return (null, 0);
+                if (bytesRead == 0)
+                {
+                    _receiveEof = true;
+                    return (null, 0);
+                }
                 prefixRead += bytesRead;
             }
 
-            var length = BinaryPrimitives.ReadInt32BigEndian(lengthPrefix.AsSpan(0, 4));
-            if (length <= 0 || length > _maxMessageSize)
-                throw new InvalidOperationException($"Invalid message length: {length}");
+            var messageLength = BinaryPrimitives.ReadUInt32BigEndian(lengthPrefix.AsSpan(0, 4));
 
+            if (messageLength > (uint)_maxMessageSize)
+            {
+                // Schedule the over-cap payload for drain on the next ReadMessageAsync
+                // so framing resumes on a clean boundary instead of parsing payload
+                // bytes as the next length prefix.
+                _pendingDrainRemaining = messageLength;
+                throw new InvalidOperationException(
+                    $"Received message size ({messageLength} bytes) exceeds maximum allowed ({_maxMessageSize} bytes); the oversized payload will be discarded and the next ReceiveAsync call will return the following message.");
+            }
+
+            if (messageLength == 0)
+            {
+                // Zero-length frame has no payload to drain and no message-type byte
+                // either — framing is unrecoverable. The caller decides whether to
+                // continue using the transit; subsequent reads will likely throw on
+                // the next misaligned prefix.
+                throw new InvalidOperationException("Received a message with zero-length payload.");
+            }
+
+            var length = (int)messageLength;
             var data = ArrayPool<byte>.Shared.Rent(length);
             try
             {
@@ -486,6 +606,7 @@ public sealed class DeltaMessageTransit<T> : IAsyncDisposable
                     if (read == 0)
                     {
                         ArrayPool<byte>.Shared.Return(data);
+                        _receiveEof = true;
                         return (null, 0);
                     }
                     totalRead += read;
@@ -502,6 +623,32 @@ public sealed class DeltaMessageTransit<T> : IAsyncDisposable
         finally
         {
             ArrayPool<byte>.Shared.Return(lengthPrefix);
+        }
+    }
+
+    private async ValueTask DrainPendingAsync(CancellationToken cancellationToken)
+    {
+        const int DrainChunk = 8192;
+        var buf = ArrayPool<byte>.Shared.Rent(DrainChunk);
+        try
+        {
+            while (_pendingDrainRemaining > 0)
+            {
+                var toRead = (int)Math.Min((uint)buf.Length, _pendingDrainRemaining);
+                var n = await _readChannel!.ReadAsync(buf.AsMemory(0, toRead), cancellationToken).ConfigureAwait(false);
+                if (n == 0)
+                {
+                    // Channel closed before the over-max payload finished draining.
+                    // Framing is unrecoverable; surface as end-of-stream.
+                    _pendingDrainRemaining = 0;
+                    throw new EndOfStreamException("Unexpected end of stream while discarding oversized message payload.");
+                }
+                _pendingDrainRemaining -= (uint)n;
+            }
+        }
+        finally
+        {
+            ArrayPool<byte>.Shared.Return(buf);
         }
     }
 
@@ -645,10 +792,15 @@ public sealed class DeltaMessageTransit<T> : IAsyncDisposable
             return (T)(object)node.DeepClone();
 
         if (type == typeof(JsonObject))
-            return (T)(object)node.AsObject();
+            // Issue #241: AsObject() is a downcast, not a clone — without DeepClone
+            // the caller would receive a live reference to _lastReceivedState, so
+            // caller mutations would silently corrupt internal state and a concurrent
+            // delta-apply would throw "Collection was modified" mid-enumeration.
+            return (T)(object)node.DeepClone().AsObject();
 
         if (type == typeof(JsonArray))
-            return (T)(object)node.AsArray();
+            // Issue #241: same aliasing hazard as JsonObject above — DeepClone first.
+            return (T)(object)node.DeepClone().AsArray();
 
         if (type == typeof(JsonDocument))
             return (T)(object)JsonDocument.Parse(node.ToJsonString());
@@ -677,14 +829,28 @@ public sealed class DeltaMessageTransit<T> : IAsyncDisposable
 
         UnsubscribeFromChannelEvents();
 
-        _sendLock.Dispose();
-        _receiveLock.Dispose();
-
+        // Aggregate per-step failures so a throw from one channel's dispose does not
+        // skip the other channel and leak its slab (#292, mirroring StreamPair PR #224
+        // / DuplexStreamTransit #305). Channels disposed first so semaphores remain
+        // valid until any in-flight send/receive observes ObjectDisposedException.
+        List<Exception>? errors = null;
         if (_writeChannel is not null)
-            await _writeChannel.DisposeAsync().ConfigureAwait(false);
-
+        {
+            try { await _writeChannel.DisposeAsync().ConfigureAwait(false); }
+            catch (Exception ex) { (errors ??= []).Add(ex); }
+        }
         if (_readChannel is not null)
-            await _readChannel.DisposeAsync().ConfigureAwait(false);
+        {
+            try { await _readChannel.DisposeAsync().ConfigureAwait(false); }
+            catch (Exception ex) { (errors ??= []).Add(ex); }
+        }
+        try { _sendLock.Dispose(); }
+        catch (Exception ex) { (errors ??= []).Add(ex); }
+        try { _receiveLock.Dispose(); }
+        catch (Exception ex) { (errors ??= []).Add(ex); }
+
+        if (errors is { Count: 1 }) throw errors[0];
+        if (errors is { Count: > 1 }) throw new AggregateException(errors);
     }
 
     private void UnsubscribeFromChannelEvents()

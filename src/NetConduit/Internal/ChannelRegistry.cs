@@ -59,6 +59,23 @@ internal sealed class ChannelRegistry
     /// </summary>
     internal readonly object AcceptLock = new();
 
+    /// <summary>
+    /// Serializes pre-handshake index allocation against the post-handshake
+    /// parity reassignment walk (#237). Held by:
+    ///   1. OpenChannel / TryRegisterChannels around AllocateChannelIndex +
+    ///      RegisterWriteChannel + WriteInitFrame, so the channel is fully
+    ///      published (and its INIT frame stamped) before any concurrent
+    ///      reassign walk takes a snapshot.
+    ///   2. StreamMultiplexer.ReassignPreHandshakeWriteChannelIndices around
+    ///      its GetAllWriteChannels enumeration + rekey loop.
+    /// Without this lock there is a race: OpenChannel reads the pre-flip
+    /// _nextChannelIndex, the main loop runs SetIndexParity + the reassign
+    /// snapshot (missing the unregistered channel), then OpenChannel registers
+    /// + writes INIT with the wrong-parity index → INIT-ACK collision and
+    /// WriteChannel.WaitForReadyAsync hangs.
+    /// </summary>
+    internal readonly object ChannelIndexLock = new();
+
     private int _nextChannelIndex;
     private readonly int _indexStep = 2;
 
@@ -73,6 +90,38 @@ internal sealed class ChannelRegistry
         // Called after handshake determines which side gets odd vs even indices.
         // Only valid before any channels have been allocated.
         _nextChannelIndex = useOddIndices ? 1 : 2;
+    }
+
+    /// <summary>
+    /// True when <paramref name="index"/> matches the current allocation parity
+    /// (odd vs even). Used after the handshake's <see cref="SetIndexParity"/>
+    /// to identify pre-handshake-allocated indices that landed on the wrong
+    /// parity space and must be reassigned before any frame is transmitted
+    /// (#237).
+    /// </summary>
+    internal bool IsCurrentParity(ushort index)
+    {
+        bool useOdd = (Volatile.Read(ref _nextChannelIndex) & 1) == 1;
+        return ((index & 1) == 1) == useOdd;
+    }
+
+    /// <summary>
+    /// Atomically rekey a registered <see cref="WriteChannel"/> from
+    /// <paramref name="oldIndex"/> to <paramref name="newIndex"/>. Used by the
+    /// post-handshake reassignment for pre-handshake-allocated channels whose
+    /// indices need to move into the correct parity space (#237).
+    /// </summary>
+    internal void RekeyWriteChannel(ushort oldIndex, ushort newIndex, WriteChannel channel)
+    {
+        if (oldIndex == newIndex) return;
+        // Reserve the new slot first so a parallel allocation cannot land on it
+        // between the remove and the add.
+        if (!_writeChannels.TryAdd(newIndex, channel))
+            throw new MultiplexerException(
+                ErrorCode.Internal,
+                $"Cannot rekey write channel '{channel.ChannelId}' to index {newIndex}: slot already occupied.");
+        _writeChannels.TryRemove(new KeyValuePair<ushort, WriteChannel>(oldIndex, channel));
+        _idToIndex[channel.ChannelId] = newIndex;
     }
 
     internal ushort AllocateChannelIndex()
@@ -140,7 +189,11 @@ internal sealed class ChannelRegistry
     internal bool UnregisterChannel(ushort index, string channelId)
     {
         bool removed = _writeChannels.TryRemove(index, out _) || _readChannels.TryRemove(index, out _);
-        _idToIndex.TryRemove(channelId, out _);
+        // Scope the _idToIndex removal to the (channelId, index) pair so a mismatched
+        // call — e.g. cleanup after a failed-to-commit registration where _idToIndex
+        // still points at a *different* (legitimate) channel under the same ChannelId
+        // — cannot tear down the legitimate mapping (#228).
+        _idToIndex.TryRemove(new KeyValuePair<string, ushort>(channelId, index));
         return removed;
     }
 
@@ -166,10 +219,18 @@ internal sealed class ChannelRegistry
 
     internal void EnqueueForAccept(ReadChannel channel)
     {
-        // Check if there's a specific async accept waiting for this channel ID
-        if (_pendingAccepts.TryRemove(channel.ChannelId, out var tcs))
+        // Check if there's a specific async accept waiting for this channel ID.
+        // If we win TryRemove but TrySetResult fails, the awaiter raced us to
+        // cancellation between our TryRemove and our TrySetResult — its callback
+        // unconditionally TrySetCanceled'd the same TCS instance after losing
+        // its own TryRemove. The TCS is dead but the channel is still live and
+        // fully registered in _readChannels: we MUST route it to the catch-all
+        // _acceptQueue (or a matching prefix subscription) instead of dropping
+        // it on the floor, or the peer keeps the channel open and writes pile
+        // up unread in the orphan slab (#269).
+        if (_pendingAccepts.TryRemove(channel.ChannelId, out var tcs)
+            && tcs.TrySetResult(channel))
         {
-            tcs.TrySetResult(channel);
             return;
         }
         // Then check prefix subscriptions (overlay protocols claiming a namespace).
@@ -219,10 +280,15 @@ internal sealed class ChannelRegistry
         // to that dead TCS in EnqueueForAccept (TryRemove succeeds, TrySetResult
         // is a no-op on a completed TCS) and the channel is silently dropped
         // from the accept stream.
+        //
+        // Only TrySetCanceled when we actually won the TryRemove. If we lost the
+        // race to EnqueueForAccept, the TCS will be — or already is — completed
+        // by it, and EnqueueForAccept's TrySetResult-fallback path (#269) takes
+        // care of routing the channel to the catch-all queue when needed.
         await using var registration = ct.Register(() =>
         {
-            _pendingAccepts.TryRemove(channelId, out _);
-            tcs.TrySetCanceled(ct);
+            if (_pendingAccepts.TryRemove(channelId, out _))
+                tcs.TrySetCanceled(ct);
         });
         return await tcs.Task;
     }

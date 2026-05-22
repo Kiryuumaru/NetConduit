@@ -977,8 +977,10 @@ public sealed class UnhappyPathTests
 
     private static byte[] BuildReconnectHandshakeFrame(Guid sessionId)
     {
-        // Wire format (#180): [CtrlSubtype.Reconnect : 1B][sessionId : 16B][maxRecvPayload : 4B BE] = 21B
-        const int payloadLength = 21;
+        // Reconnect payload (#180 + #161):
+        //   [subtype:1][sessionId:16][maxRecvPayload:4 BE][channelCount:uint16-BE=0]
+        // No per-channel position entries for a synthetic peer with no live channels.
+        const int payloadLength = 23;
         byte[] frame = new byte[FrameHeader.Size + payloadLength];
         FrameHeader.WriteTo(frame, ChannelConstants.ControlChannel, FrameFlags.Ctrl, payloadLength);
         frame[FrameHeader.Size] = CtrlSubtype.Reconnect;
@@ -986,6 +988,7 @@ public sealed class UnhappyPathTests
         System.Buffers.Binary.BinaryPrimitives.WriteUInt32BigEndian(
             frame.AsSpan(FrameHeader.Size + 17, 4),
             (uint)FrameConstants.DefaultSlabSize);
+        // bytes [FrameHeader.Size + 21 .. + 23) = uint16 channel count = 0 (already zero-initialized)
         return frame;
     }
 }

@@ -80,7 +80,7 @@ public sealed class ReconnectionTests
         public void NotifyChannelCompleted(ushort channelIndex, string channelId) { }
         public void NotifyPendingAcceptCancelled(string channelId) { }
         public void NotifyChannelOpened(string channelId) { }
-        public void SendAck(ushort channelIndex, ulong consumedPosition) { }
+        public bool SendAck(ushort channelIndex, ulong consumedPosition) => true;
         public void NotifyEventHandlerException(Exception exception) { }
         public int PeerMaxRecvPayload => FrameConstants.MaxSlabSize;
     }
