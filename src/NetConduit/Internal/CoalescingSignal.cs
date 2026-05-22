@@ -9,12 +9,18 @@ namespace NetConduit.Internal;
 internal sealed class CoalescingSignal : IDisposable
 {
     private readonly ManualResetEventSlim _gate = new(false);
+    private volatile bool _disposed;
 
     /// <summary>
     /// Signal the consumer that work is ready.
     /// Idempotent — calling multiple times before Wait() returns is a no-op volatile write.
     /// </summary>
-    public void Signal() => _gate.Set();
+    public void Signal()
+    {
+        if (_disposed) return;
+        try { _gate.Set(); }
+        catch (ObjectDisposedException) { }
+    }
 
     /// <summary>
     /// Block until signaled or cancelled. Resets the gate for the next cycle.
@@ -23,12 +29,28 @@ internal sealed class CoalescingSignal : IDisposable
     public void Wait(CancellationToken ct)
     {
         _gate.Wait(ct);
-        _gate.Reset();
+
+        // Dispose() races with this method: Set() inside Dispose() can wake Wait()
+        // *without* surfacing cancellation (the Set wins the wakeup), and Dispose()
+        // may then dispose the underlying gate before the woken consumer reaches
+        // Reset(). Without this guard, Reset() throws ObjectDisposedException on
+        // the consumer thread (typically the multiplexer writer/flusher thread) —
+        // issue #281. Tolerate the dispose-during-Reset race: the consumer's outer
+        // loop will exit on the next iteration via its own cancellation check.
+        if (_disposed) return;
+        try { _gate.Reset(); }
+        catch (ObjectDisposedException) { }
     }
 
     public void Dispose()
     {
-        _gate.Set(); // unblock any waiter so it can observe cancellation
+        if (_disposed) return;
+        _disposed = true;
+
+        // Wake any waiter so it can observe disposal and exit Wait().
+        try { _gate.Set(); }
+        catch (ObjectDisposedException) { }
+
         _gate.Dispose();
     }
 }
