@@ -50,8 +50,32 @@ public sealed class WebSocketMuxListener : IAsyncDisposable
         var ownedByMux = false;
         try
         {
-            if (sessionId.HasValue && _sessions.TryGetValue(sessionId.Value, out var entry))
+            if (sessionId.HasValue)
             {
+                if (!_sessions.TryGetValue(sessionId.Value, out var entry))
+                {
+                    // Stale or unknown session id: the client is asking to resume a session
+                    // that this listener does not have. Silently spinning up a fresh mux
+                    // would (a) make the client's reconnect handshake fail with
+                    // SessionMismatch on a session GUID it never asked for, terminally
+                    // poisoning its mux, and (b) leak that fresh mux in _sessions under a
+                    // key the client cannot reach (#236). Refuse the resume cleanly so the
+                    // client can decide whether to fall back to a brand-new session.
+                    try
+                    {
+                        await webSocket.CloseOutputAsync(
+                            System.Net.WebSockets.WebSocketCloseStatus.PolicyViolation,
+                            "Unknown session id.",
+                            cancellationToken).ConfigureAwait(false);
+                    }
+                    catch
+                    {
+                        // Best effort: peer may already be gone.
+                    }
+                    try { await pair.DisposeAsync().ConfigureAwait(false); } catch { }
+                    return;
+                }
+
                 await entry.ConnectionChannel.Writer.WriteAsync(pair, cancellationToken);
                 ownedByMux = true;
             }
