@@ -228,10 +228,20 @@ internal sealed class ChannelRegistry
         // _acceptQueue (or a matching prefix subscription) instead of dropping
         // it on the floor, or the peer keeps the channel open and writes pile
         // up unread in the orphan slab (#269).
-        if (_pendingAccepts.TryRemove(channel.ChannelId, out var tcs)
-            && tcs.TrySetResult(channel))
+        if (_pendingAccepts.TryRemove(channel.ChannelId, out var tcs))
         {
-            return;
+            if (tcs.TrySetResult(channel))
+                return;
+            // TrySetResult failed: TCS was already completed. If it was
+            // completed via AcceptChannelAsync's fast-path with THIS same
+            // channel reference, the named waiter has already received it —
+            // suppress to avoid double-delivery (#179, #229). Otherwise
+            // (cancelled, or completed with a stale channel from a prior
+            // close+reopen cycle of the same id), fall through so the new
+            // channel is still delivered somewhere (#269).
+            if (tcs.Task.Status == TaskStatus.RanToCompletion &&
+                ReferenceEquals(tcs.Task.Result, channel))
+                return;
         }
         // Then check prefix subscriptions (overlay protocols claiming a namespace).
         // Prefixes are guaranteed non-overlapping by ThrowIfPrefixConflictsLocked,
@@ -253,25 +263,31 @@ internal sealed class ChannelRegistry
 
     internal async ValueTask<ReadChannel> AcceptChannelAsync(string channelId, CancellationToken ct)
     {
-        // Check if channel already arrived
-        if (_idToIndex.TryGetValue(channelId, out var index))
-        {
-            var existing = GetReadChannel(index);
-            if (existing is not null) return existing;
-        }
-
+        // Register the TCS first. EnqueueForAccept treats a registered TCS as
+        // the sole hand-off token: once present, an inbound INIT delivers the
+        // channel via TrySetResult and never falls through to _acceptQueue.
+        //
+        // We must NOT return the channel from a fast-path _idToIndex lookup
+        // without going through the TCS. If we did, a concurrent HandleInitFrame
+        // could have just committed RegisterReadChannel (so _idToIndex hits)
+        // but not yet called EnqueueForAccept. Returning directly from the
+        // fast path would then let EnqueueForAccept fall through to
+        // _acceptQueue, delivering the same ReadChannel to this caller AND
+        // a generic AcceptChannelsAsync consumer (#179, #229).
         var tcs = new TaskCompletionSource<ReadChannel>(TaskCreationOptions.RunContinuationsAsynchronously);
         _pendingAccepts[channelId] = tcs;
 
-        // Re-check after registration — channel may have arrived between first check and registration
-        if (_idToIndex.TryGetValue(channelId, out index))
+        // If the channel had already arrived before this call, complete the
+        // TCS ourselves with the channel reference. A concurrent or subsequent
+        // EnqueueForAccept(channel) will then find the TCS still in the
+        // dictionary, TryRemove it, observe TrySetResult fails, and (because
+        // the TCS already holds *this same channel*) suppress its queue
+        // fall-through — preventing the double-delivery race.
+        if (_idToIndex.TryGetValue(channelId, out var index))
         {
             var existing = GetReadChannel(index);
             if (existing is not null)
-            {
-                _pendingAccepts.TryRemove(channelId, out _);
-                return existing;
-            }
+                tcs.TrySetResult(existing);
         }
 
         // On cancellation we must remove our entry from _pendingAccepts. Without
@@ -290,7 +306,7 @@ internal sealed class ChannelRegistry
             if (_pendingAccepts.TryRemove(channelId, out _))
                 tcs.TrySetCanceled(ct);
         });
-        return await tcs.Task;
+        return await tcs.Task.ConfigureAwait(false);
     }
 
     internal IAsyncEnumerable<ReadChannel> AcceptChannelsAsync(string? channelIdPrefix, CancellationToken ct)
