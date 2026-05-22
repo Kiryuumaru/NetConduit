@@ -1,3 +1,4 @@
+using System.Buffers.Binary;
 using NetConduit.Constants;
 using NetConduit.Enums;
 using NetConduit.Exceptions;
@@ -14,14 +15,35 @@ namespace NetConduit.Internal;
 /// </summary>
 internal static class MuxHandshake
 {
-    internal const int InitialPayloadLength = 16;
-    internal const int ReconnectPayloadLength = 17;
+    // Wire format:
+    //   Initial   : [sessionId : 16B][maxRecvPayload : 4B big-endian uint32]                              = 20B
+    //   Reconnect : [CtrlSubtype.Reconnect : 1B][sessionId : 16B][maxRecvPayload : 4B big-endian uint32]  = 21B
+    //
+    // The 4-byte max-recv-payload tail (#180) advertises the largest single
+    // frame payload this peer will accept on any inbound channel — equal to
+    // its DefaultChannelOptions.SlabSize. The remote clamps every WriteAsync
+    // against this so a heterogeneous slab configuration cannot send a frame
+    // the receiver's slab cannot buffer (which previously crashed the reader
+    // loop with MultiplexerException(ProtocolError) and burned reconnect
+    // attempts replaying the same oversize frame).
+    internal const int InitialPayloadLength = 20;
+    internal const int ReconnectPayloadLength = 21;
+    private const int MaxRecvPayloadFieldSize = 4;
 
     /// <summary>
-    /// Result of the initial handshake: the remote peer's session id and the
-    /// index-parity selection (higher session id gets odd indices).
+    /// Result of the initial handshake: the remote peer's session id, the
+    /// index-parity selection (higher session id gets odd indices), and the
+    /// remote peer's advertised maximum receive payload.
     /// </summary>
-    internal readonly record struct InitialResult(Guid RemoteSessionId, bool UseOddIndices);
+    internal readonly record struct InitialResult(Guid RemoteSessionId, bool UseOddIndices, int PeerMaxRecvPayload);
+
+    /// <summary>
+    /// Result of the reconnect handshake: confirmation that the remote
+    /// session id matched, plus the remote peer's currently advertised
+    /// maximum receive payload (re-negotiated on every reconnect since the
+    /// peer may have restarted with different options).
+    /// </summary>
+    internal readonly record struct ReconnectResult(int PeerMaxRecvPayload);
 
     /// <summary>
     /// Sends the initial handshake on <paramref name="transport"/>, awaits the
@@ -34,11 +56,17 @@ internal static class MuxHandshake
     internal static async Task<InitialResult> PerformInitialAsync(
         IStreamPair transport,
         Guid localSessionId,
+        int localMaxRecvPayload,
         CancellationToken ct)
     {
+        ValidateLocalMaxRecvPayload(localMaxRecvPayload);
+
         byte[] handshake = new byte[FrameHeader.Size + InitialPayloadLength];
         FrameHeader.WriteTo(handshake, ChannelConstants.ControlChannel, FrameFlags.Ctrl, InitialPayloadLength);
         localSessionId.TryWriteBytes(handshake.AsSpan(FrameHeader.Size));
+        BinaryPrimitives.WriteUInt32BigEndian(
+            handshake.AsSpan(FrameHeader.Size + 16, MaxRecvPayloadFieldSize),
+            (uint)localMaxRecvPayload);
 
         FrameHeader remoteHeader;
         byte[] remotePayload;
@@ -58,16 +86,19 @@ internal static class MuxHandshake
         }
 
         Guid remoteSessionId;
+        int peerMaxRecvPayload;
         if (IsInitialFrame(remoteHeader))
         {
-            remoteSessionId = new Guid(remotePayload.AsSpan(0, InitialPayloadLength));
+            remoteSessionId = new Guid(remotePayload.AsSpan(0, 16));
+            peerMaxRecvPayload = ReadPeerMaxRecvPayload(remotePayload.AsSpan(16, MaxRecvPayloadFieldSize));
         }
         else if (IsReconnectFrame(remoteHeader, remotePayload))
         {
             // A peer can complete the first handshake and lose the route before this side
             // receives its response. The next route is reconnect for that peer and initial
             // for this peer, so both handshake forms must converge on the same session.
-            remoteSessionId = new Guid(remotePayload.AsSpan(1, InitialPayloadLength));
+            remoteSessionId = new Guid(remotePayload.AsSpan(1, 16));
+            peerMaxRecvPayload = ReadPeerMaxRecvPayload(remotePayload.AsSpan(17, MaxRecvPayloadFieldSize));
         }
         else
         {
@@ -77,7 +108,7 @@ internal static class MuxHandshake
         // Determine odd/even index allocation based on session ID comparison
         // Higher session ID gets odd indices
         bool useOdd = localSessionId.CompareTo(remoteSessionId) > 0;
-        return new InitialResult(remoteSessionId, useOdd);
+        return new InitialResult(remoteSessionId, useOdd, peerMaxRecvPayload);
     }
 
     /// <summary>
@@ -88,19 +119,25 @@ internal static class MuxHandshake
     /// when its session id matches the established peer (i.e. the remote did
     /// not observe the prior handshake's completion before the route failed).
     /// </summary>
-    internal static async Task PerformReconnectAsync(
+    internal static async Task<ReconnectResult> PerformReconnectAsync(
         IStreamPair transport,
         Guid localSessionId,
         Guid expectedRemoteSessionId,
+        int localMaxRecvPayload,
         CancellationToken ct)
     {
+        ValidateLocalMaxRecvPayload(localMaxRecvPayload);
+
         // Symmetric reconnect: both sides send Reconnect, both read Reconnect.
         // Same pattern as initial handshake (send session ID, read session ID).
 
-        // Send reconnect frame: [CtrlSubtype.Reconnect][sessionId:16B]
+        // Send reconnect frame: [CtrlSubtype.Reconnect][sessionId:16B][maxRecvPayload:4B]
         byte[] reconnectPayload = new byte[ReconnectPayloadLength];
         reconnectPayload[0] = CtrlSubtype.Reconnect;
-        localSessionId.TryWriteBytes(reconnectPayload.AsSpan(1));
+        localSessionId.TryWriteBytes(reconnectPayload.AsSpan(1, 16));
+        BinaryPrimitives.WriteUInt32BigEndian(
+            reconnectPayload.AsSpan(17, MaxRecvPayloadFieldSize),
+            (uint)localMaxRecvPayload);
 
         byte[] frame = new byte[FrameHeader.Size + reconnectPayload.Length];
         FrameHeader.WriteTo(frame, ChannelConstants.ControlChannel, FrameFlags.Ctrl, reconnectPayload.Length);
@@ -124,16 +161,19 @@ internal static class MuxHandshake
         }
 
         Guid remoteSession;
+        int peerMaxRecvPayload;
         if (IsReconnectFrame(remoteHeader, remotePayload))
         {
-            remoteSession = new Guid(remotePayload.AsSpan(1, InitialPayloadLength));
+            remoteSession = new Guid(remotePayload.AsSpan(1, 16));
+            peerMaxRecvPayload = ReadPeerMaxRecvPayload(remotePayload.AsSpan(17, MaxRecvPayloadFieldSize));
         }
         else if (IsInitialFrame(remoteHeader))
         {
             // The remote peer may not have observed the first handshake completion before
             // the route failed, while this side did. Treat the duplicate initial handshake
             // as reconnect only when the session matches the established peer.
-            remoteSession = new Guid(remotePayload.AsSpan(0, InitialPayloadLength));
+            remoteSession = new Guid(remotePayload.AsSpan(0, 16));
+            peerMaxRecvPayload = ReadPeerMaxRecvPayload(remotePayload.AsSpan(16, MaxRecvPayloadFieldSize));
         }
         else
         {
@@ -142,6 +182,35 @@ internal static class MuxHandshake
 
         if (remoteSession != expectedRemoteSessionId)
             throw new MultiplexerException(ErrorCode.SessionMismatch, "Remote session ID mismatch on reconnect.");
+
+        return new ReconnectResult(peerMaxRecvPayload);
+    }
+
+    private static void ValidateLocalMaxRecvPayload(int localMaxRecvPayload)
+    {
+        if (localMaxRecvPayload < FrameConstants.MinSlabSize || localMaxRecvPayload > FrameConstants.MaxSlabSize)
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(localMaxRecvPayload),
+                localMaxRecvPayload,
+                $"Local max-recv-payload must be between {FrameConstants.MinSlabSize} and {FrameConstants.MaxSlabSize} bytes.");
+        }
+    }
+
+    private static int ReadPeerMaxRecvPayload(ReadOnlySpan<byte> field)
+    {
+        uint raw = BinaryPrimitives.ReadUInt32BigEndian(field);
+        // Reject pathological values from a misbehaving peer so the local
+        // WriteAsync clamp never produces a negative or unbounded budget.
+        // The honest-peer trust model (#scope.md) means we treat out-of-range
+        // values as a protocol error rather than a security boundary.
+        if (raw < FrameConstants.MinSlabSize || raw > FrameConstants.MaxSlabSize)
+        {
+            throw new MultiplexerException(
+                ErrorCode.ProtocolError,
+                $"Peer advertised an out-of-range max-recv-payload ({raw} bytes); must be between {FrameConstants.MinSlabSize} and {FrameConstants.MaxSlabSize}.");
+        }
+        return (int)raw;
     }
 
     private static bool IsInitialFrame(FrameHeader header)

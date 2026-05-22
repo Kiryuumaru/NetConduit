@@ -20,6 +20,7 @@ public sealed class WriteChannelTests
         public void NotifyChannelOpened(string channelId) { }
         public void SendAck(ushort channelIndex, ulong consumedPosition) { }
         public void NotifyEventHandlerException(Exception exception) { }
+        public int PeerMaxRecvPayload => FrameConstants.MaxSlabSize;
     }
 
     private static WriteChannel CreateChannel(TestRouter? router = null, int slabSize = 64 * 1024)

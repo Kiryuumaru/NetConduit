@@ -977,10 +977,15 @@ public sealed class UnhappyPathTests
 
     private static byte[] BuildReconnectHandshakeFrame(Guid sessionId)
     {
-        byte[] frame = new byte[FrameHeader.Size + 17];
-        FrameHeader.WriteTo(frame, ChannelConstants.ControlChannel, FrameFlags.Ctrl, 17);
+        // Wire format (#180): [CtrlSubtype.Reconnect : 1B][sessionId : 16B][maxRecvPayload : 4B BE] = 21B
+        const int payloadLength = 21;
+        byte[] frame = new byte[FrameHeader.Size + payloadLength];
+        FrameHeader.WriteTo(frame, ChannelConstants.ControlChannel, FrameFlags.Ctrl, payloadLength);
         frame[FrameHeader.Size] = CtrlSubtype.Reconnect;
         sessionId.TryWriteBytes(frame.AsSpan(FrameHeader.Size + 1, 16));
+        System.Buffers.Binary.BinaryPrimitives.WriteUInt32BigEndian(
+            frame.AsSpan(FrameHeader.Size + 17, 4),
+            (uint)FrameConstants.DefaultSlabSize);
         return frame;
     }
 }

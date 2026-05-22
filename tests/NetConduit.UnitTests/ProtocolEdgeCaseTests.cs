@@ -1,5 +1,7 @@
 namespace NetConduit.UnitTests;
 
+using NetConduit.Internal;
+
 /// <summary>
 /// Tests for protocol edge cases and boundary conditions:
 /// - Channel ID edge cases (long names, special characters, unicode, similar prefixes)
@@ -417,7 +419,7 @@ public sealed class ProtocolEdgeCaseTests
 
     #endregion
 
-    #region Slab Capacity Enforcement (#113)
+    #region Slab Capacity Enforcement (#113, #180)
 
     [Fact]
     public async Task ReceiverSmallerSlab_RejectsOversizedFrame()
@@ -454,38 +456,154 @@ public sealed class ProtocolEdgeCaseTests
         var reader = await server.AcceptChannelAsync("oversize-frame", cts.Token);
         await writer.WaitForReadyAsync(cts.Token);
 
+        // Post-#180: handshake advertises the receiver's 64 KiB default slab,
+        // so WriteAsync clamps against it and refuses the 96 KiB payload BEFORE
+        // touching the wire. The transport stays connected and the receiver's
+        // reader loop is never asked to buffer a frame it cannot hold.
         byte[] payload = new byte[96 * 1024];
-        await writer.WriteAsync(payload, cts.Token);
+        var ex = await Assert.ThrowsAsync<ArgumentOutOfRangeException>(
+            async () => await writer.WriteAsync(payload, cts.Token));
+        Assert.Contains("remote peer", ex.Message, StringComparison.OrdinalIgnoreCase);
+
+        // Both sides must remain healthy — no protocol error on the wire.
+        Assert.True(client.IsConnected, "Sender mux must stay connected; oversize was caught locally.");
+        Assert.True(server.IsConnected, "Receiver mux must stay connected; no oversize frame ever reached it.");
+
         await writer.DisposeAsync();
-
-        // Wait for the oversized frame to be dispatched into the receiver slab
-        // before the reader parks; otherwise TryDirectDeliver would bypass the
-        // slab-capacity check.
-        await Task.Delay(TimeSpan.FromMilliseconds(200), cts.Token);
-
-        // Reader either gets a teardown signal (read returns 0) after the
-        // receiver mux disconnects with a protocol error, or it throws.
-        byte[] buf = new byte[payload.Length];
-        int total = 0;
-        try
-        {
-            while (total < buf.Length)
-            {
-                int n = await reader.ReadAsync(buf.AsMemory(total), cts.Token);
-                if (n == 0) break;
-                total += n;
-            }
-        }
-        catch
-        {
-            // Acceptable: protocol error surfaced as an exception.
-        }
-
-        Assert.True(total < payload.Length,
-            $"Receiver must not silently accept oversized frame, but delivered {total}/{payload.Length} bytes.");
-        Assert.False(server.IsConnected,
-            "Receiver must tear down the connection after a protocol violation.");
     }
 
     #endregion
+
+    #region Slab Size Negotiation (#180)
+
+    /// <summary>
+    /// Regression for #180. With heterogeneous slab sizes, the handshake must
+    /// advertise each peer's max-recv-payload so the sender clamps its writes
+    /// against the smaller of (local slab, peer advertised). A successful write
+    /// of a payload that fits in both slabs proves the negotiation works AND
+    /// that the handshake wire format extension is read on both sides without
+    /// breaking the parity / session-id derivation.
+    /// </summary>
+    [Fact]
+    public async Task SlabSizeNegotiation_PeerMaxRecvPayloadAdvertisedInHandshake()
+    {
+        var duplex = new DuplexMemoryStream();
+        await using var client = StreamMultiplexer.Create(new MultiplexerOptions
+        {
+            StreamFactory = _ => Task.FromResult<IStreamPair>(duplex.SideA),
+            PingInterval = TimeSpan.Zero,
+            MaxAutoReconnectAttempts = 0,
+            DefaultChannelOptions = new NetConduit.Models.DefaultChannelOptions
+            {
+                SlabSize = 4 * 1024 * 1024, // 4 MiB
+            },
+        });
+        await using var server = StreamMultiplexer.Create(new MultiplexerOptions
+        {
+            StreamFactory = _ => Task.FromResult<IStreamPair>(duplex.SideB),
+            PingInterval = TimeSpan.Zero,
+            MaxAutoReconnectAttempts = 0,
+            DefaultChannelOptions = new NetConduit.Models.DefaultChannelOptions
+            {
+                SlabSize = 256 * 1024, // 256 KiB
+            },
+        });
+
+        client.Start();
+        server.Start();
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        await Task.WhenAll(client.WaitForReadyAsync(cts.Token), server.WaitForReadyAsync(cts.Token));
+
+        // Both directions: write a payload smaller than the smallest slab.
+        var c2s = client.OpenChannel(new NetConduit.Models.ChannelOptions
+        {
+            ChannelId = "neg-c2s",
+            SlabSize = 4 * 1024 * 1024,
+        });
+        var c2sReader = await server.AcceptChannelAsync("neg-c2s", cts.Token);
+        await c2s.WaitForReadyAsync(cts.Token);
+
+        byte[] payload = new byte[200 * 1024]; // fits in 256 KiB
+        for (int i = 0; i < payload.Length; i++) payload[i] = (byte)(i & 0xFF);
+        await c2s.WriteAsync(payload, cts.Token);
+
+        byte[] received = new byte[payload.Length];
+        int total = 0;
+        while (total < received.Length)
+        {
+            int n = await c2sReader.ReadAsync(received.AsMemory(total), cts.Token);
+            Assert.NotEqual(0, n);
+            total += n;
+        }
+        Assert.Equal(payload, received);
+
+        // A payload that exceeds the peer's 256 KiB slab but fits in our 4 MiB
+        // slab must be rejected at WriteAsync — without the handshake field,
+        // this would crash the peer's reader loop.
+        var oversize = new byte[300 * 1024];
+        var ex = await Assert.ThrowsAsync<ArgumentOutOfRangeException>(
+            async () => await c2s.WriteAsync(oversize, cts.Token));
+        Assert.Contains("remote peer", ex.Message, StringComparison.OrdinalIgnoreCase);
+
+        // Connections still healthy.
+        Assert.True(client.IsConnected);
+        Assert.True(server.IsConnected);
+    }
+
+    [Fact]
+    public async Task MuxHandshake_PerformInitialAsync_RejectsLocalMaxRecvOutOfRange()
+    {
+        var duplex = new DuplexMemoryStream();
+        await Assert.ThrowsAsync<ArgumentOutOfRangeException>(async () =>
+        {
+            await NetConduit.Internal.MuxHandshake.PerformInitialAsync(
+                duplex.SideA, Guid.NewGuid(),
+                localMaxRecvPayload: 1, // below MinSlabSize
+                CancellationToken.None);
+        });
+    }
+
+    [Fact]
+    public async Task MuxHandshake_RejectsPeerMaxRecvOutOfRange()
+    {
+        // Craft a handshake frame that advertises max-recv-payload = 1 (below MinSlabSize).
+        var sessionId = Guid.NewGuid();
+        byte[] handshake = new byte[FrameHeader.Size + 20];
+        FrameHeader.WriteTo(handshake, ChannelConstants.ControlChannel, FrameFlags.Ctrl, 20);
+        sessionId.TryWriteBytes(handshake.AsSpan(FrameHeader.Size, 16));
+        System.Buffers.Binary.BinaryPrimitives.WriteUInt32BigEndian(
+            handshake.AsSpan(FrameHeader.Size + 16, 4),
+            1u);
+
+        // StaticReadStreamPair replays this frame to a mux performing initial handshake.
+        var sink = new StaticReadStreamPair(handshake);
+        var ex = await Assert.ThrowsAsync<NetConduit.Exceptions.MultiplexerException>(async () =>
+        {
+            await NetConduit.Internal.MuxHandshake.PerformInitialAsync(
+                sink, Guid.NewGuid(),
+                localMaxRecvPayload: FrameConstants.DefaultSlabSize,
+                CancellationToken.None);
+        });
+        Assert.Equal(ErrorCode.ProtocolError, ex.ErrorCode);
+        Assert.Contains("max-recv-payload", ex.Message);
+    }
+
+    #endregion
+
+    private sealed class StaticReadStreamPair : IStreamPair
+    {
+        public Stream ReadStream { get; }
+        public Stream WriteStream { get; }
+        public StaticReadStreamPair(byte[] data)
+        {
+            ReadStream = new MemoryStream(data);
+            WriteStream = new MemoryStream();
+        }
+        public ValueTask DisposeAsync()
+        {
+            ReadStream.Dispose();
+            WriteStream.Dispose();
+            return ValueTask.CompletedTask;
+        }
+    }
 }

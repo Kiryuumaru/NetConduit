@@ -49,4 +49,13 @@ internal interface IChannelOwner
     /// defeat the multicast safety the channel is trying to provide.
     /// </summary>
     void NotifyEventHandlerException(Exception exception);
+
+    /// <summary>
+    /// The maximum frame payload the remote peer will accept on any inbound
+    /// channel, as negotiated during the most recent handshake (#180).
+    /// <see cref="WriteChannel.WriteAsync"/> clamps every write against this
+    /// in addition to its own local slab size so a heterogeneous slab
+    /// configuration cannot send a frame the receiver's slab cannot buffer.
+    /// </summary>
+    int PeerMaxRecvPayload { get; }
 }

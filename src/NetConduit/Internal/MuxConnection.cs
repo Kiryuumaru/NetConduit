@@ -1,3 +1,4 @@
+using NetConduit.Constants;
 using NetConduit.Interfaces;
 
 namespace NetConduit.Internal;
@@ -11,6 +12,13 @@ internal sealed class MuxConnection
 {
     public Guid SessionId;
     public Guid RemoteSessionId;
+
+    // Maximum frame payload the remote will accept on any inbound channel,
+    // negotiated during the handshake (#180). Defaults to the historical
+    // protocol assumption (1 MiB) so callers that touch this field before
+    // the handshake completes — or transports that omit the negotiation
+    // entirely — still produce traffic the legacy peer can receive.
+    public int PeerMaxRecvPayload = FrameConstants.DefaultSlabSize;
 
     public Task? MainLoopTask;
     public Task? WriterTask;

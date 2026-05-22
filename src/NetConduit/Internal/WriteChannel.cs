@@ -182,16 +182,24 @@ internal sealed class WriteChannel : Stream, IWriteChannel
 
         int frameSize = FrameHeader.Size + payloadLength;
 
-        // A single frame must fit in the slab. There is no chunking and no
-        // possible state where a payload larger than the slab can be queued,
-        // so fail fast instead of stalling for the full SendTimeout.
-        int maxPayload = _slabSize - FrameHeader.Size;
+        // A single frame must fit in BOTH the local slab AND the remote peer's
+        // advertised max-recv-payload (#180). Without the peer clamp, a peer
+        // with a smaller slab would receive a wire-legal but unbuffereable
+        // frame, throw MultiplexerException(ProtocolError) from BufferInSlab,
+        // and fault its reader loop on every reconnect — replaying the same
+        // oversize frame until MaxAutoReconnectAttempts is exhausted.
+        int peerMaxRecvPayload = _owner.PeerMaxRecvPayload;
+        int effectiveSlab = Math.Min(_slabSize, peerMaxRecvPayload);
+        int maxPayload = effectiveSlab - FrameHeader.Size;
         if (payloadLength > maxPayload)
         {
+            string limitSource = peerMaxRecvPayload < _slabSize
+                ? $"remote peer's advertised receive slab ({peerMaxRecvPayload} bytes)"
+                : $"local slab size ({_slabSize} bytes)";
             throw new ArgumentOutOfRangeException(
                 nameof(data),
-                $"Payload of {payloadLength} bytes exceeds the per-frame budget of {maxPayload} bytes for channel '{ChannelId}' (slab size {_slabSize}). " +
-                $"Configure a larger ChannelOptions.SlabSize or split the payload before writing.");
+                $"Payload of {payloadLength} bytes exceeds the per-frame budget of {maxPayload} bytes for channel '{ChannelId}' " +
+                $"(limited by {limitSource}). Configure a larger ChannelOptions.SlabSize on both peers or split the payload before writing.");
         }
 
         // Wait for space in the slab if needed

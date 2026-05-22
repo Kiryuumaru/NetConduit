@@ -21,6 +21,7 @@ public sealed class BoundaryFixesTests
         public void SendAck(ushort channelIndex, ulong consumedPosition)
             => SentAcks.Add((channelIndex, consumedPosition));
         public void NotifyEventHandlerException(Exception exception) { }
+        public int PeerMaxRecvPayload => FrameConstants.MaxSlabSize;
     }
 
     // --- Bug #20: oversized WriteAsync ----------------------------------
