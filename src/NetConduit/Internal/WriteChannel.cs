@@ -431,6 +431,31 @@ internal sealed class WriteChannel : Stream, IWriteChannel
         _owner.NotifyReady(this);
     }
 
+    /// <summary>
+    /// Forcibly advance <c>_ackedPos</c> to reflect the peer's actual received position
+    /// reported during a reconnect handshake. Resolves the case where prior in-flight ACKs
+    /// never reached the writer (TCP RST, ungraceful close) and the writer would otherwise
+    /// replay bytes the peer already delivered to its reader.
+    /// </summary>
+    /// <remarks>
+    /// Clamped to <c>[_ackedPos, _sentPos]</c>: never moves backwards (would lose work)
+    /// and never advances past sent data (peer cannot have received unsent bytes).
+    /// </remarks>
+    internal void SetReplayBase(long peerReceivedPosition)
+    {
+        lock (_posLock)
+        {
+            long upper = _compactionOffset + _sentPos;
+            if (peerReceivedPosition > upper)
+                peerReceivedPosition = upper;
+
+            int slabRelative = (int)(peerReceivedPosition - _compactionOffset);
+            if (slabRelative > _ackedPos)
+                _ackedPos = slabRelative;
+        }
+        TryReleaseSpaceSignal();
+    }
+
     internal bool HasPendingData()
     {
         lock (_posLock)
