@@ -70,7 +70,15 @@ public static class MessageTransitExtensions
         CancellationToken cancellationToken = default)
     {
         var transit = mux.OpenMessageTransit(channelId, sendTypeInfo, receiveTypeInfo, maxMessageSize);
-        await transit.WaitForReadyAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            await transit.WaitForReadyAsync(cancellationToken).ConfigureAwait(false);
+        }
+        catch
+        {
+            await transit.DisposeAsync().ConfigureAwait(false);
+            throw;
+        }
         return transit;
     }
 
@@ -107,7 +115,15 @@ public static class MessageTransitExtensions
         CancellationToken cancellationToken = default)
     {
         var transit = mux.AcceptMessageTransit(channelId, sendTypeInfo, receiveTypeInfo, maxMessageSize);
-        await transit.WaitForReadyAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            await transit.WaitForReadyAsync(cancellationToken).ConfigureAwait(false);
+        }
+        catch
+        {
+            await transit.DisposeAsync().ConfigureAwait(false);
+            throw;
+        }
         return transit;
     }
 
@@ -193,7 +209,15 @@ public static class MessageTransitExtensions
         CancellationToken cancellationToken = default)
     {
         var transit = mux.OpenMessageTransit(writeChannelId, readChannelId, sendTypeInfo, receiveTypeInfo, maxMessageSize);
-        await transit.WaitForReadyAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            await transit.WaitForReadyAsync(cancellationToken).ConfigureAwait(false);
+        }
+        catch
+        {
+            await transit.DisposeAsync().ConfigureAwait(false);
+            throw;
+        }
         return transit;
     }
 
@@ -237,7 +261,15 @@ public static class MessageTransitExtensions
         CancellationToken cancellationToken = default)
     {
         var transit = mux.AcceptReceiveOnlyMessageTransit(channelId, receiveTypeInfo, maxMessageSize);
-        await transit.WaitForReadyAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            await transit.WaitForReadyAsync(cancellationToken).ConfigureAwait(false);
+        }
+        catch
+        {
+            await transit.DisposeAsync().ConfigureAwait(false);
+            throw;
+        }
         return transit;
     }
 
@@ -278,7 +310,15 @@ public static class MessageTransitExtensions
         CancellationToken cancellationToken = default)
     {
         var transit = mux.OpenMessageTransit<TSend, TReceive>(channelId, jsonOptions, maxMessageSize);
-        await transit.WaitForReadyAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            await transit.WaitForReadyAsync(cancellationToken).ConfigureAwait(false);
+        }
+        catch
+        {
+            await transit.DisposeAsync().ConfigureAwait(false);
+            throw;
+        }
         return transit;
     }
 
@@ -313,7 +353,15 @@ public static class MessageTransitExtensions
         CancellationToken cancellationToken = default)
     {
         var transit = mux.AcceptMessageTransit<TSend, TReceive>(channelId, jsonOptions, maxMessageSize);
-        await transit.WaitForReadyAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            await transit.WaitForReadyAsync(cancellationToken).ConfigureAwait(false);
+        }
+        catch
+        {
+            await transit.DisposeAsync().ConfigureAwait(false);
+            throw;
+        }
         return transit;
     }
 
@@ -403,7 +451,15 @@ public static class MessageTransitExtensions
         CancellationToken cancellationToken = default)
     {
         var transit = mux.OpenMessageTransit<TSend, TReceive>(writeChannelId, readChannelId, jsonOptions, maxMessageSize);
-        await transit.WaitForReadyAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            await transit.WaitForReadyAsync(cancellationToken).ConfigureAwait(false);
+        }
+        catch
+        {
+            await transit.DisposeAsync().ConfigureAwait(false);
+            throw;
+        }
         return transit;
     }
 
@@ -453,7 +509,15 @@ public static class MessageTransitExtensions
         CancellationToken cancellationToken = default)
     {
         var transit = mux.AcceptReceiveOnlyMessageTransit<TReceive>(channelId, jsonOptions, maxMessageSize);
-        await transit.WaitForReadyAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            await transit.WaitForReadyAsync(cancellationToken).ConfigureAwait(false);
+        }
+        catch
+        {
+            await transit.DisposeAsync().ConfigureAwait(false);
+            throw;
+        }
         return transit;
     }
 
