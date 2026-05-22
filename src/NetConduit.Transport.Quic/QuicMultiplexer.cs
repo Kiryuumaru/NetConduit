@@ -19,6 +19,11 @@ public static class QuicMultiplexer
 {
     private const string DefaultAlpn = "netconduit";
 
+    // 1-byte NetConduit protocol preface. Both endpoints must agree on this
+    // byte before the mux runs framing on the QUIC stream. Bumping this value
+    // is the protocol-version gate (#255).
+    private const byte ExpectedPreface = 0x01;
+
     /// <summary>
     /// Creates multiplexer options that connect to the specified QUIC endpoint.
     /// Supports reconnection — each call to StreamFactory creates a new QUIC connection.
@@ -126,7 +131,7 @@ public static class QuicMultiplexer
             var stream = await connection.OpenOutboundStreamAsync(QuicStreamType.Bidirectional, ct).ConfigureAwait(false);
             try
             {
-                await stream.WriteAsync(new byte[] { 0x01 }, ct).ConfigureAwait(false);
+                await stream.WriteAsync(new byte[] { ExpectedPreface }, ct).ConfigureAwait(false);
                 await stream.FlushAsync(ct).ConfigureAwait(false);
 
                 return new StreamPair(stream, stream, connection);
@@ -242,8 +247,29 @@ public static class QuicMultiplexer
                 {
                     connection = await listener.AcceptConnectionAsync(ct).ConfigureAwait(false);
                     stream = await connection.AcceptInboundStreamAsync(ct).ConfigureAwait(false);
+
+                    // Read the 1-byte NetConduit preface fully and validate it.
+                    // QuicStream.ReadAsync may return 0 (peer closed write side without
+                    // sending the preface) or a short read; both must be rejected so the
+                    // mux gets a clear protocol-mismatch error instead of an EOF or
+                    // garbage on the first frame-header read (#255).
                     var preface = new byte[1];
-                    _ = await stream.ReadAsync(preface, ct).ConfigureAwait(false);
+                    int total = 0;
+                    while (total < preface.Length)
+                    {
+                        int n = await stream.ReadAsync(preface.AsMemory(total), ct).ConfigureAwait(false);
+                        if (n == 0)
+                        {
+                            throw new InvalidOperationException(
+                                "QUIC peer closed the inbound stream before sending the NetConduit preface byte.");
+                        }
+                        total += n;
+                    }
+                    if (preface[0] != ExpectedPreface)
+                    {
+                        throw new InvalidOperationException(
+                            $"QUIC peer sent invalid NetConduit preface byte 0x{preface[0]:X2}; expected 0x{ExpectedPreface:X2}.");
+                    }
 
                     Interlocked.Exchange(ref state, 2);
                     return new StreamPair(stream, stream, connection);
