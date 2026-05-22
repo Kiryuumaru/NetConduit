@@ -44,7 +44,18 @@ internal sealed class MuxKeepalive(
                 Interlocked.Exchange(ref conn.PendingPong, pending);
 
                 BinaryPrimitives.WriteInt64BigEndian(pingPayload, pingToken);
-                SendPing(pingPayload);
+                if (!TrySendPing(pingPayload))
+                {
+                    // Control slab is under pressure. The ping was NOT placed on the
+                    // wire, so it would be wrong to count this as a missed ping or to
+                    // wait for a pong that can never arrive. Clear the just-installed
+                    // pending (so the dangling TCS does not pin allocation) and back
+                    // off until the next interval. Slab pressure is transient — the
+                    // writer loop will drain coalescable ACKs (#291/#336) before the
+                    // next ping. See #355.
+                    Interlocked.CompareExchange(ref conn.PendingPong, null, pending);
+                    continue;
+                }
 
                 if (await WaitForPongAsync(pending, ct))
                 {
@@ -66,10 +77,18 @@ internal sealed class MuxKeepalive(
         }
     }
 
-    private void SendPing(ReadOnlySpan<byte> payload)
+    private bool TrySendPing(ReadOnlySpan<byte> payload)
     {
-        // ControlChannel may be torn down concurrently with shutdown — skip silently.
-        conn.ControlChannel?.WriteRawFrame(ControlFrameBuilder.BuildControlFrame(FrameFlags.Ping, payload));
+        // ControlChannel may be torn down concurrently with shutdown — treat as
+        // a benign skip (the cancellation token will fire on the next Delay).
+        // The throwing WriteRawFrame variant must not be used here: under
+        // sustained control-slab pressure from coalesced position ACKs the
+        // slab can transiently lack room for the ping frame, and an exception
+        // out of the keepalive loop tears the mux down even though the wire is
+        // healthy (#355 — parallel of #291/#336 not previously applied to the
+        // PING path).
+        return conn.ControlChannel?.TryWriteRawFrame(
+            ControlFrameBuilder.BuildControlFrame(FrameFlags.Ping, payload)) ?? false;
     }
 
     private async Task<bool> WaitForPongAsync(PendingPong pending, CancellationToken ct)
