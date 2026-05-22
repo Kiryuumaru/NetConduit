@@ -171,6 +171,82 @@ public sealed class ChannelRegistryTests
         Assert.Same(channel, await acceptTask);
     }
 
+    /// <summary>
+    /// Regression for #179. When AcceptChannelAsync's post-registration re-check
+    /// finds the channel already published in _idToIndex (because the dispatcher's
+    /// RegisterReadChannel ran between TCS registration and the re-check), the
+    /// pre-#179 fast path removed the TCS and returned the channel directly. The
+    /// dispatcher's subsequent EnqueueForAccept then found no TCS and fell
+    /// through to _acceptQueue (or a prefix subscription), double-delivering the
+    /// SAME ReadChannel instance to both the named waiter and a generic
+    /// AcceptChannelsAsync consumer. The fix routes the fast path through
+    /// TrySetResult on the SAME TCS that EnqueueForAccept targets, so exactly
+    /// one side wins delivery. We simulate the race deterministically by
+    /// pre-registering the channel BEFORE calling AcceptChannelAsync and then
+    /// calling EnqueueForAccept ourselves — the pre-#179 code would route the
+    /// channel into _acceptQueue; the fix drops it.
+    /// </summary>
+    [Fact]
+    public async Task AcceptChannelAsync_ChannelAlreadyPublished_EnqueueForAcceptDoesNotDoubleDeliver()
+    {
+        var registry = new ChannelRegistry(useOddIndices: false);
+        var channel = new ReadChannel("race", 2, ChannelPriority.Normal, 64 * 1024);
+        registry.RegisterReadChannel(2, channel);
+
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(2));
+
+        // Named waiter claims via the AcceptChannelAsync fast path. Under the
+        // fix this uses TrySetResult on a TCS still resident in _pendingAccepts.
+        var accepted = await registry.AcceptChannelAsync("race", cts.Token);
+        Assert.Same(channel, accepted);
+
+        // Dispatcher publishes the channel as part of the same INIT handling.
+        // Under the pre-#179 bug the TCS was already removed by the fast path,
+        // so EnqueueForAccept routed the channel into _acceptQueue. Under the
+        // fix EnqueueForAccept observes TryRemove-success + TrySetResult-false
+        // (RanToCompletion) and drops the duplicate delivery.
+        registry.EnqueueForAccept(channel);
+
+        // The catch-all stream must NOT see the channel: it was already
+        // delivered to the named waiter.
+        using var drainCts = new CancellationTokenSource(TimeSpan.FromMilliseconds(150));
+        await using var enumerator = registry.AcceptChannelsAsync(null, drainCts.Token).GetAsyncEnumerator(drainCts.Token);
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(async () => await enumerator.MoveNextAsync());
+    }
+
+    /// <summary>
+    /// Regression for #179 paired with #269. EnqueueForAccept must distinguish
+    /// "TCS already completed because the fast path delivered" (drop the
+    /// duplicate, #179) from "TCS already cancelled because the awaiter raced
+    /// cancellation" (route to the catch-all queue so the channel is not lost,
+    /// #269). The discriminator is Task.IsCanceled. We pre-stuff _pendingAccepts
+    /// with a TCS in the RanToCompletion state (modeling the post-fast-path
+    /// state) and assert EnqueueForAccept drops the channel.
+    /// </summary>
+    [Fact]
+    public async Task EnqueueForAccept_TcsAlreadyCompleted_DropsDuplicateDelivery()
+    {
+        var registry = new ChannelRegistry(useOddIndices: false);
+        var channel = new ReadChannel("drop", 2, ChannelPriority.Normal, 64 * 1024);
+        registry.RegisterReadChannel(2, channel);
+
+        var pendingAcceptsField = typeof(ChannelRegistry).GetField(
+            "_pendingAccepts",
+            System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic);
+        Assert.NotNull(pendingAcceptsField);
+        var pendingAccepts = (System.Collections.Concurrent.ConcurrentDictionary<string, TaskCompletionSource<ReadChannel>>)pendingAcceptsField!.GetValue(registry)!;
+
+        var completedTcs = new TaskCompletionSource<ReadChannel>(TaskCreationOptions.RunContinuationsAsynchronously);
+        completedTcs.SetResult(channel);
+        pendingAccepts["drop"] = completedTcs;
+
+        registry.EnqueueForAccept(channel);
+
+        using var drainCts = new CancellationTokenSource(TimeSpan.FromMilliseconds(150));
+        await using var enumerator = registry.AcceptChannelsAsync(null, drainCts.Token).GetAsyncEnumerator(drainCts.Token);
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(async () => await enumerator.MoveNextAsync());
+    }
+
     private sealed class NoopOwner : IChannelOwner
     {
         public void NotifyReady(WriteChannel channel) { }

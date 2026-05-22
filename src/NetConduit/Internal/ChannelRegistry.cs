@@ -220,18 +220,29 @@ internal sealed class ChannelRegistry
     internal void EnqueueForAccept(ReadChannel channel)
     {
         // Check if there's a specific async accept waiting for this channel ID.
-        // If we win TryRemove but TrySetResult fails, the awaiter raced us to
-        // cancellation between our TryRemove and our TrySetResult — its callback
-        // unconditionally TrySetCanceled'd the same TCS instance after losing
-        // its own TryRemove. The TCS is dead but the channel is still live and
-        // fully registered in _readChannels: we MUST route it to the catch-all
-        // _acceptQueue (or a matching prefix subscription) instead of dropping
-        // it on the floor, or the peer keeps the channel open and writes pile
-        // up unread in the orphan slab (#269).
-        if (_pendingAccepts.TryRemove(channel.ChannelId, out var tcs)
-            && tcs.TrySetResult(channel))
+        //
+        // Two failure modes are possible after a successful TryRemove:
+        //
+        //   1. TrySetResult succeeds -> delivered to the named waiter. Return.
+        //   2. TrySetResult returns false -> the TCS was already in a terminal
+        //      state. Disambiguate by inspecting Task.IsCanceled:
+        //        - RanToCompletion: AcceptChannelAsync's post-registration
+        //          fast path already claimed the channel via TrySetResult on
+        //          this same TCS instance (#179). The named waiter has the
+        //          channel; dropping here prevents double-delivery to the
+        //          generic _acceptQueue or a prefix subscription.
+        //        - Canceled: the awaiter's ct.Register callback poisoned the
+        //          TCS in a legacy post-race state (#269). The channel is
+        //          live and fully registered but has no owner: route to the
+        //          catch-all _acceptQueue (or a matching prefix subscription)
+        //          so the peer's writes are not silently dropped.
+        if (_pendingAccepts.TryRemove(channel.ChannelId, out var tcs))
         {
-            return;
+            if (tcs.TrySetResult(channel))
+                return;
+            if (!tcs.Task.IsCanceled)
+                return;
+            // Cancelled - fall through to fallback routing.
         }
         // Then check prefix subscriptions (overlay protocols claiming a namespace).
         // Prefixes are guaranteed non-overlapping by ThrowIfPrefixConflictsLocked,
@@ -253,25 +264,30 @@ internal sealed class ChannelRegistry
 
     internal async ValueTask<ReadChannel> AcceptChannelAsync(string channelId, CancellationToken ct)
     {
-        // Check if channel already arrived
-        if (_idToIndex.TryGetValue(channelId, out var index))
-        {
-            var existing = GetReadChannel(index);
-            if (existing is not null) return existing;
-        }
-
+        // Register the TCS FIRST so any concurrent dispatcher EnqueueForAccept
+        // routes through it. If the channel has already arrived, claim it via
+        // TrySetResult on the SAME TCS that EnqueueForAccept targets - both
+        // sides race the same atomic, so exactly one wins delivery and the
+        // other is a no-op (#179).
+        //
+        // Do NOT TryRemove the TCS from _pendingAccepts in the fast path. The
+        // pre-#179 code removed the entry and returned the channel directly,
+        // which bypassed EnqueueForAccept's TryRemove and caused the dispatcher
+        // to fall through to _acceptQueue (or a prefix subscription) with the
+        // same ReadChannel instance - double-delivering to both the named
+        // waiter and a generic AcceptChannelsAsync consumer. Letting
+        // EnqueueForAccept own the removal preserves the single-owner
+        // invariant: TryRemove-success + TrySetResult-false (RanToCompletion)
+        // is the signal that the fast path already delivered, so the
+        // dispatcher drops the duplicate.
         var tcs = new TaskCompletionSource<ReadChannel>(TaskCreationOptions.RunContinuationsAsynchronously);
         _pendingAccepts[channelId] = tcs;
 
-        // Re-check after registration — channel may have arrived between first check and registration
-        if (_idToIndex.TryGetValue(channelId, out index))
+        if (_idToIndex.TryGetValue(channelId, out var index))
         {
             var existing = GetReadChannel(index);
             if (existing is not null)
-            {
-                _pendingAccepts.TryRemove(channelId, out _);
-                return existing;
-            }
+                tcs.TrySetResult(existing);
         }
 
         // On cancellation we must remove our entry from _pendingAccepts. Without
@@ -282,7 +298,7 @@ internal sealed class ChannelRegistry
         // from the accept stream.
         //
         // Only TrySetCanceled when we actually won the TryRemove. If we lost the
-        // race to EnqueueForAccept, the TCS will be — or already is — completed
+        // race to EnqueueForAccept, the TCS will be (or already is) completed
         // by it, and EnqueueForAccept's TrySetResult-fallback path (#269) takes
         // care of routing the channel to the catch-all queue when needed.
         await using var registration = ct.Register(() =>
