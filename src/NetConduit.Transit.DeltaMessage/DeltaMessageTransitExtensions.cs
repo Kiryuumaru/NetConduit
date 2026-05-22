@@ -64,7 +64,15 @@ public static class DeltaMessageTransitExtensions
         CancellationToken cancellationToken = default)
     {
         var transit = mux.OpenDeltaMessageTransit(channelId, typeInfo, maxMessageSize);
-        await transit.WaitForReadyAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            await transit.WaitForReadyAsync(cancellationToken).ConfigureAwait(false);
+        }
+        catch
+        {
+            await transit.DisposeAsync().ConfigureAwait(false);
+            throw;
+        }
         return transit;
     }
 
@@ -99,7 +107,15 @@ public static class DeltaMessageTransitExtensions
         CancellationToken cancellationToken = default)
     {
         var transit = mux.AcceptDeltaMessageTransit(channelId, typeInfo, maxMessageSize);
-        await transit.WaitForReadyAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            await transit.WaitForReadyAsync(cancellationToken).ConfigureAwait(false);
+        }
+        catch
+        {
+            await transit.DisposeAsync().ConfigureAwait(false);
+            throw;
+        }
         return transit;
     }
 
@@ -146,7 +162,15 @@ public static class DeltaMessageTransitExtensions
         CancellationToken cancellationToken = default)
     {
         var transit = mux.AcceptReceiveOnlyDeltaMessageTransit(channelId, typeInfo, maxMessageSize);
-        await transit.WaitForReadyAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            await transit.WaitForReadyAsync(cancellationToken).ConfigureAwait(false);
+        }
+        catch
+        {
+            await transit.DisposeAsync().ConfigureAwait(false);
+            throw;
+        }
         return transit;
     }
 
