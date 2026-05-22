@@ -26,6 +26,14 @@ public sealed class MessageTransit<TSend, TReceive> : ITransit
     private readonly int _maxMessageSize;
     private readonly SemaphoreSlim _sendLock = new(1, 1);
     private readonly SemaphoreSlim _receiveLock = new(1, 1);
+    // Cancelled by DisposeAsync/Dispose so any in-flight SendAsync/ReceiveAsync
+    // promptly unwinds out of the channel I/O and releases its semaphore before
+    // the dispose path attempts to dispose the semaphore itself. Without this,
+    // disposing the SemaphoreSlim while a caller is still inside the protected
+    // section would either race the caller's Release() (throws ObjectDisposed-
+    // Exception, masking the genuine channel exception) or leave the dispose
+    // path acquiring an already-disposed handle (#219).
+    private readonly CancellationTokenSource _disposeCts = new();
     private volatile bool _disposed;
     private volatile bool _readyFired;
     // Set once when the inbound channel reaches EOF. ReceiveAllAsync consults
@@ -177,7 +185,10 @@ public sealed class MessageTransit<TSend, TReceive> : ITransit
         if (_writeChannel is null)
             throw new InvalidOperationException("This transit does not have a write channel configured.");
 
-        await _sendLock.WaitAsync(cancellationToken).ConfigureAwait(false);
+        using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, _disposeCts.Token);
+        var ct = linkedCts.Token;
+
+        await _sendLock.WaitAsync(ct).ConfigureAwait(false);
         try
         {
             byte[] jsonBytes;
@@ -199,7 +210,7 @@ public sealed class MessageTransit<TSend, TReceive> : ITransit
             {
                 BinaryPrimitives.WriteUInt32BigEndian(combinedBuffer, (uint)jsonBytes.Length);
                 jsonBytes.CopyTo(combinedBuffer, 4);
-                await _writeChannel.WriteAsync(combinedBuffer.AsMemory(0, totalLength), cancellationToken).ConfigureAwait(false);
+                await _writeChannel.WriteAsync(combinedBuffer.AsMemory(0, totalLength), ct).ConfigureAwait(false);
             }
             finally
             {
@@ -208,7 +219,7 @@ public sealed class MessageTransit<TSend, TReceive> : ITransit
         }
         finally
         {
-            _sendLock.Release();
+            ReleaseSendLockSafe();
         }
     }
 
@@ -222,7 +233,10 @@ public sealed class MessageTransit<TSend, TReceive> : ITransit
         if (_readChannel is null)
             throw new InvalidOperationException("This transit does not have a read channel configured.");
 
-        await _receiveLock.WaitAsync(cancellationToken).ConfigureAwait(false);
+        using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, _disposeCts.Token);
+        var ct = linkedCts.Token;
+
+        await _receiveLock.WaitAsync(ct).ConfigureAwait(false);
         try
         {
             // Drain any payload bytes still owed to a previously-rejected
@@ -231,7 +245,7 @@ public sealed class MessageTransit<TSend, TReceive> : ITransit
             // preserves progress for the next call.
             if (_pendingDrainRemaining > 0)
             {
-                await DrainPendingAsync(cancellationToken).ConfigureAwait(false);
+                await DrainPendingAsync(ct).ConfigureAwait(false);
             }
 
             // Read the 4-byte length prefix into the persistent buffer. If a
@@ -243,7 +257,7 @@ public sealed class MessageTransit<TSend, TReceive> : ITransit
             {
                 var n = await _readChannel.ReadAsync(
                     _pendingLengthBytes.AsMemory(_pendingLengthOffset, 4 - _pendingLengthOffset),
-                    cancellationToken).ConfigureAwait(false);
+                    ct).ConfigureAwait(false);
                 if (n == 0)
                 {
                     if (_pendingLengthOffset == 0)
@@ -292,7 +306,7 @@ public sealed class MessageTransit<TSend, TReceive> : ITransit
             {
                 var n = await _readChannel.ReadAsync(
                     _pendingPayloadBuffer.AsMemory(_pendingPayloadOffset, _pendingPayloadLength - _pendingPayloadOffset),
-                    cancellationToken).ConfigureAwait(false);
+                    ct).ConfigureAwait(false);
                 if (n == 0)
                 {
                     var torn = _pendingPayloadBuffer;
@@ -332,7 +346,7 @@ public sealed class MessageTransit<TSend, TReceive> : ITransit
         }
         finally
         {
-            _receiveLock.Release();
+            ReleaseReceiveLockSafe();
         }
     }
 
@@ -412,31 +426,84 @@ public sealed class MessageTransit<TSend, TReceive> : ITransit
 
         UnsubscribeFromChannelEvents();
 
+        // Cancel any in-flight Send/Receive so they release the semaphores and
+        // unwind out of the channel I/O. Without this, disposing _sendLock /
+        // _receiveLock while an operation is still in the protected section
+        // races the caller's Release() and surfaces a misleading ObjectDisposed-
+        // Exception about the semaphore instead of the real channel exception (#219).
+        try { _disposeCts.Cancel(); } catch (ObjectDisposedException) { }
+
+        // Drain in-flight operations by acquiring both locks. A misbehaving
+        // channel that ignores cancellation cannot indefinitely block dispose
+        // — the bounded timeout caps the wait, after which the safe-release
+        // helpers in SendAsync/ReceiveAsync swallow the post-dispose ODE.
+        using (var drainCts = new CancellationTokenSource(DisposeDrainTimeout))
+        {
+            try { await _sendLock.WaitAsync(drainCts.Token).ConfigureAwait(false); }
+            catch (OperationCanceledException) { }
+            catch (ObjectDisposedException) { }
+
+            try { await _receiveLock.WaitAsync(drainCts.Token).ConfigureAwait(false); }
+            catch (OperationCanceledException) { }
+            catch (ObjectDisposedException) { }
+        }
+
+        List<Exception>? errors = null;
+
         if (_writeChannel is not null)
-            await _writeChannel.DisposeAsync().ConfigureAwait(false);
+        {
+            try { await _writeChannel.DisposeAsync().ConfigureAwait(false); }
+            catch (Exception ex) { (errors ??= []).Add(ex); }
+        }
 
         if (_readChannel is not null)
-            await _readChannel.DisposeAsync().ConfigureAwait(false);
+        {
+            try { await _readChannel.DisposeAsync().ConfigureAwait(false); }
+            catch (Exception ex) { (errors ??= []).Add(ex); }
+        }
 
-        ReturnPendingPayloadBuffer();
-        _sendLock.Dispose();
-        _receiveLock.Dispose();
+        try { ReturnPendingPayloadBuffer(); }
+        catch (Exception ex) { (errors ??= []).Add(ex); }
+
+        try { _sendLock.Dispose(); }    catch (Exception ex) { (errors ??= []).Add(ex); }
+        try { _receiveLock.Dispose(); } catch (Exception ex) { (errors ??= []).Add(ex); }
+        try { _disposeCts.Dispose(); }  catch (Exception ex) { (errors ??= []).Add(ex); }
+
+        if (errors is { Count: 1 }) throw errors[0];
+        if (errors is { Count: > 1 }) throw new AggregateException(errors);
     }
 
     /// <inheritdoc/>
     public void Dispose()
     {
-        if (_disposed)
-            return;
+        // Delegate to DisposeAsync so the cancel+drain ordering is identical
+        // for sync and async callers. The synchronous wait is bounded by
+        // DisposeDrainTimeout via the internal drainCts — a malicious or
+        // wedged channel cannot park a synchronous Dispose forever.
+        DisposeAsync().AsTask().GetAwaiter().GetResult();
+    }
 
-        _disposed = true;
+    // Cap for how long DisposeAsync waits for an in-flight Send/Receive to
+    // observe the cancel and release its semaphore. Sized to be visibly longer
+    // than any reasonable channel write/read while still bounding a wedged
+    // dispose to a few seconds.
+    private static readonly TimeSpan DisposeDrainTimeout = TimeSpan.FromSeconds(5);
 
-        UnsubscribeFromChannelEvents();
-        _writeChannel?.Dispose();
-        _readChannel?.Dispose();
-        ReturnPendingPayloadBuffer();
-        _sendLock.Dispose();
-        _receiveLock.Dispose();
+    // Releases _sendLock while tolerating the race where the dispose path
+    // drained and disposed the semaphore while this operation was still
+    // unwinding. Suppressing ODE here is what prevents the misleading
+    // "semaphore has been disposed" exception from masking the real
+    // channel exception that triggered the unwind (#219).
+    private void ReleaseSendLockSafe()
+    {
+        try { _sendLock.Release(); }
+        catch (ObjectDisposedException) { }
+    }
+
+    private void ReleaseReceiveLockSafe()
+    {
+        try { _receiveLock.Release(); }
+        catch (ObjectDisposedException) { }
     }
 
     // Returns any payload buffer held across a cancelled mid-frame ReceiveAsync
