@@ -437,6 +437,19 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IChannelOwner
 
                     continue;
                 }
+                catch
+                {
+                    // Non-transport handshake failures (MultiplexerException for
+                    // SessionMismatch / ProtocolError / Internal, applyRemotePositions
+                    // throws, etc.) propagate to terminate the mux. The freshly
+                    // connected transport is still owned by this loop and must be
+                    // disposed before leaving the scope. On the reconnect path
+                    // _conn.Transport was never assigned, so the outer DisposeAsync
+                    // safety net cannot reach it (#356).
+                    _conn.Transport = null;
+                    try { await transport.DisposeAsync(); } catch { }
+                    throw;
+                }
 
                 handshakeAttempt = 0;
 
