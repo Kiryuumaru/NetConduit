@@ -130,11 +130,20 @@ internal sealed class WriteChannel : Stream, IWriteChannel
 
     internal void MarkOpen()
     {
-        // Don't regress state if channel is already closing or closed
-        if (_state is ChannelState.Closing or ChannelState.Closed) return;
-
-        _state = ChannelState.Open;
-        if (!_isReady)
+        // Promote Opening → Open atomically under _posLock so a concurrent
+        // SetClosed/Abort that flips _state to Closed cannot land between the
+        // check and the write and leave the channel resurrected to Open
+        // after its slab/handlers were already torn down (issue #163).
+        // Closing/Closed/Open are all no-ops; only Opening promotes.
+        bool promoted;
+        lock (_posLock)
+        {
+            if (_state != ChannelState.Opening)
+                return;
+            _state = ChannelState.Open;
+            promoted = true;
+        }
+        if (promoted && !_isReady)
         {
             _isReady = true;
             // Raise synchronous notifications first so handlers observe a ready channel,
@@ -443,10 +452,20 @@ internal sealed class WriteChannel : Stream, IWriteChannel
     /// </summary>
     public ValueTask CloseAsync(CancellationToken ct = default)
     {
-        if (_state is ChannelState.Closing or ChannelState.Closed)
-            return ValueTask.CompletedTask;
+        // Atomically promote Opening/Open → Closing under _posLock so a concurrent
+        // MarkOpen cannot resurrect the channel after we passed the state check
+        // (issue #163). Closing/Closed are no-ops.
+        bool transitioned;
+        lock (_posLock)
+        {
+            if (_state is ChannelState.Closing or ChannelState.Closed)
+                return ValueTask.CompletedTask;
+            _state = ChannelState.Closing;
+            transitioned = true;
+        }
 
-        _state = ChannelState.Closing;
+        if (!transitioned) return ValueTask.CompletedTask;
+
         bool finQueued = TryWriteFinFrameSafe();
         // If the FIN could not be queued (slab full, or the writer thread is
         // not running) the caller must still observe a transition to Closed
@@ -480,11 +499,18 @@ internal sealed class WriteChannel : Stream, IWriteChannel
 
     internal void SetClosed(ChannelCloseReason reason, Exception? exception = null)
     {
-        if (_state == ChannelState.Closed) return;
-        _state = ChannelState.Closed;
-        _closeReason = reason;
-        _closeException = exception;
-        _isConnected = false;
+        // Atomically commit the closed state alongside _closeReason/_closeException
+        // and _isConnected so a concurrent MarkOpen cannot interleave between the
+        // close-state check and the close-state write (issue #163). Holding _posLock
+        // also fences these writes against any in-flight reader of the same fields.
+        lock (_posLock)
+        {
+            if (_state == ChannelState.Closed) return;
+            _state = ChannelState.Closed;
+            _closeReason = reason;
+            _closeException = exception;
+            _isConnected = false;
+        }
         // Wake anyone waiting for ready (channel will never open)
         _readyTcs.TrySetException(new ChannelClosedException(ChannelId, reason));
         // Wake any blocked writers
@@ -629,11 +655,18 @@ internal sealed class WriteChannel : Stream, IWriteChannel
             // Send FIN so the peer observes EOF, matching DisposeAsync semantics.
             // Best-effort: if the slab cannot fit FIN, finalize the close anyway
             // so Dispose never throws under normal conditions.
-            if (_state is not ChannelState.Closing)
+            // Promote Opening/Open → Closing atomically under _posLock so a concurrent
+            // MarkOpen cannot resurrect the channel after the check (issue #163).
+            bool queueFin = false;
+            lock (_posLock)
             {
-                _state = ChannelState.Closing;
-                TryWriteFinFrameSafe();
+                if (_state is ChannelState.Opening or ChannelState.Open)
+                {
+                    _state = ChannelState.Closing;
+                    queueFin = true;
+                }
             }
+            if (queueFin) TryWriteFinFrameSafe();
             SetClosed(ChannelCloseReason.LocalClose);
             _spaceAvailable.Dispose();
         }
