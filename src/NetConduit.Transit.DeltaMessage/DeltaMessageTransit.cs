@@ -36,6 +36,15 @@ public sealed class DeltaMessageTransit<T> : IAsyncDisposable
     // sender lock, and a cross-lock null write races with ComputeDelta and produces
     // either NRE or silent state divergence (issue #300).
     private int _resyncRequested;
+    // Set by the receive path when WE need to ask the peer to re-send full state
+    // (delta arrived before any full state, or ApplyDelta threw mid-batch).
+    // Drained by the ReceiveAsync wrapper AFTER _receiveLock is released, then
+    // emitted under _sendLock so the 5-byte resync frame cannot interleave bytes
+    // with a concurrent SendAsync's in-flight write (issue #193). Writing from
+    // inside _receiveLock would either bypass _sendLock (corrupts wire framing)
+    // or, if acquired in-place, invert the lock order against ResetState
+    // (_sendLock then _receiveLock) and deadlock.
+    private int _outgoingResyncPending;
     // Bytes still owed by a previously-rejected over-max frame. ReadMessageAsync drains
     // these from the read channel before reading the next length prefix so that one
     // over-cap message does not permanently desync the framing for every subsequent
@@ -332,14 +341,27 @@ public sealed class DeltaMessageTransit<T> : IAsyncDisposable
         if (_readChannel is null)
             throw new InvalidOperationException("This transit does not have a read channel configured.");
 
-        await _receiveLock.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
-            return await ReceiveCoreAsync(cancellationToken).ConfigureAwait(false);
+            await _receiveLock.WaitAsync(cancellationToken).ConfigureAwait(false);
+            try
+            {
+                return await ReceiveCoreAsync(cancellationToken).ConfigureAwait(false);
+            }
+            finally
+            {
+                _receiveLock.Release();
+            }
         }
         finally
         {
-            _receiveLock.Release();
+            // Drain any outgoing resync request flagged by ReceiveCoreAsync AFTER
+            // _receiveLock has been released. Acquiring _sendLock while holding
+            // _receiveLock would invert the lock order against ResetState (which
+            // acquires _sendLock first), risking deadlock. Writing without
+            // _sendLock would interleave bytes with concurrent SendAsync calls
+            // and corrupt wire framing (#193).
+            await DrainOutgoingResyncAsync(cancellationToken).ConfigureAwait(false);
         }
     }
 
@@ -364,7 +386,9 @@ public sealed class DeltaMessageTransit<T> : IAsyncDisposable
                 case 0x01: // Delta
                     if (_lastReceivedState is null)
                     {
-                        await RequestResyncAsync(cancellationToken).ConfigureAwait(false);
+                        // Defer the resync write to the ReceiveAsync wrapper so it
+                        // happens under _sendLock after _receiveLock is released (#193).
+                        Interlocked.Exchange(ref _outgoingResyncPending, 1);
                         return default;
                     }
                     var ops = DeserializeDelta(payload.Span);
@@ -383,7 +407,9 @@ public sealed class DeltaMessageTransit<T> : IAsyncDisposable
                     catch (Exception ex)
                     {
                         _lastReceivedState = null;
-                        await RequestResyncAsync(cancellationToken).ConfigureAwait(false);
+                        // Defer the resync write to the ReceiveAsync wrapper so it
+                        // happens under _sendLock after _receiveLock is released (#193).
+                        Interlocked.Exchange(ref _outgoingResyncPending, 1);
                         throw new InvalidOperationException(
                             "Delta apply failed; receiver state has been reset and a resync has been requested from the peer.",
                             ex);
@@ -522,11 +548,33 @@ public sealed class DeltaMessageTransit<T> : IAsyncDisposable
         }
     }
 
-    private async ValueTask RequestResyncAsync(CancellationToken cancellationToken)
+    private async ValueTask DrainOutgoingResyncAsync(CancellationToken cancellationToken)
     {
-        if (_writeChannel is not null)
+        if (Interlocked.Exchange(ref _outgoingResyncPending, 0) != 1)
+            return;
+        if (_writeChannel is null)
+            return;
+
+        // Acquire _sendLock so the 5-byte resync frame is serialized against any
+        // concurrent SendAsync / SendBatchAsync write on the same channel. This
+        // method is invoked from ReceiveAsync's outer finally and MUST NOT throw:
+        // throwing here would swallow an InvalidOperationException raised by
+        // ReceiveCoreAsync (e.g. on ApplyDelta failure). On any failure we
+        // re-flag _outgoingResyncPending so the next ReceiveAsync drains it again.
+        bool acquired = false;
+        try
         {
+            await _sendLock.WaitAsync(cancellationToken).ConfigureAwait(false);
+            acquired = true;
             await WriteMessageAsync(ResyncRequestHeader, cancellationToken).ConfigureAwait(false);
+        }
+        catch
+        {
+            Interlocked.Exchange(ref _outgoingResyncPending, 1);
+        }
+        finally
+        {
+            if (acquired) _sendLock.Release();
         }
     }
 
