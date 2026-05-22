@@ -166,7 +166,15 @@ internal sealed class ChannelRegistry
 
     internal void EnqueueForAccept(ReadChannel channel)
     {
-        // Check if there's a specific async accept waiting for this channel ID
+        // Check if there's a specific async accept waiting for this channel ID.
+        // If we win TryRemove but TrySetResult fails, the awaiter raced us to
+        // cancellation between our TryRemove and our TrySetResult — its callback
+        // unconditionally TrySetCanceled'd the same TCS instance after losing
+        // its own TryRemove. The TCS is dead but the channel is still live and
+        // fully registered in _readChannels: we MUST route it to the catch-all
+        // _acceptQueue (or a matching prefix subscription) instead of dropping
+        // it on the floor, or the peer keeps the channel open and writes pile
+        // up unread in the orphan slab (#269).
         if (_pendingAccepts.TryRemove(channel.ChannelId, out var tcs))
         {
             if (tcs.TrySetResult(channel))
@@ -177,7 +185,7 @@ internal sealed class ChannelRegistry
             // suppress to avoid double-delivery (#179, #229). Otherwise
             // (cancelled, or completed with a stale channel from a prior
             // close+reopen cycle of the same id), fall through so the new
-            // channel is still delivered somewhere.
+            // channel is still delivered somewhere (#269).
             if (tcs.Task.Status == TaskStatus.RanToCompletion &&
                 ReferenceEquals(tcs.Task.Result, channel))
                 return;
@@ -232,12 +240,18 @@ internal sealed class ChannelRegistry
         // On cancellation we must remove our entry from _pendingAccepts. Without
         // this, a cancelled accept leaves a permanently-cancelled TCS in the
         // dictionary; the next inbound INIT for the same channel ID gets routed
-        // to that dead TCS in EnqueueForAccept and would (without the
-        // RanToCompletion/ReferenceEquals guard) be silently dropped.
+        // to that dead TCS in EnqueueForAccept (TryRemove succeeds, TrySetResult
+        // is a no-op on a completed TCS) and the channel is silently dropped
+        // from the accept stream.
+        //
+        // Only TrySetCanceled when we actually won the TryRemove. If we lost the
+        // race to EnqueueForAccept, the TCS will be — or already is — completed
+        // by it, and EnqueueForAccept's TrySetResult-fallback path (#269) takes
+        // care of routing the channel to the catch-all queue when needed.
         await using var registration = ct.Register(() =>
         {
-            _pendingAccepts.TryRemove(channelId, out _);
-            tcs.TrySetCanceled(ct);
+            if (_pendingAccepts.TryRemove(channelId, out _))
+                tcs.TrySetCanceled(ct);
         });
         return await tcs.Task.ConfigureAwait(false);
     }

@@ -1,6 +1,8 @@
 using System.Net;
 using System.Net.Quic;
+using System.Net.Security;
 using System.Runtime.Versioning;
+using System.Security.Authentication;
 using System.Security.Cryptography;
 using System.Security.Cryptography.X509Certificates;
 using NetConduit.Transport.Quic;
@@ -120,5 +122,82 @@ public class QuicMultiplexerTests
         using var retryTimeout = new CancellationTokenSource(TimeSpan.FromSeconds(1));
         await Assert.ThrowsAnyAsync<OperationCanceledException>(
             async () => await serverOptions.StreamFactory(retryTimeout.Token));
+    }
+
+    [Fact(Timeout = 30000)]
+    public async Task ServerFactory_RejectsPeerThatClosesStreamWithoutPreface()
+    {
+        if (!QuicListener.IsSupported)
+            return;
+
+        using var cert = CreateSelfSignedCert();
+        await using var listener = await QuicMultiplexer.ListenAsync(new IPEndPoint(IPAddress.Loopback, 0), cert);
+        var port = listener.LocalEndPoint.Port;
+        var serverOptions = QuicMultiplexer.CreateServerOptions(listener);
+
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+        var serverTask = Task.Run(async () => await serverOptions.StreamFactory(cts.Token));
+
+        await using var rogue = await ConnectRogueClientAsync(port, cts.Token);
+        var rogueStream = await rogue.OpenOutboundStreamAsync(QuicStreamType.Bidirectional, cts.Token);
+        rogueStream.CompleteWrites();
+
+        var ex = await Assert.ThrowsAnyAsync<Exception>(async () => await serverTask);
+        Assert.IsType<InvalidOperationException>(GetBaseInvalidOperation(ex));
+        Assert.Contains("preface", GetBaseInvalidOperation(ex)!.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact(Timeout = 30000)]
+    public async Task ServerFactory_RejectsPeerThatSendsWrongPrefaceByte()
+    {
+        if (!QuicListener.IsSupported)
+            return;
+
+        using var cert = CreateSelfSignedCert();
+        await using var listener = await QuicMultiplexer.ListenAsync(new IPEndPoint(IPAddress.Loopback, 0), cert);
+        var port = listener.LocalEndPoint.Port;
+        var serverOptions = QuicMultiplexer.CreateServerOptions(listener);
+
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+        var serverTask = Task.Run(async () => await serverOptions.StreamFactory(cts.Token));
+
+        await using var rogue = await ConnectRogueClientAsync(port, cts.Token);
+        var rogueStream = await rogue.OpenOutboundStreamAsync(QuicStreamType.Bidirectional, cts.Token);
+        await rogueStream.WriteAsync(new byte[] { 0xFF }, cts.Token);
+        await rogueStream.FlushAsync(cts.Token);
+
+        var ex = await Assert.ThrowsAnyAsync<Exception>(async () => await serverTask);
+        var ioe = GetBaseInvalidOperation(ex);
+        Assert.NotNull(ioe);
+        Assert.Contains("0xFF", ioe!.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static async Task<QuicConnection> ConnectRogueClientAsync(int port, CancellationToken ct)
+    {
+        var clientOptions = new QuicClientConnectionOptions
+        {
+            RemoteEndPoint = new IPEndPoint(IPAddress.Loopback, port),
+            DefaultCloseErrorCode = 0,
+            DefaultStreamErrorCode = 0,
+            MaxInboundBidirectionalStreams = 100,
+            MaxInboundUnidirectionalStreams = 0,
+            ClientAuthenticationOptions = new SslClientAuthenticationOptions
+            {
+                TargetHost = "localhost",
+                ApplicationProtocols = [new SslApplicationProtocol("netconduit")],
+                EnabledSslProtocols = SslProtocols.Tls13,
+                RemoteCertificateValidationCallback = static (_, _, _, _) => true,
+            }
+        };
+        return await QuicConnection.ConnectAsync(clientOptions, ct);
+    }
+
+    private static InvalidOperationException? GetBaseInvalidOperation(Exception ex)
+    {
+        for (var e = ex; e is not null; e = e.InnerException)
+        {
+            if (e is InvalidOperationException ioe) return ioe;
+        }
+        return null;
     }
 }
