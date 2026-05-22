@@ -646,10 +646,15 @@ public sealed class DeltaMessageTransit<T> : IAsyncDisposable
             return (T)(object)node.DeepClone();
 
         if (type == typeof(JsonObject))
-            return (T)(object)node.AsObject();
+            // Issue #241: AsObject() is a downcast, not a clone — without DeepClone
+            // the caller would receive a live reference to _lastReceivedState, so
+            // caller mutations would silently corrupt internal state and a concurrent
+            // delta-apply would throw "Collection was modified" mid-enumeration.
+            return (T)(object)node.DeepClone().AsObject();
 
         if (type == typeof(JsonArray))
-            return (T)(object)node.AsArray();
+            // Issue #241: same aliasing hazard as JsonObject above — DeepClone first.
+            return (T)(object)node.DeepClone().AsArray();
 
         if (type == typeof(JsonDocument))
             return (T)(object)JsonDocument.Parse(node.ToJsonString());
