@@ -149,10 +149,19 @@ internal sealed class ReadChannel : Stream, IReadChannel, IValueTaskSource<int>
         // (use-after-free). The dispatcher detects this state under AcceptLock
         // and falls through to creating a fresh channel; this is the
         // defense-in-depth backstop.
-        if (_state == ChannelState.Closed)
-            return;
-        _state = ChannelState.Open;
-        if (!_isReady)
+        // Promote Opening → Open atomically under _lock so a concurrent
+        // SetClosed cannot land between the check and the write and leave the
+        // channel resurrected to Open after its slab/handlers were torn down
+        // (issue #163). Closing/Closed/Open are all no-ops; only Opening promotes.
+        bool promoted;
+        lock (_lock)
+        {
+            if (_state != ChannelState.Opening)
+                return;
+            _state = ChannelState.Open;
+            promoted = true;
+        }
+        if (promoted && !_isReady)
         {
             _isReady = true;
             // Raise synchronous Ready first so handlers observe a ready channel,
@@ -173,11 +182,36 @@ internal sealed class ReadChannel : Stream, IReadChannel, IValueTaskSource<int>
     internal void MarkDisconnected(DisconnectReason reason, Exception? exception = null)
     {
         _isConnected = false;
-        // Frames received but never acknowledged will be replayed by the writer
-        // when it reconnects. Skip exactly those frame bytes so the user sees
-        // each payload exactly once.
-        _skipFrameBytes = _frameBytesReceived - _ackSentFrameBytes;
+        // The reconnect handshake advertises this side's current _frameBytesReceived
+        // and the peer rewinds its writer to that exact position (see WriteChannel.SetReplayBase).
+        // Consequently the very next byte the peer sends is the one we expect next, so we
+        // never have to skip a replayed prefix. Computing skip from local-only state would
+        // be wrong: _ackSentFrameBytes is bumped on local enqueue of an ACK, not on peer
+        // delivery, so a lost ACK frame on the wire would yield a too-short skip and
+        // duplicate-deliver bytes to ReadAsync (issue #161).
+        _skipFrameBytes = 0;
         SafeEventRaiser.Raise(this, Disconnected, new DisconnectedEventArgs(reason, exception), _onHandlerException);
+    }
+
+    /// <summary>
+    /// Total frame bytes (header + payload) received on this channel across all sessions,
+    /// counting every frame type that consumes slab on the peer's writer — currently INIT
+    /// and DATA. Advertised in the reconnect handshake so the peer's writer can rewind its
+    /// replay base to exactly this position (issue #161).
+    /// </summary>
+    internal long FrameBytesReceived => _frameBytesReceived;
+
+    /// <summary>
+    /// Account for an inbound frame whose bytes were consumed off the wire for this
+    /// channel but did not reach <see cref="ReceivePayload"/> — namely the initial
+    /// <c>INIT</c> frame that the mux processes at channel registration time. The peer's
+    /// writer slab includes those bytes, so omitting them here would make the reconnect
+    /// handshake's replay-base land mid-frame and the writer would replay already-delivered
+    /// bytes.
+    /// </summary>
+    internal void AccountInboundFrame(int frameBytes)
+    {
+        _frameBytesReceived += frameBytes;
     }
 
     internal void SetAckChannel(WriteChannel ackChannel) => _ackChannel = ackChannel;

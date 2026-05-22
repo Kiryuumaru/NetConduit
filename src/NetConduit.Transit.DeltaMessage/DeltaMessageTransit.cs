@@ -30,6 +30,12 @@ public sealed class DeltaMessageTransit<T> : IAsyncDisposable
 
     private JsonNode? _lastSentState;
     private JsonNode? _lastReceivedState;
+    // Set by the receive path when a peer 0x02 resync request arrives, consumed by the
+    // send path under _sendLock at the top of every SendCore/SendBatchCore call. The
+    // receive path must not mutate _lastSentState directly: that field is owned by the
+    // sender lock, and a cross-lock null write races with ComputeDelta and produces
+    // either NRE or silent state divergence (issue #300).
+    private int _resyncRequested;
     private volatile bool _disposed;
     private volatile bool _readyFired;
     private readonly object _readyLock = new();
@@ -192,6 +198,8 @@ public sealed class DeltaMessageTransit<T> : IAsyncDisposable
 
     private async ValueTask SendCoreAsync(T state, CancellationToken cancellationToken)
     {
+        ConsumeResyncRequest();
+
         var currentState = ToJsonNode(state);
 
         if (_lastSentState is null)
@@ -216,6 +224,8 @@ public sealed class DeltaMessageTransit<T> : IAsyncDisposable
 
     private async ValueTask SendBatchCoreAsync(IEnumerable<T> states, CancellationToken cancellationToken)
     {
+        ConsumeResyncRequest();
+
         // Stage all batched mutations on a local clone so an exception during the
         // accumulated delta flush does not advance _lastSentState past what the peer
         // actually received. _lastSentState is only committed after a successful send.
@@ -317,7 +327,9 @@ public sealed class DeltaMessageTransit<T> : IAsyncDisposable
                     return FromJsonNode(_lastReceivedState);
 
                 case 0x02: // Resync request
-                    _lastSentState = null;
+                    // Defer the _lastSentState reset to the send path so it happens under
+                    // _sendLock, avoiding the cross-lock race against ComputeDelta (#300).
+                    Interlocked.Exchange(ref _resyncRequested, 1);
                     return default;
 
                 default:
@@ -354,8 +366,36 @@ public sealed class DeltaMessageTransit<T> : IAsyncDisposable
     /// </summary>
     public void ResetState()
     {
-        _lastSentState = null;
-        _lastReceivedState = null;
+        // Acquire both locks so the reset is atomic with respect to in-flight
+        // SendCoreAsync / ReceiveCoreAsync calls. Without this, a concurrent send
+        // could observe _lastSentState going null mid-ComputeDelta (#300).
+        _sendLock.Wait();
+        try
+        {
+            _receiveLock.Wait();
+            try
+            {
+                _lastSentState = null;
+                _lastReceivedState = null;
+                Interlocked.Exchange(ref _resyncRequested, 0);
+            }
+            finally
+            {
+                _receiveLock.Release();
+            }
+        }
+        finally
+        {
+            _sendLock.Release();
+        }
+    }
+
+    private void ConsumeResyncRequest()
+    {
+        if (Interlocked.Exchange(ref _resyncRequested, 0) == 1)
+        {
+            _lastSentState = null;
+        }
     }
 
     private async ValueTask SendFullAsync(JsonNode state, CancellationToken cancellationToken)
