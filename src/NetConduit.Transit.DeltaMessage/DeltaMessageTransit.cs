@@ -226,26 +226,29 @@ public sealed class DeltaMessageTransit<T> : IAsyncDisposable
     {
         ConsumeResyncRequest();
 
-        JsonNode? finalState = null;
+        // Stage all batched mutations on a local clone so an exception during the
+        // accumulated delta flush does not advance _lastSentState past what the peer
+        // actually received. _lastSentState is only committed after a successful send.
+        var stagedBaseline = _lastSentState?.DeepClone();
         var combinedOps = new List<DeltaOperation>();
 
         foreach (var state in states)
         {
             var currentState = ToJsonNode(state);
-            finalState = currentState;
 
-            if (_lastSentState is null)
+            if (stagedBaseline is null)
             {
                 await SendFullAsync(currentState, cancellationToken).ConfigureAwait(false);
+                stagedBaseline = currentState.DeepClone();
                 _lastSentState = currentState.DeepClone();
                 combinedOps.Clear();
             }
             else
             {
-                var ops = DeltaDiff.ComputeDelta(_lastSentState, currentState);
+                var ops = DeltaDiff.ComputeDelta(stagedBaseline, currentState);
                 if (ops.Count > 0 && !RequiresFullState(ops))
                 {
-                    DeltaApply.ApplyDelta(_lastSentState, ops);
+                    DeltaApply.ApplyDelta(stagedBaseline, ops);
                     combinedOps.AddRange(ops);
                 }
                 else
@@ -253,9 +256,11 @@ public sealed class DeltaMessageTransit<T> : IAsyncDisposable
                     if (combinedOps.Count > 0)
                     {
                         await SendDeltaAsync(combinedOps, cancellationToken).ConfigureAwait(false);
+                        _lastSentState = stagedBaseline.DeepClone();
                         combinedOps.Clear();
                     }
                     await SendFullAsync(currentState, cancellationToken).ConfigureAwait(false);
+                    stagedBaseline = currentState.DeepClone();
                     _lastSentState = currentState.DeepClone();
                 }
             }
@@ -264,11 +269,7 @@ public sealed class DeltaMessageTransit<T> : IAsyncDisposable
         if (combinedOps.Count > 0)
         {
             await SendDeltaAsync(combinedOps, cancellationToken).ConfigureAwait(false);
-        }
-
-        if (finalState is not null)
-        {
-            _lastSentState = finalState.DeepClone();
+            _lastSentState = stagedBaseline!.DeepClone();
         }
     }
 
@@ -645,10 +646,15 @@ public sealed class DeltaMessageTransit<T> : IAsyncDisposable
             return (T)(object)node.DeepClone();
 
         if (type == typeof(JsonObject))
-            return (T)(object)node.AsObject();
+            // Issue #241: AsObject() is a downcast, not a clone — without DeepClone
+            // the caller would receive a live reference to _lastReceivedState, so
+            // caller mutations would silently corrupt internal state and a concurrent
+            // delta-apply would throw "Collection was modified" mid-enumeration.
+            return (T)(object)node.DeepClone().AsObject();
 
         if (type == typeof(JsonArray))
-            return (T)(object)node.AsArray();
+            // Issue #241: same aliasing hazard as JsonObject above — DeepClone first.
+            return (T)(object)node.DeepClone().AsArray();
 
         if (type == typeof(JsonDocument))
             return (T)(object)JsonDocument.Parse(node.ToJsonString());
@@ -677,14 +683,28 @@ public sealed class DeltaMessageTransit<T> : IAsyncDisposable
 
         UnsubscribeFromChannelEvents();
 
-        _sendLock.Dispose();
-        _receiveLock.Dispose();
-
+        // Aggregate per-step failures so a throw from one channel's dispose does not
+        // skip the other channel and leak its slab (#292, mirroring StreamPair PR #224
+        // / DuplexStreamTransit #305). Channels disposed first so semaphores remain
+        // valid until any in-flight send/receive observes ObjectDisposedException.
+        List<Exception>? errors = null;
         if (_writeChannel is not null)
-            await _writeChannel.DisposeAsync().ConfigureAwait(false);
-
+        {
+            try { await _writeChannel.DisposeAsync().ConfigureAwait(false); }
+            catch (Exception ex) { (errors ??= []).Add(ex); }
+        }
         if (_readChannel is not null)
-            await _readChannel.DisposeAsync().ConfigureAwait(false);
+        {
+            try { await _readChannel.DisposeAsync().ConfigureAwait(false); }
+            catch (Exception ex) { (errors ??= []).Add(ex); }
+        }
+        try { _sendLock.Dispose(); }
+        catch (Exception ex) { (errors ??= []).Add(ex); }
+        try { _receiveLock.Dispose(); }
+        catch (Exception ex) { (errors ??= []).Add(ex); }
+
+        if (errors is { Count: 1 }) throw errors[0];
+        if (errors is { Count: > 1 }) throw new AggregateException(errors);
     }
 
     private void UnsubscribeFromChannelEvents()
