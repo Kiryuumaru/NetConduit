@@ -363,7 +363,27 @@ public sealed class DeltaMessageTransit<T> : IAsyncDisposable
                         return default;
                     }
                     var ops = DeserializeDelta(payload.Span);
-                    DeltaApply.ApplyDelta(_lastReceivedState, ops);
+                    // Apply atomically: stage on a clone, swap on success. If any op
+                    // throws mid-batch (path not found, array index out of range,
+                    // incompatible parent type, ...), _lastReceivedState is left
+                    // untouched, then cleared and a resync is requested so the peer
+                    // re-sends full state. Without this, an earlier op's mutation
+                    // would leak into _lastReceivedState and every subsequent delta
+                    // would be applied to a corrupt baseline (#223).
+                    var staging = _lastReceivedState.DeepClone();
+                    try
+                    {
+                        DeltaApply.ApplyDelta(staging, ops);
+                    }
+                    catch (Exception ex)
+                    {
+                        _lastReceivedState = null;
+                        await RequestResyncAsync(cancellationToken).ConfigureAwait(false);
+                        throw new InvalidOperationException(
+                            "Delta apply failed; receiver state has been reset and a resync has been requested from the peer.",
+                            ex);
+                    }
+                    _lastReceivedState = staging;
                     return FromJsonNode(_lastReceivedState);
 
                 case 0x02: // Resync request
@@ -425,6 +445,9 @@ public sealed class DeltaMessageTransit<T> : IAsyncDisposable
 
     /// <summary>
     /// Resets the local state, forcing full state transmission on next send.
+    /// Also clears the last received state so the next inbound delta will trigger
+    /// a resync request to the peer. Use this as a recovery API when the
+    /// application detects state corruption or wants to start a fresh sync.
     /// </summary>
     public void ResetState()
     {
