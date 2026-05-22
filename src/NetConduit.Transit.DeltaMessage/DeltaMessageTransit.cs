@@ -677,14 +677,27 @@ public sealed class DeltaMessageTransit<T> : IAsyncDisposable
 
         UnsubscribeFromChannelEvents();
 
-        _sendLock.Dispose();
-        _receiveLock.Dispose();
-
+        // Run every dispose step unconditionally and aggregate failures
+        // so a throw from one channel's dispose does not strand the other
+        // channel's slab or the semaphores (#292).
+        List<Exception>? errors = null;
         if (_writeChannel is not null)
-            await _writeChannel.DisposeAsync().ConfigureAwait(false);
-
+        {
+            try { await _writeChannel.DisposeAsync().ConfigureAwait(false); }
+            catch (Exception ex) { (errors ??= []).Add(ex); }
+        }
         if (_readChannel is not null)
-            await _readChannel.DisposeAsync().ConfigureAwait(false);
+        {
+            try { await _readChannel.DisposeAsync().ConfigureAwait(false); }
+            catch (Exception ex) { (errors ??= []).Add(ex); }
+        }
+        try { _sendLock.Dispose(); }
+        catch (Exception ex) { (errors ??= []).Add(ex); }
+        try { _receiveLock.Dispose(); }
+        catch (Exception ex) { (errors ??= []).Add(ex); }
+
+        if (errors is { Count: 1 }) throw errors[0];
+        if (errors is { Count: > 1 }) throw new AggregateException(errors);
     }
 
     private void UnsubscribeFromChannelEvents()

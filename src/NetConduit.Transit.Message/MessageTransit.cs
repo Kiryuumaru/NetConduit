@@ -412,15 +412,31 @@ public sealed class MessageTransit<TSend, TReceive> : ITransit
 
         UnsubscribeFromChannelEvents();
 
+        // Run every dispose step unconditionally and aggregate failures.
+        // A throw from one channel's dispose must not strand the other
+        // channel, the pending payload buffer (up to MaxMessageSize from
+        // ArrayPool<byte>.Shared), or the semaphores (#292, same family
+        // as #218 / PR #224 for StreamPair).
+        List<Exception>? errors = null;
         if (_writeChannel is not null)
-            await _writeChannel.DisposeAsync().ConfigureAwait(false);
-
+        {
+            try { await _writeChannel.DisposeAsync().ConfigureAwait(false); }
+            catch (Exception ex) { (errors ??= []).Add(ex); }
+        }
         if (_readChannel is not null)
-            await _readChannel.DisposeAsync().ConfigureAwait(false);
+        {
+            try { await _readChannel.DisposeAsync().ConfigureAwait(false); }
+            catch (Exception ex) { (errors ??= []).Add(ex); }
+        }
+        try { ReturnPendingPayloadBuffer(); }
+        catch (Exception ex) { (errors ??= []).Add(ex); }
+        try { _sendLock.Dispose(); }
+        catch (Exception ex) { (errors ??= []).Add(ex); }
+        try { _receiveLock.Dispose(); }
+        catch (Exception ex) { (errors ??= []).Add(ex); }
 
-        ReturnPendingPayloadBuffer();
-        _sendLock.Dispose();
-        _receiveLock.Dispose();
+        if (errors is { Count: 1 }) throw errors[0];
+        if (errors is { Count: > 1 }) throw new AggregateException(errors);
     }
 
     /// <inheritdoc/>
@@ -432,11 +448,21 @@ public sealed class MessageTransit<TSend, TReceive> : ITransit
         _disposed = true;
 
         UnsubscribeFromChannelEvents();
-        _writeChannel?.Dispose();
-        _readChannel?.Dispose();
-        ReturnPendingPayloadBuffer();
-        _sendLock.Dispose();
-        _receiveLock.Dispose();
+
+        List<Exception>? errors = null;
+        try { _writeChannel?.Dispose(); }
+        catch (Exception ex) { (errors ??= []).Add(ex); }
+        try { _readChannel?.Dispose(); }
+        catch (Exception ex) { (errors ??= []).Add(ex); }
+        try { ReturnPendingPayloadBuffer(); }
+        catch (Exception ex) { (errors ??= []).Add(ex); }
+        try { _sendLock.Dispose(); }
+        catch (Exception ex) { (errors ??= []).Add(ex); }
+        try { _receiveLock.Dispose(); }
+        catch (Exception ex) { (errors ??= []).Add(ex); }
+
+        if (errors is { Count: 1 }) throw errors[0];
+        if (errors is { Count: > 1 }) throw new AggregateException(errors);
     }
 
     // Returns any payload buffer held across a cancelled mid-frame ReceiveAsync
