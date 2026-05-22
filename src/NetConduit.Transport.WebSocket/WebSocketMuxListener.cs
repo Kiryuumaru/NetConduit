@@ -95,8 +95,26 @@ public sealed class WebSocketMuxListener : IAsyncDisposable
                 {
                     // The mux for this session reached a terminal state between
                     // TryGetValue and WriteAsync; its Disconnected handler has
-                    // already evicted the entry. Treat as if no sessionId was
-                    // supplied and start a fresh session below (#279).
+                    // already evicted the entry (#279). Refuse the resume the
+                    // same way the unknown-session branch does: falling through
+                    // to fresh-mux creation would silently bind this pair to a
+                    // brand-new SessionId, which causes the client's reconnect
+                    // handshake to fault with SessionMismatch and leaks a
+                    // server-side mux under a key the client cannot reach —
+                    // the exact defect #236 fixed and #354 re-surfaced.
+                    try
+                    {
+                        await webSocket.CloseOutputAsync(
+                            System.Net.WebSockets.WebSocketCloseStatus.PolicyViolation,
+                            "Session has been evicted.",
+                            cancellationToken).ConfigureAwait(false);
+                    }
+                    catch
+                    {
+                        // Best effort: peer may already be gone.
+                    }
+                    try { await pair.DisposeAsync().ConfigureAwait(false); } catch { }
+                    return;
                 }
             }
 
