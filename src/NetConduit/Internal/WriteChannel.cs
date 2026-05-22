@@ -17,7 +17,12 @@ internal sealed class WriteChannel : Stream, IWriteChannel
 {
     private readonly byte[] _slab;
     private readonly Memory<byte> _slabMemory;
-    private readonly ushort _channelIndex;
+    // Mutable to support post-handshake reassignment when a pre-handshake
+    // OpenChannel allocated this channel from the wrong default parity (#237).
+    // The mux walks queued frames in the slab and patches the index bytes
+    // before the writer thread starts; outside that single reassignment, the
+    // index is stable for the channel's lifetime.
+    private ushort _channelIndex;
     private readonly IChannelOwner _owner;
 
     internal ushort ChannelIndex => _channelIndex;
@@ -275,6 +280,34 @@ internal sealed class WriteChannel : Stream, IWriteChannel
             _pendingPos = _writePos;
         }
         _owner.NotifyReady(this);
+    }
+
+    /// <summary>
+    /// Reassigns this channel's wire index and rewrites the channel-index
+    /// bytes of every queued frame in the slab. Used by the multiplexer to
+    /// move a pre-handshake-allocated channel from the default-odd seed parity
+    /// into the post-handshake-decided parity space (#237). Must be called
+    /// before the writer thread starts transmitting from this slab and before
+    /// any frame from this channel has been observed by the peer.
+    /// </summary>
+    internal void RestampChannelIndex(ushort newIndex)
+    {
+        lock (_posLock)
+        {
+            // Walk every queued frame in [_sentPos.._writePos). Pre-handshake
+            // _sentPos is 0; in general the writer has not yet drained any
+            // frame at the time this is called, so this collapses to the
+            // whole [0.._writePos) range. We still scan from _sentPos to keep
+            // the invariant correct if the contract is ever loosened.
+            int pos = _sentPos;
+            while (pos + FrameHeader.Size <= _writePos)
+            {
+                BinaryPrimitives.WriteUInt16BigEndian(_slab.AsSpan(pos, 2), newIndex);
+                uint payloadLength = BinaryPrimitives.ReadUInt32BigEndian(_slab.AsSpan(pos + 4, 4));
+                pos += FrameHeader.Size + (int)payloadLength;
+            }
+            _channelIndex = newIndex;
+        }
     }
 
     internal void WriteAckFrame(ulong receivedPosition)

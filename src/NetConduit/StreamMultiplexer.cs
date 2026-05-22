@@ -237,21 +237,29 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IChannelOwner
             throw new InvalidOperationException("Cannot open new channels after GoAwayAsync.");
 
         bool enableReplay = _options.MaxAutoReconnectAttempts != 0;
-        ushort index = _registry.AllocateChannelIndex();
-        var channel = new WriteChannel(
-            options.ChannelId,
-            index,
-            options.Priority,
-            options.SlabSize,
-            options.SendTimeout,
-            this,
-            enableReplay);
+        WriteChannel channel;
+        // Lock against ReassignPreHandshakeWriteChannelIndices: allocate +
+        // register + stamp the INIT frame as one atomic unit so a concurrent
+        // post-handshake reassign either sees this channel and rekeys it, or
+        // we observe the already-flipped parity and allocate correctly (#237).
+        lock (_registry.ChannelIndexLock)
+        {
+            ushort index = _registry.AllocateChannelIndex();
+            channel = new WriteChannel(
+                options.ChannelId,
+                index,
+                options.Priority,
+                options.SlabSize,
+                options.SendTimeout,
+                this,
+                enableReplay);
 
-        _registry.RegisterWriteChannel(index, channel);
+            _registry.RegisterWriteChannel(index, channel);
 
-        // Send INIT frame (channel does it itself — builds the frame in its slab)
-        channel.WriteInitFrame(channelIdBytes);
-        // Channel stays in Opening/Pending state until remote ACKs the INIT
+            // Send INIT frame (channel does it itself — builds the frame in its slab)
+            channel.WriteInitFrame(channelIdBytes);
+            // Channel stays in Opening/Pending state until remote ACKs the INIT
+        }
 
         if (_isConnected)
             channel.MarkConnected();
@@ -435,6 +443,16 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IChannelOwner
                 _conn.Transport = transport;
                 _isConnected = true;
                 _disconnectReason = null;
+
+                // Reassign any pre-handshake-allocated WriteChannel that landed
+                // on the wrong default-odd parity space so its queued INIT and
+                // any DATA frames go out under the parity decided by the
+                // session-GUID handshake (#237). Done here on the first connect
+                // only; reconnects re-use the same parity (decided by the same
+                // session GUIDs) and AllocateChannelIndex below allocates from
+                // the correct space already.
+                if (!hasConnectedBefore)
+                    ReassignPreHandshakeWriteChannelIndices();
 
                 // Create control channel on first connect
                 if (_conn.ControlChannel is null)
@@ -1010,6 +1028,36 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IChannelOwner
             writeChannel?.SetReplayBase(pos.FrameBytesReceived);
         }
     }
+
+    // Walks the registry's WriteChannels after the initial handshake set the
+    // real index parity. Any pre-handshake OpenChannel / TryRegisterChannels
+    // call allocated indices from the default odd seed (Create(...) hardcodes
+    // useOddIndices: true on both peers); on the side whose session GUID lost
+    // the handshake comparison those indices are now in the wrong parity
+    // space and must move before the writer thread transmits any frame from
+    // them. Both peers always allocate index 1 first pre-handshake, so without
+    // this both sides would transmit INIT for the same wire index and the
+    // peer's INIT-ACK would route to the wrong local channel.
+    //
+    // Called only on the first connect (after PerformHandshakeAsync, before
+    // the writer/flusher/reader tasks start) so no concurrent slab reader can
+    // observe an in-flight rewrite. Reconnects re-use the same parity (it is
+    // a deterministic function of the unchanging session GUIDs) and never
+    // re-enter this path.
+    private void ReassignPreHandshakeWriteChannelIndices()
+    {
+        foreach (var channel in _registry.GetAllWriteChannels())
+        {
+            if (_registry.IsCurrentParity(channel.ChannelIndex))
+                continue;
+
+            ushort oldIndex = channel.ChannelIndex;
+            ushort newIndex = _registry.AllocateChannelIndex();
+            channel.RestampChannelIndex(newIndex);
+            _registry.RekeyWriteChannel(oldIndex, newIndex, channel);
+        }
+    }
+
 
     private static async Task ReadExactAsync(Stream stream, Memory<byte> buffer, CancellationToken ct)
     {
