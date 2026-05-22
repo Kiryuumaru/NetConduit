@@ -608,16 +608,29 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IChannelOwner
 
     void IChannelOwner.NotifyChannelCompleted(ushort channelIndex, string channelId)
     {
-        // Write channels: stats decrement here (after FIN sent + no pending data).
-        // Read channels: stats already decremented at FIN receipt in DispatchToChannel.
-        bool isWriteChannel = _registry.GetWriteChannel(channelIndex) is not null;
+        // Capture role BEFORE unregistering, since GetWriteChannel/GetReadChannel
+        // return null after the registry mutation.
+        var writeChannel = _registry.GetWriteChannel(channelIndex);
+        var readChannel = writeChannel is null ? _registry.GetReadChannel(channelIndex) : null;
 
         _registry.UnregisterChannel(channelIndex, channelId);
 
-        if (isWriteChannel)
+        if (writeChannel is not null)
         {
+            // Write channels are always closed locally (FIN-out then drain),
+            // so this is the single accounting site. No CAS needed.
             Interlocked.Decrement(ref _stats._openChannels);
             Interlocked.Increment(ref _stats._totalChannelsClosed);
+        }
+        else if (readChannel is not null && readChannel.TryClaimCompletionAccounting())
+        {
+            // Read channels can be closed by inbound FIN, by local Dispose,
+            // or by mux-level abort — whichever runs first claims the accounting.
+            // Pre-fix this branch only fired on FIN, so a local-Dispose-before-FIN
+            // permanently inflated OpenChannels and skipped ChannelClosed (#172).
+            Interlocked.Decrement(ref _stats._openChannels);
+            Interlocked.Increment(ref _stats._totalChannelsClosed);
+            RaiseEvent(ChannelClosed, new ChannelClosedEventArgs(channelId, readChannel.CloseException));
         }
     }
 
@@ -770,6 +783,11 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IChannelOwner
             _registry.RegisterReadChannel(header.ChannelIndex, readChannel);
         }
 
+        // Account for the INIT frame bytes that just arrived; the writer-side slab
+        // includes them in its _sentPos counter so the reader's FrameBytesReceived
+        // must match (otherwise reconnect replay-base lands mid-frame — issue #161).
+        readChannel.AccountInboundFrame(FrameHeader.Size + payload.Length);
+
         readChannel.MarkOpen();
         readChannel.MarkConnected();
 
@@ -806,9 +824,15 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IChannelOwner
 
         if (header.Flags == FrameFlags.Fin)
         {
-            Interlocked.Decrement(ref _stats._openChannels);
-            Interlocked.Increment(ref _stats._totalChannelsClosed);
-            RaiseEvent(ChannelClosed, new ChannelClosedEventArgs(channel.ChannelId, null));
+            // Single-decrement contract via CAS: whichever runs first
+            // (this FIN handler or NotifyChannelCompleted on local Dispose)
+            // claims the accounting; the other becomes a no-op. See #172.
+            if (channel.TryClaimCompletionAccounting())
+            {
+                Interlocked.Decrement(ref _stats._openChannels);
+                Interlocked.Increment(ref _stats._totalChannelsClosed);
+                RaiseEvent(ChannelClosed, new ChannelClosedEventArgs(channel.ChannelId, null));
+            }
         }
     }
 
@@ -821,7 +845,22 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IChannelOwner
                 SendControlFrame(FrameFlags.Pong, payload);
                 break;
             case FrameFlags.Pong:
-                Interlocked.Exchange(ref conn.PendingPong, null)?.TrySetResult();
+                // Correlate the echoed 8-byte token to the currently outstanding ping.
+                // A late pong from a previous (timed-out) ping must not satisfy the
+                // *next* ping's TCS — that would mask real liveness failures by
+                // resetting the missed-ping counter (issue #293).
+                if (payload.Length >= 8)
+                {
+                    long echoedToken = BinaryPrimitives.ReadInt64BigEndian(payload);
+                    var pending = Volatile.Read(ref conn.PendingPong);
+                    if (pending is not null
+                        && pending.ExpectedToken == echoedToken
+                        && Interlocked.CompareExchange(ref conn.PendingPong, null, pending) == pending)
+                    {
+                        pending.Tcs.TrySetResult();
+                    }
+                    // else: stale or already-cleared — drop silently.
+                }
                 break;
             case FrameFlags.Ctrl:
                 ProcessCtrlSubframe(payload);
@@ -847,9 +886,63 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IChannelOwner
 
     private void HandleRemoteGoAway()
     {
+        // If local already initiated shutdown (via GoAwayAsync or DisposeAsync),
+        // the existing path owns teardown. Don't double-drive it.
+        if (_isShuttingDown) return;
         _isShuttingDown = true;
         _disconnectReason = Enums.DisconnectReason.GoAwayReceived;
-        _cts.Cancel();
+
+        // Mirror GoAwayAsync's drain-then-cancel semantics on the remote-initiated
+        // path. Cancelling _cts immediately would wake the main loop, which then
+        // cancels _loopCts and aborts the writer mid-flush — frames already stamped
+        // into channel slabs by WriteAsync (which returned successfully to the caller)
+        // would be silently dropped on the wire (issue #165).
+        //
+        // Run the drain off-thread because this handler executes on the reader loop;
+        // the writer needs the reader to keep pumping inbound ACKs to release slab
+        // capacity while it finishes flushing.
+        _ = Task.Run(DrainAndCancelOnRemoteGoAwayAsync);
+    }
+
+    private async Task DrainAndCancelOnRemoteGoAwayAsync()
+    {
+        try
+        {
+            using var drainCts = new CancellationTokenSource(_options.GoAwayTimeout);
+            while (!drainCts.IsCancellationRequested)
+            {
+                bool anyPending = false;
+                foreach (var ch in _registry.GetAllWriteChannels())
+                {
+                    if (ch.HasPendingData())
+                    {
+                        anyPending = true;
+                        break;
+                    }
+                }
+                if (!anyPending) break;
+
+                try
+                {
+                    await Task.Delay(20, drainCts.Token).ConfigureAwait(false);
+                }
+                catch (OperationCanceledException)
+                {
+                    break;
+                }
+            }
+        }
+        catch
+        {
+            // Best-effort drain — fall through to cancel regardless. Any error here
+            // (e.g. registry mutation race during teardown) must not leave _cts
+            // un-cancelled or the main loop never observes the GoAway.
+        }
+        finally
+        {
+            try { _cts.Cancel(); }
+            catch (ObjectDisposedException) { /* DisposeAsync already ran */ }
+        }
     }
 
     private void SendControlFrame(FrameFlags flags, ReadOnlySpan<byte> payload)
@@ -885,7 +978,38 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IChannelOwner
     }
 
     private Task PerformReconnectHandshakeAsync(IStreamPair transport, CancellationToken ct)
-        => MuxHandshake.PerformReconnectAsync(transport, _conn.SessionId, _conn.RemoteSessionId, ct);
+        => MuxHandshake.PerformReconnectAsync(
+            transport,
+            _conn.SessionId,
+            _conn.RemoteSessionId,
+            BuildLocalReplayPositions(),
+            ApplyRemoteReplayPositions,
+            ct);
+
+    private IReadOnlyList<ChannelReplayPosition> BuildLocalReplayPositions()
+    {
+        var readChannels = _registry.GetAllReadChannels();
+        if (readChannels.Count == 0)
+            return Array.Empty<ChannelReplayPosition>();
+
+        var result = new ChannelReplayPosition[readChannels.Count];
+        int i = 0;
+        foreach (var ch in readChannels)
+        {
+            result[i++] = new ChannelReplayPosition(ch.ChannelIndex, ch.FrameBytesReceived);
+        }
+        return result;
+    }
+
+    private void ApplyRemoteReplayPositions(IReadOnlyList<ChannelReplayPosition> positions)
+    {
+        for (int i = 0; i < positions.Count; i++)
+        {
+            var pos = positions[i];
+            var writeChannel = _registry.GetWriteChannel(pos.ChannelIndex);
+            writeChannel?.SetReplayBase(pos.FrameBytesReceived);
+        }
+    }
 
     private static async Task ReadExactAsync(Stream stream, Memory<byte> buffer, CancellationToken ct)
     {
