@@ -165,7 +165,13 @@ internal sealed class ReliableUdpStream : Stream
 
                 if ((flags & FlagAck) == FlagAck)
                 {
-                    _pendingAck?.TrySetResult(seq);
+                    // Only complete the pending ACK when its sequence matches the seq the sender
+                    // is currently waiting for. UDP can deliver duplicate or delayed ACKs (peers
+                    // re-ACK every duplicate DATA, NIC offload may double-deliver, middleboxes
+                    // reorder); accepting any seq would complete the TCS with a stale value and
+                    // spin SendWithAckAsync into an infinite tight resend loop (issue #302).
+                    if (seq == Volatile.Read(ref _sendSeq))
+                        _pendingAck?.TrySetResult(seq);
                     continue;
                 }
 
@@ -220,9 +226,11 @@ internal sealed class ReliableUdpStream : Stream
                 using var ackCts = new CancellationTokenSource(_options.RetransmitTimeout);
                 using var combined = CancellationTokenSource.CreateLinkedTokenSource(ackCts.Token, linkedCts.Token);
                 var acked = await (_pendingAck?.Task ?? Task.FromResult<uint>(0)).WaitAsync(combined.Token).ConfigureAwait(false);
+                // Receive-loop filter guarantees acked == _sendSeq for any completion that
+                // reaches us here, so the matching seq is the only success path.
                 if (acked == _sendSeq)
                 {
-                    _sendSeq++;
+                    Volatile.Write(ref _sendSeq, _sendSeq + 1);
                     break;
                 }
             }
