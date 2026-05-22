@@ -36,6 +36,11 @@ public sealed class DeltaMessageTransit<T> : IAsyncDisposable
     // sender lock, and a cross-lock null write races with ComputeDelta and produces
     // either NRE or silent state divergence (issue #300).
     private int _resyncRequested;
+    // Set once when the inbound channel reaches real EOF (read returns 0 bytes).
+    // ReceiveAllAsync consults this — NOT IsConnected — so transient transport
+    // disconnects during auto-reconnect do not prematurely terminate the
+    // enumerable (#297). Mirrors the MessageTransit pattern established by #177.
+    private volatile bool _receiveEof;
     private volatile bool _disposed;
     private volatile bool _readyFired;
     private readonly object _readyLock = new();
@@ -74,6 +79,15 @@ public sealed class DeltaMessageTransit<T> : IAsyncDisposable
         }
 
         SubscribeToChannelEvents();
+        // Channel.Ready is single-shot; if all configured channels were already
+        // ready before we subscribed, the event we wired up will never fire.
+        // Synthesise the call so subscribers attached after construction still
+        // observe Ready exactly once (#266). OnChannelReady's _readyFired guard
+        // makes the synthesised call race-safe against a concurrent genuine event.
+        var writeReady = _writeChannel?.IsReady ?? true;
+        var readReady = _readChannel?.IsReady ?? true;
+        if (writeReady && readReady)
+            OnChannelReady(this, EventArgs.Empty);
     }
 
     private void SubscribeToChannelEvents()
@@ -98,12 +112,14 @@ public sealed class DeltaMessageTransit<T> : IAsyncDisposable
         var writeReady = _writeChannel?.IsReady ?? true;
         var readReady = _readChannel?.IsReady ?? true;
         if (!writeReady || !readReady) return;
+        EventHandler? handlers;
         lock (_readyLock)
         {
             if (_readyFired) return;
             _readyFired = true;
+            handlers = _readyHandlers;
         }
-        Ready?.Invoke(this, EventArgs.Empty);
+        handlers?.Invoke(this, EventArgs.Empty);
     }
 
     private void OnChannelConnected(object? sender, EventArgs e) => Connected?.Invoke(this, EventArgs.Empty);
@@ -132,8 +148,32 @@ public sealed class DeltaMessageTransit<T> : IAsyncDisposable
     /// <summary>Gets the read channel ID.</summary>
     public string? ReadChannelId => _readChannel?.ChannelId;
 
+    private EventHandler? _readyHandlers;
+
     /// <summary>Raised once when all channels are confirmed ready. Never fires again.</summary>
-    public event EventHandler? Ready;
+    /// <remarks>
+    /// Latching: subscribers attached after the transit has already become Ready are
+    /// invoked immediately on subscription, so callers that wait for channel readiness
+    /// before constructing the transit still observe the event exactly once (#266).
+    /// </remarks>
+    public event EventHandler? Ready
+    {
+        add
+        {
+            if (value is null) return;
+            bool fireImmediately;
+            lock (_readyLock)
+            {
+                _readyHandlers += value;
+                fireImmediately = _readyFired;
+            }
+            if (fireImmediately) value(this, EventArgs.Empty);
+        }
+        remove
+        {
+            lock (_readyLock) { _readyHandlers -= value; }
+        }
+    }
 
     /// <summary>Raised each time the underlying transport connects.</summary>
     public event EventHandler? Connected;
@@ -323,7 +363,27 @@ public sealed class DeltaMessageTransit<T> : IAsyncDisposable
                         return default;
                     }
                     var ops = DeserializeDelta(payload.Span);
-                    DeltaApply.ApplyDelta(_lastReceivedState, ops);
+                    // Apply atomically: stage on a clone, swap on success. If any op
+                    // throws mid-batch (path not found, array index out of range,
+                    // incompatible parent type, ...), _lastReceivedState is left
+                    // untouched, then cleared and a resync is requested so the peer
+                    // re-sends full state. Without this, an earlier op's mutation
+                    // would leak into _lastReceivedState and every subsequent delta
+                    // would be applied to a corrupt baseline (#223).
+                    var staging = _lastReceivedState.DeepClone();
+                    try
+                    {
+                        DeltaApply.ApplyDelta(staging, ops);
+                    }
+                    catch (Exception ex)
+                    {
+                        _lastReceivedState = null;
+                        await RequestResyncAsync(cancellationToken).ConfigureAwait(false);
+                        throw new InvalidOperationException(
+                            "Delta apply failed; receiver state has been reset and a resync has been requested from the peer.",
+                            ex);
+                    }
+                    _lastReceivedState = staging;
                     return FromJsonNode(_lastReceivedState);
 
                 case 0x02: // Resync request
@@ -345,24 +405,49 @@ public sealed class DeltaMessageTransit<T> : IAsyncDisposable
     /// <summary>
     /// Receives all state updates as an async enumerable.
     /// </summary>
+    /// <remarks>
+    /// Termination conditions: the supplied <paramref name="cancellationToken"/> is
+    /// cancelled, the transit is disposed, or the inbound channel reaches real
+    /// end-of-stream. Transient transport disconnects do NOT terminate the
+    /// enumerable — when auto-reconnect is configured, iteration resumes after the
+    /// mux re-establishes the connection (#297).
+    /// </remarks>
     public async IAsyncEnumerable<T> ReceiveAllAsync([EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
-        while (!cancellationToken.IsCancellationRequested && IsConnected)
+        while (!cancellationToken.IsCancellationRequested && !_disposed)
         {
-            var state = await ReceiveAsync(cancellationToken).ConfigureAwait(false);
+            T? state;
+            try
+            {
+                state = await ReceiveAsync(cancellationToken).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException)
+            {
+                yield break;
+            }
+            catch (ObjectDisposedException)
+            {
+                yield break;
+            }
+
+            // EOF is signalled exclusively via _receiveEof. A null return is
+            // legitimate mid-stream control traffic (resync request received,
+            // delta-before-baseline triggering a resync request to the peer) —
+            // breaking on null would conflate control frames with real EOF and
+            // bail on every resync handshake (#297).
+            if (_receiveEof)
+                yield break;
+
             if (state is not null)
-            {
                 yield return state;
-            }
-            else if (!IsConnected)
-            {
-                break;
-            }
         }
     }
 
     /// <summary>
     /// Resets the local state, forcing full state transmission on next send.
+    /// Also clears the last received state so the next inbound delta will trigger
+    /// a resync request to the peer. Use this as a recovery API when the
+    /// application detects state corruption or wants to start a fresh sync.
     /// </summary>
     public void ResetState()
     {
@@ -469,7 +554,11 @@ public sealed class DeltaMessageTransit<T> : IAsyncDisposable
             while (prefixRead < 4)
             {
                 var bytesRead = await _readChannel.ReadAsync(lengthPrefix.AsMemory(prefixRead, 4 - prefixRead), cancellationToken).ConfigureAwait(false);
-                if (bytesRead == 0) return (null, 0);
+                if (bytesRead == 0)
+                {
+                    _receiveEof = true;
+                    return (null, 0);
+                }
                 prefixRead += bytesRead;
             }
 
@@ -487,6 +576,7 @@ public sealed class DeltaMessageTransit<T> : IAsyncDisposable
                     if (read == 0)
                     {
                         ArrayPool<byte>.Shared.Return(data);
+                        _receiveEof = true;
                         return (null, 0);
                     }
                     totalRead += read;

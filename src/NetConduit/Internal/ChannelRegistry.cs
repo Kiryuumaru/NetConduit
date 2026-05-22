@@ -198,10 +198,18 @@ internal sealed class ChannelRegistry
 
     internal void EnqueueForAccept(ReadChannel channel)
     {
-        // Check if there's a specific async accept waiting for this channel ID
-        if (_pendingAccepts.TryRemove(channel.ChannelId, out var tcs))
+        // Check if there's a specific async accept waiting for this channel ID.
+        // If we win TryRemove but TrySetResult fails, the awaiter raced us to
+        // cancellation between our TryRemove and our TrySetResult — its callback
+        // unconditionally TrySetCanceled'd the same TCS instance after losing
+        // its own TryRemove. The TCS is dead but the channel is still live and
+        // fully registered in _readChannels: we MUST route it to the catch-all
+        // _acceptQueue (or a matching prefix subscription) instead of dropping
+        // it on the floor, or the peer keeps the channel open and writes pile
+        // up unread in the orphan slab (#269).
+        if (_pendingAccepts.TryRemove(channel.ChannelId, out var tcs)
+            && tcs.TrySetResult(channel))
         {
-            tcs.TrySetResult(channel);
             return;
         }
         // Then check prefix subscriptions (overlay protocols claiming a namespace).
@@ -251,10 +259,15 @@ internal sealed class ChannelRegistry
         // to that dead TCS in EnqueueForAccept (TryRemove succeeds, TrySetResult
         // is a no-op on a completed TCS) and the channel is silently dropped
         // from the accept stream.
+        //
+        // Only TrySetCanceled when we actually won the TryRemove. If we lost the
+        // race to EnqueueForAccept, the TCS will be — or already is — completed
+        // by it, and EnqueueForAccept's TrySetResult-fallback path (#269) takes
+        // care of routing the channel to the catch-all queue when needed.
         await using var registration = ct.Register(() =>
         {
-            _pendingAccepts.TryRemove(channelId, out _);
-            tcs.TrySetCanceled(ct);
+            if (_pendingAccepts.TryRemove(channelId, out _))
+                tcs.TrySetCanceled(ct);
         });
         return await tcs.Task;
     }
