@@ -60,6 +60,7 @@ internal sealed class ReadChannel : Stream, IReadChannel, IValueTaskSource<int>
     private volatile ChannelState _state = ChannelState.Opening;
     private volatile bool _isReady;
     private volatile bool _isConnected;
+    private int _connectedFired; // CAS guard: ensures Connected fires exactly once per connect transition (#357)
     private ChannelCloseReason? _closeReason;
     private Exception? _closeException;
     // CAS guard: ensures the stats decrement and ChannelClosed event fire exactly once,
@@ -188,12 +189,23 @@ internal sealed class ReadChannel : Stream, IReadChannel, IValueTaskSource<int>
 
     internal void MarkConnected()
     {
+        // MainLoopAsync calls MarkConnected on every registered channel after a
+        // successful handshake, and AcceptChannel/TryRegisterChannels also call
+        // it on the fast path when _isConnected is already true. A channel
+        // registered between those two sites would otherwise receive two
+        // Connected events for a single transport-up transition (#357). CAS on
+        // _connectedFired promotes 0->1 exactly once per connect transition;
+        // MarkDisconnected resets the flag so a subsequent reconnect re-fires.
+        if (Interlocked.Exchange(ref _connectedFired, 1) == 1) return;
         _isConnected = true;
         SafeEventRaiser.Raise(this, Connected, _onHandlerException);
     }
 
     internal void MarkDisconnected(DisconnectReason reason, Exception? exception = null)
     {
+        // Pair the _connectedFired reset with _isConnected = false so the next
+        // MarkConnected on this channel re-fires Connected (#357).
+        if (Interlocked.Exchange(ref _connectedFired, 0) == 0) return;
         _isConnected = false;
         // The reconnect handshake advertises this side's current _frameBytesReceived
         // and the peer rewinds its writer to that exact position (see WriteChannel.SetReplayBase).

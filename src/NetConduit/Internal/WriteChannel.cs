@@ -56,6 +56,7 @@ internal sealed class WriteChannel : Stream, IWriteChannel
     // last negotiated value and is safe to read across disconnect/reconnect
     // windows; before then it is still the 1 MiB default and unsafe.
     private volatile bool _peerCapNegotiated;
+    private int _connectedFired; // CAS guard: ensures Connected fires exactly once per connect transition (#357)
     private ChannelCloseReason? _closeReason;
     private Exception? _closeException;
 
@@ -169,6 +170,14 @@ internal sealed class WriteChannel : Stream, IWriteChannel
 
     internal void MarkConnected()
     {
+        // MainLoopAsync calls MarkConnected on every registered channel after a
+        // successful handshake, and OpenChannel/AcceptChannel also call it on
+        // the fast path when _isConnected is already true. A channel registered
+        // between those two sites would otherwise receive two Connected events
+        // for a single transport-up transition (#357). CAS on _connectedFired
+        // promotes 0->1 exactly once per connect transition; MarkDisconnected
+        // resets the flag so a subsequent reconnect re-fires Connected.
+        if (Interlocked.Exchange(ref _connectedFired, 1) == 1) return;
         _isConnected = true;
         // Latch: from this point on _owner.PeerMaxRecvPayload is a real
         // negotiated value, not the 1 MiB default. Subsequent reconnects
@@ -180,6 +189,9 @@ internal sealed class WriteChannel : Stream, IWriteChannel
 
     internal void MarkDisconnected(DisconnectReason reason, Exception? exception = null)
     {
+        // Pair the _connectedFired reset with _isConnected = false so the next
+        // MarkConnected on this channel re-fires Connected (#357).
+        if (Interlocked.Exchange(ref _connectedFired, 0) == 0) return;
         _isConnected = false;
         SafeEventRaiser.Raise(this, Disconnected, new DisconnectedEventArgs(reason, exception), _owner.NotifyEventHandlerException);
     }
