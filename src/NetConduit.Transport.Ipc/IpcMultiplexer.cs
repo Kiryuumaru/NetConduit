@@ -1,13 +1,14 @@
-using System.Net;
+using System.IO.Pipes;
 using System.Net.Sockets;
-using System.Security.Cryptography;
 using NetConduit.Interfaces;
 using NetConduit.Models;
 
 namespace NetConduit.Transport.Ipc;
 
 /// <summary>
-/// IPC transport helper (TCP loopback on Windows, Unix domain sockets elsewhere).
+/// IPC transport helper (named pipes on Windows, Unix domain sockets elsewhere).
+/// The endpoint string is used verbatim as the addressing key on both platforms,
+/// so two distinct endpoint names always resolve to two distinct OS objects.
 /// </summary>
 public static class IpcMultiplexer
 {
@@ -27,17 +28,19 @@ public static class IpcMultiplexer
             {
                 if (OperatingSystem.IsWindows())
                 {
-                    var port = GetDeterministicPort(endpoint);
-                    var client = new TcpClient(AddressFamily.InterNetwork);
+                    var pipe = new NamedPipeClientStream(
+                        serverName: ".",
+                        pipeName: endpoint,
+                        direction: PipeDirection.InOut,
+                        options: PipeOptions.Asynchronous);
                     try
                     {
-                        await client.ConnectAsync(IPAddress.Loopback, port, ct).ConfigureAwait(false);
-                        var stream = client.GetStream();
-                        return new StreamPair(stream, client);
+                        await pipe.ConnectAsync(ct).ConfigureAwait(false);
+                        return new StreamPair(pipe);
                     }
                     catch
                     {
-                        client.Dispose();
+                        pipe.Dispose();
                         throw;
                     }
                 }
@@ -95,28 +98,33 @@ public static class IpcMultiplexer
                     StreamPair pair;
                     if (OperatingSystem.IsWindows())
                     {
-                        var port = GetDeterministicPort(endpoint);
-                        var listener = new TcpListener(IPAddress.Loopback, port);
-                        listener.Start();
-
-                        TcpClient client;
+                        // maxNumberOfServerInstances: 1 — the endpoint name is owned by this
+                        // server instance for its lifetime. A second server with the same name
+                        // fails at construction with IOException("All pipe instances are busy"),
+                        // which mirrors the EADDRINUSE behaviour the Unix path gets from bind(2).
+                        //
+                        // inBufferSize / outBufferSize: 64 KiB. The default (0) makes WriteAsync
+                        // block until the peer reads, which deadlocks the multiplexer's symmetric
+                        // write-then-read handshake (both sides write before either side reads).
+                        // 64 KiB matches the multiplexer's MaxFrameSize so a single frame never
+                        // stalls inside the kernel pipe buffer.
+                        const int PipeBufferSize = 64 * 1024;
+                        var pipe = new NamedPipeServerStream(
+                            pipeName: endpoint,
+                            direction: PipeDirection.InOut,
+                            maxNumberOfServerInstances: 1,
+                            transmissionMode: PipeTransmissionMode.Byte,
+                            options: PipeOptions.Asynchronous,
+                            inBufferSize: PipeBufferSize,
+                            outBufferSize: PipeBufferSize);
                         try
                         {
-                            client = await listener.AcceptTcpClientAsync(ct).ConfigureAwait(false);
-                        }
-                        finally
-                        {
-                            listener.Stop();
-                        }
-
-                        try
-                        {
-                            var stream = client.GetStream();
-                            pair = new StreamPair(stream, client);
+                            await pipe.WaitForConnectionAsync(ct).ConfigureAwait(false);
+                            pair = new StreamPair(pipe);
                         }
                         catch
                         {
-                            client.Dispose();
+                            pipe.Dispose();
                             throw;
                         }
                     }
@@ -152,14 +160,6 @@ public static class IpcMultiplexer
                 }
             }
         };
-    }
-
-    private static int GetDeterministicPort(string endpoint)
-    {
-        var bytes = System.Text.Encoding.UTF8.GetBytes(endpoint);
-        var hash = SHA256.HashData(bytes);
-        var value = (ushort)(hash[0] << 8 | hash[1]);
-        return 49152 + (value % (65535 - 49152));
     }
 
     // Refuses to delete the endpoint path when it points at something the user did

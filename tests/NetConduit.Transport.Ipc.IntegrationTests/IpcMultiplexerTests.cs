@@ -173,4 +173,91 @@ public class IpcMultiplexerTests
                 File.Delete(endpoint);
         }
     }
+
+    // Regression for #233: prior to the named-pipe rewrite, the Windows IPC transport
+    // hashed the endpoint to a 16-bit port and could route a client targeting endpoint
+    // "A" to a server bound under endpoint "B" whenever the two hashes collided.
+    // Named pipes use the endpoint string verbatim, so two distinct endpoint names must
+    // always resolve to two distinct servers — there is no hash, hence no collision.
+    [Fact(Timeout = 30000)]
+    public async Task TwoDistinctEndpoints_RouteToDistinctServers()
+    {
+        var endpointA = GetUniqueEndpoint();
+        var endpointB = GetUniqueEndpoint();
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+
+        await using var serverA = StreamMultiplexer.Create(IpcMultiplexer.CreateServerOptions(endpointA));
+        await using var serverB = StreamMultiplexer.Create(IpcMultiplexer.CreateServerOptions(endpointB));
+        serverA.Start();
+        serverB.Start();
+
+        await Task.Delay(200, cts.Token);
+
+        await using var clientA = StreamMultiplexer.Create(IpcMultiplexer.CreateOptions(endpointA));
+        await using var clientB = StreamMultiplexer.Create(IpcMultiplexer.CreateOptions(endpointB));
+        clientA.Start();
+        clientB.Start();
+
+        await Task.WhenAll(
+            clientA.WaitForReadyAsync(cts.Token),
+            clientB.WaitForReadyAsync(cts.Token),
+            serverA.WaitForReadyAsync(cts.Token),
+            serverB.WaitForReadyAsync(cts.Token));
+
+        var writeA = clientA.OpenChannel("probe");
+        var writeB = clientB.OpenChannel("probe");
+        var readA = await serverA.AcceptChannelAsync("probe", cts.Token);
+        var readB = await serverB.AcceptChannelAsync("probe", cts.Token);
+
+        var payloadA = "from-client-A"u8.ToArray();
+        var payloadB = "from-client-B"u8.ToArray();
+        await writeA.WriteAsync(payloadA, cts.Token);
+        await writeB.WriteAsync(payloadB, cts.Token);
+        await writeA.CloseAsync(cts.Token);
+        await writeB.CloseAsync(cts.Token);
+
+        var bufA = new byte[payloadA.Length];
+        var bufB = new byte[payloadB.Length];
+        int readACount = 0;
+        int readBCount = 0;
+        while (readACount < bufA.Length)
+        {
+            int n = await readA.ReadAsync(bufA.AsMemory(readACount), cts.Token);
+            if (n == 0) break;
+            readACount += n;
+        }
+        while (readBCount < bufB.Length)
+        {
+            int n = await readB.ReadAsync(bufB.AsMemory(readBCount), cts.Token);
+            if (n == 0) break;
+            readBCount += n;
+        }
+
+        Assert.Equal(payloadA, bufA);
+        Assert.Equal(payloadB, bufB);
+    }
+
+    // Regression for #233 (Windows-only): two servers cannot bind the same endpoint
+    // name. With the prior TCP-port-hash implementation, the second server raised
+    // SocketException(EADDRINUSE). With named pipes (maxNumberOfServerInstances: 1),
+    // the constructor itself throws IOException("All pipe instances are busy"). Either
+    // way, the user-visible contract is "one server per endpoint name" — assert it.
+    [Fact(Timeout = 30000)]
+    public async Task DuplicateServerBind_OnSameEndpoint_Fails()
+    {
+        if (!OperatingSystem.IsWindows())
+            return;
+
+        var endpoint = GetUniqueEndpoint();
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+
+        await using var serverA = StreamMultiplexer.Create(IpcMultiplexer.CreateServerOptions(endpoint));
+        serverA.Start();
+
+        await Task.Delay(200, cts.Token);
+
+        var optionsB = IpcMultiplexer.CreateServerOptions(endpoint);
+        await Assert.ThrowsAnyAsync<IOException>(async () =>
+            await optionsB.StreamFactory(cts.Token));
+    }
 }
