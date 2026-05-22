@@ -33,10 +33,12 @@ internal sealed class MuxKeepalive(
             {
                 await Task.Delay(pingInterval, ct);
 
-                var pendingPong = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+                long timestamp = Environment.TickCount64;
+                var tcs = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+                var pendingPong = new PendingPong(timestamp, tcs);
                 Interlocked.Exchange(ref conn.PendingPong, pendingPong);
 
-                BinaryPrimitives.WriteInt64BigEndian(pingPayload, Environment.TickCount64);
+                BinaryPrimitives.WriteInt64BigEndian(pingPayload, timestamp);
                 SendPing(pingPayload);
 
                 if (await WaitForPongAsync(pendingPong, ct))
@@ -65,14 +67,14 @@ internal sealed class MuxKeepalive(
         conn.ControlChannel?.WriteRawFrame(ControlFrameBuilder.BuildControlFrame(FrameFlags.Ping, payload));
     }
 
-    private async Task<bool> WaitForPongAsync(TaskCompletionSource pendingPong, CancellationToken ct)
+    private async Task<bool> WaitForPongAsync(PendingPong pendingPong, CancellationToken ct)
     {
         Task timeout = pingTimeout > TimeSpan.Zero
             ? Task.Delay(pingTimeout, ct)
             : Task.CompletedTask;
 
-        Task completed = await Task.WhenAny(pendingPong.Task, timeout);
-        if (completed == pendingPong.Task)
+        Task completed = await Task.WhenAny(pendingPong.Tcs.Task, timeout);
+        if (completed == pendingPong.Tcs.Task)
             return true;
 
         ct.ThrowIfCancellationRequested();

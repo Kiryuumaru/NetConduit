@@ -21,5 +21,14 @@ internal sealed class MuxConnection
     public IStreamPair? Transport;
     public CancellationTokenSource? LoopCts;
     public WriteChannel? ControlChannel;
-    public TaskCompletionSource? PendingPong;
+    public PendingPong? PendingPong;
+}
+
+// Pairs the in-flight PING's echoed timestamp with the completion source that
+// the keepalive loop is awaiting, so an out-of-order or stale PONG (whose
+// payload does not match the most recent PING) cannot satisfy the wait.
+internal sealed class PendingPong(long expectedTimestamp, TaskCompletionSource tcs)
+{
+    public long ExpectedTimestamp { get; } = expectedTimestamp;
+    public TaskCompletionSource Tcs { get; } = tcs;
 }

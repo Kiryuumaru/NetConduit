@@ -821,12 +821,29 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IChannelOwner
                 SendControlFrame(FrameFlags.Pong, payload);
                 break;
             case FrameFlags.Pong:
-                Interlocked.Exchange(ref conn.PendingPong, null)?.TrySetResult();
+                HandlePong(conn, payload);
                 break;
             case FrameFlags.Ctrl:
                 ProcessCtrlSubframe(payload);
                 break;
         }
+    }
+
+    private static void HandlePong(MuxConnection conn, ReadOnlySpan<byte> payload)
+    {
+        // Correlate PONG to its originating PING via the echoed 8-byte timestamp.
+        // Drop stale or malformed PONGs so a late response from a previous PING
+        // cannot satisfy the wait for the current one (issue #293).
+        if (payload.Length != 8) return;
+
+        var pending = Volatile.Read(ref conn.PendingPong);
+        if (pending is null) return;
+
+        long echoed = System.Buffers.Binary.BinaryPrimitives.ReadInt64BigEndian(payload);
+        if (echoed != pending.ExpectedTimestamp) return;
+
+        if (Interlocked.CompareExchange(ref conn.PendingPong, null, pending) == pending)
+            pending.Tcs.TrySetResult();
     }
 
     private void ProcessCtrlSubframe(ReadOnlySpan<byte> payload)
