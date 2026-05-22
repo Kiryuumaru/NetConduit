@@ -770,6 +770,11 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IChannelOwner
             _registry.RegisterReadChannel(header.ChannelIndex, readChannel);
         }
 
+        // Account for the INIT frame bytes that just arrived; the writer-side slab
+        // includes them in its _sentPos counter so the reader's FrameBytesReceived
+        // must match (otherwise reconnect replay-base lands mid-frame — issue #161).
+        readChannel.AccountInboundFrame(FrameHeader.Size + payload.Length);
+
         readChannel.MarkOpen();
         readChannel.MarkConnected();
 
@@ -885,7 +890,38 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IChannelOwner
     }
 
     private Task PerformReconnectHandshakeAsync(IStreamPair transport, CancellationToken ct)
-        => MuxHandshake.PerformReconnectAsync(transport, _conn.SessionId, _conn.RemoteSessionId, ct);
+        => MuxHandshake.PerformReconnectAsync(
+            transport,
+            _conn.SessionId,
+            _conn.RemoteSessionId,
+            BuildLocalReplayPositions(),
+            ApplyRemoteReplayPositions,
+            ct);
+
+    private IReadOnlyList<ChannelReplayPosition> BuildLocalReplayPositions()
+    {
+        var readChannels = _registry.GetAllReadChannels();
+        if (readChannels.Count == 0)
+            return Array.Empty<ChannelReplayPosition>();
+
+        var result = new ChannelReplayPosition[readChannels.Count];
+        int i = 0;
+        foreach (var ch in readChannels)
+        {
+            result[i++] = new ChannelReplayPosition(ch.ChannelIndex, ch.FrameBytesReceived);
+        }
+        return result;
+    }
+
+    private void ApplyRemoteReplayPositions(IReadOnlyList<ChannelReplayPosition> positions)
+    {
+        for (int i = 0; i < positions.Count; i++)
+        {
+            var pos = positions[i];
+            var writeChannel = _registry.GetWriteChannel(pos.ChannelIndex);
+            writeChannel?.SetReplayBase(pos.FrameBytesReceived);
+        }
+    }
 
     private static async Task ReadExactAsync(Stream stream, Memory<byte> buffer, CancellationToken ct)
     {
