@@ -36,6 +36,11 @@ public sealed class DeltaMessageTransit<T> : IAsyncDisposable
     // sender lock, and a cross-lock null write races with ComputeDelta and produces
     // either NRE or silent state divergence (issue #300).
     private int _resyncRequested;
+    // Set once when the inbound channel reaches real EOF (read returns 0 bytes).
+    // ReceiveAllAsync consults this — NOT IsConnected — so transient transport
+    // disconnects during auto-reconnect do not prematurely terminate the
+    // enumerable (#297). Mirrors the MessageTransit pattern established by #177.
+    private volatile bool _receiveEof;
     private volatile bool _disposed;
     private volatile bool _readyFired;
     private readonly object _readyLock = new();
@@ -380,19 +385,41 @@ public sealed class DeltaMessageTransit<T> : IAsyncDisposable
     /// <summary>
     /// Receives all state updates as an async enumerable.
     /// </summary>
+    /// <remarks>
+    /// Termination conditions: the supplied <paramref name="cancellationToken"/> is
+    /// cancelled, the transit is disposed, or the inbound channel reaches real
+    /// end-of-stream. Transient transport disconnects do NOT terminate the
+    /// enumerable — when auto-reconnect is configured, iteration resumes after the
+    /// mux re-establishes the connection (#297).
+    /// </remarks>
     public async IAsyncEnumerable<T> ReceiveAllAsync([EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
-        while (!cancellationToken.IsCancellationRequested && IsConnected)
+        while (!cancellationToken.IsCancellationRequested && !_disposed)
         {
-            var state = await ReceiveAsync(cancellationToken).ConfigureAwait(false);
+            T? state;
+            try
+            {
+                state = await ReceiveAsync(cancellationToken).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException)
+            {
+                yield break;
+            }
+            catch (ObjectDisposedException)
+            {
+                yield break;
+            }
+
+            // EOF is signalled exclusively via _receiveEof. A null return is
+            // legitimate mid-stream control traffic (resync request received,
+            // delta-before-baseline triggering a resync request to the peer) —
+            // breaking on null would conflate control frames with real EOF and
+            // bail on every resync handshake (#297).
+            if (_receiveEof)
+                yield break;
+
             if (state is not null)
-            {
                 yield return state;
-            }
-            else if (!IsConnected)
-            {
-                break;
-            }
         }
     }
 
@@ -504,7 +531,11 @@ public sealed class DeltaMessageTransit<T> : IAsyncDisposable
             while (prefixRead < 4)
             {
                 var bytesRead = await _readChannel.ReadAsync(lengthPrefix.AsMemory(prefixRead, 4 - prefixRead), cancellationToken).ConfigureAwait(false);
-                if (bytesRead == 0) return (null, 0);
+                if (bytesRead == 0)
+                {
+                    _receiveEof = true;
+                    return (null, 0);
+                }
                 prefixRead += bytesRead;
             }
 
@@ -522,6 +553,7 @@ public sealed class DeltaMessageTransit<T> : IAsyncDisposable
                     if (read == 0)
                     {
                         ArrayPool<byte>.Shared.Return(data);
+                        _receiveEof = true;
                         return (null, 0);
                     }
                     totalRead += read;
