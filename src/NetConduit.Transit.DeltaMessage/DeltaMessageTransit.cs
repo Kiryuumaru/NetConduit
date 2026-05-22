@@ -74,6 +74,15 @@ public sealed class DeltaMessageTransit<T> : IAsyncDisposable
         }
 
         SubscribeToChannelEvents();
+        // Channel.Ready is single-shot; if all configured channels were already
+        // ready before we subscribed, the event we wired up will never fire.
+        // Synthesise the call so subscribers attached after construction still
+        // observe Ready exactly once (#266). OnChannelReady's _readyFired guard
+        // makes the synthesised call race-safe against a concurrent genuine event.
+        var writeReady = _writeChannel?.IsReady ?? true;
+        var readReady = _readChannel?.IsReady ?? true;
+        if (writeReady && readReady)
+            OnChannelReady(this, EventArgs.Empty);
     }
 
     private void SubscribeToChannelEvents()
@@ -98,12 +107,14 @@ public sealed class DeltaMessageTransit<T> : IAsyncDisposable
         var writeReady = _writeChannel?.IsReady ?? true;
         var readReady = _readChannel?.IsReady ?? true;
         if (!writeReady || !readReady) return;
+        EventHandler? handlers;
         lock (_readyLock)
         {
             if (_readyFired) return;
             _readyFired = true;
+            handlers = _readyHandlers;
         }
-        Ready?.Invoke(this, EventArgs.Empty);
+        handlers?.Invoke(this, EventArgs.Empty);
     }
 
     private void OnChannelConnected(object? sender, EventArgs e) => Connected?.Invoke(this, EventArgs.Empty);
@@ -132,8 +143,32 @@ public sealed class DeltaMessageTransit<T> : IAsyncDisposable
     /// <summary>Gets the read channel ID.</summary>
     public string? ReadChannelId => _readChannel?.ChannelId;
 
+    private EventHandler? _readyHandlers;
+
     /// <summary>Raised once when all channels are confirmed ready. Never fires again.</summary>
-    public event EventHandler? Ready;
+    /// <remarks>
+    /// Latching: subscribers attached after the transit has already become Ready are
+    /// invoked immediately on subscription, so callers that wait for channel readiness
+    /// before constructing the transit still observe the event exactly once (#266).
+    /// </remarks>
+    public event EventHandler? Ready
+    {
+        add
+        {
+            if (value is null) return;
+            bool fireImmediately;
+            lock (_readyLock)
+            {
+                _readyHandlers += value;
+                fireImmediately = _readyFired;
+            }
+            if (fireImmediately) value(this, EventArgs.Empty);
+        }
+        remove
+        {
+            lock (_readyLock) { _readyHandlers -= value; }
+        }
+    }
 
     /// <summary>Raised each time the underlying transport connects.</summary>
     public event EventHandler? Connected;
