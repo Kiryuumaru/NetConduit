@@ -305,5 +305,6 @@ public sealed class ChannelRegistryTests
         public void NotifyChannelOpened(string channelId) { }
         public bool SendAck(ushort channelIndex, ulong consumedPosition) => true;
         public void NotifyEventHandlerException(Exception exception) { }
+        public int PeerMaxRecvPayload => FrameConstants.MaxSlabSize;
     }
 }

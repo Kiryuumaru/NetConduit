@@ -95,6 +95,7 @@ public sealed class ControlSlabBackpressureTests
     private sealed class RecordingRouter : IChannelOwner
     {
         public int NotifyCount;
+        public int PeerMaxRecvPayload => FrameConstants.MaxSlabSize;
         public void NotifyReady(WriteChannel channel) => Interlocked.Increment(ref NotifyCount);
         public void NotifyChannelCompleted(ushort channelIndex, string channelId) { }
         public void NotifyPendingAcceptCancelled(string channelId) { }
@@ -107,6 +108,7 @@ public sealed class ControlSlabBackpressureTests
     {
         public bool AcceptNext;
         public List<(ushort Index, ulong Position)> SentAcks { get; } = [];
+        public int PeerMaxRecvPayload => FrameConstants.MaxSlabSize;
 
         public void NotifyReady(WriteChannel channel) { }
         public void NotifyChannelCompleted(ushort channelIndex, string channelId) { }

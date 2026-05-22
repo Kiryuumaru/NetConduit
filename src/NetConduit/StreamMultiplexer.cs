@@ -669,6 +669,8 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IChannelOwner
         RaiseError(exception);
     }
 
+    int IChannelOwner.PeerMaxRecvPayload => _conn.PeerMaxRecvPayload;
+
     // =====================================================================
     // Reader Thread — THE DISPATCHER (receive side)
     // Reads 8-byte header, routes payload to the correct channel.
@@ -995,19 +997,28 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IChannelOwner
     private async Task PerformHandshakeAsync(CancellationToken ct)
     {
         var transport = _conn.Transport ?? throw new InvalidOperationException("Transport not initialized.");
-        var result = await MuxHandshake.PerformInitialAsync(transport, _conn.SessionId, ct);
+        var result = await MuxHandshake.PerformInitialAsync(
+            transport,
+            _conn.SessionId,
+            _options.DefaultChannelOptions.SlabSize,
+            ct);
         _conn.RemoteSessionId = result.RemoteSessionId;
+        _conn.PeerMaxRecvPayload = result.PeerMaxRecvPayload;
         _registry.SetIndexParity(result.UseOddIndices);
     }
 
-    private Task PerformReconnectHandshakeAsync(IStreamPair transport, CancellationToken ct)
-        => MuxHandshake.PerformReconnectAsync(
+    private async Task PerformReconnectHandshakeAsync(IStreamPair transport, CancellationToken ct)
+    {
+        var result = await MuxHandshake.PerformReconnectAsync(
             transport,
             _conn.SessionId,
             _conn.RemoteSessionId,
+            _options.DefaultChannelOptions.SlabSize,
             BuildLocalReplayPositions(),
             ApplyRemoteReplayPositions,
             ct);
+        _conn.PeerMaxRecvPayload = result.PeerMaxRecvPayload;
+    }
 
     private IReadOnlyList<ChannelReplayPosition> BuildLocalReplayPositions()
     {

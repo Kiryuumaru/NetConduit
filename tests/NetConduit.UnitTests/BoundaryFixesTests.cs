@@ -24,6 +24,7 @@ public sealed class BoundaryFixesTests
             return true;
         }
         public void NotifyEventHandlerException(Exception exception) { }
+        public int PeerMaxRecvPayload => FrameConstants.MaxSlabSize;
     }
 
     // --- Bug #20: oversized WriteAsync ----------------------------------
