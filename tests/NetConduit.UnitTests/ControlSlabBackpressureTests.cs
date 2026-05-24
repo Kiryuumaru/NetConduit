@@ -84,12 +84,30 @@ public sealed class ControlSlabBackpressureTests
         for (int i = 0; i < framesToCrossGate; i++)
             read.ReceivePayload(FrameFlags.Data, payload);
 
+        // Drain the second batch so the consumer-consumed counter (#394)
+        // catches up to cumulative wire-received. Without this drain the
+        // second batch is still buffered in the slab and the ACK position
+        // would correctly reflect only the first batch under the new
+        // consumed-position backpressure model.
+        byte[] sink2 = new byte[slabSize];
+        var t2 = read.ReadAsync(sink2).AsTask();
+        Assert.True(t2.IsCompleted);
+
+        // Final flush: ReadAsync's slow path calls MaybeSendAck when the
+        // consumer catches up. Trigger one more frame past the gate to
+        // ensure an ACK is emitted with the now-fully-drained position.
+        for (int i = 0; i < framesToCrossGate; i++)
+            read.ReceivePayload(FrameFlags.Data, payload);
+        byte[] sink3 = new byte[slabSize];
+        var t3 = read.ReadAsync(sink3).AsTask();
+        Assert.True(t3.IsCompleted);
+
         Assert.NotEmpty(owner.SentAcks);
         ulong reportedPosition = owner.SentAcks[^1].Position;
-        // Reported position must reflect cumulative bytes, including the
-        // frames the previous (refused) gate crossing covered.
-        Assert.True(reportedPosition >= (ulong)(frameBytesPerFrame * framesToCrossGate * 2),
-            $"Reported position {reportedPosition} must include cumulative bytes from refused-gate frames");
+        // Reported position must reflect cumulative bytes from every batch
+        // that the consumer has fully drained from the slab (#394).
+        Assert.True(reportedPosition >= (ulong)(frameBytesPerFrame * framesToCrossGate * 3),
+            $"Reported position {reportedPosition} must include cumulative bytes from all drained batches");
     }
 
     private sealed class RecordingRouter : IChannelOwner

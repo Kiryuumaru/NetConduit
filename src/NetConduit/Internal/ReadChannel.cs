@@ -36,9 +36,22 @@ internal sealed class ReadChannel : Stream, IReadChannel, IValueTaskSource<int>
 
     // Cumulative frame bytes (FrameHeader.Size + payload.Length) ever received,
     // counted post-skip. Mirrors the writer's slab position so an ACK that
-    // reports this value can be applied directly as a slab position.
+    // reports this value can be applied directly as a slab position. NOTE: this
+    // is wire-received accounting only; the ACK position reported to the peer
+    // tracks _drainedFrameBytes (consumer-consumed) instead so a slow consumer
+    // pins the writer's slab and produces real backpressure (#394).
     private long _frameBytesReceived;
     private long _ackSentFrameBytes;
+
+    // Cumulative frame bytes (FrameHeader.Size + payload.Length) whose payload
+    // has been fully drained by the consumer (delivered to user buffer + slab
+    // emptied). Reported as the ACK position so the writer's slab compacts
+    // only after the consumer catches up; while the consumer lags, no ACK
+    // flows, the writer's slab fills, and WriteAsync blocks — the documented
+    // "slow consumer slows producer" backpressure contract (#394). Updated
+    // whenever (a) direct delivery consumes a whole frame (slab bypass) or
+    // (b) ReadAsync drains the slab to empty.
+    private long _drainedFrameBytes;
 
     // Replay skip: on reconnect, the writer replays from its last ACKed slab
     // position. The reader skips the frame bytes that arrived after the last
@@ -237,6 +250,13 @@ internal sealed class ReadChannel : Stream, IReadChannel, IValueTaskSource<int>
     internal void AccountInboundFrame(int frameBytes)
     {
         _frameBytesReceived += frameBytes;
+        // INIT bytes are not delivered to a user buffer; they count as
+        // consumed immediately so the ACK position can advance past them
+        // (#394). Without this snap, the first ACK would underreport by
+        // the INIT frame size and the writer's slab would never compact
+        // its INIT slot.
+        if (_receivedPos == _consumedPos)
+            _drainedFrameBytes = _frameBytesReceived;
     }
 
     internal void SetAckChannel(WriteChannel ackChannel) => _ackChannel = ackChannel;
@@ -270,6 +290,19 @@ internal sealed class ReadChannel : Stream, IReadChannel, IValueTaskSource<int>
                     _slabMemory.Span.Slice(_consumedPos, toCopy).CopyTo(buffer.Span);
                     _consumedPos += toCopy;
                     Interlocked.Add(ref Stats._bytesReceived, toCopy);
+                    // Consumer just drained the slab to empty -> every frame
+                    // received so far is now consumer-consumed and can be
+                    // ACKed (#394). The frame-byte accounting cannot drift
+                    // because _frameBytesReceived is monotonic and the slab
+                    // contains payload-only bytes from those exact frames.
+                    if (_receivedPos == _consumedPos)
+                    {
+                        _drainedFrameBytes = _frameBytesReceived;
+                        // Flush any pending ACK now that the gate-relevant
+                        // counter advanced; otherwise an ACK could be stranded
+                        // until the next inbound frame triggers MaybeSendAck.
+                        MaybeSendAck();
+                    }
                     // If the consumer just drained the last buffered bytes
                     // after the channel closed, release the slab now.
                     if (_state == ChannelState.Closed && _receivedPos <= _consumedPos)
@@ -394,6 +427,17 @@ internal sealed class ReadChannel : Stream, IReadChannel, IValueTaskSource<int>
                 BufferInSlab(payload[toCopy..]);
             }
 
+            // If the entire frame went direct to the user buffer (no slab
+            // overflow), the slab is still empty -> snap drained-counter
+            // to received-counter so the next ACK reflects consumption
+            // (#394). When there's slab overflow, the snap is deferred
+            // until ReadAsync drains the slab to empty.
+            if (_receivedPos == _consumedPos)
+            {
+                _drainedFrameBytes = _frameBytesReceived;
+                MaybeSendAck();
+            }
+
             // Detach the cancellation callback now that the read has
             // completed. Unregister is non-blocking so it is safe to call
             // under the lock that the callback would otherwise contend on.
@@ -466,15 +510,20 @@ internal sealed class ReadChannel : Stream, IReadChannel, IValueTaskSource<int>
     private void MaybeSendAck()
     {
         if (_owner is null) return;
-        long delta = _frameBytesReceived - _ackSentFrameBytes;
+        // Report consumer-drained bytes, not wire-received bytes (#394).
+        // The writer applies the ACK as a slab-position so it can release
+        // those bytes from its own slab and unblock WriteAsync. If the
+        // consumer lags the wire, _drainedFrameBytes stays behind and the
+        // writer naturally throttles.
+        long delta = _drainedFrameBytes - _ackSentFrameBytes;
         if (delta >= _slabSize / 16)
         {
             // Only advance the high-water mark when the ACK was actually
             // staged. If the control-channel slab is currently full, retain
             // the unacked accumulator so the next gate crossing retries with
             // the latest cumulative position (issue #291).
-            if (_owner.SendAck(_channelIndex, (ulong)_frameBytesReceived))
-                _ackSentFrameBytes = _frameBytesReceived;
+            if (_owner.SendAck(_channelIndex, (ulong)_drainedFrameBytes))
+                _ackSentFrameBytes = _drainedFrameBytes;
         }
     }
 

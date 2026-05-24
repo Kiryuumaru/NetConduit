@@ -342,11 +342,22 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IChannelOwner
     public async ValueTask GoAwayAsync(CancellationToken ct = default)
     {
         if (_isShuttingDown) return;
-        _isShuttingDown = true;
 
-        // Send GoAway control frame to remote before shutting down
-        ReadOnlySpan<byte> goAwayPayload = [CtrlSubtype.GoAway];
-        SendControlFrame(FrameFlags.Ctrl, goAwayPayload);
+        // Try to stage the GoAway frame BEFORE latching _isShuttingDown so a
+        // transient slab-full does not leave the mux in half-shutdown limbo
+        // with no GoAway on the wire (#374). Short retry budget; if the slab
+        // is still full after, proceed anyway - peer observes transport close
+        // and reports TransportError instead of GoAwayReceived, but the local
+        // mux still tears down cleanly.
+        byte[] goAwayPayload = [CtrlSubtype.GoAway];
+        const int MaxGoAwayAttempts = 5;
+        for (int attempt = 0; attempt < MaxGoAwayAttempts; attempt++)
+        {
+            if (SendControlFrame(FrameFlags.Ctrl, goAwayPayload)) break;
+            await Task.Yield();
+        }
+
+        _isShuttingDown = true;
 
         // Wait up to GoAwayTimeout for already-open channels to drain. The caller token cancels the wait;
         // GoAwayTimeout bounds it. Either path falls through to forced abort below.
@@ -978,21 +989,41 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IChannelOwner
         }
     }
 
-    private void SendControlFrame(FrameFlags flags, ReadOnlySpan<byte> payload)
+    // Non-throwing control-frame senders. Returning false (rather than throwing
+    // InvalidOperationException as the old WriteRawFrame did) preserves the
+    // invariant that control-slab pressure must never fault the reader thread,
+    // keepalive loop, or graceful-shutdown path. Callers decide the recovery
+    // policy per frame kind (drop, retry, escalate). Closes #291/#336/#355/
+    // #365/#373/#374/#377/#392/#404.
+    private bool SendControlFrame(FrameFlags flags, ReadOnlySpan<byte> payload)
     {
-        if (_conn.ControlChannel is null) return;
-
-        // Write through the control channel's slab so the writer thread picks it up.
-        // The control channel uses ChannelIndex 0, so frames are stamped with channel 0.
-        _conn.ControlChannel.WriteRawFrame(ControlFrameBuilder.BuildControlFrame(flags, payload));
+        if (_conn.ControlChannel is null) return false;
+        return _conn.ControlChannel.TryWriteRawFrame(ControlFrameBuilder.BuildControlFrame(flags, payload));
     }
 
-    private void SendInitAck(ushort channelIndex)
+    private bool SendInitAck(ushort channelIndex)
     {
-        if (_conn.ControlChannel is null) return;
+        if (_conn.ControlChannel is null) return false;
+        return _conn.ControlChannel.TryWriteRawFrame(ControlFrameBuilder.BuildAckFrame(channelIndex, 0));
+    }
 
-        // ACK frame on the opener's channel index with position 0 — signals channel established.
-        _conn.ControlChannel.WriteRawFrame(ControlFrameBuilder.BuildAckFrame(channelIndex, 0));
+    // Re-attempt every queued INIT-ACK whose original SendInitAck failed because
+    // the control slab was transiently full. Bounded by the peer's outstanding
+    // open budget. Any ACK that still cannot be staged is re-queued for the next
+    // drain pass (#365/#377/#404).
+    private void DrainPendingInitAcks(MuxConnection conn)
+    {
+        if (conn.PendingInitAcks.IsEmpty) return;
+        int initialCount = conn.PendingInitAcks.Count;
+        int requeue = 0;
+        while (requeue < initialCount && conn.PendingInitAcks.TryDequeue(out ushort idx))
+        {
+            if (!SendInitAck(idx))
+            {
+                conn.PendingInitAcks.Enqueue(idx);
+                requeue++;
+            }
+        }
     }
 
     bool IChannelOwner.SendAck(ushort channelIndex, ulong consumedPosition)
