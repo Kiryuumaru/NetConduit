@@ -813,6 +813,21 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IChannelOwner
                 isNewlyAccepted = false;
             }
 
+            // If a stale closed read channel for this ID is still registered
+            // (peer reopened the channel ID before the local consumer disposed
+            // the closed ReadChannel), evict it so the new wire index can
+            // claim the _idToIndex slot. Without this the second RegisterReadChannel
+            // throws MultiplexerException(ChannelExists) out of the reader loop
+            // and faults the mux on a legal close-and-reopen sequence (#367).
+            // The user's reference to the old ReadChannel remains valid
+            // (State == Closed, ReadAsync returns EOF) - only the registry
+            // slot is released.
+            var staleById = _registry.GetReadChannelById(channelId);
+            if (staleById is { State: ChannelState.Closed })
+            {
+                _registry.UnregisterChannel(staleById.ChannelIndex, channelId);
+            }
+
             _registry.RegisterReadChannel(header.ChannelIndex, readChannel);
         }
 
