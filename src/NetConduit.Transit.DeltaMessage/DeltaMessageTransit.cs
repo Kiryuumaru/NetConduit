@@ -605,6 +605,12 @@ public sealed class DeltaMessageTransit<T> : IAsyncDisposable
         if (_pendingDrainRemaining > 0)
         {
             await DrainPendingAsync(cancellationToken).ConfigureAwait(false);
+            // If the peer closed gracefully mid-drain, DrainPendingAsync set
+            // _receiveEof. Surface EOF the same way every other EOF path does
+            // — a null return that ReceiveCoreAsync maps to default(T) and
+            // ReceiveAllAsync turns into a clean yield break (#369).
+            if (_receiveEof)
+                return (null, 0);
         }
 
         var lengthPrefix = ArrayPool<byte>.Shared.Rent(4);
@@ -687,9 +693,17 @@ public sealed class DeltaMessageTransit<T> : IAsyncDisposable
                 if (n == 0)
                 {
                     // Channel closed before the over-max payload finished draining.
-                    // Framing is unrecoverable; surface as end-of-stream.
+                    // Treat as clean EOF: the transit is done, not corrupt.
+                    // Throwing EndOfStreamException here leaks past
+                    // ReceiveAllAsync's OperationCanceledException/
+                    // ObjectDisposedException catches and misrepresents a normal
+                    // peer-side disconnect as a transit failure (#369). Mirror
+                    // every other EOF path in this file: latch _receiveEof and
+                    // let the caller signal EOF via the standard (null, 0)
+                    // return from ReadMessageAsync.
                     _pendingDrainRemaining = 0;
-                    throw new EndOfStreamException("Unexpected end of stream while discarding oversized message payload.");
+                    _receiveEof = true;
+                    return;
                 }
                 _pendingDrainRemaining -= (uint)n;
             }
