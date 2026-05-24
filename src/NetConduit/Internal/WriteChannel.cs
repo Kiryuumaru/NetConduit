@@ -602,7 +602,7 @@ internal sealed class WriteChannel : Stream, IWriteChannel
         }
     }
 
-    internal void SetClosed(ChannelCloseReason reason, Exception? exception = null)
+    internal void SetClosed(ChannelCloseReason reason, Exception? exception = null, bool returnSlab = true)
     {
         // Atomically commit the closed state alongside _closeReason/_closeException
         // and _isConnected so a concurrent MarkOpen cannot interleave between the
@@ -630,17 +630,27 @@ internal sealed class WriteChannel : Stream, IWriteChannel
         }
         else
         {
-            // Writer loop is cancelled under MuxDisposed; no concurrent
-            // TakeReady/MarkSent can race with us, so the slab must be
-            // returned unconditionally. Gating on !HasPendingData() leaks
-            // the slab whenever the channel is torn down with bytes still
-            // queued (see issue #169). Serialize with _posLock so any
-            // in-flight WriteAsync commit completes before the slab is
-            // released to the pool (issue #258).
-            lock (_posLock) TryReturnSlab();
+            // _posLock fences TakeReady/MarkSent but does NOT cover the writer
+            // thread's synchronous writeStream.Write(frames.Span) between them.
+            // If the slab is returned to ArrayPool here while the writer is
+            // mid-Write, the in-flight span is reused by other pool consumers
+            // and corrupts wire data (issue #368). When returnSlab is false
+            // the caller is responsible for invoking ReturnSlab() AFTER the
+            // writer task has fully exited.
+            if (returnSlab)
+            {
+                lock (_posLock) TryReturnSlab();
+            }
             // Registry cleared externally on mux dispose; unblock any DisposeAsync awaiters.
             _unregisteredTcs.TrySetResult();
         }
+    }
+
+    // Used by ChannelRegistry to defer slab return to phase B of mux dispose,
+    // after the writer task has exited (issue #368). Idempotent.
+    internal void ReturnSlab()
+    {
+        lock (_posLock) TryReturnSlab();
     }
 
     internal void Abort(ChannelCloseReason reason, Exception? exception = null)

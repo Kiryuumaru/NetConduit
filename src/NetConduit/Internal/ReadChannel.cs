@@ -490,7 +490,7 @@ internal sealed class ReadChannel : Stream, IReadChannel, IValueTaskSource<int>
         return ValueTask.CompletedTask;
     }
 
-    internal void SetClosed(ChannelCloseReason reason, Exception? exception = null)
+    internal void SetClosed(ChannelCloseReason reason, Exception? exception = null, bool returnSlab = true)
     {
         bool returnSlabNow = false;
         lock (_lock)
@@ -525,11 +525,16 @@ internal sealed class ReadChannel : Stream, IReadChannel, IValueTaskSource<int>
             // - Graceful close with buffered data: preserve the slab so the
             //   consumer can drain to EOF; ReadAsync returns the slab when
             //   it observes EOF, and DisposeAsync catches any abandoned case.
+            //
+            // When returnSlab is false (mux dispose phase A, issue #368) the
+            // reader thread may still be mid-frame-copy into this slab; defer
+            // the actual pool return until the caller has awaited the reader
+            // task and calls ReturnSlab().
             if (reason == ChannelCloseReason.MuxDisposed)
             {
                 _receivedPos = 0;
                 _consumedPos = 0;
-                returnSlabNow = true;
+                returnSlabNow = returnSlab;
             }
             else if (_receivedPos <= _consumedPos)
             {
@@ -539,6 +544,13 @@ internal sealed class ReadChannel : Stream, IReadChannel, IValueTaskSource<int>
         SafeEventRaiser.Raise(this, Closed, new ChannelCloseEventArgs(reason, exception), _onHandlerException);
         if (returnSlabNow)
             TryReturnSlab();
+    }
+
+    // Used by ChannelRegistry to defer slab return to phase B of mux dispose,
+    // after the reader task has exited (issue #368). Idempotent.
+    internal void ReturnSlab()
+    {
+        TryReturnSlab();
     }
 
     private void TryReturnSlab()

@@ -1113,7 +1113,13 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IChannelOwner
 
         _cts.Cancel();
 
-        _registry.AbortAllChannels(ChannelCloseReason.MuxDisposed);
+        // Phase A: wake parked WriteAsync waiters, transition channels to
+        // Closed/MuxDisposed, and signal _unregisteredTcs so per-channel
+        // DisposeAsync awaiters unblock — but DO NOT return slabs yet. The
+        // writer thread can be mid synchronous writeStream.Write(frames.Span)
+        // where frames.Span points into a channel's slab; returning that slab
+        // to ArrayPool now is a use-after-free (issue #368).
+        _registry.AbortAllChannels(ChannelCloseReason.MuxDisposed, returnSlabs: false);
         _registry.CancelAllPendingAccepts();
 
         if (_conn.MainLoopTask is not null)
@@ -1122,6 +1128,11 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IChannelOwner
             catch (OperationCanceledException) { }
             catch { /* swallow during dispose */ }
         }
+
+        // Phase B: writer/reader tasks have fully exited (MainLoopTask awaits
+        // them via WaitForLoopsAsync). Channel slabs can now be safely returned
+        // to the ArrayPool (issue #368).
+        _registry.ReturnAllChannelSlabsAndClear();
 
         if (_conn.Transport is not null)
         {

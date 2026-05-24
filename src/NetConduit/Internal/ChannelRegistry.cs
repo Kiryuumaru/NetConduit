@@ -423,14 +423,35 @@ internal sealed class ChannelRegistry
         }
     }
 
-    internal void AbortAllChannels(ChannelCloseReason reason, Exception? exception = null)
+    internal void AbortAllChannels(ChannelCloseReason reason, Exception? exception = null, bool returnSlabs = true)
     {
         foreach (var channel in _writeChannels.Values)
-            channel.SetClosed(reason, exception);
+            channel.SetClosed(reason, exception, returnSlabs);
         foreach (var channel in _readChannels.Values)
-            channel.SetClosed(reason, exception);
+            channel.SetClosed(reason, exception, returnSlabs);
         foreach (var channel in _pendingAcceptChannels.Values)
-            channel.SetClosed(reason, exception);
+            channel.SetClosed(reason, exception, returnSlabs);
+        // When deferring slab return (phase A of mux dispose, issue #368), keep
+        // channel collections populated so phase B can re-iterate to return
+        // slabs after the writer/reader tasks have exited.
+        if (!returnSlabs) return;
+        _writeChannels.Clear();
+        _readChannels.Clear();
+        _pendingAcceptChannels.Clear();
+        _idToIndex.Clear();
+    }
+
+    // Phase B of mux dispose (issue #368): after the writer/reader tasks have
+    // fully exited, return every channel's slab to ArrayPool and clear the
+    // registry. Must be invoked once after AbortAllChannels(..., returnSlabs: false).
+    internal void ReturnAllChannelSlabsAndClear()
+    {
+        foreach (var channel in _writeChannels.Values)
+            channel.ReturnSlab();
+        foreach (var channel in _readChannels.Values)
+            channel.ReturnSlab();
+        foreach (var channel in _pendingAcceptChannels.Values)
+            channel.ReturnSlab();
         _writeChannels.Clear();
         _readChannels.Clear();
         _pendingAcceptChannels.Clear();
