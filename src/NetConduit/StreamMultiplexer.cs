@@ -344,9 +344,31 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IChannelOwner
         if (_isShuttingDown) return;
         _isShuttingDown = true;
 
-        // Send GoAway control frame to remote before shutting down
+        // Stage the GoAway control frame on the control slab. Use bounded
+        // retry instead of the previously throwing WriteRawFrame — under
+        // transient control-slab pressure (parallel of #291/#336/#355) the
+        // old path threw InvalidOperationException AFTER committing
+        // _isShuttingDown = true, leaving the mux permanently half-shut with
+        // no GoAway frame on the wire and no terminal cleanup run (#365).
+        // Best-effort: if we cannot stage within the bounded window, fall
+        // through to local-side teardown anyway. The peer will observe a
+        // transport close rather than a graceful GoAway, but local state
+        // stays consistent and the caller never sees an exception.
         ReadOnlySpan<byte> goAwayPayload = [CtrlSubtype.GoAway];
-        SendControlFrame(FrameFlags.Ctrl, goAwayPayload);
+        if (!TrySendControlFrame(FrameFlags.Ctrl, goAwayPayload))
+        {
+            byte[] goAwayFrame = ControlFrameBuilder.BuildControlFrame(FrameFlags.Ctrl, goAwayPayload);
+            var stageDeadline = TimeSpan.FromSeconds(1);
+            var stageSw = System.Diagnostics.Stopwatch.StartNew();
+            while (stageSw.Elapsed < stageDeadline && !ct.IsCancellationRequested)
+            {
+                try { await Task.Delay(5, ct).ConfigureAwait(false); }
+                catch (OperationCanceledException) { break; }
+                var control = _conn.ControlChannel;
+                if (control is null) break;
+                if (control.TryWriteRawFrame(goAwayFrame)) break;
+            }
+        }
 
         // Wait up to GoAwayTimeout for already-open channels to drain. The caller token cancels the wait;
         // GoAwayTimeout bounds it. Either path falls through to forced abort below.
@@ -874,8 +896,14 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IChannelOwner
         switch (header.Flags)
         {
             case FrameFlags.Ping:
-                // Respond with Pong on control channel (echo the payload)
-                SendControlFrame(FrameFlags.Pong, payload);
+                // Respond with Pong on control channel (echo the payload).
+                // Use the non-throwing stage path: under transient control-slab
+                // pressure (parallel of #291/#336/#355), a dropped Pong simply
+                // increments the peer's missed-ping counter by one cycle, which
+                // the peer's MaxMissedPings already absorbs. Throwing here
+                // would propagate out of the reader task and fault the entire
+                // mux on a healthy wire (#365).
+                _ = TrySendControlFrame(FrameFlags.Pong, payload);
                 break;
             case FrameFlags.Pong:
                 // Correlate the echoed 8-byte token to the currently outstanding ping.
@@ -978,21 +1006,64 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IChannelOwner
         }
     }
 
-    private void SendControlFrame(FrameFlags flags, ReadOnlySpan<byte> payload)
+    // Non-throwing control-frame stage. Returns true if the frame was placed
+    // in the control slab, false if the slab is currently full or the control
+    // channel is gone. Reader-thread callers (Pong reply) drop on false;
+    // GoAwayAsync retries with bounded backoff; SendInitAck queues for
+    // background retry. See issue #365 — the throwing WriteRawFrame variant
+    // was reachable from the reader thread (Pong/INIT-ACK) and from the
+    // public GoAwayAsync surface, all of which could fault the mux or leak
+    // state under transient control-slab pressure exactly the same way #291,
+    // #336, and #355 already addressed for SendAck and SendPing.
+    private bool TrySendControlFrame(FrameFlags flags, ReadOnlySpan<byte> payload)
     {
-        if (_conn.ControlChannel is null) return;
-
-        // Write through the control channel's slab so the writer thread picks it up.
-        // The control channel uses ChannelIndex 0, so frames are stamped with channel 0.
-        _conn.ControlChannel.WriteRawFrame(ControlFrameBuilder.BuildControlFrame(flags, payload));
+        var control = _conn.ControlChannel;
+        if (control is null) return false;
+        return control.TryWriteRawFrame(ControlFrameBuilder.BuildControlFrame(flags, payload));
     }
 
     private void SendInitAck(ushort channelIndex)
     {
-        if (_conn.ControlChannel is null) return;
+        var control = _conn.ControlChannel;
+        if (control is null) return;
 
         // ACK frame on the opener's channel index with position 0 — signals channel established.
-        _conn.ControlChannel.WriteRawFrame(ControlFrameBuilder.BuildAckFrame(channelIndex, 0));
+        byte[] frame = ControlFrameBuilder.BuildAckFrame(channelIndex, 0);
+        if (control.TryWriteRawFrame(frame)) return;
+
+        // Slab full — defer to a bounded background retry so the reader thread
+        // does not fault (#365). Unlike position ACKs (which coalesce — a later
+        // ACK supersedes an earlier one), INIT-ACK is one-shot: dropping it
+        // hangs the peer's WaitForReadyAsync until the next reconnect. The
+        // writer drains the control slab in microseconds under normal
+        // operation, so the retry loop almost always completes on the first
+        // backoff. Failure cases (mux shutting down, control channel torn
+        // down) fall through silently — the peer's open will be retried on
+        // the next session.
+        _ = RetryInitAckAsync(frame, _cts.Token);
+    }
+
+    private async Task RetryInitAckAsync(byte[] frame, CancellationToken ct)
+    {
+        try
+        {
+            while (!ct.IsCancellationRequested)
+            {
+                try { await Task.Delay(5, ct).ConfigureAwait(false); }
+                catch (OperationCanceledException) { return; }
+
+                var control = _conn.ControlChannel;
+                if (control is null) return;
+                if (control.TryWriteRawFrame(frame)) return;
+            }
+        }
+        catch
+        {
+            // Best-effort retry. Any failure here (shutdown race, registry
+            // teardown) is benign: the peer's open path will hang briefly and
+            // then reconnect, which re-runs the INIT exchange on a fresh
+            // session — the same outcome as a dropped INIT on the wire.
+        }
     }
 
     bool IChannelOwner.SendAck(ushort channelIndex, ulong consumedPosition)
