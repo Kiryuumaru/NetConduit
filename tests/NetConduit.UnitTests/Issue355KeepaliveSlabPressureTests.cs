@@ -54,7 +54,12 @@ public sealed class Issue355KeepaliveSlabPressureTests
             pingTimeout: TimeSpan.FromMilliseconds(20),
             maxMissedPings: 5);
 
-        using var cts = new CancellationTokenSource(TimeSpan.FromMilliseconds(300));
+        // Cancel inside the slab-pressure budget (5 * 40ms = 200ms). #355's
+        // contract is "transient pressure must NOT fault the loop" — that is,
+        // a small number of cycles under pressure must absorb cleanly. The
+        // companion #366 test verifies that sustained pressure DOES tear down
+        // once the budget is exceeded.
+        using var cts = new CancellationTokenSource(TimeSpan.FromMilliseconds(120));
 
         // Without the fix: the first SendPing call throws InvalidOperationException
         // ("Slab full for raw frame.") out of RunAsync — the task faults.

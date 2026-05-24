@@ -25,6 +25,18 @@ internal sealed class MuxKeepalive(
     internal async Task RunAsync(CancellationToken ct)
     {
         int missedPings = 0;
+        // Independent budget for consecutive cycles where the control slab
+        // cannot fit a PING (#366). The #355 fix introduced TrySendPing +
+        // continue to absorb transient control-slab pressure from coalesced
+        // ACKs, but the assumption "pressure is transient because the writer
+        // will drain" is false on a half-open transport where the writer
+        // thread is itself blocked on transport.WriteStream.Write. In that
+        // scenario the slab stays full forever, every PING attempt returns
+        // false, missedPings never increments, and the mux never tears down —
+        // silently disabling the liveness check exactly when it is needed.
+        // Treat sustained inability to stage a PING as evidence of writer
+        // stall and fire the same IOException missed-pong saturation would.
+        int slabPressureCycles = 0;
         long pingToken = 0;
         byte[] pingPayload = new byte[8];
 
@@ -50,12 +62,29 @@ internal sealed class MuxKeepalive(
                     // wire, so it would be wrong to count this as a missed ping or to
                     // wait for a pong that can never arrive. Clear the just-installed
                     // pending (so the dangling TCS does not pin allocation) and back
-                    // off until the next interval. Slab pressure is transient — the
-                    // writer loop will drain coalescable ACKs (#291/#336) before the
-                    // next ping. See #355.
+                    // off until the next interval. See #355.
                     Interlocked.CompareExchange(ref conn.PendingPong, null, pending);
+
+                    // Bound the number of consecutive cycles tolerated under
+                    // slab pressure. The budget mirrors maxMissedPings so the
+                    // half-open detection window matches the documented
+                    // keepalive contract: by N * pingInterval the mux tears
+                    // down whether the failure mode is "PONG never arrives"
+                    // or "PING cannot even be staged" (#366).
+                    slabPressureCycles++;
+                    if (slabPressureCycles >= maxMissedPings)
+                    {
+                        throw new IOException(
+                            $"Keepalive timeout: {slabPressureCycles} consecutive cycles unable to stage PING due to control-slab pressure (interval: {pingInterval}). " +
+                            "The writer thread is likely blocked on the underlying transport — assuming half-open connection.");
+                    }
                     continue;
                 }
+
+                // PING staged successfully — reset the pressure counter so a
+                // burst of transient pressure (which #355 must still tolerate)
+                // does not aggregate across recovered cycles.
+                slabPressureCycles = 0;
 
                 if (await WaitForPongAsync(pending, ct))
                 {
