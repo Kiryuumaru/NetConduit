@@ -344,7 +344,7 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IChannelOwner
         if (registrations.IsEmpty)
             throw new ArgumentException("At least one registration is required.", nameof(registrations));
 
-        return _channelRegistrar.TryRegisterChannels(registrations, _isConnected, out channels);
+        return _channelRegistrar.TryRegisterChannels(registrations, out channels);
     }
 
     /// <inheritdoc />
@@ -392,6 +392,20 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IChannelOwner
         _registry.CancelAllPendingAccepts();
 
         _disconnectReason = Enums.DisconnectReason.LocalDispose;
+        _isConnected = false;
+
+        // Symmetric with the remote-GoAway branch in MainLoopAsync: local
+        // GoAway disconnects the transport just as surely as remote GoAway
+        // does, so the mux-level Disconnected event must fire on this path
+        // too (fixes #378). Gated on _disconnectedFired (reset on every
+        // Connected edge per #383/#400) so DisposeAsync's terminal fallback
+        // becomes a no-op when DisposeAsync is awaited after GoAwayAsync.
+        if (!_disconnectedFired)
+        {
+            _disconnectedFired = true;
+            RaiseEvent(Disconnected, new DisconnectedEventArgs(Enums.DisconnectReason.LocalDispose, null));
+        }
+
         _cts.Cancel();
     }
 
@@ -731,6 +745,8 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IChannelOwner
     }
 
     int IChannelOwner.PeerMaxRecvPayload => _conn.PeerMaxRecvPayload;
+
+    bool IChannelOwner.IsTransportConnected => _isConnected;
 
     // =====================================================================
     // Reader Thread — THE DISPATCHER (receive side)

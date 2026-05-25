@@ -62,4 +62,25 @@ internal interface IChannelOwner
     /// configuration cannot send a frame the receiver's slab cannot buffer.
     /// </summary>
     int PeerMaxRecvPayload { get; }
+
+    /// <summary>
+    /// Live snapshot of the multiplexer's transport-connected state. Read
+    /// by <see cref="ChannelBatchRegistrar"/> in Phase 3 — after a fresh
+    /// channel has been published into the registry — so the batch-register
+    /// path observes the same publish-then-read invariant as
+    /// <c>StreamMultiplexer.OpenChannel</c>. Capturing this value at the
+    /// caller's entry to <c>TryRegisterChannels</c> instead would create a
+    /// race window in which the mux completes its initial handshake between
+    /// the entry read and Phase 2 commit, MainLoopAsync's MarkConnected
+    /// foreach runs against an empty snapshot, and Phase 3 then skips
+    /// MarkConnected on the stale-false snapshot — leaving fresh channels
+    /// IsConnected==false forever despite a live transport (fixes #399).
+    /// </summary>
+    /// <remarks>
+    /// Defaults to <c>false</c> so isolated test fakes that exercise
+    /// individual channels without a real multiplexer do not need to
+    /// implement this member. <see cref="StreamMultiplexer"/> overrides
+    /// the default with the live <c>_isConnected</c> field.
+    /// </remarks>
+    bool IsTransportConnected => false;
 }
