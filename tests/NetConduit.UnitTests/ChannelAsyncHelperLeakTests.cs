@@ -4,7 +4,7 @@ using NetConduit.Exceptions;
 namespace NetConduit.UnitTests;
 
 /// <summary>
-/// Regression tests for issue #250: OpenChannelAsync / AcceptChannelAsync must
+/// Regression tests for issue: OpenChannelAsync / AcceptChannelAsync must
 /// dispose the channel when WaitForReadyAsync throws, otherwise the channelId,
 /// slab, and wire-index are leaked permanently.
 /// </summary>

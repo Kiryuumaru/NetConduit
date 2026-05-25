@@ -92,7 +92,7 @@ public static class UdpMultiplexer
                     // socket. Without this loop a single stray UDP packet (port
                     // scanner, leftover from a previous session, attacker probe,
                     // health check) would Connect() the listener to a non-client
-                    // endpoint and permanently DoS the server (#303).
+                    // endpoint and permanently DoS the server.
                     IPEndPoint remote;
                     while (true)
                     {
@@ -108,7 +108,7 @@ public static class UdpMultiplexer
                     await listener.SendAsync(HelloAckPayload, ct).ConfigureAwait(false);
 
                     // Drain any duplicate NC_HELLO datagrams the client retransmitted
-                    // while its first send was still in flight (#213). Without this,
+                    // while its first send was still in flight. Without this,
                     // the leftover HELLO bytes sit in the kernel buffer and the next
                     // ReliableUdpStream.ReadAsync delivers "NC_HELLO" as protocol
                     // bytes, which parse as a bogus frame header and either fault the
@@ -150,7 +150,7 @@ public static class UdpMultiplexer
 
                 // Silently discarding non-ACK datagrams would lose application
                 // data permanently if the server's first frame races ahead of
-                // (or replaces) the ACK on the wire (#213). The server only ever
+                // (or replaces) the ACK on the wire. The server only ever
                 // emits NC_HELLO_ACK before the application protocol starts, so
                 // anything else here is either a stale retransmit from a previous
                 // session on the same port or a protocol error — either way the

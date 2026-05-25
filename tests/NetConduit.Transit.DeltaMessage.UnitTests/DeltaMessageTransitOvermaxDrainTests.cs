@@ -8,11 +8,11 @@ using NetConduit.Models;
 namespace NetConduit.Transit.DeltaMessage.UnitTests;
 
 /// <summary>
-/// Regression for #298: <see cref="DeltaMessageTransit{T}.ReadMessageAsync"/> threw on an
+/// Regression for: <see cref="DeltaMessageTransit{T}.ReadMessageAsync"/> threw on an
 /// oversized length prefix without draining the payload, leaving the read channel
 /// permanently misaligned. Subsequent <c>ReceiveAsync</c> calls would parse payload bytes
 /// as the next length prefix and corrupt the stream silently. The fix mirrors
-/// MessageTransit's <c>_pendingDrainRemaining</c> approach from #286.
+/// MessageTransit's <c>_pendingDrainRemaining</c> approach.
 /// </summary>
 public sealed class DeltaMessageTransitOvermaxDrainTests
 {

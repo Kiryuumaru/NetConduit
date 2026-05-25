@@ -35,7 +35,7 @@ internal sealed class MuxKeepalive(
                 await Task.Delay(pingInterval, ct);
 
                 // Monotonically increasing per-ping correlation token. Used by the
-                // Pong handler to discard stale pongs (#293) — a counter is collision
+                // Pong handler to discard stale pongs — a counter is collision
                 // free even when two pings would otherwise share Environment.TickCount64.
                 pingToken++;
                 var pending = new PendingPong(
@@ -46,7 +46,7 @@ internal sealed class MuxKeepalive(
                 BinaryPrimitives.WriteInt64BigEndian(pingPayload, pingToken);
                 if (!TrySendPing(pingPayload))
                 {
-                    // #366: Slab pressure is transient under normal load, but if
+                    // Slab pressure is transient under normal load, but if
                     // the writer is stuck on a half-open transport the slab never
                     // drains and no pong can ever arrive. Treat a consecutive run
                     // of TrySendPing failures the same as missed pongs so the mux
@@ -91,15 +91,15 @@ internal sealed class MuxKeepalive(
         // sustained control-slab pressure from coalesced position ACKs the
         // slab can transiently lack room for the ping frame, and an exception
         // out of the keepalive loop tears the mux down even though the wire is
-        // healthy (#355 — parallel of #291/#336 not previously applied to the
-        // PING path).
+        // healthy. Slab pressure under bursty position-ACK coalescing is
+        // transient and the next interval recovers.
         return conn.ControlChannel?.TryWriteRawFrame(
             ControlFrameBuilder.BuildControlFrame(FrameFlags.Ping, payload)) ?? false;
     }
 
     private async Task<bool> WaitForPongAsync(PendingPong pending, CancellationToken ct)
     {
-        // #397: Use a linked CTS we can cancel when pong wins so the Task.Delay
+        // Use a linked CTS we can cancel when pong wins so the Task.Delay
         // timer is released immediately instead of running until pingTimeout.
         // Without this, every successful ping/pong cycle on a long-lived
         // healthy connection leaks one Task.Delay timer per interval; over

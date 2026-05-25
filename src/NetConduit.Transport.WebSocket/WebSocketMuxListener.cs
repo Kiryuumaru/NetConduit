@@ -57,7 +57,7 @@ public sealed class WebSocketMuxListener : IAsyncDisposable
             // (transport error / GoAway / dispose). If we observe TryGetValue success
             // but the writer was already completed by a concurrent eviction, fall
             // through to the new-session branch instead of throwing
-            // ChannelClosedException at the caller (issue #279).
+            // ChannelClosedException at the caller.
             bool routedToExistingSession = false;
             if (sessionId.HasValue)
             {
@@ -68,7 +68,7 @@ public sealed class WebSocketMuxListener : IAsyncDisposable
                     // would (a) make the client's reconnect handshake fail with
                     // SessionMismatch on a session GUID it never asked for, terminally
                     // poisoning its mux, and (b) leak that fresh mux in _sessions under a
-                    // key the client cannot reach (#236). Refuse the resume cleanly so the
+                    // key the client cannot reach. Refuse the resume cleanly so the
                     // client can decide whether to fall back to a brand-new session.
                     try
                     {
@@ -95,13 +95,13 @@ public sealed class WebSocketMuxListener : IAsyncDisposable
                 {
                     // The mux for this session reached a terminal state between
                     // TryGetValue and WriteAsync; its Disconnected handler has
-                    // already evicted the entry (#279). Refuse the resume the
+                    // already evicted the entry. Refuse the resume the
                     // same way the unknown-session branch does: falling through
                     // to fresh-mux creation would silently bind this pair to a
                     // brand-new SessionId, which causes the client's reconnect
                     // handshake to fault with SessionMismatch and leaks a
                     // server-side mux under a key the client cannot reach —
-                    // the exact defect #236 fixed and #354 re-surfaced.
+                    // the exact defect fixed and re-surfaced.
                     try
                     {
                         await webSocket.CloseOutputAsync(
@@ -283,7 +283,7 @@ public sealed class WebSocketMuxListener : IAsyncDisposable
         _newMuxChannel.Writer.TryComplete();
 
         // Aggregate per-session dispose failures so a single bad mux cannot
-        // strand the remaining sessions or block _sessions.Clear() (#295).
+        // strand the remaining sessions or block _sessions.Clear().
         List<Exception>? errors = null;
         foreach (var entry in _sessions.Values)
         {
@@ -296,7 +296,7 @@ public sealed class WebSocketMuxListener : IAsyncDisposable
                 (errors ??= []).Add(ex);
             }
 
-            // #398: Drain any buffered CompletionStreamPair items still in the
+            // Drain any buffered CompletionStreamPair items still in the
             // channel reader before disposing the mux. The reader may hold
             // pairs that the mux never consumed (e.g. a reconnect arrived,
             // was queued, but the mux DisposeAsync started before the
@@ -344,10 +344,10 @@ public sealed class WebSocketMuxListener : IAsyncDisposable
             // The mux-release contract is that the mux is done with this transport
             // once it calls DisposeAsync. The completion signal must fire regardless
             // of whether the inner dispose succeeds or throws (e.g. StreamPair
-            // aggregating inner-stream dispose failures per #218/#224), otherwise
+            // aggregating inner-stream dispose failures), otherwise
             // HandleAsync hangs on completion.Task.WaitAsync until request
             // cancellation. Inner-dispose exceptions still propagate to the mux's
-            // teardown path. See #353.
+            // teardown path.
             try
             {
                 await inner.DisposeAsync();

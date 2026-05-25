@@ -71,7 +71,7 @@ internal sealed class WebSocketStream : Stream
             // or future WebSocket message types) must be rejected here — otherwise its
             // payload would be fed to FrameHeader.Parse and either tear down the mux
             // with a misattributed ProtocolError or, worse, inject bytes into the
-            // wrong channel's read stream (issue #217).
+            // wrong channel's read stream.
             if (result.MessageType != WebSocketMessageType.Binary)
             {
                 throw new IOException(
@@ -82,7 +82,7 @@ internal sealed class WebSocketStream : Stream
             // Zero-length Binary frames are wire-legal per RFC 6455 §5.6 but carry
             // no stream bytes. Without this branch the loop re-iterates immediately
             // and a peer flooding empty frames pins a CPU core while the mux reader
-            // never returns to its caller (issue #183). NetConduit's writer always
+            // never returns to its caller. NetConduit's writer always
             // emits frames >= FrameHeader.Size, so a zero-length data frame from the
             // peer is always a protocol abuse and is treated as a transport error.
             if (result.Count == 0)

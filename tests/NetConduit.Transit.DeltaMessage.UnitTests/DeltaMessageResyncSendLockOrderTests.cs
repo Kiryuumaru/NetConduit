@@ -5,12 +5,12 @@ using Xunit;
 namespace NetConduit.Transit.DeltaMessage.UnitTests;
 
 /// <summary>
-/// Regression for #193. <see cref="DeltaMessageTransit{T}"/>'s receive path
-/// triggers a resync request to the peer when a 0x01 delta arrives before any
-/// 0x00 full state. Before the fix the resync write was issued from inside the
-/// receive lock and bypassed <c>_sendLock</c>, so its 5-byte frame could
-/// interleave bytes with a concurrent <c>SendAsync</c> on the same write
-/// channel, corrupting wire framing.
+/// <see cref="DeltaMessageTransit{T}"/>'s receive path triggers a resync
+/// request to the peer when a 0x01 delta arrives before any 0x00 full state.
+/// Before the fix the resync write was issued from inside the receive lock
+/// and bypassed <c>_sendLock</c>, so its 5-byte frame could interleave bytes
+/// with a concurrent <c>SendAsync</c> on the same write channel, corrupting
+/// wire framing.
 ///
 /// The fix flags the resync request from inside <c>_receiveLock</c> and drains
 /// it from the <see cref="DeltaMessageTransit{T}.ReceiveAsync"/> wrapper after
@@ -18,7 +18,7 @@ namespace NetConduit.Transit.DeltaMessage.UnitTests;
 /// asserts the lock invariant deterministically: holding <c>_sendLock</c>
 /// externally must block the resync write until released.
 /// </summary>
-public sealed class Issue193RegressionTests
+public sealed class DeltaMessageResyncSendLockOrderTests
 {
     [Fact]
     public async Task ReceiveAsync_DeltaBeforeFullState_ResyncWriteWaitsForSendLock()
@@ -44,8 +44,8 @@ public sealed class Issue193RegressionTests
 
         // Pre-acquire serverTransit._sendLock from outside, simulating an
         // in-flight SendAsync that has not yet released the lock. Under the
-        // pre-#193 code the resync write happens inside _receiveLock and never
-        // touches _sendLock, so it would complete immediately even though
+        // pre-fix code the resync write happened inside _receiveLock and never
+        // touched _sendLock, so it would complete immediately even though
         // _sendLock is held. Under the fix the drain waits for _sendLock.
         var sendLockField = typeof(DeltaMessageTransit<JsonObject>)
             .GetField("_sendLock", BindingFlags.Instance | BindingFlags.NonPublic);
@@ -69,7 +69,7 @@ public sealed class Issue193RegressionTests
             await Task.Delay(20, ct);
 
         Assert.False(receiveTask.IsCompleted,
-            "ReceiveAsync must block on _sendLock before emitting the resync frame so the 5-byte resync cannot interleave with a concurrent SendAsync (#193).");
+            "ReceiveAsync must block on _sendLock before emitting the resync frame so the 5-byte resync cannot interleave with a concurrent SendAsync.");
 
         // Release _sendLock. The drain proceeds and writes the resync frame.
         sendLock.Release();

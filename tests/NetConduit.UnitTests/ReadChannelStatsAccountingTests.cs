@@ -3,7 +3,7 @@ using NetConduit.Interfaces;
 namespace NetConduit.UnitTests;
 
 /// <summary>
-/// Regression tests for issue #172. <c>MultiplexerStats.OpenChannels</c> must
+/// Regression tests for issue. <c>MultiplexerStats.OpenChannels</c> must
 /// decrement and <c>TotalChannelsClosed</c> must increment exactly once per
 /// channel close, regardless of whether the close was driven by an inbound
 /// <c>Fin</c> frame or by a local <c>DisposeAsync</c>/<c>Dispose</c>. The

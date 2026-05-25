@@ -4,7 +4,7 @@ using NetConduit.Transport.Ipc;
 namespace NetConduit.Transport.Ipc.IntegrationTests;
 
 /// <summary>
-/// #233 regression: two distinct endpoint names must NEVER address the same IPC
+/// Two distinct endpoint names must NEVER address the same IPC
 /// listener. The legacy Windows implementation hashed the endpoint name to a
 /// 16-bit value modulo a 16,383-port window; the birthday bound made colliding
 /// endpoint names trivial to construct and a client targeting endpoint A could

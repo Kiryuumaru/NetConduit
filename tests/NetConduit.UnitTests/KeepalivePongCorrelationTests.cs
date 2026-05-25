@@ -7,7 +7,7 @@ using NetConduit.Internal;
 namespace NetConduit.UnitTests;
 
 /// <summary>
-/// Regression tests for #293: Pong frame must be correlated to its triggering
+/// Regression tests for: Pong frame must be correlated to its triggering
 /// Ping by the 8-byte payload token. A pong with a non-matching token must NOT
 /// satisfy the outstanding ping's TaskCompletionSource — otherwise stale pongs
 /// (or forged pongs from a buggy/half-broken peer) silently mask liveness

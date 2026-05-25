@@ -3,8 +3,6 @@ using NetConduit.Internal;
 namespace NetConduit.UnitTests;
 
 /// <summary>
-/// Regression test for issue #357.
-///
 /// <see cref="WriteChannel.MarkConnected"/> and
 /// <see cref="ReadChannel.MarkConnected"/> were non-idempotent: every call
 /// raised the <c>Connected</c> event. The mux invokes <c>MarkConnected</c>
@@ -18,7 +16,7 @@ namespace NetConduit.UnitTests;
 /// exactly once per connect transition and is reset by
 /// <c>MarkDisconnected</c> so the next reconnect can re-fire.
 /// </summary>
-public sealed class Issue357MarkConnectedIdempotenceTests
+public sealed class MarkConnectedIdempotenceTests
 {
     [Fact]
     public void WriteChannel_MarkConnected_FiresOnceAcrossDuplicateCalls()
@@ -115,7 +113,7 @@ public sealed class Issue357MarkConnectedIdempotenceTests
     [Fact]
     public async Task OpenChannelDuringReconnect_FiresConnectedExactlyOnce()
     {
-        // Drive the actual race described in #357: open a channel concurrently
+        // Drive the actual race described in: open a channel concurrently
         // with the MainLoopAsync post-handshake foreach. Without idempotence,
         // a fraction of runs see the channel's Connected event fire twice.
         // With the fix every channel always fires Connected exactly once per
@@ -180,7 +178,7 @@ public sealed class Issue357MarkConnectedIdempotenceTests
             {
                 Assert.True(
                     count <= 1,
-                    $"Channel '{id}' fired Connected {count} times in one transport-up transition (#357).");
+                    $"Channel '{id}' fired Connected {count} times in one transport-up transition.");
             }
 
             await client.DisposeAsync();

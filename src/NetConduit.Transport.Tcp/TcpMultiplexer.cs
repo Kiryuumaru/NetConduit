@@ -110,7 +110,7 @@ public static class TcpMultiplexer
                         // (e.g. SocketException(WSAECONNRESET) from NoDelay, or
                         // InvalidOperationException from GetStream when Socket.Connected
                         // is already false). Without an inner try, the accepted client
-                        // would leak its kernel socket handle until finalization (#267).
+                        // would leak its kernel socket handle until finalization.
                         client.NoDelay = true;
                         var stream = client.GetStream();
                         Interlocked.Exchange(ref state, 2);

@@ -15,7 +15,7 @@ internal sealed class MuxConnection
     public Guid RemoteSessionId;
 
     // Maximum frame payload the remote will accept on any inbound channel,
-    // negotiated during the handshake (#180). Defaults to the historical
+    // negotiated during the handshake. Defaults to the historical
     // protocol assumption (1 MiB) so callers that touch this field before
     // the handshake completes — or transports that omit the negotiation
     // entirely — still produce traffic the legacy peer can receive.
@@ -35,7 +35,7 @@ internal sealed class MuxConnection
     // Channel indices whose peer-initiated INIT was accepted but whose INIT-ACK
     // reply could not be staged into the control slab (transient back-pressure).
     // Drained on every reader-loop iteration. Bounded by peer's outstanding open
-    // budget so unbounded growth is impossible. Closes #365/#377/#404 — the
+    // budget so unbounded growth is impossible. — the
     // reader thread can no longer throw InvalidOperationException("Slab full")
     // when the control slab is transiently full.
     public readonly ConcurrentQueue<ushort> PendingInitAcks = new();
@@ -45,7 +45,7 @@ internal sealed class MuxConnection
 // correlation token written into the ping payload. The Pong handler must
 // only complete the TCS when the echoed token matches; otherwise a late
 // pong from a previous (timed-out) ping would satisfy the next ping's TCS
-// and mask real liveness failures (issue #293).
+// and mask real liveness failures.
 internal sealed class PendingPong(long expectedToken, TaskCompletionSource tcs)
 {
     public long ExpectedToken { get; } = expectedToken;

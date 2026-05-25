@@ -3,7 +3,7 @@ using NetConduit.Internal;
 namespace NetConduit.UnitTests;
 
 /// <summary>
-/// Regression tests for bugs #20-#23 from the bug-hunter second-pass session.
+/// Regression tests for boundary-condition bugs.
 /// Each test corresponds to an investigate/bug-NNN-*/ PoC and locks down the
 /// fixed behavior so future refactors cannot silently reintroduce these bugs.
 /// </summary>
@@ -27,7 +27,7 @@ public sealed class BoundaryFixesTests
         public int PeerMaxRecvPayload => FrameConstants.MaxSlabSize;
     }
 
-    // --- Bug #20: oversized WriteAsync ----------------------------------
+    // --- Bug: oversized WriteAsync ----------------------------------
 
     [Fact]
     public async Task WriteAsync_PayloadExceedsSlab_ThrowsArgumentOutOfRange()
@@ -74,7 +74,7 @@ public sealed class BoundaryFixesTests
         Assert.Equal(slabSize, ready.Length);
     }
 
-    // --- Bug #21: sync Dispose with full slab ---------------------------
+    // --- Bug: sync Dispose with full slab ---------------------------
 
     [Fact]
     public async Task Dispose_WhenSlabIsFull_DoesNotThrow()
@@ -102,7 +102,7 @@ public sealed class BoundaryFixesTests
         Assert.Equal(ChannelCloseReason.LocalClose, channel.CloseReason);
     }
 
-    // --- Bug #22: CloseAsync transitions to Closed ---------------------
+    // --- Bug: CloseAsync transitions to Closed ---------------------
 
     [Fact]
     public async Task CloseAsync_TransitionsToClosed_AndFiresClosedEvent()
@@ -164,7 +164,7 @@ public sealed class BoundaryFixesTests
         Assert.Equal(1, closedFiredCount);
     }
 
-    // --- Bug #23: peer ACK position is clamped -------------------------
+    // --- Bug: peer ACK position is clamped -------------------------
 
     [Fact]
     public async Task OnAck_OutOfRangePositionFromPeer_IsClamped()

@@ -532,7 +532,7 @@ public sealed class MessageTransitTests
     }
 
     /// <summary>
-    /// Regression for #278: when the receiver rejects a message because its
+    /// Regression for: when the receiver rejects a message because its
     /// length prefix exceeds the receiver's _maxMessageSize, the over-max
     /// payload bytes are still queued on the channel. The receiver MUST drain
     /// those bytes before the next ReceiveAsync so framing resumes on a clean
@@ -615,7 +615,7 @@ public sealed class MessageTransitTests
     [Fact]
     public async Task MessageTransit_ReceiveAllAsync_StopsOnChannelClose_WhenReceiveTypeIsValueType()
     {
-        // Issue #177: ReceiveAllAsync used `message is null` to detect EOF,
+        // ReceiveAllAsync used `message is null` to detect EOF,
         // which is always false for non-nullable value types. The loop would
         // yield default(int)=0 forever after the channel closed.
         var (client, server) = await CreateReadyPairAsync();
@@ -653,7 +653,7 @@ public sealed class MessageTransitTests
     [Fact]
     public async Task MessageTransit_ReceiveAllAsync_YieldsLegitimateJsonNullPayload_AndContinues()
     {
-        // Issue #220: ReceiveAllAsync used `message is null` as a secondary EOF
+        // ReceiveAllAsync used `message is null` as a secondary EOF
         // sentinel, conflating a peer-sent JSON `null` payload with end-of-stream.
         // The first legit null message terminated the loop and every subsequent
         // message was silently lost. Fix: rely solely on `_receiveEof`; yield
@@ -875,7 +875,7 @@ public sealed class MessageTransitTests
     [Fact]
     public async Task MessageTransit_IsConnected_ReturnsFalse_AfterDispose_EvenWhenReadChannelStillConnected()
     {
-        // Issue #166: MessageTransit.IsConnected was missing parentheses around
+        // MessageTransit.IsConnected was missing parentheses around
         // the `||` group, so the read-channel disjunct bypassed the !_disposed
         // guard. With a read channel that still reports IsConnected == true
         // (e.g. during the window between flipping _disposed and the read
@@ -925,7 +925,7 @@ public sealed class MessageTransitTests
 
     #endregion
 
-    #region Receive Cancellation Framing (#240)
+    #region Receive Cancellation Framing
 
     // IReadChannel that delivers bytes from a queued backlog in caller-chosen
     // chunk sizes, and observes the caller's CancellationToken. Lets us

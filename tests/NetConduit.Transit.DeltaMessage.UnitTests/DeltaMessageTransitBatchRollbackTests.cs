@@ -11,7 +11,7 @@ namespace NetConduit.Transit.DeltaMessage.UnitTests;
 /// Regression: when the final flush of <see cref="DeltaMessageTransit{T}.SendBatchAsync"/>
 /// throws (cancellation, transport closure), the local <c>_lastSentState</c> must NOT be
 /// advanced past what the peer actually received. Otherwise the next <see cref="DeltaMessageTransit{T}.SendAsync"/>
-/// computes a delta against a corrupted baseline, silently desyncing the peer (#299).
+/// computes a delta against a corrupted baseline, silently desyncing the peer.
 /// </summary>
 public sealed class DeltaMessageTransitBatchRollbackTests
 {

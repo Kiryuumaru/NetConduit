@@ -16,10 +16,10 @@ public sealed class StreamTransit : System.IO.Stream, ITransit
     private volatile bool _readyFired;
     private readonly object _readyLock = new();
     // Connected/Disconnected edge latches for the AND-Connected / OR-Disconnected
-    // / latch-reset pattern. Mirrors the DuplexStreamTransit fix (#191/#349)
-    // and MessageTransit fix (#381). Required when both write+read channels
+    // / latch-reset pattern. Mirrors the DuplexStreamTransit fix
+    // and MessageTransit fix. Required when both write+read channels
     // are configured so the transit doesn't fire Connected/Disconnected twice
-    // per cycle (#405) and so reconnect cycles re-fire events (#371/#396).
+    // per cycle and so reconnect cycles re-fire events.
     private readonly object _stateLock = new();
     private bool _connectedFired;
     private bool _disconnectedFired;
@@ -47,7 +47,7 @@ public sealed class StreamTransit : System.IO.Stream, ITransit
     // Channel.Ready is single-shot; if the channel was already ready before we
     // subscribed, the event we wired up will never fire. Synthesise the call so
     // subscribers attached after construction still observe Ready exactly once
-    // (#266). OnChannelReady's _readyFired guard makes the synthesised call
+    // . OnChannelReady's _readyFired guard makes the synthesised call
     // race-safe against a concurrent genuine event.
     private void ReplayReadyIfChannelAlreadyReady()
     {
@@ -83,11 +83,11 @@ public sealed class StreamTransit : System.IO.Stream, ITransit
         handlers?.Invoke(this, EventArgs.Empty);
     }
 
-    // #405: When both write+read channels are configured each half raises
+    // When both write+read channels are configured each half raises
     // its own Connected/Disconnected events; forwarding each independently
     // double-fired the transit's events. AND-coalesce Connected (all halves
     // up), OR-coalesce Disconnected (first half down). Reset opposite latch
-    // on each edge so reconnect cycles fire (#371).
+    // on each edge so reconnect cycles fire.
     private void OnChannelConnected(object? sender, EventArgs e)
     {
         if ((_writeChannel?.IsConnected ?? true) == false) return;
@@ -117,7 +117,7 @@ public sealed class StreamTransit : System.IO.Stream, ITransit
     }
 
     /// <inheritdoc/>
-    // #379: When both write+read channels are configured, IsReady must be the
+    // When both write+read channels are configured, IsReady must be the
     // AND of both halves, not the first non-null half. The old expression
     // `(_writeChannel?.IsReady ?? _readChannel?.IsReady ?? false)` reported
     // ready as soon as the write half was up, ignoring the read half
@@ -160,7 +160,7 @@ public sealed class StreamTransit : System.IO.Stream, ITransit
     /// <remarks>
     /// Latching: subscribers attached after the transit has already become Ready are
     /// invoked immediately on subscription, so callers that wait for channel readiness
-    /// before constructing the transit still observe the event exactly once (#266).
+    /// before constructing the transit still observe the event exactly once.
     /// </remarks>
     public event EventHandler? Ready
     {
@@ -188,7 +188,7 @@ public sealed class StreamTransit : System.IO.Stream, ITransit
     public event EventHandler<DisconnectedEventArgs>? Disconnected;
 
     /// <inheritdoc/>
-    // #379: When both halves are configured, callers must wait for BOTH to
+    // When both halves are configured, callers must wait for BOTH to
     // become ready, not just the first non-null one.
     public async Task WaitForReadyAsync(CancellationToken ct = default)
     {
@@ -294,10 +294,10 @@ public sealed class StreamTransit : System.IO.Stream, ITransit
         {
             UnsubscribeFromChannelEvents();
 
-            // #372: Aggregate inner-dispose failures so a throw from one half
+            // Aggregate inner-dispose failures so a throw from one half
             // doesn't strand the other half (leak its slab back to the pool)
             // and doesn't skip base.Dispose. Mirrors the DuplexStreamTransit
-            // pattern from #305.
+            // pattern.
             List<Exception>? errors = null;
             if (_writeChannel is not null)
             {
@@ -330,10 +330,10 @@ public sealed class StreamTransit : System.IO.Stream, ITransit
 
         UnsubscribeFromChannelEvents();
 
-        // #372: Aggregate inner-dispose failures so a throw from one half
+        // Aggregate inner-dispose failures so a throw from one half
         // doesn't strand the other half (leak its slab back to the pool)
         // and doesn't skip base.DisposeAsync. Mirrors the DuplexStreamTransit
-        // pattern from #305.
+        // pattern.
         List<Exception>? errors = null;
         if (_writeChannel is not null)
         {

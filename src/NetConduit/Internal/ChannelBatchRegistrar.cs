@@ -121,7 +121,7 @@ internal sealed class ChannelBatchRegistrar(
         var perRegChannel = new IChannel?[count];
 
         // Outer lock against StreamMultiplexer.ReassignPreHandshakeWriteChannelIndices
-        // (#237). Phase 2's AllocateChannelIndex + RegisterWriteChannel and
+        // . Phase 2's AllocateChannelIndex + RegisterWriteChannel and
         // Phase 3's WriteInitFrame must complete as one atomic unit against
         // the post-handshake reassign walk: otherwise the reassign snapshot
         // can miss a partially-published channel and the writer thread sends

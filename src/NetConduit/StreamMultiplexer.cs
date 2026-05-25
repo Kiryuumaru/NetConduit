@@ -241,7 +241,7 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IChannelOwner
         // Lock against ReassignPreHandshakeWriteChannelIndices: allocate +
         // register + stamp the INIT frame as one atomic unit so a concurrent
         // post-handshake reassign either sees this channel and rekeys it, or
-        // we observe the already-flipped parity and allocate correctly (#237).
+        // we observe the already-flipped parity and allocate correctly.
         lock (_registry.ChannelIndexLock)
         {
             ushort index = _registry.AllocateChannelIndex();
@@ -345,7 +345,7 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IChannelOwner
 
         // Try to stage the GoAway frame BEFORE latching _isShuttingDown so a
         // transient slab-full does not leave the mux in half-shutdown limbo
-        // with no GoAway on the wire (#374). Short retry budget; if the slab
+        // with no GoAway on the wire. Short retry budget; if the slab
         // is still full after, proceed anyway - peer observes transport close
         // and reports TransportError instead of GoAwayReceived, but the local
         // mux still tears down cleanly.
@@ -456,7 +456,7 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IChannelOwner
                     // connected transport is still owned by this loop and must be
                     // disposed before leaving the scope. On the reconnect path
                     // _conn.Transport was never assigned, so the outer DisposeAsync
-                    // safety net cannot reach it (#356).
+                    // safety net cannot reach it.
                     _conn.Transport = null;
                     try { await transport.DisposeAsync(); } catch { }
                     throw;
@@ -471,7 +471,7 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IChannelOwner
                 // Reassign any pre-handshake-allocated WriteChannel that landed
                 // on the wrong default-odd parity space so its queued INIT and
                 // any DATA frames go out under the parity decided by the
-                // session-GUID handshake (#237). Done here on the first connect
+                // session-GUID handshake. Done here on the first connect
                 // only; reconnects re-use the same parity (decided by the same
                 // session GUIDs) and AllocateChannelIndex below allocates from
                 // the correct space already.
@@ -669,7 +669,7 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IChannelOwner
             // Read channels can be closed by inbound FIN, by local Dispose,
             // or by mux-level abort — whichever runs first claims the accounting.
             // Pre-fix this branch only fired on FIN, so a local-Dispose-before-FIN
-            // permanently inflated OpenChannels and skipped ChannelClosed (#172).
+            // permanently inflated OpenChannels and skipped ChannelClosed.
             Interlocked.Decrement(ref _stats._openChannels);
             Interlocked.Increment(ref _stats._totalChannelsClosed);
             RaiseEvent(ChannelClosed, new ChannelClosedEventArgs(channelId, readChannel.CloseException));
@@ -689,7 +689,7 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IChannelOwner
     {
         // Forward channel-level event handler failures to the mux's Error
         // event surface so they are observable without crashing the producer
-        // thread that raised the channel event (#286).
+        // thread that raised the channel event.
         RaiseError(exception);
     }
 
@@ -829,7 +829,7 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IChannelOwner
 
         // Account for the INIT frame bytes that just arrived; the writer-side slab
         // includes them in its _sentPos counter so the reader's FrameBytesReceived
-        // must match (otherwise reconnect replay-base lands mid-frame — issue #161).
+        // must match (otherwise reconnect replay-base lands mid-frame).
         readChannel.AccountInboundFrame(FrameHeader.Size + payload.Length);
 
         readChannel.MarkOpen();
@@ -870,7 +870,7 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IChannelOwner
         {
             // Single-decrement contract via CAS: whichever runs first
             // (this FIN handler or NotifyChannelCompleted on local Dispose)
-            // claims the accounting; the other becomes a no-op. See #172.
+            // claims the accounting; the other becomes a no-op.
             if (channel.TryClaimCompletionAccounting())
             {
                 Interlocked.Decrement(ref _stats._openChannels);
@@ -892,7 +892,7 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IChannelOwner
                 // Correlate the echoed 8-byte token to the currently outstanding ping.
                 // A late pong from a previous (timed-out) ping must not satisfy the
                 // *next* ping's TCS — that would mask real liveness failures by
-                // resetting the missed-ping counter (issue #293).
+                // resetting the missed-ping counter.
                 if (payload.Length >= 8)
                 {
                     long echoedToken = BinaryPrimitives.ReadInt64BigEndian(payload);
@@ -940,7 +940,7 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IChannelOwner
         // path. Cancelling _cts immediately would wake the main loop, which then
         // cancels _loopCts and aborts the writer mid-flush — frames already stamped
         // into channel slabs by WriteAsync (which returned successfully to the caller)
-        // would be silently dropped on the wire (issue #165).
+        // would be silently dropped on the wire.
         //
         // Run the drain off-thread because this handler executes on the reader loop;
         // the writer needs the reader to keep pumping inbound ACKs to release slab
@@ -993,8 +993,7 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IChannelOwner
     // InvalidOperationException as the old WriteRawFrame did) preserves the
     // invariant that control-slab pressure must never fault the reader thread,
     // keepalive loop, or graceful-shutdown path. Callers decide the recovery
-    // policy per frame kind (drop, retry, escalate). Closes #291/#336/#355/
-    // #365/#373/#374/#377/#392/#404.
+    // policy per frame kind (drop, retry, escalate).
     private bool SendControlFrame(FrameFlags flags, ReadOnlySpan<byte> payload)
     {
         if (_conn.ControlChannel is null) return false;
@@ -1010,7 +1009,7 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IChannelOwner
     // Re-attempt every queued INIT-ACK whose original SendInitAck failed because
     // the control slab was transiently full. Bounded by the peer's outstanding
     // open budget. Any ACK that still cannot be staged is re-queued for the next
-    // drain pass (#365/#377/#404).
+    // drain pass.
     private void DrainPendingInitAcks(MuxConnection conn)
     {
         if (conn.PendingInitAcks.IsEmpty) return;
@@ -1031,7 +1030,7 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IChannelOwner
         // Return false (without throwing) when the control channel is gone or
         // its slab is currently full. The caller (ReadChannel.MaybeSendAck) is
         // expected to retain its unacked accumulator and retry on the next
-        // gate crossing — see issue #291.
+        // gate crossing
         if (_conn.ControlChannel is null) return false;
 
         return _conn.ControlChannel.TryWriteRawFrame(
@@ -1091,7 +1090,7 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IChannelOwner
 
     // Walks the registry's WriteChannels after the initial handshake set the
     // real index parity. Any pre-handshake OpenChannel / TryRegisterChannels
-    // call allocated indices from the default odd seed (Create(...) hardcodes
+    // call allocated indices from the default odd seed (Create(.) hardcodes
     // useOddIndices: true on both peers); on the side whose session GUID lost
     // the handshake comparison those indices are now in the wrong parity
     // space and must move before the writer thread transmits any frame from

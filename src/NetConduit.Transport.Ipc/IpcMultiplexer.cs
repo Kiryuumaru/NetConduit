@@ -110,7 +110,7 @@ public static class IpcMultiplexer
                         // for 50% collision) AND the conflict with the kernel's own ephemeral
                         // port range, which would otherwise allow an unrelated process to
                         // grab the deterministic port first and cause a NetConduit client to
-                        // silently land on it (#233).
+                        // silently land on it.
                         //
                         // The registry file is opened FileShare.Read|DeleteOnClose with a
                         // SHA-256-hashed filename derived from the endpoint string, so:
@@ -153,7 +153,7 @@ public static class IpcMultiplexer
                         }
                         catch
                         {
-                            // #403: AcceptTcpClientAsync cancellation/failure
+                            // AcceptTcpClientAsync cancellation/failure
                             // leaves the registry FileStream open and the
                             // endpoint exclusively locked until process exit
                             // (DeleteOnClose only fires on dispose, not GC).

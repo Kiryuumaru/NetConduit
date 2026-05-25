@@ -39,7 +39,7 @@ internal sealed class MuxConnectRetry(
     /// retries. Replaces a flat <see cref="Task.Delay(TimeSpan, CancellationToken)"/>
     /// in <c>MainLoopAsync</c> that ignored
     /// <see cref="MultiplexerOptions.AutoReconnectBackoffMultiplier"/> and
-    /// never fired <c>Reconnecting</c> for handshake-only failures (#393).
+    /// never fired <c>Reconnecting</c> for handshake-only failures.
     /// </summary>
     /// <param name="handshakeAttempt">
     /// 1-based count of handshake attempts that have already failed.
@@ -82,7 +82,7 @@ internal sealed class MuxConnectRetry(
 
         // Enforce a non-zero floor so a misconfigured zero AutoReconnectDelay
         // does not spin the retry loop against a permanently-failing transport
-        // (#402). The floor is conservative: 10 ms gives the OS scheduler time
+        // . The floor is conservative: 10 ms gives the OS scheduler time
         // to make progress on whatever is failing without altering observable
         // behavior for sane configurations.
         const double MinRetryDelayMs = 10.0;
@@ -139,7 +139,7 @@ internal sealed class MuxConnectRetry(
                 raiseError(ex);
 
                 // Permanently-fatal factory exceptions must short-circuit the
-                // retry loop instead of spinning forever (#406). Server-side
+                // retry loop instead of spinning forever. Server-side
                 // helpers (Tcp/Udp/Quic/Ipc/WebSocket CreateServerOptions)
                 // install one-shot factories that throw on a second invocation;
                 // their failure is structural, not transient, and the mux
@@ -157,7 +157,7 @@ internal sealed class MuxConnectRetry(
 
     // Heuristic classifier for permanently-fatal connect failures. Conservative:
     // only known-fatal patterns short-circuit; anything else stays in the retry
-    // loop so honest-peer transient failures still recover. Closes #406.
+    // loop so honest-peer transient failures still recover.
     private static bool IsFatalFactoryException(Exception ex)
     {
         // User-error exceptions thrown by misconfigured factory args.

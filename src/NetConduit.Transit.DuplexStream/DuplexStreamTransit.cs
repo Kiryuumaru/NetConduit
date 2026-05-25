@@ -29,7 +29,7 @@ public sealed class DuplexStreamTransit : Stream, ITransit
         // Channel.Ready is single-shot. If both underlying channels were already
         // ready before we subscribed, the event we wired up will never fire.
         // Synthesise the call so subscribers attached after construction still
-        // observe Ready exactly once (#266).
+        // observe Ready exactly once.
         OnChannelReady(this, EventArgs.Empty);
     }
 
@@ -57,13 +57,13 @@ public sealed class DuplexStreamTransit : Stream, ITransit
         handlers?.Invoke(this, EventArgs.Empty);
     }
 
-    // #191: Each underlying half (write + read) raises its own Connected and
+    // Each underlying half (write + read) raises its own Connected and
     // Disconnected events. Forwarding each one independently caused the
     // transit to fire Connected twice and Disconnected twice. Connected fires
     // once when BOTH halves are connected; Disconnected fires once on the
     // first half going down.
     //
-    // #371/#396: Each transition resets the opposite latch so the next
+    // Each transition resets the opposite latch so the next
     // reconnect cycle observes a fresh edge. Without the reset, the latches
     // stick after the first cycle and reconnect-aware subscribers stop
     // receiving events for the entire lifetime of the transit.
@@ -112,7 +112,7 @@ public sealed class DuplexStreamTransit : Stream, ITransit
     /// <remarks>
     /// Latching: subscribers attached after the transit has already become Ready are
     /// invoked immediately on subscription, so callers that wait for channel readiness
-    /// before constructing the transit still observe the event exactly once (#266).
+    /// before constructing the transit still observe the event exactly once.
     /// </remarks>
     public event EventHandler? Ready
     {
@@ -235,7 +235,7 @@ public sealed class DuplexStreamTransit : Stream, ITransit
             UnsubscribeFromChannelEvents();
 
             // Aggregate inner-dispose failures so a throw from one half does not
-            // strand the other and leak its slab back to the pool (#305).
+            // strand the other and leak its slab back to the pool.
             List<Exception>? errors = null;
             try { _writeChannel.Dispose(); }
             catch (Exception ex) { (errors ??= []).Add(ex); }
@@ -263,7 +263,7 @@ public sealed class DuplexStreamTransit : Stream, ITransit
         UnsubscribeFromChannelEvents();
 
         // Aggregate inner-dispose failures so a throw from one half does not
-        // strand the other and leak its slab back to the pool (#305).
+        // strand the other and leak its slab back to the pool.
         List<Exception>? errors = null;
         try { await _writeChannel.DisposeAsync().ConfigureAwait(false); }
         catch (Exception ex) { (errors ??= []).Add(ex); }

@@ -35,7 +35,7 @@ internal sealed class CoalescingSignal : IDisposable
         // may then dispose the underlying gate before the woken consumer reaches
         // Reset(). Without this guard, Reset() throws ObjectDisposedException on
         // the consumer thread (typically the multiplexer writer/flusher thread) —
-        // issue #281. Tolerate the dispose-during-Reset race: the consumer's outer
+        // issue. Tolerate the dispose-during-Reset race: the consumer's outer
         // loop will exit on the next iteration via its own cancellation check.
         if (_disposed) return;
         try { _gate.Reset(); }

@@ -25,7 +25,7 @@ public sealed class ChannelOptions
     /// <see cref="NetConduit.Interfaces.IStreamMultiplexer.OpenChannel(ChannelOptions)"/>
     /// at the boundary so misconfigured options surface immediately as
     /// <see cref="ArgumentOutOfRangeException"/> instead of becoming a silent
-    /// no-op timeout or an unbounded wait deeper in the send path (#387).
+    /// no-op timeout or an unbounded wait deeper in the send path.
     /// <see cref="System.Threading.Timeout.InfiniteTimeSpan"/> is the only
     /// negative <see cref="TimeSpan"/> permitted; it is the sentinel for
     /// "wait forever".

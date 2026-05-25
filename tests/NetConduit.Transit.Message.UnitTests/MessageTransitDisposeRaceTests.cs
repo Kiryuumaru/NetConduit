@@ -4,7 +4,7 @@ using NetConduit.Transit.Message;
 
 namespace NetConduit.Transit.Message.UnitTests;
 
-// Regression coverage for #219: MessageTransit.Dispose / DisposeAsync used to
+// Regression coverage for: MessageTransit.Dispose / DisposeAsync used to
 // dispose the SemaphoreSlim mutexes without coordinating with an in-flight
 // SendAsync / ReceiveAsync. The in-flight operation's finally block would call
 // _sendLock.Release() on an already-disposed semaphore and surface
@@ -49,7 +49,7 @@ public class MessageTransitDisposeRaceTests
         // Acceptable outcomes: clean completion, OperationCanceledException
         // (linked dispose CTS), or a channel-level exception. NOT acceptable:
         // ObjectDisposedException whose message names the semaphore — that's
-        // the #219 bug surfacing.
+        // the bug surfacing.
         if (threw && exception is ObjectDisposedException ode &&
             ode.Message.Contains("semaphore", StringComparison.OrdinalIgnoreCase))
         {

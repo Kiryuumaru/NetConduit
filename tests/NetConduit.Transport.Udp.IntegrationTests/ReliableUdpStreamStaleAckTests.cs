@@ -11,7 +11,7 @@ public class ReliableUdpStreamStaleAckTests
     private const byte FlagAck = 0x02;
 
     /// <summary>
-    /// Regression for #302: a delayed/duplicated ACK for a previous sequence number must not
+    /// Regression for: a delayed/duplicated ACK for a previous sequence number must not
     /// complete the pending-ACK TCS for the current send. Pre-fix, a stale ACK completed the
     /// TCS with the wrong seq, the send loop saw acked != _sendSeq, retransmitted, then
     /// re-awaited the already-completed TCS — spinning into an infinite tight resend loop.

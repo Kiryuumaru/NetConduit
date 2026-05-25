@@ -4,8 +4,8 @@ using Xunit;
 namespace NetConduit.UnitTests;
 
 /// <summary>
-/// Regression tests for #237 — pre-handshake OpenChannel must not allocate a
-/// wire index from the default odd parity. Both peers' Create(...) factories
+/// Regression tests for — pre-handshake OpenChannel must not allocate a
+/// wire index from the default odd parity. Both peers' Create(.) factories
 /// seed _nextChannelIndex to 1; the real parity is only decided by the
 /// handshake's session-GUID comparison. If allocation runs before the
 /// handshake flips one side to even, both sides bake index 1 into queued

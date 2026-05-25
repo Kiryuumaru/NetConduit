@@ -21,7 +21,7 @@ public static class QuicMultiplexer
 
     // 1-byte NetConduit protocol preface. Both endpoints must agree on this
     // byte before the mux runs framing on the QUIC stream. Bumping this value
-    // is the protocol-version gate (#255).
+    // is the protocol-version gate.
     private const byte ExpectedPreface = 0x01;
 
     /// <summary>
@@ -252,7 +252,7 @@ public static class QuicMultiplexer
                     // QuicStream.ReadAsync may return 0 (peer closed write side without
                     // sending the preface) or a short read; both must be rejected so the
                     // mux gets a clear protocol-mismatch error instead of an EOF or
-                    // garbage on the first frame-header read (#255).
+                    // garbage on the first frame-header read.
                     var preface = new byte[1];
                     int total = 0;
                     while (total < preface.Length)

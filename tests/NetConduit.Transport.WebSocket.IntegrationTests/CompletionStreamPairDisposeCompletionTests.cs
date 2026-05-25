@@ -4,12 +4,12 @@ using NetConduit.Interfaces;
 namespace NetConduit.Transport.WebSocket.IntegrationTests;
 
 /// <summary>
-/// #353 regression: WebSocketMuxListener.CompletionStreamPair.DisposeAsync must complete
+/// WebSocketMuxListener.CompletionStreamPair.DisposeAsync must complete
 /// its TaskCompletionSource even when the inner IStreamPair.DisposeAsync throws.
-/// Without the fix, HandleAsync hangs on completion.Task.WaitAsync until request
+/// Without this, HandleAsync hangs on completion.Task.WaitAsync until request
 /// cancellation fires.
 /// </summary>
-public class Issue353CompletionStreamPairDisposeTests
+public class CompletionStreamPairDisposeCompletionTests
 {
     [Fact(Timeout = 5000)]
     public async Task DisposeAsync_InnerThrows_StillSignalsCompletion()
@@ -27,7 +27,7 @@ public class Issue353CompletionStreamPairDisposeTests
         await Assert.ThrowsAsync<InvalidOperationException>(async () => await pair.DisposeAsync());
 
         Assert.True(completion.Task.IsCompletedSuccessfully,
-            "completion.TrySetResult must fire even when inner.DisposeAsync throws (issue #353).");
+            "completion.TrySetResult must fire even when inner.DisposeAsync throws.");
         Assert.True(throwingPair.DisposeCalled);
     }
 

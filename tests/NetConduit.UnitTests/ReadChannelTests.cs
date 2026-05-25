@@ -296,7 +296,7 @@ public sealed class ReadChannelTests
         channel.SetClosed(ChannelCloseReason.MuxDisposed);
 
         Assert.True(IsSlabReturned(channel),
-            "MuxDisposed must release the slab to the pool without requiring DisposeAsync (issue #199).");
+            "MuxDisposed must release the slab to the pool without requiring DisposeAsync.");
     }
 
     [Fact]
@@ -334,7 +334,7 @@ public sealed class ReadChannelTests
         channel.SetClosed(ChannelCloseReason.RemoteFin);
 
         Assert.True(IsSlabReturned(channel),
-            "Graceful close with no buffered data must release the slab immediately (issue #199).");
+            "Graceful close with no buffered data must release the slab immediately.");
     }
 
     [Fact]
@@ -368,7 +368,7 @@ public sealed class ReadChannelTests
         int read1 = await channel.ReadAsync(buffer);
         Assert.Equal(3, read1);
         Assert.True(IsSlabReturned(channel),
-            "Draining the last buffered byte after close must release the slab (issue #199).");
+            "Draining the last buffered byte after close must release the slab.");
 
         int read2 = await channel.ReadAsync(buffer);
         Assert.Equal(0, read2);

@@ -8,16 +8,15 @@ using NetConduit.Transport.WebSocket;
 
 namespace NetConduit.Transport.WebSocket.IntegrationTests;
 
-public class Issue354ChannelClosedReconnectTests
+public class EvictedSessionReconnectRefusalTests
 {
     /// <summary>
-    /// #354 regression: when a reconnect HandleAsync(sessionId=X) is blocked on a full
-    /// ConnectionChannel and the session is evicted (channel writer completed), the catch
-    /// of ChannelClosedException MUST refuse the reconnect with a PolicyViolation close.
+    /// When a reconnect HandleAsync(sessionId=X) is blocked on a full ConnectionChannel
+    /// and the session is evicted (channel writer completed), the catch of
+    /// ChannelClosedException MUST refuse the reconnect with a PolicyViolation close.
     /// Falling through to fresh-session creation silently binds the pair to a brand-new
     /// SessionId Y ≠ X, causing the client's reconnect handshake to fault with
-    /// SessionMismatch and leaking a mux under a key the client cannot reach — the exact
-    /// defect #236 fixed.
+    /// SessionMismatch and leaking a mux under a key the client cannot reach.
     /// </summary>
     [Fact(Timeout = 30000)]
     public async Task ReconnectBlockedOnFullChannel_SessionEvicted_RefusesInsteadOfNewMux()
@@ -93,7 +92,7 @@ public class Issue354ChannelClosedReconnectTests
             // 4. HandleAsync#2 must return cleanly without spinning up a fresh mux.
             await handle2Task.WaitAsync(TimeSpan.FromSeconds(5));
 
-            // 5. Client #2 observes the PolicyViolation close frame — proves the listener
+            // 5. Client observes the PolicyViolation close frame — proves the listener
             //    refused the reconnect rather than silently re-binding to a new SessionId.
             var buf = new byte[256];
             var rcv = await client2.ReceiveAsync(buf, cts.Token);

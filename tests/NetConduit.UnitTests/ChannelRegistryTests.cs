@@ -6,7 +6,7 @@ namespace NetConduit.UnitTests;
 public sealed class ChannelRegistryTests
 {
     /// <summary>
-    /// Regression for #268. When RegisterWriteChannel succeeds on the per-index
+    /// Regression for. When RegisterWriteChannel succeeds on the per-index
     /// insert but loses the per-id race (a channel with the same ChannelId was
     /// already registered at a different index), the throw must NOT leave the
     /// per-index entry populated — that would orphan the channel in _writeChannels,
@@ -32,7 +32,7 @@ public sealed class ChannelRegistryTests
     }
 
     /// <summary>
-    /// Regression for #268 (ReadChannel side). Same semantics as the write-side
+    /// Regression for (ReadChannel side). Same semantics as the write-side
     /// test above: per-index entry must be rolled back when the per-id insert
     /// loses the race.
     /// </summary>
@@ -52,7 +52,7 @@ public sealed class ChannelRegistryTests
     }
 
     /// <summary>
-    /// Regression for #179 / #229. The fast-path scenario: an inbound INIT
+    /// Regression for. The fast-path scenario: an inbound INIT
     /// has registered the channel in _idToIndex BEFORE AcceptChannelAsync is
     /// called, but EnqueueForAccept has not yet fired. AcceptChannelAsync
     /// must register its TCS first, complete it via fast-path with the
@@ -92,7 +92,7 @@ public sealed class ChannelRegistryTests
     }
 
     /// <summary>
-    /// Regression for #179 / #229 — the canonical race: AcceptChannelAsync
+    /// Regression for — the canonical race: AcceptChannelAsync
     /// registers its TCS, then the dispatcher commits RegisterReadChannel
     /// (so a re-check would hit _idToIndex). The TCS-routing fix completes
     /// the TCS via fast-path; the dispatcher's subsequent EnqueueForAccept
@@ -138,7 +138,7 @@ public sealed class ChannelRegistryTests
     }
 
     /// <summary>
-    /// Regression for #179 / #229 — close+reopen edge case. After a successful
+    /// Regression for — close+reopen edge case. After a successful
     /// AcceptChannelAsync via fast-path, the TCS is left completed in
     /// _pendingAccepts. If the same channel id is later closed and re-INITed,
     /// EnqueueForAccept must NOT silently drop the new channel (which would
@@ -178,7 +178,7 @@ public sealed class ChannelRegistryTests
     }
 
     /// <summary>
-    /// Regression for #228. UnregisterChannel must scope its _idToIndex removal
+    /// Regression for. UnregisterChannel must scope its _idToIndex removal
     /// to the (channelId, index) pair: a call with a channelId that resolves to
     /// a *different* index must NOT remove the legitimate mapping. Otherwise a
     /// well-meaning cleanup of a failed registration (or any future caller that
@@ -194,7 +194,7 @@ public sealed class ChannelRegistryTests
         registry.RegisterReadChannel(2, legitimate);
 
         // Mismatched call: index 4 was never registered for "shared-id". This can
-        // arise from a caller cleaning up after a failed RegisterReadChannel(4, ...)
+        // arise from a caller cleaning up after a failed RegisterReadChannel(4.)
         // when the failure mode is the per-id race (index 4 was rolled back but
         // _idToIndex still points at index 2).
         registry.UnregisterChannel(4, "shared-id");
@@ -205,7 +205,7 @@ public sealed class ChannelRegistryTests
 
     /// <summary>
     /// UnregisterChannel(index, channelId) with the channel's own (index, channelId)
-    /// pair must still remove the ID mapping — the scoping fix from #228 must not
+    /// pair must still remove the ID mapping — the scoping must not
     /// regress the normal path.
     /// </summary>
     [Fact]
@@ -223,7 +223,7 @@ public sealed class ChannelRegistryTests
     }
 
     /// <summary>
-    /// Regression for #269. EnqueueForAccept loses the cancellation race against
+    /// Regression for. EnqueueForAccept loses the cancellation race against
     /// AcceptChannelAsync's ct.Register callback when both run after the dictionary
     /// TryRemove but before TrySetResult. The TCS in _pendingAccepts ends up in
     /// the Cancelled state, EnqueueForAccept's TrySetResult returns false, and the
@@ -259,7 +259,7 @@ public sealed class ChannelRegistryTests
     }
 
     /// <summary>
-    /// Regression for #269 (cancellation side). When the awaiter's ct fires AFTER
+    /// Regression for (cancellation side). When the awaiter's ct fires AFTER
     /// EnqueueForAccept has already won the dictionary TryRemove (and therefore
     /// removed the TCS from the dictionary), the cancellation callback's own
     /// TryRemove returns false. In that case it MUST NOT call TrySetCanceled

@@ -24,7 +24,7 @@ internal sealed class ReadChannel : Stream, IReadChannel, IValueTaskSource<int>
     private readonly IChannelOwner? _owner;
     // Cached method-group target for SafeEventRaiser so the channel event raise
     // sites can pass a single Action<Exception>? without re-checking the
-    // nullable owner each time (#286). Null when the channel was constructed
+    // nullable owner each time. Null when the channel was constructed
     // without an owner (some test/internal contexts).
     private readonly Action<Exception>? _onHandlerException;
     private int _slabReturned; // CAS guard: ensures slab is returned to pool exactly once
@@ -39,7 +39,7 @@ internal sealed class ReadChannel : Stream, IReadChannel, IValueTaskSource<int>
     // reports this value can be applied directly as a slab position. NOTE: this
     // is wire-received accounting only; the ACK position reported to the peer
     // tracks _drainedFrameBytes (consumer-consumed) instead so a slow consumer
-    // pins the writer's slab and produces real backpressure (#394).
+    // pins the writer's slab and produces real backpressure.
     private long _frameBytesReceived;
     private long _ackSentFrameBytes;
 
@@ -48,7 +48,7 @@ internal sealed class ReadChannel : Stream, IReadChannel, IValueTaskSource<int>
     // emptied). Reported as the ACK position so the writer's slab compacts
     // only after the consumer catches up; while the consumer lags, no ACK
     // flows, the writer's slab fills, and WriteAsync blocks — the documented
-    // "slow consumer slows producer" backpressure contract (#394). Updated
+    // "slow consumer slows producer" backpressure contract. Updated
     // whenever (a) direct delivery consumes a whole frame (slab bypass) or
     // (b) ReadAsync drains the slab to empty.
     private long _drainedFrameBytes;
@@ -73,12 +73,12 @@ internal sealed class ReadChannel : Stream, IReadChannel, IValueTaskSource<int>
     private volatile ChannelState _state = ChannelState.Opening;
     private volatile bool _isReady;
     private volatile bool _isConnected;
-    private int _connectedFired; // CAS guard: ensures Connected fires exactly once per connect transition (#357)
+    private int _connectedFired; // CAS guard: ensures Connected fires exactly once per connect transition
     private ChannelCloseReason? _closeReason;
     private Exception? _closeException;
     // CAS guard: ensures the stats decrement and ChannelClosed event fire exactly once,
     // regardless of whether the close path is the inbound FIN dispatcher or
-    // local DisposeAsync/Dispose. Issue #172.
+    // local DisposeAsync/Dispose. Issue.
     private int _completionAccounted;
 
     /// <summary>
@@ -179,7 +179,7 @@ internal sealed class ReadChannel : Stream, IReadChannel, IValueTaskSource<int>
         // Promote Opening → Open atomically under _lock so a concurrent
         // SetClosed cannot land between the check and the write and leave the
         // channel resurrected to Open after its slab/handlers were torn down
-        // (issue #163). Closing/Closed/Open are all no-ops; only Opening promotes.
+        // . Closing/Closed/Open are all no-ops; only Opening promotes.
         bool promoted;
         lock (_lock)
         {
@@ -194,7 +194,7 @@ internal sealed class ReadChannel : Stream, IReadChannel, IValueTaskSource<int>
             // Raise synchronous Ready first so handlers observe a ready channel,
             // then complete the TCS so async awaiters resume only after handlers ran.
             // Multicast-safe: a throwing user handler must not crash the mux reader
-            // thread that drove MarkOpen (#286).
+            // thread that drove MarkOpen.
             SafeEventRaiser.Raise(this, Ready, _onHandlerException);
             _readyTcs.TrySetResult();
         }
@@ -206,7 +206,7 @@ internal sealed class ReadChannel : Stream, IReadChannel, IValueTaskSource<int>
         // successful handshake, and AcceptChannel/TryRegisterChannels also call
         // it on the fast path when _isConnected is already true. A channel
         // registered between those two sites would otherwise receive two
-        // Connected events for a single transport-up transition (#357). CAS on
+        // Connected events for a single transport-up transition. CAS on
         // _connectedFired promotes 0->1 exactly once per connect transition;
         // MarkDisconnected resets the flag so a subsequent reconnect re-fires.
         if (Interlocked.Exchange(ref _connectedFired, 1) == 1) return;
@@ -217,7 +217,7 @@ internal sealed class ReadChannel : Stream, IReadChannel, IValueTaskSource<int>
     internal void MarkDisconnected(DisconnectReason reason, Exception? exception = null)
     {
         // Pair the _connectedFired reset with _isConnected = false so the next
-        // MarkConnected on this channel re-fires Connected (#357).
+        // MarkConnected on this channel re-fires Connected.
         if (Interlocked.Exchange(ref _connectedFired, 0) == 0) return;
         _isConnected = false;
         // The reconnect handshake advertises this side's current _frameBytesReceived
@@ -226,7 +226,7 @@ internal sealed class ReadChannel : Stream, IReadChannel, IValueTaskSource<int>
         // never have to skip a replayed prefix. Computing skip from local-only state would
         // be wrong: _ackSentFrameBytes is bumped on local enqueue of an ACK, not on peer
         // delivery, so a lost ACK frame on the wire would yield a too-short skip and
-        // duplicate-deliver bytes to ReadAsync (issue #161).
+        // duplicate-deliver bytes to ReadAsync.
         _skipFrameBytes = 0;
         SafeEventRaiser.Raise(this, Disconnected, new DisconnectedEventArgs(reason, exception), _onHandlerException);
     }
@@ -235,7 +235,7 @@ internal sealed class ReadChannel : Stream, IReadChannel, IValueTaskSource<int>
     /// Total frame bytes (header + payload) received on this channel across all sessions,
     /// counting every frame type that consumes slab on the peer's writer — currently INIT
     /// and DATA. Advertised in the reconnect handshake so the peer's writer can rewind its
-    /// replay base to exactly this position (issue #161).
+    /// replay base to exactly this position.
     /// </summary>
     internal long FrameBytesReceived => _frameBytesReceived;
 
@@ -252,7 +252,7 @@ internal sealed class ReadChannel : Stream, IReadChannel, IValueTaskSource<int>
         _frameBytesReceived += frameBytes;
         // INIT bytes are not delivered to a user buffer; they count as
         // consumed immediately so the ACK position can advance past them
-        // (#394). Without this snap, the first ACK would underreport by
+        // . Without this snap, the first ACK would underreport by
         // the INIT frame size and the writer's slab would never compact
         // its INIT slot.
         if (_receivedPos == _consumedPos)
@@ -292,7 +292,7 @@ internal sealed class ReadChannel : Stream, IReadChannel, IValueTaskSource<int>
                     Interlocked.Add(ref Stats._bytesReceived, toCopy);
                     // Consumer just drained the slab to empty -> every frame
                     // received so far is now consumer-consumed and can be
-                    // ACKed (#394). The frame-byte accounting cannot drift
+                    // ACKed. The frame-byte accounting cannot drift
                     // because _frameBytesReceived is monotonic and the slab
                     // contains payload-only bytes from those exact frames.
                     if (_receivedPos == _consumedPos)
@@ -430,7 +430,7 @@ internal sealed class ReadChannel : Stream, IReadChannel, IValueTaskSource<int>
             // If the entire frame went direct to the user buffer (no slab
             // overflow), the slab is still empty -> snap drained-counter
             // to received-counter so the next ACK reflects consumption
-            // (#394). When there's slab overflow, the snap is deferred
+            // . When there's slab overflow, the snap is deferred
             // until ReadAsync drains the slab to empty.
             if (_receivedPos == _consumedPos)
             {
@@ -510,7 +510,7 @@ internal sealed class ReadChannel : Stream, IReadChannel, IValueTaskSource<int>
     private void MaybeSendAck()
     {
         if (_owner is null) return;
-        // Report consumer-drained bytes, not wire-received bytes (#394).
+        // Report consumer-drained bytes, not wire-received bytes.
         // The writer applies the ACK as a slab-position so it can release
         // those bytes from its own slab and unblock WriteAsync. If the
         // consumer lags the wire, _drainedFrameBytes stays behind and the
@@ -521,7 +521,7 @@ internal sealed class ReadChannel : Stream, IReadChannel, IValueTaskSource<int>
             // Only advance the high-water mark when the ACK was actually
             // staged. If the control-channel slab is currently full, retain
             // the unacked accumulator so the next gate crossing retries with
-            // the latest cumulative position (issue #291).
+            // the latest cumulative position.
             if (_owner.SendAck(_channelIndex, (ulong)_drainedFrameBytes))
                 _ackSentFrameBytes = _drainedFrameBytes;
         }
@@ -568,7 +568,7 @@ internal sealed class ReadChannel : Stream, IReadChannel, IValueTaskSource<int>
             // - MuxDisposed: the mux is gone, no further reads can succeed.
             //   Drop any buffered data (zero positions so subsequent ReadAsync
             //   returns EOF) and release the slab unconditionally. Mirrors
-            //   WriteChannel.SetClosed's MuxDisposed branch (issue #169).
+            //   WriteChannel.SetClosed's MuxDisposed branch.
             // - Graceful close with no buffered data (Fin/Err/LocalClose):
             //   no consumer drain is possible; release the slab immediately.
             // - Graceful close with buffered data: preserve the slab so the

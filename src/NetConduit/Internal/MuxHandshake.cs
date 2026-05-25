@@ -24,7 +24,7 @@ internal static class MuxHandshake
     //               [channelIndex : 2B BE][frameBytesReceived : 8B BE] * channelCount
     //               = 23B header + 10B per channel entry
     //
-    // The 4-byte max-recv-payload tail (#180) advertises the largest single
+    // The 4-byte max-recv-payload tail advertises the largest single
     // frame payload this peer will accept on any inbound channel — equal to
     // its DefaultChannelOptions.SlabSize. The remote clamps every WriteAsync
     // against this so a heterogeneous slab configuration cannot send a frame
@@ -32,7 +32,7 @@ internal static class MuxHandshake
     // loop with MultiplexerException(ProtocolError) and burned reconnect
     // attempts replaying the same oversize frame).
     //
-    // The per-channel replay position vector (#161) advertises each side's
+    // The per-channel replay position vector advertises each side's
     // FrameBytesReceived for every active inbound channel so the writer can
     // rewind its replay base to the byte the peer actually delivered. Without
     // it, a lost ACK frame causes the writer's _ackedPos to lag the reader's
@@ -136,8 +136,8 @@ internal static class MuxHandshake
     /// when its session id matches the established peer (i.e. the remote did
     /// not observe the prior handshake's completion before the route failed).
     ///
-    /// The reconnect payload carries a re-negotiated max-recv-payload (#180)
-    /// and a per-channel position vector (#161) advertising each side's
+    /// The reconnect payload carries a re-negotiated max-recv-payload
+    /// and a per-channel position vector advertising each side's
     /// <c>FrameBytesReceived</c> for every active inbound channel;
     /// <paramref name="applyRemotePositions"/> is invoked with the remote's
     /// vector so the local writer can rewind its replay base to the byte
@@ -158,8 +158,8 @@ internal static class MuxHandshake
 
         // Symmetric reconnect: both sides send Reconnect, both read Reconnect.
         // Same pattern as initial handshake (send session ID, read session ID), plus
-        // re-negotiated max-recv-payload (#180) and a per-channel position vector
-        // (#161) that lets each side rewind its writer's replay base to the peer's
+        // re-negotiated max-recv-payload and a per-channel position vector
+        //  that lets each side rewind its writer's replay base to the peer's
         // actually-received position.
         if (localPositions.Count > ushort.MaxValue)
             throw new MultiplexerException(ErrorCode.Internal, "Too many channels for reconnect handshake.");

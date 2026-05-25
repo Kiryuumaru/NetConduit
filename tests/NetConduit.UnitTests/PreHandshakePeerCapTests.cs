@@ -3,15 +3,15 @@ using NetConduit.Internal;
 namespace NetConduit.UnitTests;
 
 /// <summary>
-/// Regression tests for #358 — pre-handshake WriteAsync must use a conservative
-/// peer-recv-payload cap (MinSlabSize) instead of the default 1 MiB. Otherwise
-/// a caller can buffer a frame that is wire-legal for the local 1 MiB default
-/// but exceeds the peer's actual advertised cap once the handshake lands. The
-/// drainer then ships an oversize frame, the peer faults BufferInSlab with
+/// Pre-handshake WriteAsync must use a conservative peer-recv-payload cap
+/// (MinSlabSize) instead of the default 1 MiB. Otherwise a caller can buffer
+/// a frame that is wire-legal for the local 1 MiB default but exceeds the
+/// peer's actual advertised cap once the handshake lands. The drainer then
+/// ships an oversize frame, the peer faults BufferInSlab with
 /// MultiplexerException(ProtocolError), and every reconnect attempt replays
 /// the same frame until MaxAutoReconnectAttempts is exhausted.
 /// </summary>
-public sealed class Issue358PreHandshakePeerCapTests
+public sealed class PreHandshakePeerCapTests
 {
     private sealed class TestRouter : IChannelOwner
     {
@@ -48,7 +48,7 @@ public sealed class Issue358PreHandshakePeerCapTests
         // must be the binding constraint pre-handshake.
         var channel = CreateChannel(slabSize: FrameConstants.DefaultSlabSize);
 
-        // 900 KiB — the example payload from issue #358.
+        // 900 KiB — the example payload from issue.
         byte[] payload = new byte[900 * 1024];
 
         var ex = await Assert.ThrowsAsync<ArgumentOutOfRangeException>(

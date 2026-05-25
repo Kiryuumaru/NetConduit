@@ -32,29 +32,29 @@ public sealed class MessageTransit<TSend, TReceive> : ITransit
     // disposing the SemaphoreSlim while a caller is still inside the protected
     // section would either race the caller's Release() (throws ObjectDisposed-
     // Exception, masking the genuine channel exception) or leave the dispose
-    // path acquiring an already-disposed handle (#219).
+    // path acquiring an already-disposed handle.
     private readonly CancellationTokenSource _disposeCts = new();
     private volatile bool _disposed;
     private volatile bool _readyFired;
     // Set once when the inbound channel reaches EOF. ReceiveAllAsync consults
     // this instead of `message is null`, which is always false for non-nullable
     // value-type TReceive and would otherwise yield default(TReceive) forever
-    // after the channel closes (issue #177).
+    // after the channel closes.
     private volatile bool _receiveEof;
     private readonly object _readyLock = new();
     // Connected/Disconnected edge latches for the AND-Connected / OR-Disconnected
     // / latch-reset pattern. Each transition resets the opposite latch so a
-    // reconnect cycle (Disconnected → Connected → Disconnected → ...) fires a
+    // reconnect cycle (Disconnected → Connected → Disconnected →.) fires a
     // fresh event each time, mirroring channel-level event semantics. Without
     // the reset, the first cycle latches both flags and subscribers stop
-    // observing events for the rest of the transit's lifetime (#370/#381/#405).
+    // observing events for the rest of the transit's lifetime.
     private readonly object _stateLock = new();
     private bool _connectedFired;
     private bool _disconnectedFired;
 
     // Per-frame receive state. Survives a cancellation between the length-prefix
     // read and the payload read so the underlying channel never sees a partial
-    // frame consume that would desync the next call's length prefix (#240).
+    // frame consume that would desync the next call's length prefix.
     // All access is serialized through _receiveLock.
     private readonly byte[] _pendingLengthBytes = new byte[4];
     private int _pendingLengthOffset;
@@ -66,7 +66,7 @@ public sealed class MessageTransit<TSend, TReceive> : ITransit
     // committed to consuming from the channel (length prefix was read and
     // validated as too large). These bytes MUST be drained from the channel
     // before the next length prefix can be parsed, or the framing desyncs
-    // permanently (#278). Survives cancellation: a cancelled drain resumes
+    // permanently. Survives cancellation: a cancelled drain resumes
     // on the next ReceiveAsync call. uint covers the full 4-byte length range.
     private uint _pendingDrainRemaining;
 
@@ -112,7 +112,7 @@ public sealed class MessageTransit<TSend, TReceive> : ITransit
     // Channel.Ready is single-shot; if all configured channels were already
     // ready before we subscribed, the event we wired up will never fire.
     // Synthesise the call so subscribers attached after construction still
-    // observe Ready exactly once (#266). OnChannelReady's _readyFired guard
+    // observe Ready exactly once. OnChannelReady's _readyFired guard
     // makes the synthesised call race-safe against a concurrent genuine event.
     private void ReplayReadyIfChannelsAlreadyReady()
     {
@@ -154,16 +154,15 @@ public sealed class MessageTransit<TSend, TReceive> : ITransit
         handlers?.Invoke(this, EventArgs.Empty);
     }
 
-    // #381/#405: Each underlying half (write + read) raises its own Connected
+    // Each underlying half (write + read) raises its own Connected
     // and Disconnected events. Forwarding each one independently fired the
     // transit's events twice when both halves were configured for a
-    // bidirectional MessageTransit. Mirrors the DuplexStreamTransit fix from
-    // #191/#349.
+    // bidirectional MessageTransit. Mirrors the DuplexStreamTransit fix.
     //
     // Connected fires once when ALL configured halves are connected.
     // Disconnected fires once on the FIRST half going down.
     //
-    // #370/#371/#396: Each transition resets the opposite latch so the next
+    // Each transition resets the opposite latch so the next
     // reconnect cycle observes a fresh edge. Without the reset, the latches
     // stick after the first cycle and reconnect-aware subscribers stop
     // receiving events for the entire lifetime of the transit.
@@ -223,7 +222,7 @@ public sealed class MessageTransit<TSend, TReceive> : ITransit
     /// <remarks>
     /// Latching: subscribers attached after the transit has already become Ready are
     /// invoked immediately on subscription, so callers that wait for channel readiness
-    /// before constructing the transit still observe the event exactly once (#266).
+    /// before constructing the transit still observe the event exactly once.
     /// </remarks>
     public event EventHandler? Ready
     {
@@ -328,7 +327,7 @@ public sealed class MessageTransit<TSend, TReceive> : ITransit
         {
             // Drain any payload bytes still owed to a previously-rejected
             // over-max message so the next length prefix lands on a clean
-            // frame boundary (#278). If cancelled mid-drain, _pendingDrainRemaining
+            // frame boundary. If cancelled mid-drain, _pendingDrainRemaining
             // preserves progress for the next call.
             if (_pendingDrainRemaining > 0)
             {
@@ -339,7 +338,7 @@ public sealed class MessageTransit<TSend, TReceive> : ITransit
             // prior ReceiveAsync was cancelled mid-prefix, _pendingLengthOffset
             // preserves how many bytes were already consumed so this call
             // resumes at the exact same byte boundary — preserving framing
-            // invariants across cancellation events (#240).
+            // invariants across cancellation events.
             while (_pendingPayloadBuffer is null && _pendingLengthOffset < 4)
             {
                 var n = await _readChannel.ReadAsync(
@@ -368,7 +367,7 @@ public sealed class MessageTransit<TSend, TReceive> : ITransit
                     // Mark the over-max payload bytes for drain on the next
                     // ReceiveAsync so framing resumes on a clean boundary
                     // instead of parsing payload bytes as the next length
-                    // prefix (#278). Clear the length-prefix progress; this
+                    // prefix. Clear the length-prefix progress; this
                     // length has been fully consumed.
                     _pendingLengthOffset = 0;
                     _pendingDrainRemaining = messageLength;
@@ -493,7 +492,7 @@ public sealed class MessageTransit<TSend, TReceive> : ITransit
             // EOF is signalled exclusively via `_receiveEof`. Using
             // `message is null` as a secondary terminator would conflate
             // genuine end-of-stream with a peer that legitimately sends a
-            // JSON `null` payload (issue #220) — losing that message and
+            // JSON `null` payload — losing that message and
             // every subsequent one. The flag is set inside ReceiveAsync
             // when the length-prefix or payload read returns 0 bytes.
             if (_receiveEof)
@@ -517,7 +516,7 @@ public sealed class MessageTransit<TSend, TReceive> : ITransit
         // unwind out of the channel I/O. Without this, disposing _sendLock /
         // _receiveLock while an operation is still in the protected section
         // races the caller's Release() and surfaces a misleading ObjectDisposed-
-        // Exception about the semaphore instead of the real channel exception (#219).
+        // Exception about the semaphore instead of the real channel exception.
         try { _disposeCts.Cancel(); } catch (ObjectDisposedException) { }
 
         // Drain in-flight operations by acquiring both locks. A misbehaving
@@ -569,7 +568,7 @@ public sealed class MessageTransit<TSend, TReceive> : ITransit
         UnsubscribeFromChannelEvents();
 
         // Same cancel+drain ordering as DisposeAsync so a synchronous caller
-        // also unwinds in-flight Send/Receive before the semaphores go away (#219).
+        // also unwinds in-flight Send/Receive before the semaphores go away.
         try { _disposeCts.Cancel(); } catch (ObjectDisposedException) { }
         using (var drainCts = new CancellationTokenSource(DisposeDrainTimeout))
         {
@@ -581,7 +580,7 @@ public sealed class MessageTransit<TSend, TReceive> : ITransit
             catch (ObjectDisposedException) { }
         }
 
-        // Aggregate per-step failures (#292) using each channel's synchronous Dispose.
+        // Aggregate per-step failures using each channel's synchronous Dispose.
         List<Exception>? errors = null;
         try { _writeChannel?.Dispose(); }
         catch (Exception ex) { (errors ??= []).Add(ex); }
@@ -607,7 +606,7 @@ public sealed class MessageTransit<TSend, TReceive> : ITransit
     // drained and disposed the semaphore while this operation was still
     // unwinding. Suppressing ODE here is what prevents the misleading
     // "semaphore has been disposed" exception from masking the real
-    // channel exception that triggered the unwind (#219).
+    // channel exception that triggered the unwind.
     private void ReleaseSendLockSafe()
     {
         try { _sendLock.Release(); }
