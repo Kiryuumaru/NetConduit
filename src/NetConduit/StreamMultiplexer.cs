@@ -255,11 +255,25 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IChannelOwner
                 this,
                 enableReplay);
 
-            _registry.RegisterWriteChannel(index, channel);
+            try
+            {
+                _registry.RegisterWriteChannel(index, channel);
 
-            // Send INIT frame (channel does it itself — builds the frame in its slab)
-            channel.WriteInitFrame(channelIdBytes);
-            // Channel stays in Opening/Pending state until remote ACKs the INIT
+                // Send INIT frame (channel does it itself — builds the frame in its slab)
+                channel.WriteInitFrame(channelIdBytes);
+                // Channel stays in Opening/Pending state until remote ACKs the INIT
+            }
+            catch
+            {
+                // RegisterWriteChannel throws ChannelExists on duplicate id; the
+                // WriteChannel constructor already rented its slab from
+                // ArrayPool<byte>.Shared and the caller never receives a handle
+                // to dispose. Abort returns the slab to the pool and disposes
+                // the space-available semaphore (fixes #390). Index allocation
+                // is intentionally monotonic and not reclaimed.
+                channel.Abort(ChannelCloseReason.LocalClose);
+                throw;
+            }
         }
 
         if (_isConnected)
@@ -617,9 +631,16 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IChannelOwner
         }
         catch (Exception ex)
         {
-            // Fatal error (protocol error, exhausted retries) — notify waiters
-            if (hasConnectedBefore)
-                AbortChannelsForTerminalTransportFailure(ex);
+            // Fatal error (protocol error, exhausted retries) — notify waiters.
+            // Always abort registered channels, regardless of hasConnectedBefore:
+            // pre-handshake channels rented their slab and parked their _readyTcs
+            // in the constructor, so a terminal first-connect failure that skips
+            // AbortAllChannels leaves channel.WaitForReadyAsync hanging forever
+            // and leaks the slab until the channel object becomes unreachable
+            // (fixes #385). AbortAllChannels is safe to call when no channels
+            // were ever connected — MarkDisconnected and SetClosed are both
+            // idempotent and tolerate Opening-state entries.
+            AbortChannelsForTerminalTransportFailure(ex);
 
             _readyTcs.TrySetException(ex);
         }
