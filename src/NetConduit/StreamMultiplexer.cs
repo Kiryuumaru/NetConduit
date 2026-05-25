@@ -344,7 +344,7 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IChannelOwner
         if (registrations.IsEmpty)
             throw new ArgumentException("At least one registration is required.", nameof(registrations));
 
-        return _channelRegistrar.TryRegisterChannels(registrations, _isConnected, out channels);
+        return _channelRegistrar.TryRegisterChannels(registrations, out channels);
     }
 
     /// <inheritdoc />
@@ -392,6 +392,20 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IChannelOwner
         _registry.CancelAllPendingAccepts();
 
         _disconnectReason = Enums.DisconnectReason.LocalDispose;
+        _isConnected = false;
+
+        // Local GoAway tears down the transport identically to a remote
+        // GoAway, so the mux-level Disconnected event must fire here too.
+        // _disconnectedFired is the single arbiter for terminal Disconnected
+        // emission across GoAwayAsync, the remote-GoAway branch in
+        // MainLoopAsync, and DisposeAsync, guaranteeing exactly-once
+        // delivery regardless of which teardown trigger fires first.
+        if (!_disconnectedFired)
+        {
+            _disconnectedFired = true;
+            RaiseEvent(Disconnected, new DisconnectedEventArgs(Enums.DisconnectReason.LocalDispose, null));
+        }
+
         _cts.Cancel();
     }
 
@@ -434,7 +448,7 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IChannelOwner
                     else
                     {
                         _conn.Transport = transport;
-                        await PerformHandshakeAsync(ct);
+                        _conn.UseOddIndices = await PerformHandshakeAsync(ct);
                     }
                 }
                 catch (OperationCanceledException) when (ct.IsCancellationRequested)
@@ -483,15 +497,26 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IChannelOwner
                 _isConnected = true;
                 _disconnectReason = null;
 
-                // Reassign any pre-handshake-allocated WriteChannel that landed
-                // on the wrong default-odd parity space so its queued INIT and
-                // any DATA frames go out under the parity decided by the
-                // session-GUID handshake. Done here on the first connect
-                // only; reconnects re-use the same parity (decided by the same
-                // session GUIDs) and AllocateChannelIndex below allocates from
-                // the correct space already.
+                // Commit the handshake-negotiated index parity and reassign any
+                // pre-handshake-allocated WriteChannel that landed on the wrong
+                // parity space as ONE atomic block under ChannelIndexLock.
+                // SetIndexParity resets _nextChannelIndex; any concurrent
+                // OpenChannel / TryRegisterChannels allocator holding the same
+                // lock around its allocate+register sequence must not observe
+                // the reset mid-batch, otherwise a later AllocateChannelIndex
+                // call can return an index already issued in the same batch
+                // and RegisterWriteChannel collides on the slot. First connect
+                // only; reconnects re-use the same session-GUID-derived parity
+                // and AllocateChannelIndex already returns indices in the
+                // correct space.
                 if (!hasConnectedBefore)
-                    ReassignPreHandshakeWriteChannelIndices();
+                {
+                    lock (_registry.ChannelIndexLock)
+                    {
+                        _registry.SetIndexParity(_conn.UseOddIndices);
+                        ReassignPreHandshakeWriteChannelIndices();
+                    }
+                }
 
                 // Create control channel on first connect
                 if (_conn.ControlChannel is null)
@@ -731,6 +756,8 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IChannelOwner
     }
 
     int IChannelOwner.PeerMaxRecvPayload => _conn.PeerMaxRecvPayload;
+
+    bool IChannelOwner.IsTransportConnected => _isConnected;
 
     // =====================================================================
     // Reader Thread — THE DISPATCHER (receive side)
@@ -1097,7 +1124,12 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IChannelOwner
             ControlFrameBuilder.BuildAckFrame(channelIndex, consumedPosition));
     }
 
-    private async Task PerformHandshakeAsync(CancellationToken ct)
+    // Performs the initial mux handshake and returns the negotiated index
+    // parity. The caller MUST commit the parity to the registry and reassign
+    // any pre-handshake-allocated channels as one atomic unit under
+    // ChannelIndexLock so concurrent channel allocations cannot interleave
+    // between the parity reset and the reassign-walk.
+    private async Task<bool> PerformHandshakeAsync(CancellationToken ct)
     {
         var transport = _conn.Transport ?? throw new InvalidOperationException("Transport not initialized.");
         var result = await MuxHandshake.PerformInitialAsync(
@@ -1107,7 +1139,7 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IChannelOwner
             ct);
         _conn.RemoteSessionId = result.RemoteSessionId;
         _conn.PeerMaxRecvPayload = result.PeerMaxRecvPayload;
-        _registry.SetIndexParity(result.UseOddIndices);
+        return result.UseOddIndices;
     }
 
     private async Task PerformReconnectHandshakeAsync(IStreamPair transport, CancellationToken ct)

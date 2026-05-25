@@ -28,14 +28,10 @@ internal sealed class ChannelBatchRegistrar(
     /// registration fails Phase-1 validation.
     /// </summary>
     /// <param name="registrations">Registrations to commit.</param>
-    /// <param name="isConnected">Snapshot of the mux's <c>_isConnected</c>
-    /// flag at the entry of the call. Freshly-committed channels are
-    /// transitioned to <c>Connected</c> when true.</param>
     /// <param name="channels">On success, maps each registration to its
     /// committed channel (write or read).</param>
     internal bool TryRegisterChannels(
         ReadOnlySpan<ChannelRegistration> registrations,
-        bool isConnected,
         out IReadOnlyDictionary<ChannelRegistration, IChannel> channels)
     {
         // Phase 1: validate every registration up-front. After this loop, the only
@@ -219,6 +215,16 @@ internal sealed class ChannelBatchRegistrar(
         // WriteInitFrame infallible here, so no rollback can be necessary.
         // Only freshly-committed write channels emit an INIT frame and bump open
         // stats; reused inbound channels do nothing here.
+        //
+        // IsTransportConnected MUST be read AFTER Phase 2 has published the
+        // channel into the registry: the multiplexer's connect path sets the
+        // flag true and then walks the registry calling MarkConnected on
+        // every registered channel. Reading after publish guarantees that
+        // either this read sees the live transport (and we MarkConnected
+        // here), or the connect-path walk observed our channel in the
+        // registry (and it MarkConnected for us). MarkConnected is
+        // idempotent so the two paths cannot double-fire Connected.
+        bool isConnectedNow = owner.IsTransportConnected;
         var result = new Dictionary<ChannelRegistration, IChannel>(count);
         int outboundCursor = 0;
         for (int i = 0; i < count; i++)
@@ -229,14 +235,14 @@ internal sealed class ChannelBatchRegistrar(
             {
                 var wc = committedWrites[outboundCursor++].Channel;
                 wc.WriteInitFrame(p.IdBytes);
-                if (isConnected) wc.MarkConnected();
+                if (isConnectedNow) wc.MarkConnected();
                 Interlocked.Increment(ref stats._openChannels);
                 Interlocked.Increment(ref stats._totalChannelsOpened);
             }
             else if (committedPendingAccepts.Contains((ReadChannel)ch))
             {
                 // Freshly-committed pending accept: mark connected just like AcceptChannel does.
-                if (isConnected) ((ReadChannel)ch).MarkConnected();
+                if (isConnectedNow) ((ReadChannel)ch).MarkConnected();
             }
             // else: reused existing inbound channel — no side effects.
 

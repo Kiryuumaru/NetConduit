@@ -62,4 +62,19 @@ internal interface IChannelOwner
     /// configuration cannot send a frame the receiver's slab cannot buffer.
     /// </summary>
     int PeerMaxRecvPayload { get; }
+
+    /// <summary>
+    /// Live snapshot of the multiplexer's transport-connected state. The
+    /// batch-register path reads this AFTER publishing a fresh channel into
+    /// the registry so it observes the same publish-then-read invariant as
+    /// single-channel <c>OpenChannel</c>: either the read returns true and
+    /// the caller marks the channel connected, or the connect-path's
+    /// registry walk sees the published channel and marks it connected.
+    /// </summary>
+    /// <remarks>
+    /// Defaults to <c>false</c> so isolated test fakes that exercise
+    /// individual channels without a real multiplexer do not need to
+    /// implement this member.
+    /// </remarks>
+    bool IsTransportConnected => false;
 }
