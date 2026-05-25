@@ -62,25 +62,36 @@ public sealed class DuplexStreamTransit : Stream, ITransit
     // transit to fire Connected twice and Disconnected twice. Connected fires
     // once when BOTH halves are connected; Disconnected fires once on the
     // first half going down.
+    //
+    // #371/#396: Each transition resets the opposite latch so the next
+    // reconnect cycle observes a fresh edge. Without the reset, the latches
+    // stick after the first cycle and reconnect-aware subscribers stop
+    // receiving events for the entire lifetime of the transit.
     private void OnChannelConnected(object? sender, EventArgs e)
     {
         if (!_writeChannel.IsConnected || !_readChannel.IsConnected) return;
+        bool fire = false;
         lock (_stateLock)
         {
             if (_connectedFired) return;
             _connectedFired = true;
+            _disconnectedFired = false;
+            fire = true;
         }
-        Connected?.Invoke(this, EventArgs.Empty);
+        if (fire) Connected?.Invoke(this, EventArgs.Empty);
     }
 
     private void OnChannelDisconnected(object? sender, DisconnectedEventArgs e)
     {
+        bool fire = false;
         lock (_stateLock)
         {
             if (_disconnectedFired) return;
             _disconnectedFired = true;
+            _connectedFired = false;
+            fire = true;
         }
-        Disconnected?.Invoke(this, e);
+        if (fire) Disconnected?.Invoke(this, e);
     }
 
     /// <inheritdoc/>

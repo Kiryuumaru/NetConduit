@@ -236,6 +236,12 @@ internal sealed class ReliableUdpStream : Stream
             }
             catch (OperationCanceledException)
             {
+                // Distinguish caller cancellation (propagate OCE) from honest
+                // retransmit-budget exhaustion (TimeoutException). Conflating
+                // the two hides genuine timeouts inside ambient cancellation
+                // handlers and reports cancelled sends as timeouts (#375).
+                if (cancellationToken.IsCancellationRequested)
+                    throw new OperationCanceledException(cancellationToken);
                 if (attempts > _options.MaxRetransmits)
                     throw new TimeoutException($"UDP send timed out after {attempts} attempts");
             }

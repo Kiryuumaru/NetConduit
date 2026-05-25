@@ -52,15 +52,21 @@ public sealed class Issue355KeepaliveSlabPressureTests
             conn,
             pingInterval: TimeSpan.FromMilliseconds(40),
             pingTimeout: TimeSpan.FromMilliseconds(20),
-            maxMissedPings: 5);
+            maxMissedPings: 50);
 
         using var cts = new CancellationTokenSource(TimeSpan.FromMilliseconds(300));
 
-        // Without the fix: the first SendPing call throws InvalidOperationException
-        // ("Slab full for raw frame.") out of RunAsync — the task faults.
-        // With the fix: TrySendPing returns false, the just-installed PendingPong
-        // is CompareExchange-cleared, the loop continues, and the cancellation
-        // cleanly exits via OperationCanceledException → suppressed → completion.
+        // Pre-fix (#355): the first SendPing call threw InvalidOperationException
+        // ("Slab full for raw frame.") out of RunAsync, faulting the keepalive
+        // task and tearing the mux down even on a healthy wire under transient
+        // control-slab pressure.
+        // Post-fix (#355 + #366): TrySendPing returns false, the just-installed
+        // PendingPong is CompareExchange-cleared, and the missed-ping counter
+        // increments. With maxMissedPings well above the cycles that fit in
+        // the cancellation window, cancellation wins and RunAsync returns
+        // cleanly. (#366 separately verifies that SUSTAINED slab pressure —
+        // past the maxMissedPings budget — DOES tear the keepalive down with
+        // IOException; that contract is exercised by Issue366 tests.)
         await keepalive.RunAsync(cts.Token);
 
         // PendingPong must be null after the cancelled-but-slab-pressured run:

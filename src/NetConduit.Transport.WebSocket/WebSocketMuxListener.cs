@@ -296,6 +296,21 @@ public sealed class WebSocketMuxListener : IAsyncDisposable
                 (errors ??= []).Add(ex);
             }
 
+            // #398: Drain any buffered CompletionStreamPair items still in the
+            // channel reader before disposing the mux. The reader may hold
+            // pairs that the mux never consumed (e.g. a reconnect arrived,
+            // was queued, but the mux DisposeAsync started before the
+            // reconnect handshake began). Without draining, each leaked pair
+            // holds an open WebSocket and a pending completion TCS, and the
+            // corresponding HandleAsync invocation hangs on
+            // completion.Task.WaitAsync until the request cancellation
+            // token fires.
+            while (entry.ConnectionChannel.Reader.TryRead(out var leakedPair))
+            {
+                try { await leakedPair.DisposeAsync().ConfigureAwait(false); }
+                catch (Exception ex) { (errors ??= []).Add(ex); }
+            }
+
             try
             {
                 await entry.Mux.DisposeAsync();

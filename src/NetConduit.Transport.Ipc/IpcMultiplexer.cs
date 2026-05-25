@@ -151,6 +151,20 @@ public static class IpcMultiplexer
                         {
                             client = await listener.AcceptTcpClientAsync(ct).ConfigureAwait(false);
                         }
+                        catch
+                        {
+                            // #403: AcceptTcpClientAsync cancellation/failure
+                            // leaves the registry FileStream open and the
+                            // endpoint exclusively locked until process exit
+                            // (DeleteOnClose only fires on dispose, not GC).
+                            // A second server bind on the same endpoint then
+                            // fails until the original process terminates,
+                            // because the registry file is held under
+                            // FileShare.Read | DeleteOnClose. Explicit
+                            // dispose releases the lock immediately.
+                            registry.Dispose();
+                            throw;
+                        }
                         finally
                         {
                             listener.Stop();

@@ -31,6 +31,42 @@ internal sealed class MuxConnectRetry(
     }
 
     /// <summary>
+    /// Awaits the inter-attempt delay between successive handshake retries
+    /// using the same exponential-backoff curve as
+    /// <see cref="ConnectWithRetryAsync(bool, CancellationToken)"/> and
+    /// raises a <c>Reconnecting</c> event for each retry so observers see
+    /// handshake-retry attempts on the same channel as transport-connect
+    /// retries. Replaces a flat <see cref="Task.Delay(TimeSpan, CancellationToken)"/>
+    /// in <c>MainLoopAsync</c> that ignored
+    /// <see cref="MultiplexerOptions.AutoReconnectBackoffMultiplier"/> and
+    /// never fired <c>Reconnecting</c> for handshake-only failures (#393).
+    /// </summary>
+    /// <param name="handshakeAttempt">
+    /// 1-based count of handshake attempts that have already failed.
+    /// </param>
+    /// <param name="ct">Cancellation token observed during the delay.</param>
+    internal async Task AwaitHandshakeRetryDelayAsync(int handshakeAttempt, CancellationToken ct)
+    {
+        double delay = options.AutoReconnectDelay.TotalMilliseconds;
+        double maxDelay = options.MaxAutoReconnectDelay.TotalMilliseconds;
+        const double MinRetryDelayMs = 10.0;
+        if (delay < MinRetryDelayMs) delay = MinRetryDelayMs;
+        if (maxDelay < delay) maxDelay = delay;
+
+        // Scale the base delay by the backoff multiplier raised to the number
+        // of failed attempts already observed. handshakeAttempt is 1 on the
+        // first retry, so the first wait uses base * multiplier^0 = base.
+        double scaled = delay;
+        for (int i = 1; i < handshakeAttempt; i++)
+        {
+            scaled = Math.Min(scaled * options.AutoReconnectBackoffMultiplier, maxDelay);
+        }
+
+        raiseReconnecting(new ReconnectingEventArgs(handshakeAttempt));
+        await Task.Delay(TimeSpan.FromMilliseconds(scaled), ct).ConfigureAwait(false);
+    }
+
+    /// <summary>
     /// Runs the connect-with-retry loop until an <see cref="IStreamPair"/>
     /// is produced, the retry budget is exhausted, or <paramref name="ct"/>
     /// is cancelled. Raises the <c>Reconnecting</c> event on every attempt

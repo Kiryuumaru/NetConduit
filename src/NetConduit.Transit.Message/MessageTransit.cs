@@ -42,6 +42,15 @@ public sealed class MessageTransit<TSend, TReceive> : ITransit
     // after the channel closes (issue #177).
     private volatile bool _receiveEof;
     private readonly object _readyLock = new();
+    // Connected/Disconnected edge latches for the AND-Connected / OR-Disconnected
+    // / latch-reset pattern. Each transition resets the opposite latch so a
+    // reconnect cycle (Disconnected → Connected → Disconnected → ...) fires a
+    // fresh event each time, mirroring channel-level event semantics. Without
+    // the reset, the first cycle latches both flags and subscribers stop
+    // observing events for the rest of the transit's lifetime (#370/#381/#405).
+    private readonly object _stateLock = new();
+    private bool _connectedFired;
+    private bool _disconnectedFired;
 
     // Per-frame receive state. Survives a cancellation between the length-prefix
     // read and the payload read so the underlying channel never sees a partial
@@ -145,9 +154,46 @@ public sealed class MessageTransit<TSend, TReceive> : ITransit
         handlers?.Invoke(this, EventArgs.Empty);
     }
 
-    private void OnChannelConnected(object? sender, EventArgs e) => Connected?.Invoke(this, EventArgs.Empty);
+    // #381/#405: Each underlying half (write + read) raises its own Connected
+    // and Disconnected events. Forwarding each one independently fired the
+    // transit's events twice when both halves were configured for a
+    // bidirectional MessageTransit. Mirrors the DuplexStreamTransit fix from
+    // #191/#349.
+    //
+    // Connected fires once when ALL configured halves are connected.
+    // Disconnected fires once on the FIRST half going down.
+    //
+    // #370/#371/#396: Each transition resets the opposite latch so the next
+    // reconnect cycle observes a fresh edge. Without the reset, the latches
+    // stick after the first cycle and reconnect-aware subscribers stop
+    // receiving events for the entire lifetime of the transit.
+    private void OnChannelConnected(object? sender, EventArgs e)
+    {
+        if ((_writeChannel?.IsConnected ?? true) == false) return;
+        if ((_readChannel?.IsConnected ?? true) == false) return;
+        bool fire = false;
+        lock (_stateLock)
+        {
+            if (_connectedFired) return;
+            _connectedFired = true;
+            _disconnectedFired = false;
+            fire = true;
+        }
+        if (fire) Connected?.Invoke(this, EventArgs.Empty);
+    }
 
-    private void OnChannelDisconnected(object? sender, DisconnectedEventArgs e) => Disconnected?.Invoke(this, e);
+    private void OnChannelDisconnected(object? sender, DisconnectedEventArgs e)
+    {
+        bool fire = false;
+        lock (_stateLock)
+        {
+            if (_disconnectedFired) return;
+            _disconnectedFired = true;
+            _connectedFired = false;
+            fire = true;
+        }
+        if (fire) Disconnected?.Invoke(this, e);
+    }
 
     /// <inheritdoc/>
     public bool IsReady

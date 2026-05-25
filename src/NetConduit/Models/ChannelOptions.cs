@@ -19,6 +19,25 @@ public sealed class ChannelOptions
 
     /// <summary>Timeout for write operations waiting for slab space.</summary>
     public TimeSpan SendTimeout { get; init; } = TimeSpan.FromSeconds(30);
+
+    /// <summary>
+    /// Validates that all fields hold legal values. Called by
+    /// <see cref="NetConduit.Interfaces.IStreamMultiplexer.OpenChannel(ChannelOptions)"/>
+    /// at the boundary so misconfigured options surface immediately as
+    /// <see cref="ArgumentOutOfRangeException"/> instead of becoming a silent
+    /// no-op timeout or an unbounded wait deeper in the send path (#387).
+    /// <see cref="System.Threading.Timeout.InfiniteTimeSpan"/> is the only
+    /// negative <see cref="TimeSpan"/> permitted; it is the sentinel for
+    /// "wait forever".
+    /// </summary>
+    public void Validate()
+    {
+        if (SendTimeout < TimeSpan.Zero && SendTimeout != Timeout.InfiniteTimeSpan)
+            throw new ArgumentOutOfRangeException(
+                nameof(SendTimeout),
+                SendTimeout,
+                $"{nameof(SendTimeout)} must be non-negative, or Timeout.InfiniteTimeSpan for no timeout.");
+    }
 }
 
 /// <summary>
