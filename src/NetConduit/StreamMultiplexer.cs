@@ -824,6 +824,29 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IChannelOwner
                 isNewlyAccepted = false;
             }
 
+            // Peer-reopen reconciliation (fixes #367). The peer's WriteChannel
+            // auto-unregisters its ChannelId when it closes, so the peer is
+            // free to immediately open a fresh channel under the same id at
+            // a brand-new index. On this side, the prior ReadChannel for that
+            // id stays in the registry until the local consumer disposes it,
+            // by design, so the consumer can still drain buffered post-FIN
+            // bytes through its existing reference and inspect the close
+            // reason. The two invariants collide when the peer's reopen INIT
+            // arrives before the consumer disposes: RegisterReadChannel
+            // would throw ChannelExists, fault the reader, and trigger an
+            // infinite reconnect-and-refault loop on every replay of the
+            // INIT frame. The structural resolution is to honour the
+            // peer's reopen atomically with the new registration under the
+            // same AcceptLock: if the existing ChannelId slot is held by a
+            // Closed channel, evict it. The consumer's reference to the
+            // closed channel remains valid; only the registry slot is
+            // yielded.
+            var stale = _registry.GetReadChannelById(channelId);
+            if (stale is not null && stale.State == ChannelState.Closed)
+            {
+                _registry.UnregisterChannel(stale.ChannelIndex, channelId);
+            }
+
             _registry.RegisterReadChannel(header.ChannelIndex, readChannel);
         }
 
