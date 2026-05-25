@@ -598,7 +598,14 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IChannelOwner
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
-            // Normal shutdown via Dispose/GoAway
+            // Normal shutdown via Dispose/GoAway. Complete _readyTcs so any
+            // WaitForReadyAsync caller without a CancellationToken observes a
+            // deterministic TaskCanceledException instead of hanging forever
+            // (fixes #395, #401). TrySetCanceled is a no-op once _readyTcs has
+            // already been completed via TrySetResult on a prior successful
+            // handshake, so reconnect-after-Ready dispose semantics are
+            // unchanged.
+            _readyTcs.TrySetCanceled(ct);
         }
         catch (Exception ex)
         {
@@ -1168,6 +1175,13 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IChannelOwner
         _isRunning = false;
         _isConnected = false;
         _disconnectReason ??= Enums.DisconnectReason.LocalDispose;
+
+        // Complete _readyTcs before signalling shutdown so a never-started mux
+        // (MainLoopAsync never ran, OCE catch never fires) still surfaces a
+        // TaskCanceledException to any pending WaitForReadyAsync caller
+        // instead of hanging forever (fixes #395, #401). Idempotent vs. a
+        // prior TrySetResult on the happy path.
+        _readyTcs.TrySetCanceled();
 
         _cts.Cancel();
 
