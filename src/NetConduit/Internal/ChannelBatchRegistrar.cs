@@ -164,7 +164,11 @@ internal sealed class ChannelBatchRegistrar(
                     catch (MultiplexerException)
                     {
                         // Race with a concurrent single-channel OpenChannel (which does
-                        // not take AcceptLock). Treat as collision.
+                        // not take AcceptLock). Treat as collision. The WriteChannel
+                        // ctor already rented its slab and is NOT in committedWrites
+                        // yet, so RollbackPartialBatch will not see it — Abort it
+                        // here to return the slab to the pool (fixes #384).
+                        wc.Abort(ChannelCloseReason.LocalClose);
                         RollbackPartialBatch(committedWrites, committedPendingAccepts);
                         channels = null!;
                         return false;
@@ -250,14 +254,29 @@ internal sealed class ChannelBatchRegistrar(
     {
         // Caller holds AcceptLock. Unregister in reverse insertion order; channel
         // indices are intentionally not reclaimed (allocation is monotonic).
+        //
+        // Each committed channel was constructed (which rents an ArrayPool<byte>
+        // slab in the ctor) and registered. UnregisterChannel /
+        // RemovePendingAcceptChannel only drop dictionary entries — they do
+        // NOT return the slab. Without an explicit Abort here, every
+        // partially-committed batch that hits a collision leaks one slab per
+        // already-committed channel out of ArrayPool<byte>.Shared until the
+        // orphan channel object is GC'd (which goes to the heap, not back to
+        // the pool). Mirror ChannelRegistry.AbortAllChannels's slab-return
+        // discipline (fixes #384).
         for (int i = committedWrites.Count - 1; i >= 0; i--)
         {
             var (idx, ch) = committedWrites[i];
             registry.UnregisterChannel(idx, ch.ChannelId);
+            ch.Abort(ChannelCloseReason.LocalClose);
         }
         for (int i = committedPendingAccepts.Count - 1; i >= 0; i--)
         {
-            registry.RemovePendingAcceptChannel(committedPendingAccepts[i].ChannelId);
+            var rc = committedPendingAccepts[i];
+            registry.RemovePendingAcceptChannel(rc.ChannelId);
+            // Freshly-committed pending accept has no buffered data, so
+            // ReadChannel.SetClosed(LocalClose) returns the slab immediately.
+            rc.SetClosed(ChannelCloseReason.LocalClose);
         }
     }
 

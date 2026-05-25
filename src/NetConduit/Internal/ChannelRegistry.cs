@@ -424,6 +424,27 @@ internal sealed class ChannelRegistry
 
     internal void AbortAllChannels(ChannelCloseReason reason, Exception? exception = null)
     {
+        // Teardown discipline: every registered channel that was ever connected
+        // must fire Disconnected before Closed (fixes #391). The natural
+        // transport-drop path in MainLoopAsync already calls MarkDisconnected
+        // explicitly; the mux-dispose, local-GoAway, remote-GoAway, and
+        // terminal-failure paths all funnel through AbortAllChannels and used
+        // to skip it, violating IChannel.Disconnected's documented contract.
+        // MarkDisconnected is idempotent (no-op on never-connected channels and
+        // on channels already disconnected this cycle), so the natural-drop
+        // path's explicit pre-call still suppresses a duplicate fire here.
+        DisconnectReason disconnectReason = reason switch
+        {
+            ChannelCloseReason.MuxDisposed => DisconnectReason.LocalDispose,
+            ChannelCloseReason.TransportFailed => DisconnectReason.TransportError,
+            _ => DisconnectReason.LocalDispose,
+        };
+        foreach (var channel in _writeChannels.Values)
+            channel.MarkDisconnected(disconnectReason, exception);
+        foreach (var channel in _readChannels.Values)
+            channel.MarkDisconnected(disconnectReason, exception);
+        // Pending accepts were never connected — no Disconnected event to fire.
+
         foreach (var channel in _writeChannels.Values)
             channel.SetClosed(reason, exception);
         foreach (var channel in _readChannels.Values)
