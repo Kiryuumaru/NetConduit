@@ -524,6 +524,14 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IChannelOwner
 
                 RaiseEvent(Connected);
 
+                // Reset the Disconnected latch on every (re)connect edge so the
+                // next down-edge — whether transient transport failure or terminal
+                // DisposeAsync — fires its own Disconnected event (fixes #383, #400).
+                // Without this reset, _disconnectedFired is a lifetime latch and
+                // any mux that ever experienced ≥1 transient drop silently
+                // suppresses its terminal Disconnected(LocalDispose) on dispose.
+                _disconnectedFired = false;
+
                 if (!hasConnectedBefore)
                 {
                     _isReady = true;
