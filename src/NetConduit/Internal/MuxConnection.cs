@@ -14,6 +14,12 @@ internal sealed class MuxConnection
     public Guid SessionId;
     public Guid RemoteSessionId;
 
+    // Index parity decided by the initial handshake (session-GUID comparison).
+    // Stored on _conn so MainLoopAsync can commit it under ChannelIndexLock
+    // atomically with ReassignPreHandshakeWriteChannelIndices — see
+    // StreamMultiplexer.PerformHandshakeAsync for the race fix rationale.
+    public bool UseOddIndices;
+
     // Maximum frame payload the remote will accept on any inbound channel,
     // negotiated during the handshake. Defaults to the historical
     // protocol assumption (1 MiB) so callers that touch this field before

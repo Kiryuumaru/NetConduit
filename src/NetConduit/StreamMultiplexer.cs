@@ -448,7 +448,7 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IChannelOwner
                     else
                     {
                         _conn.Transport = transport;
-                        await PerformHandshakeAsync(ct);
+                        _conn.UseOddIndices = await PerformHandshakeAsync(ct);
                     }
                 }
                 catch (OperationCanceledException) when (ct.IsCancellationRequested)
@@ -497,15 +497,31 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IChannelOwner
                 _isConnected = true;
                 _disconnectReason = null;
 
-                // Reassign any pre-handshake-allocated WriteChannel that landed
-                // on the wrong default-odd parity space so its queued INIT and
-                // any DATA frames go out under the parity decided by the
-                // session-GUID handshake. Done here on the first connect
-                // only; reconnects re-use the same parity (decided by the same
-                // session GUIDs) and AllocateChannelIndex below allocates from
-                // the correct space already.
+                // Commit the handshake-negotiated index parity and reassign any
+                // pre-handshake-allocated WriteChannel that landed on the wrong
+                // default-even parity space — as ONE atomic block under
+                // ChannelIndexLock so no in-flight OpenChannel /
+                // TryRegisterChannels allocation can interleave between the
+                // parity reset and the reassign-walk. Without this serialization
+                // SetIndexParity could reset _nextChannelIndex back to a value
+                // already allocated by an in-progress batch's first
+                // AllocateChannelIndex call, then the batch's second
+                // AllocateChannelIndex would return the SAME index — Phase 2's
+                // RegisterWriteChannel would throw ChannelExists, the batch
+                // would return false, and the caller would see ok==false from
+                // TryRegisterChannels on a fresh client with unique ids. Done
+                // on the first connect only; reconnects re-use the same parity
+                // (a deterministic function of the unchanging session GUIDs)
+                // and AllocateChannelIndex already returns indices in the
+                // correct parity space.
                 if (!hasConnectedBefore)
-                    ReassignPreHandshakeWriteChannelIndices();
+                {
+                    lock (_registry.ChannelIndexLock)
+                    {
+                        _registry.SetIndexParity(_conn.UseOddIndices);
+                        ReassignPreHandshakeWriteChannelIndices();
+                    }
+                }
 
                 // Create control channel on first connect
                 if (_conn.ControlChannel is null)
@@ -1113,7 +1129,19 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IChannelOwner
             ControlFrameBuilder.BuildAckFrame(channelIndex, consumedPosition));
     }
 
-    private async Task PerformHandshakeAsync(CancellationToken ct)
+    /// <summary>
+    /// Performs the initial mux handshake and returns the negotiated index
+    /// parity. The caller MUST commit the parity and reassign any
+    /// pre-handshake-allocated channels as one atomic unit under
+    /// <c>ChannelIndexLock</c> — see MainLoopAsync's first-connect block —
+    /// so that no in-flight <c>OpenChannel</c> / <c>TryRegisterChannels</c>
+    /// allocation can interleave between the parity reset and the
+    /// reassign-walk (fixes the race that re-set _nextChannelIndex from
+    /// under an in-progress batch's AllocateChannelIndex calls and caused
+    /// duplicate index slot collisions in Phase 2 — symptom: #399's
+    /// regression stress test returned ok==false on CI Linux runners).
+    /// </summary>
+    private async Task<bool> PerformHandshakeAsync(CancellationToken ct)
     {
         var transport = _conn.Transport ?? throw new InvalidOperationException("Transport not initialized.");
         var result = await MuxHandshake.PerformInitialAsync(
@@ -1123,7 +1151,7 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IChannelOwner
             ct);
         _conn.RemoteSessionId = result.RemoteSessionId;
         _conn.PeerMaxRecvPayload = result.PeerMaxRecvPayload;
-        _registry.SetIndexParity(result.UseOddIndices);
+        return result.UseOddIndices;
     }
 
     private async Task PerformReconnectHandshakeAsync(IStreamPair transport, CancellationToken ct)
