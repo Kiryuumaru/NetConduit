@@ -44,6 +44,15 @@ internal sealed class MuxConnectRetry(
         double delay = options.AutoReconnectDelay.TotalMilliseconds;
         double maxDelay = options.MaxAutoReconnectDelay.TotalMilliseconds;
 
+        // Enforce a non-zero floor so a misconfigured zero AutoReconnectDelay
+        // does not spin the retry loop against a permanently-failing transport
+        // (#402). The floor is conservative: 10 ms gives the OS scheduler time
+        // to make progress on whatever is failing without altering observable
+        // behavior for sane configurations.
+        const double MinRetryDelayMs = 10.0;
+        if (delay < MinRetryDelayMs) delay = MinRetryDelayMs;
+        if (maxDelay < delay) maxDelay = delay;
+
         if (isReconnect && maxAttempts == 0)
             throw new MultiplexerException(ErrorCode.Internal, "Reconnect is disabled.");
 
@@ -93,11 +102,36 @@ internal sealed class MuxConnectRetry(
             {
                 raiseError(ex);
 
+                // Permanently-fatal factory exceptions must short-circuit the
+                // retry loop instead of spinning forever (#406). Server-side
+                // helpers (Tcp/Udp/Quic/Ipc/WebSocket CreateServerOptions)
+                // install one-shot factories that throw on a second invocation;
+                // their failure is structural, not transient, and the mux
+                // cannot recover by waiting.
+                if (IsFatalFactoryException(ex))
+                    throw;
+
                 // maxAttempts == 0 means no retry: propagate the first failure immediately
                 // whether this is the initial connect or a reconnect after the link died.
                 if (maxAttempts == 0)
                     throw;
             }
         }
+    }
+
+    // Heuristic classifier for permanently-fatal connect failures. Conservative:
+    // only known-fatal patterns short-circuit; anything else stays in the retry
+    // loop so honest-peer transient failures still recover. Closes #406.
+    private static bool IsFatalFactoryException(Exception ex)
+    {
+        // User-error exceptions thrown by misconfigured factory args.
+        if (ex is ArgumentException) return true;
+        // Server-side one-shot helpers across all transports throw
+        // InvalidOperationException with this exact phrase once their accept
+        // state is consumed. A second invocation can never succeed.
+        if (ex is InvalidOperationException && ex.Message.Contains(
+                "does not support reconnection", StringComparison.Ordinal))
+            return true;
+        return false;
     }
 }

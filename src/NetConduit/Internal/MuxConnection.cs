@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using NetConduit.Constants;
 using NetConduit.Interfaces;
 
@@ -30,6 +31,14 @@ internal sealed class MuxConnection
     public CancellationTokenSource? LoopCts;
     public WriteChannel? ControlChannel;
     public PendingPong? PendingPong;
+
+    // Channel indices whose peer-initiated INIT was accepted but whose INIT-ACK
+    // reply could not be staged into the control slab (transient back-pressure).
+    // Drained on every reader-loop iteration. Bounded by peer's outstanding open
+    // budget so unbounded growth is impossible. Closes #365/#377/#404 — the
+    // reader thread can no longer throw InvalidOperationException("Slab full")
+    // when the control slab is transiently full.
+    public readonly ConcurrentQueue<ushort> PendingInitAcks = new();
 }
 
 // Pairs a keepalive ping's outstanding TaskCompletionSource with the 8-byte
