@@ -394,12 +394,12 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IChannelOwner
         _disconnectReason = Enums.DisconnectReason.LocalDispose;
         _isConnected = false;
 
-        // Symmetric with the remote-GoAway branch in MainLoopAsync: local
-        // GoAway disconnects the transport just as surely as remote GoAway
-        // does, so the mux-level Disconnected event must fire on this path
-        // too (fixes #378). Gated on _disconnectedFired (reset on every
-        // Connected edge per #383/#400) so DisposeAsync's terminal fallback
-        // becomes a no-op when DisposeAsync is awaited after GoAwayAsync.
+        // Local GoAway tears down the transport identically to a remote
+        // GoAway, so the mux-level Disconnected event must fire here too.
+        // _disconnectedFired is the single arbiter for terminal Disconnected
+        // emission across GoAwayAsync, the remote-GoAway branch in
+        // MainLoopAsync, and DisposeAsync, guaranteeing exactly-once
+        // delivery regardless of which teardown trigger fires first.
         if (!_disconnectedFired)
         {
             _disconnectedFired = true;
@@ -499,21 +499,16 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IChannelOwner
 
                 // Commit the handshake-negotiated index parity and reassign any
                 // pre-handshake-allocated WriteChannel that landed on the wrong
-                // default-even parity space — as ONE atomic block under
-                // ChannelIndexLock so no in-flight OpenChannel /
-                // TryRegisterChannels allocation can interleave between the
-                // parity reset and the reassign-walk. Without this serialization
-                // SetIndexParity could reset _nextChannelIndex back to a value
-                // already allocated by an in-progress batch's first
-                // AllocateChannelIndex call, then the batch's second
-                // AllocateChannelIndex would return the SAME index — Phase 2's
-                // RegisterWriteChannel would throw ChannelExists, the batch
-                // would return false, and the caller would see ok==false from
-                // TryRegisterChannels on a fresh client with unique ids. Done
-                // on the first connect only; reconnects re-use the same parity
-                // (a deterministic function of the unchanging session GUIDs)
+                // parity space as ONE atomic block under ChannelIndexLock.
+                // SetIndexParity resets _nextChannelIndex; any concurrent
+                // OpenChannel / TryRegisterChannels allocator holding the same
+                // lock around its allocate+register sequence must not observe
+                // the reset mid-batch, otherwise a later AllocateChannelIndex
+                // call can return an index already issued in the same batch
+                // and RegisterWriteChannel collides on the slot. First connect
+                // only; reconnects re-use the same session-GUID-derived parity
                 // and AllocateChannelIndex already returns indices in the
-                // correct parity space.
+                // correct space.
                 if (!hasConnectedBefore)
                 {
                     lock (_registry.ChannelIndexLock)
@@ -1129,18 +1124,11 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IChannelOwner
             ControlFrameBuilder.BuildAckFrame(channelIndex, consumedPosition));
     }
 
-    /// <summary>
-    /// Performs the initial mux handshake and returns the negotiated index
-    /// parity. The caller MUST commit the parity and reassign any
-    /// pre-handshake-allocated channels as one atomic unit under
-    /// <c>ChannelIndexLock</c> — see MainLoopAsync's first-connect block —
-    /// so that no in-flight <c>OpenChannel</c> / <c>TryRegisterChannels</c>
-    /// allocation can interleave between the parity reset and the
-    /// reassign-walk (fixes the race that re-set _nextChannelIndex from
-    /// under an in-progress batch's AllocateChannelIndex calls and caused
-    /// duplicate index slot collisions in Phase 2 — symptom: #399's
-    /// regression stress test returned ok==false on CI Linux runners).
-    /// </summary>
+    // Performs the initial mux handshake and returns the negotiated index
+    // parity. The caller MUST commit the parity to the registry and reassign
+    // any pre-handshake-allocated channels as one atomic unit under
+    // ChannelIndexLock so concurrent channel allocations cannot interleave
+    // between the parity reset and the reassign-walk.
     private async Task<bool> PerformHandshakeAsync(CancellationToken ct)
     {
         var transport = _conn.Transport ?? throw new InvalidOperationException("Transport not initialized.");

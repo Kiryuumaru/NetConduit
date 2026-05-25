@@ -216,18 +216,14 @@ internal sealed class ChannelBatchRegistrar(
         // Only freshly-committed write channels emit an INIT frame and bump open
         // stats; reused inbound channels do nothing here.
         //
-        // The transport-connected state is read fresh from the owner here —
-        // AFTER Phase 2 has published the channel into the registry — so this
-        // path observes the same publish-then-read invariant as
-        // StreamMultiplexer.OpenChannel. A captured snapshot from the method
-        // entry would race with MainLoopAsync setting _isConnected=true and
-        // running its MarkConnected foreach: the foreach can run against an
-        // empty registry snapshot (Phase 2 not committed yet) and Phase 3
-        // would then skip MarkConnected on the stale-false flag, leaving
-        // freshly-committed channels IsConnected==false despite a live
-        // transport (fixes #399). MarkConnected is idempotent (#357) so a
-        // concurrent MainLoop foreach that DID see the channel and a Phase 3
-        // re-read that both observe true together still fire Connected once.
+        // IsTransportConnected MUST be read AFTER Phase 2 has published the
+        // channel into the registry: the multiplexer's connect path sets the
+        // flag true and then walks the registry calling MarkConnected on
+        // every registered channel. Reading after publish guarantees that
+        // either this read sees the live transport (and we MarkConnected
+        // here), or the connect-path walk observed our channel in the
+        // registry (and it MarkConnected for us). MarkConnected is
+        // idempotent so the two paths cannot double-fire Connected.
         bool isConnectedNow = owner.IsTransportConnected;
         var result = new Dictionary<ChannelRegistration, IChannel>(count);
         int outboundCursor = 0;

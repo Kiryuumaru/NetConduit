@@ -3,20 +3,10 @@ using Xunit;
 namespace NetConduit.UnitTests;
 
 /// <summary>
-/// Regressions for symmetric lifecycle-event emission:
-/// every code path that triggers a lifecycle transition must fire the
-/// corresponding event, not just the most-common path.
-///
-/// #378: Local GoAwayAsync must fire the mux-level Disconnected event,
-/// symmetric with the remote-GoAway branch in MainLoopAsync that already
-/// fires it. The transport is torn down identically on both paths.
-///
-/// #399: TryRegisterChannels must observe the publish-then-read invariant
-/// for the transport-connected flag, symmetric with single-channel
-/// OpenChannel. A captured snapshot from method entry would race with
-/// MainLoopAsync setting _isConnected=true and running its MarkConnected
-/// foreach, leaving freshly-committed channels IsConnected==false despite
-/// a live transport.
+/// Every code path that triggers a mux lifecycle transition must fire the
+/// corresponding event. These tests pin the symmetry between paths so the
+/// Disconnected and Connected contracts cannot regress on a secondary path
+/// while continuing to work on the primary one.
 /// </summary>
 public sealed class SymmetricLifecycleEventTests
 {
@@ -43,7 +33,7 @@ public sealed class SymmetricLifecycleEventTests
     }
 
     // -----------------------------------------------------------------------
-    // #378: Local GoAwayAsync fires mux-level Disconnected(LocalDispose)
+    // Local GoAwayAsync fires mux-level Disconnected(LocalDispose).
     // -----------------------------------------------------------------------
     [Fact]
     public async Task GoAwayAsync_FiresMuxDisconnected()
@@ -63,8 +53,9 @@ public sealed class SymmetricLifecycleEventTests
         Assert.Equal(1, disconnectedFired);
         Assert.Equal(DisconnectReason.LocalDispose, observedReason);
 
-        // DisposeAsync after GoAwayAsync must NOT double-fire (gated by
-        // _disconnectedFired which is now set on the GoAway path).
+        // DisposeAsync after GoAwayAsync must NOT double-fire: the
+        // _disconnectedFired latch arbitrates terminal emission across
+        // both teardown paths.
         await client.DisposeAsync();
         Assert.Equal(1, disconnectedFired);
 
@@ -72,9 +63,8 @@ public sealed class SymmetricLifecycleEventTests
     }
 
     // -----------------------------------------------------------------------
-    // #378: DisposeAsync alone (no prior GoAwayAsync) still fires Disconnected
-    // exactly once — proves the GoAway-path fix doesn't break the existing
-    // DisposeAsync fallback contract.
+    // DisposeAsync without a prior GoAwayAsync still fires Disconnected
+    // exactly once.
     // -----------------------------------------------------------------------
     [Fact]
     public async Task DisposeAsync_WithoutGoAway_FiresMuxDisconnectedOnce()
@@ -92,16 +82,10 @@ public sealed class SymmetricLifecycleEventTests
     }
 
     // -----------------------------------------------------------------------
-    // #399: TryRegisterChannels published outbound channels report
-    // IsConnected==true and fire Connected after the mux is ready,
-    // exercised under repeated handshake-window stress.
-    //
-    // The bug manifests when MainLoopAsync sets _isConnected=true and runs
-    // its MarkConnected foreach AGAINST AN EMPTY REGISTRY SNAPSHOT between
-    // the captured-snapshot read and Phase 2 commit. The window is narrow
-    // on an in-memory duplex but repeated iterations exercise the seam.
-    // Post-fix the contract is structural (publish-then-read on every
-    // iteration) so the assertion holds deterministically.
+    // Outbound channels committed via TryRegisterChannels while the mux is
+    // mid-handshake must observe IsConnected==true once the mux is ready.
+    // Iterated to exercise the narrow window between transport-connected
+    // and registry publication.
     // -----------------------------------------------------------------------
     [Fact]
     public async Task TryRegisterChannels_DuringInitialHandshake_FiresConnectedOnEveryChannel()
@@ -122,9 +106,9 @@ public sealed class SymmetricLifecycleEventTests
             client.Start();
             server.Start();
 
-            // Race TryRegisterChannels against the in-flight handshake.
-            // Dispatched on a separate task so the call's entry-time read
-            // of _isConnected may legitimately observe false.
+            // Race TryRegisterChannels against the in-flight handshake on a
+            // separate task so the call may legitimately enter before the
+            // mux's transport is connected.
             var batchTask = Task.Run(() =>
             {
                 ChannelRegistration[] regs =
@@ -143,13 +127,9 @@ public sealed class SymmetricLifecycleEventTests
             Assert.NotNull(dict);
 
             // After the mux is ready, every committed outbound channel must
-            // observe IsConnected==true. Pre-fix the captured-snapshot path
-            // could leave them IsConnected==false on the first cycle.
-            //
-            // Allow a brief grace for the MainLoopAsync foreach to run on
-            // channels that were already in the registry when foreach
-            // executed (idempotent CAS in MarkConnected makes double-call
-            // safe, but the foreach itself is the natural-path safety net).
+            // observe IsConnected==true. Allow a brief grace for the
+            // connect-path's MarkConnected walk to complete on channels
+            // that were already in the registry when the walk ran.
             var deadline = DateTime.UtcNow.AddSeconds(2);
             while (DateTime.UtcNow < deadline)
             {
