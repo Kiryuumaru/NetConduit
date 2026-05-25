@@ -27,6 +27,15 @@ public sealed class DeltaMessageTransit<T> : IAsyncDisposable
     private readonly int _maxMessageSize;
     private readonly SemaphoreSlim _sendLock = new(1, 1);
     private readonly SemaphoreSlim _receiveLock = new(1, 1);
+    // Cancelled by DisposeAsync so any in-flight SendAsync/SendBatchAsync/
+    // ReceiveAsync promptly unwinds out of the channel I/O and releases its
+    // semaphore before the dispose path attempts to dispose the semaphore
+    // itself. Without this, disposing the SemaphoreSlim while a caller is
+    // still inside the protected section would either race the caller's
+    // Release() (throws ObjectDisposedException, masking the genuine channel
+    // exception) or leave the dispose path acquiring an already-disposed
+    // handle.
+    private readonly CancellationTokenSource _disposeCts = new();
 
     private JsonNode? _lastSentState;
     private JsonNode? _lastReceivedState;
@@ -34,13 +43,13 @@ public sealed class DeltaMessageTransit<T> : IAsyncDisposable
     // send path under _sendLock at the top of every SendCore/SendBatchCore call. The
     // receive path must not mutate _lastSentState directly: that field is owned by the
     // sender lock, and a cross-lock null write races with ComputeDelta and produces
-    // either NRE or silent state divergence (issue #300).
+    // either NRE or silent state divergence.
     private int _resyncRequested;
     // Set by the receive path when WE need to ask the peer to re-send full state
     // (delta arrived before any full state, or ApplyDelta threw mid-batch).
     // Drained by the ReceiveAsync wrapper AFTER _receiveLock is released, then
     // emitted under _sendLock so the 5-byte resync frame cannot interleave bytes
-    // with a concurrent SendAsync's in-flight write (issue #193). Writing from
+    // with a concurrent SendAsync's in-flight write. Writing from
     // inside _receiveLock would either bypass _sendLock (corrupts wire framing)
     // or, if acquired in-place, invert the lock order against ResetState
     // (_sendLock then _receiveLock) and deadlock.
@@ -48,16 +57,34 @@ public sealed class DeltaMessageTransit<T> : IAsyncDisposable
     // Bytes still owed by a previously-rejected over-max frame. ReadMessageAsync drains
     // these from the read channel before reading the next length prefix so that one
     // over-cap message does not permanently desync the framing for every subsequent
-    // message (#298). Mirrors the MessageTransit pattern established by #286.
+    // message. Mirrors the MessageTransit pattern.
     private uint _pendingDrainRemaining;
+    // Persistent framing state so that a ReceiveAsync cancelled mid-prefix or
+    // mid-payload resumes at the exact same byte boundary on the next call —
+    // local stack variables for these offsets silently discard the bytes
+    // already drained from the wire and the next call mis-parses payload bytes
+    // as a length prefix. Mirrors the MessageTransit pattern.
+    private readonly byte[] _pendingLengthBytes = new byte[4];
+    private int _pendingLengthOffset;
+    private byte[]? _pendingPayloadBuffer;
+    private int _pendingPayloadOffset;
+    private int _pendingPayloadLength;
     // Set once when the inbound channel reaches real EOF (read returns 0 bytes).
     // ReceiveAllAsync consults this — NOT IsConnected — so transient transport
     // disconnects during auto-reconnect do not prematurely terminate the
-    // enumerable (#297). Mirrors the MessageTransit pattern established by #177.
+    // enumerable. Mirrors the MessageTransit pattern.
     private volatile bool _receiveEof;
     private volatile bool _disposed;
     private volatile bool _readyFired;
     private readonly object _readyLock = new();
+    // Connected/Disconnected edge latches for the AND-Connected / OR-Disconnected
+    // / latch-reset pattern. Each transition resets the opposite latch so a
+    // reconnect cycle fires a fresh event each time. Without the reset, the
+    // first cycle latches both flags and subscribers stop observing events
+    // for the rest of the transit's lifetime.
+    private readonly object _stateLock = new();
+    private bool _connectedFired;
+    private bool _disconnectedFired;
 
     private static readonly byte[] ResyncRequestHeader = [0x02];
 
@@ -96,7 +123,7 @@ public sealed class DeltaMessageTransit<T> : IAsyncDisposable
         // Channel.Ready is single-shot; if all configured channels were already
         // ready before we subscribed, the event we wired up will never fire.
         // Synthesise the call so subscribers attached after construction still
-        // observe Ready exactly once (#266). OnChannelReady's _readyFired guard
+        // observe Ready exactly once. OnChannelReady's _readyFired guard
         // makes the synthesised call race-safe against a concurrent genuine event.
         var writeReady = _writeChannel?.IsReady ?? true;
         var readReady = _readChannel?.IsReady ?? true;
@@ -136,9 +163,39 @@ public sealed class DeltaMessageTransit<T> : IAsyncDisposable
         handlers?.Invoke(this, EventArgs.Empty);
     }
 
-    private void OnChannelConnected(object? sender, EventArgs e) => Connected?.Invoke(this, EventArgs.Empty);
+    // Each underlying half raises its own Connected and
+    // Disconnected events. Forwarding each one independently fired the
+    // transit's events twice when both halves were configured. Mirrors the
+    // DuplexStreamTransit and MessageTransit pattern: AND-coalesce Connected,
+    // OR-coalesce Disconnected (first wins), and reset the opposite latch on
+    // each edge so reconnect cycles fire.
+    private void OnChannelConnected(object? sender, EventArgs e)
+    {
+        if ((_writeChannel?.IsConnected ?? true) == false) return;
+        if ((_readChannel?.IsConnected ?? true) == false) return;
+        bool fire = false;
+        lock (_stateLock)
+        {
+            if (_connectedFired) return;
+            _connectedFired = true;
+            _disconnectedFired = false;
+            fire = true;
+        }
+        if (fire) Connected?.Invoke(this, EventArgs.Empty);
+    }
 
-    private void OnChannelDisconnected(object? sender, DisconnectedEventArgs e) => Disconnected?.Invoke(this, e);
+    private void OnChannelDisconnected(object? sender, DisconnectedEventArgs e)
+    {
+        bool fire = false;
+        lock (_stateLock)
+        {
+            if (_disconnectedFired) return;
+            _disconnectedFired = true;
+            _connectedFired = false;
+            fire = true;
+        }
+        if (fire) Disconnected?.Invoke(this, e);
+    }
 
     /// <summary>Gets whether the transit is ready (all channels confirmed by remote).</summary>
     public bool IsReady
@@ -168,7 +225,7 @@ public sealed class DeltaMessageTransit<T> : IAsyncDisposable
     /// <remarks>
     /// Latching: subscribers attached after the transit has already become Ready are
     /// invoked immediately on subscription, so callers that wait for channel readiness
-    /// before constructing the transit still observe the event exactly once (#266).
+    /// before constructing the transit still observe the event exactly once.
     /// </remarks>
     public event EventHandler? Ready
     {
@@ -218,14 +275,16 @@ public sealed class DeltaMessageTransit<T> : IAsyncDisposable
         if (_writeChannel is null)
             throw new InvalidOperationException("This transit does not have a write channel configured.");
 
-        await _sendLock.WaitAsync(cancellationToken).ConfigureAwait(false);
+        using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, _disposeCts.Token);
+        var ct = linkedCts.Token;
+        await _sendLock.WaitAsync(ct).ConfigureAwait(false);
         try
         {
-            await SendCoreAsync(state, cancellationToken).ConfigureAwait(false);
+            await SendCoreAsync(state, ct).ConfigureAwait(false);
         }
         finally
         {
-            _sendLock.Release();
+            try { _sendLock.Release(); } catch (ObjectDisposedException) { /* race with DisposeAsync — benign */ }
         }
     }
 
@@ -239,14 +298,16 @@ public sealed class DeltaMessageTransit<T> : IAsyncDisposable
         if (_writeChannel is null)
             throw new InvalidOperationException("This transit does not have a write channel configured.");
 
-        await _sendLock.WaitAsync(cancellationToken).ConfigureAwait(false);
+        using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, _disposeCts.Token);
+        var ct = linkedCts.Token;
+        await _sendLock.WaitAsync(ct).ConfigureAwait(false);
         try
         {
-            await SendBatchCoreAsync(states, cancellationToken).ConfigureAwait(false);
+            await SendBatchCoreAsync(states, ct).ConfigureAwait(false);
         }
         finally
         {
-            _sendLock.Release();
+            try { _sendLock.Release(); } catch (ObjectDisposedException) { /* race with DisposeAsync — benign */ }
         }
     }
 
@@ -341,16 +402,18 @@ public sealed class DeltaMessageTransit<T> : IAsyncDisposable
         if (_readChannel is null)
             throw new InvalidOperationException("This transit does not have a read channel configured.");
 
+        using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, _disposeCts.Token);
+        var ct = linkedCts.Token;
         try
         {
-            await _receiveLock.WaitAsync(cancellationToken).ConfigureAwait(false);
+            await _receiveLock.WaitAsync(ct).ConfigureAwait(false);
             try
             {
-                return await ReceiveCoreAsync(cancellationToken).ConfigureAwait(false);
+                return await ReceiveCoreAsync(ct).ConfigureAwait(false);
             }
             finally
             {
-                _receiveLock.Release();
+                try { _receiveLock.Release(); } catch (ObjectDisposedException) { /* race with DisposeAsync — benign */ }
             }
         }
         finally
@@ -360,8 +423,8 @@ public sealed class DeltaMessageTransit<T> : IAsyncDisposable
             // _receiveLock would invert the lock order against ResetState (which
             // acquires _sendLock first), risking deadlock. Writing without
             // _sendLock would interleave bytes with concurrent SendAsync calls
-            // and corrupt wire framing (#193).
-            await DrainOutgoingResyncAsync(cancellationToken).ConfigureAwait(false);
+            // and corrupt wire framing.
+            await DrainOutgoingResyncAsync(ct).ConfigureAwait(false);
         }
     }
 
@@ -387,18 +450,18 @@ public sealed class DeltaMessageTransit<T> : IAsyncDisposable
                     if (_lastReceivedState is null)
                     {
                         // Defer the resync write to the ReceiveAsync wrapper so it
-                        // happens under _sendLock after _receiveLock is released (#193).
+                        // happens under _sendLock after _receiveLock is released.
                         Interlocked.Exchange(ref _outgoingResyncPending, 1);
                         return default;
                     }
                     var ops = DeserializeDelta(payload.Span);
                     // Apply atomically: stage on a clone, swap on success. If any op
                     // throws mid-batch (path not found, array index out of range,
-                    // incompatible parent type, ...), _lastReceivedState is left
+                    // incompatible parent type.), _lastReceivedState is left
                     // untouched, then cleared and a resync is requested so the peer
                     // re-sends full state. Without this, an earlier op's mutation
                     // would leak into _lastReceivedState and every subsequent delta
-                    // would be applied to a corrupt baseline (#223).
+                    // would be applied to a corrupt baseline.
                     var staging = _lastReceivedState.DeepClone();
                     try
                     {
@@ -408,7 +471,7 @@ public sealed class DeltaMessageTransit<T> : IAsyncDisposable
                     {
                         _lastReceivedState = null;
                         // Defer the resync write to the ReceiveAsync wrapper so it
-                        // happens under _sendLock after _receiveLock is released (#193).
+                        // happens under _sendLock after _receiveLock is released.
                         Interlocked.Exchange(ref _outgoingResyncPending, 1);
                         throw new InvalidOperationException(
                             "Delta apply failed; receiver state has been reset and a resync has been requested from the peer.",
@@ -419,7 +482,7 @@ public sealed class DeltaMessageTransit<T> : IAsyncDisposable
 
                 case 0x02: // Resync request
                     // Defer the _lastSentState reset to the send path so it happens under
-                    // _sendLock, avoiding the cross-lock race against ComputeDelta (#300).
+                    // _sendLock, avoiding the cross-lock race against ComputeDelta.
                     Interlocked.Exchange(ref _resyncRequested, 1);
                     return default;
 
@@ -441,7 +504,7 @@ public sealed class DeltaMessageTransit<T> : IAsyncDisposable
     /// cancelled, the transit is disposed, or the inbound channel reaches real
     /// end-of-stream. Transient transport disconnects do NOT terminate the
     /// enumerable — when auto-reconnect is configured, iteration resumes after the
-    /// mux re-establishes the connection (#297).
+    /// mux re-establishes the connection.
     /// </remarks>
     public async IAsyncEnumerable<T> ReceiveAllAsync([EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
@@ -465,7 +528,7 @@ public sealed class DeltaMessageTransit<T> : IAsyncDisposable
             // legitimate mid-stream control traffic (resync request received,
             // delta-before-baseline triggering a resync request to the peer) —
             // breaking on null would conflate control frames with real EOF and
-            // bail on every resync handshake (#297).
+            // bail on every resync handshake.
             if (_receiveEof)
                 yield break;
 
@@ -484,7 +547,7 @@ public sealed class DeltaMessageTransit<T> : IAsyncDisposable
     {
         // Acquire both locks so the reset is atomic with respect to in-flight
         // SendCoreAsync / ReceiveCoreAsync calls. Without this, a concurrent send
-        // could observe _lastSentState going null mid-ComputeDelta (#300).
+        // could observe _lastSentState going null mid-ComputeDelta.
         _sendLock.Wait();
         try
         {
@@ -601,34 +664,57 @@ public sealed class DeltaMessageTransit<T> : IAsyncDisposable
         if (_readChannel is null) return (null, 0);
 
         // Drain any bytes owed by a previously-rejected over-max frame so the next
-        // length prefix lines up with a real frame boundary on the wire (#298).
+        // length prefix lines up with a real frame boundary on the wire.
+        // If the peer closes the channel mid-drain, surface a clean EOF instead
+        // of leaking EndOfStreamException out of ReceiveAsync.
         if (_pendingDrainRemaining > 0)
         {
-            await DrainPendingAsync(cancellationToken).ConfigureAwait(false);
+            try
+            {
+                await DrainPendingAsync(cancellationToken).ConfigureAwait(false);
+            }
+            catch (EndOfStreamException)
+            {
+                _receiveEof = true;
+                return (null, 0);
+            }
         }
 
-        var lengthPrefix = ArrayPool<byte>.Shared.Rent(4);
-        try
+        // Read the 4-byte length prefix into the persistent buffer. If a prior
+        // ReceiveAsync was cancelled mid-prefix, _pendingLengthOffset preserves
+        // how many bytes were already consumed so this call resumes at the
+        // exact same byte boundary — preserving framing invariants across
+        // cancellation events.
+        while (_pendingPayloadBuffer is null && _pendingLengthOffset < 4)
         {
-            var prefixRead = 0;
-            while (prefixRead < 4)
+            var n = await _readChannel.ReadAsync(
+                _pendingLengthBytes.AsMemory(_pendingLengthOffset, 4 - _pendingLengthOffset),
+                cancellationToken).ConfigureAwait(false);
+            if (n == 0)
             {
-                var bytesRead = await _readChannel.ReadAsync(lengthPrefix.AsMemory(prefixRead, 4 - prefixRead), cancellationToken).ConfigureAwait(false);
-                if (bytesRead == 0)
+                if (_pendingLengthOffset == 0)
                 {
                     _receiveEof = true;
                     return (null, 0);
                 }
-                prefixRead += bytesRead;
+                _pendingLengthOffset = 0;
+                throw new EndOfStreamException("Unexpected end of stream while reading message length prefix.");
             }
+            _pendingLengthOffset += n;
+        }
 
-            var messageLength = BinaryPrimitives.ReadUInt32BigEndian(lengthPrefix.AsSpan(0, 4));
+        // Length prefix complete: allocate (or reuse) the payload buffer.
+        if (_pendingPayloadBuffer is null)
+        {
+            var messageLength = BinaryPrimitives.ReadUInt32BigEndian(_pendingLengthBytes);
 
             if (messageLength > (uint)_maxMessageSize)
             {
                 // Schedule the over-cap payload for drain on the next ReadMessageAsync
                 // so framing resumes on a clean boundary instead of parsing payload
-                // bytes as the next length prefix.
+                // bytes as the next length prefix. Clear length-prefix progress;
+                // this length has been fully consumed.
+                _pendingLengthOffset = 0;
                 _pendingDrainRemaining = messageLength;
                 throw new InvalidOperationException(
                     $"Received message size ({messageLength} bytes) exceeds maximum allowed ({_maxMessageSize} bytes); the oversized payload will be discarded and the next ReceiveAsync call will return the following message.");
@@ -636,42 +722,45 @@ public sealed class DeltaMessageTransit<T> : IAsyncDisposable
 
             if (messageLength == 0)
             {
-                // Zero-length frame has no payload to drain and no message-type byte
-                // either — framing is unrecoverable. The caller decides whether to
-                // continue using the transit; subsequent reads will likely throw on
-                // the next misaligned prefix.
+                _pendingLengthOffset = 0;
                 throw new InvalidOperationException("Received a message with zero-length payload.");
             }
 
-            var length = (int)messageLength;
-            var data = ArrayPool<byte>.Shared.Rent(length);
-            try
-            {
-                var totalRead = 0;
-                while (totalRead < length)
-                {
-                    var read = await _readChannel.ReadAsync(data.AsMemory(totalRead, length - totalRead), cancellationToken).ConfigureAwait(false);
-                    if (read == 0)
-                    {
-                        ArrayPool<byte>.Shared.Return(data);
-                        _receiveEof = true;
-                        return (null, 0);
-                    }
-                    totalRead += read;
-                }
+            _pendingPayloadLength = (int)messageLength;
+            _pendingPayloadBuffer = ArrayPool<byte>.Shared.Rent(_pendingPayloadLength);
+            _pendingPayloadOffset = 0;
+        }
 
-                return (data, length);
-            }
-            catch
-            {
-                ArrayPool<byte>.Shared.Return(data);
-                throw;
-            }
-        }
-        finally
+        // Read the payload. If cancelled mid-payload, _pendingPayloadOffset
+        // preserves the progress so the next call resumes exactly here.
+        while (_pendingPayloadOffset < _pendingPayloadLength)
         {
-            ArrayPool<byte>.Shared.Return(lengthPrefix);
+            var n = await _readChannel.ReadAsync(
+                _pendingPayloadBuffer.AsMemory(_pendingPayloadOffset, _pendingPayloadLength - _pendingPayloadOffset),
+                cancellationToken).ConfigureAwait(false);
+            if (n == 0)
+            {
+                var torn = _pendingPayloadBuffer;
+                _pendingPayloadBuffer = null;
+                _pendingPayloadOffset = 0;
+                _pendingPayloadLength = 0;
+                _pendingLengthOffset = 0;
+                ArrayPool<byte>.Shared.Return(torn);
+                _receiveEof = true;
+                return (null, 0);
+            }
+            _pendingPayloadOffset += n;
         }
+
+        // Frame complete — capture and clear state. The caller owns the
+        // returned buffer and must return it to ArrayPool.
+        var payload = _pendingPayloadBuffer;
+        var payloadLength = _pendingPayloadLength;
+        _pendingPayloadBuffer = null;
+        _pendingPayloadOffset = 0;
+        _pendingPayloadLength = 0;
+        _pendingLengthOffset = 0;
+        return (payload, payloadLength);
     }
 
     private async ValueTask DrainPendingAsync(CancellationToken cancellationToken)
@@ -840,14 +929,14 @@ public sealed class DeltaMessageTransit<T> : IAsyncDisposable
             return (T)(object)node.DeepClone();
 
         if (type == typeof(JsonObject))
-            // Issue #241: AsObject() is a downcast, not a clone — without DeepClone
+            // AsObject() is a downcast, not a clone — without DeepClone
             // the caller would receive a live reference to _lastReceivedState, so
             // caller mutations would silently corrupt internal state and a concurrent
             // delta-apply would throw "Collection was modified" mid-enumeration.
             return (T)(object)node.DeepClone().AsObject();
 
         if (type == typeof(JsonArray))
-            // Issue #241: same aliasing hazard as JsonObject above — DeepClone first.
+            // same aliasing hazard as JsonObject above — DeepClone first.
             return (T)(object)node.DeepClone().AsArray();
 
         if (type == typeof(JsonDocument))
@@ -875,12 +964,17 @@ public sealed class DeltaMessageTransit<T> : IAsyncDisposable
         if (_disposed) return;
         _disposed = true;
 
+        // Cancel BEFORE acquiring channel dispose paths so in-flight
+        // SendAsync/ReceiveAsync unwind out of channel I/O and release their
+        // semaphores. Mirrors MessageTransit.
+        try { _disposeCts.Cancel(); } catch (ObjectDisposedException) { }
+
         UnsubscribeFromChannelEvents();
 
         // Aggregate per-step failures so a throw from one channel's dispose does not
-        // skip the other channel and leak its slab (#292, mirroring StreamPair PR #224
-        // / DuplexStreamTransit #305). Channels disposed first so semaphores remain
-        // valid until any in-flight send/receive observes ObjectDisposedException.
+        // skip the other channel and leak its slab. Channels disposed first so
+        // semaphores remain valid until any in-flight send/receive observes
+        // ObjectDisposedException.
         List<Exception>? errors = null;
         if (_writeChannel is not null)
         {
@@ -896,9 +990,27 @@ public sealed class DeltaMessageTransit<T> : IAsyncDisposable
         catch (Exception ex) { (errors ??= []).Add(ex); }
         try { _receiveLock.Dispose(); }
         catch (Exception ex) { (errors ??= []).Add(ex); }
+        try { _disposeCts.Dispose(); }
+        catch (Exception ex) { (errors ??= []).Add(ex); }
+
+        // Return any payload buffer held across a cancelled mid-frame ReceiveAsync
+        // back to the array pool so dispose does not leak it.
+        try { ReturnPendingPayloadBuffer(); }
+        catch (Exception ex) { (errors ??= []).Add(ex); }
 
         if (errors is { Count: 1 }) throw errors[0];
         if (errors is { Count: > 1 }) throw new AggregateException(errors);
+    }
+
+    private void ReturnPendingPayloadBuffer()
+    {
+        var buf = _pendingPayloadBuffer;
+        if (buf is null) return;
+        _pendingPayloadBuffer = null;
+        _pendingPayloadOffset = 0;
+        _pendingPayloadLength = 0;
+        _pendingLengthOffset = 0;
+        ArrayPool<byte>.Shared.Return(buf);
     }
 
     private void UnsubscribeFromChannelEvents()

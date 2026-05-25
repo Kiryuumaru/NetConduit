@@ -147,7 +147,7 @@ public sealed class DeltaDiffTests
     [Fact]
     public void PropertyAddedWithNullValue_ProducesSetOp_AndApplyPreservesPresence()
     {
-        // Regression for issue #211: a newly-added property with JSON null
+        // Regression for issue: a newly-added property with JSON null
         // value was silently dropped from the diff because JsonObject's
         // indexer returns C# null for both "key missing" and "key present
         // with JSON null value".

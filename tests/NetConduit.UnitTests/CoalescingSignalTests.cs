@@ -39,7 +39,7 @@ public class CoalescingSignalTests
     [Fact]
     public async Task Dispose_during_Wait_does_not_throw_ObjectDisposedException_on_consumer_thread()
     {
-        // Regression for issue #281: Dispose() calls Set() then Dispose() on the
+        // Regression for issue: Dispose() calls Set() then Dispose() on the
         // underlying ManualResetEventSlim. A consumer woken by the Set() (rather
         // than by cancellation) would race to Reset() against the dispose and
         // throw ObjectDisposedException on the consumer thread. The fix tolerates

@@ -8,7 +8,7 @@ namespace NetConduit.Transit.DeltaMessage.UnitTests;
 internal partial class JsonArrayContext : JsonSerializerContext { }
 
 /// <summary>
-/// Regression tests for issue #241: DeltaMessageTransit&lt;JsonObject&gt; and
+/// Regression tests for issue: DeltaMessageTransit&lt;JsonObject&gt; and
 /// DeltaMessageTransit&lt;JsonArray&gt;.ReceiveAsync must not return a live
 /// reference to the internal _lastReceivedState — caller mutation must not
 /// silently corrupt internal state observed by subsequent delta-applied
@@ -70,7 +70,7 @@ public sealed class DeltaMessageTransitJsonAliasingTests
         Assert.Equal("alice", got3["name"]!.GetValue<string>());
         Assert.False(
             got3.ContainsKey("extra"),
-            "Receiver _lastReceivedState was contaminated by caller mutation of an earlier delta result (#241).");
+            "Receiver _lastReceivedState was contaminated by caller mutation of an earlier delta result.");
     }
 
     [Fact]
@@ -98,7 +98,7 @@ public sealed class DeltaMessageTransitJsonAliasingTests
         Assert.NotNull(secondDelta);
         Assert.False(
             ReferenceEquals(firstDelta, secondDelta),
-            "Consecutive delta ReceiveAsync results aliased to the same _lastReceivedState (#241).");
+            "Consecutive delta ReceiveAsync results aliased to the same _lastReceivedState.");
         Assert.Equal(2, firstDelta!["v"]!.GetValue<int>());
         Assert.Equal(3, secondDelta!["v"]!.GetValue<int>());
     }

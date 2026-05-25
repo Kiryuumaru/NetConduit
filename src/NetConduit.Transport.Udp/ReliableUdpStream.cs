@@ -159,7 +159,7 @@ internal sealed class ReliableUdpStream : Stream
                 // Wire-declared length must match the actual datagram payload size.
                 // Mismatches are dropped without ACK so the sender retransmits — silently
                 // clamping with Math.Min would deliver a truncated payload while still
-                // ACKing, desynchronising the multiplexer byte stream (issue #187).
+                // ACKing, desynchronising the multiplexer byte stream.
                 if (len != span.Length - 7)
                     continue;
 
@@ -169,7 +169,7 @@ internal sealed class ReliableUdpStream : Stream
                     // is currently waiting for. UDP can deliver duplicate or delayed ACKs (peers
                     // re-ACK every duplicate DATA, NIC offload may double-deliver, middleboxes
                     // reorder); accepting any seq would complete the TCS with a stale value and
-                    // spin SendWithAckAsync into an infinite tight resend loop (issue #302).
+                    // spin SendWithAckAsync into an infinite tight resend loop.
                     if (seq == Volatile.Read(ref _sendSeq))
                         _pendingAck?.TrySetResult(seq);
                     continue;
@@ -236,6 +236,12 @@ internal sealed class ReliableUdpStream : Stream
             }
             catch (OperationCanceledException)
             {
+                // Distinguish caller cancellation (propagate OCE) from honest
+                // retransmit-budget exhaustion (TimeoutException). Conflating
+                // the two hides genuine timeouts inside ambient cancellation
+                // handlers and reports cancelled sends as timeouts.
+                if (cancellationToken.IsCancellationRequested)
+                    throw new OperationCanceledException(cancellationToken);
                 if (attempts > _options.MaxRetransmits)
                     throw new TimeoutException($"UDP send timed out after {attempts} attempts");
             }

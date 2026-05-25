@@ -8,7 +8,7 @@ using NetConduit.Transport.WebSocket;
 namespace NetConduit.Transport.WebSocket.IntegrationTests;
 
 /// <summary>
-/// #279: <see cref="WebSocketMuxListener"/> must automatically evict session
+/// <see cref="WebSocketMuxListener"/> must automatically evict session
 /// entries when a mux reaches a terminal lifecycle (Disconnected event), and
 /// must not hang when a reconnect attempt references a dead session.
 /// </summary>
@@ -48,8 +48,8 @@ public class WebSocketMuxListenerSessionEvictionTests
         var sessions = GetSessionsDictionary(harness.Listener);
 
         // 1. Open first session, capture sessionId, then dispose its server mux.
-        //    The auto-eviction from #279 removes the entry from _sessions; combined
-        //    with master's #236 (reject unknown session ids), a subsequent reconnect
+        //    The auto-eviction removes the entry from _sessions; combined
+        //    with master's (reject unknown session ids), a subsequent reconnect
         //    using the same session id must be cleanly rejected rather than silently
         //    promoted to a fresh session under a GUID the client never asked for.
         var (clientMux1, _) = await harness.OpenClientAsync(cts.Token);

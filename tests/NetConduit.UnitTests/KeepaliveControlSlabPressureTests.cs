@@ -5,14 +5,13 @@ using NetConduit.Internal;
 namespace NetConduit.UnitTests;
 
 /// <summary>
-/// #355 regression: <see cref="MuxKeepalive"/> must use the non-throwing
-/// <c>TryWriteRawFrame</c> for the PING path. Under sustained control-slab
-/// pressure (parallel of #291/#336), an outgoing PING that hits a full slab
-/// MUST NOT fault the keepalive loop with <see cref="InvalidOperationException"/>
-/// — that propagates out of <c>RunAsync</c>, faults <c>KeepaliveTask</c>, and
-/// tears the entire mux down on a healthy wire.
+/// <see cref="MuxKeepalive"/> must use the non-throwing <c>TryWriteRawFrame</c>
+/// for the PING path. Under sustained control-slab pressure, an outgoing PING
+/// that hits a full slab MUST NOT fault the keepalive loop with
+/// <see cref="InvalidOperationException"/> — that propagates out of <c>RunAsync</c>,
+/// faults <c>KeepaliveTask</c>, and tears the entire mux down on a healthy wire.
 /// </summary>
-public sealed class Issue355KeepaliveSlabPressureTests
+public sealed class KeepaliveControlSlabPressureTests
 {
     [Fact]
     public async Task RunAsync_ControlSlabFull_DoesNotThrow_AndKeepsPendingPongClear()
@@ -52,15 +51,21 @@ public sealed class Issue355KeepaliveSlabPressureTests
             conn,
             pingInterval: TimeSpan.FromMilliseconds(40),
             pingTimeout: TimeSpan.FromMilliseconds(20),
-            maxMissedPings: 5);
+            maxMissedPings: 50);
 
         using var cts = new CancellationTokenSource(TimeSpan.FromMilliseconds(300));
 
-        // Without the fix: the first SendPing call throws InvalidOperationException
-        // ("Slab full for raw frame.") out of RunAsync — the task faults.
-        // With the fix: TrySendPing returns false, the just-installed PendingPong
-        // is CompareExchange-cleared, the loop continues, and the cancellation
-        // cleanly exits via OperationCanceledException → suppressed → completion.
+        // Pre-fix: the first SendPing call threw InvalidOperationException
+        // ("Slab full for raw frame.") out of RunAsync, faulting the keepalive
+        // task and tearing the mux down even on a healthy wire under transient
+        // control-slab pressure.
+        // Post-fix: TrySendPing returns false, the just-installed
+        // PendingPong is CompareExchange-cleared, and the missed-ping counter
+        // increments. With maxMissedPings well above the cycles that fit in
+        // the cancellation window, cancellation wins and RunAsync returns
+        // cleanly. SUSTAINED slab pressure past the maxMissedPings budget
+        // DOES tear the keepalive down with IOException; that contract is
+        // exercised by the sustained-pressure keepalive tests.
         await keepalive.RunAsync(cts.Token);
 
         // PendingPong must be null after the cancelled-but-slab-pressured run:

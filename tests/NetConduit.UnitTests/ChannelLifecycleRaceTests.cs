@@ -4,7 +4,7 @@ using NetConduit.Internal;
 namespace NetConduit.UnitTests;
 
 /// <summary>
-/// Regression coverage for #163: <see cref="WriteChannel.MarkOpen"/> and
+/// Regression coverage for: <see cref="WriteChannel.MarkOpen"/> and
 /// <see cref="ReadChannel.MarkOpen"/> performed a check-then-set on a volatile
 /// <c>_state</c> field, so a concurrent <c>SetClosed</c> could land between
 /// the check and the write and resurrect a Closed channel back to Open.

@@ -4,7 +4,7 @@ using NetConduit.Transport.Udp;
 
 namespace NetConduit.Transport.Udp.IntegrationTests;
 
-// Regression coverage for #213. Two distinct defects in the UDP handshake:
+// Regression coverage for. Two distinct defects in the UDP handshake:
 //
 //   1. Server-side: a client's NC_HELLO retransmit (sent because the 200 ms
 //      ack-wait fired before the ACK arrived) was left in the kernel buffer
@@ -32,7 +32,7 @@ public class UdpHandshakeIntegrityTests
     [Fact(Timeout = 30000)]
     public async Task ServerFactory_ThrowsWhenNonHelloDatagramQueuedDuringHandshake()
     {
-        // Reproduces the server-side leg of #213. A misbehaving (or malicious)
+        // Reproduces the server-side leg of. A misbehaving (or malicious)
         // client sends NC_HELLO followed immediately by a non-handshake
         // datagram before the server has finished its handshake. Pre-fix the
         // server reads only the first datagram, sends NC_HELLO_ACK, then
@@ -75,7 +75,7 @@ public class UdpHandshakeIntegrityTests
     [Fact(Timeout = 30000)]
     public async Task ClientFactory_ThrowsOnNonAckDatagramDuringHandshake()
     {
-        // Reproduces the client-side leg of #213. A rogue "server" listens on
+        // Reproduces the client-side leg of. A rogue "server" listens on
         // the port, receives NC_HELLO, then immediately sends a non-ACK
         // payload (e.g. a stray protocol frame). Pre-fix, the client silently
         // discarded that datagram and kept retransmitting NC_HELLO until the

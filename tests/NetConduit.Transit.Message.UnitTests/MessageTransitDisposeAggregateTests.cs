@@ -4,7 +4,7 @@ using Xunit;
 namespace NetConduit.Transit.Message.UnitTests;
 
 /// <summary>
-/// Regression tests for #292: MessageTransit.DisposeAsync / Dispose must run every
+/// Regression tests for: MessageTransit.DisposeAsync / Dispose must run every
 /// step even if an earlier one throws, and aggregate the failures. Otherwise a
 /// throwing _writeChannel.DisposeAsync skips _readChannel disposal (slab leak),
 /// the pending payload buffer return (up to 16 MiB ArrayPool rental leak), and

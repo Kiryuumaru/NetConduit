@@ -9,7 +9,7 @@ using Xunit;
 namespace NetConduit.Transit.DeltaMessage.UnitTests;
 
 /// <summary>
-/// Regression tests for #300: peer-initiated resync (0x02) handling races with concurrent SendAsync.
+/// Regression tests for: peer-initiated resync (0x02) handling races with concurrent SendAsync.
 ///
 /// Pre-fix, the receive path's `case 0x02` mutated the sender-owned field `_lastSentState`
 /// outside `_sendLock`. When that mutation interleaved with an in-flight SendCoreAsync,

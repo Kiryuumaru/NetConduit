@@ -3,8 +3,6 @@ using NetConduit.Interfaces;
 namespace NetConduit.UnitTests;
 
 /// <summary>
-/// Regression test for issue #356.
-///
 /// MainLoopAsync's handshake try-block only caught HandshakeTransportException
 /// and OperationCanceledException. Non-transport handshake failures
 /// (MultiplexerException for SessionMismatch / ProtocolError / Internal, etc.)
@@ -17,7 +15,7 @@ namespace NetConduit.UnitTests;
 /// MultiplexerException(SessionMismatch) and we assert the freshly-connected
 /// reconnect transport is disposed.
 /// </summary>
-public sealed class Issue356MainLoopTransportLeakTests
+public sealed class ReconnectTransportLeakTests
 {
     [Fact]
     public async Task Reconnect_NonTransportHandshakeFailure_DisposesFreshlyConnectedTransport()
@@ -107,7 +105,7 @@ public sealed class Issue356MainLoopTransportLeakTests
         // MultiplexerException propagated past the only handshake catch clause.
         Assert.True(
             trackedClient2.DisposeCount > 0,
-            $"Reconnect transport leaked: expected DisposeCount > 0, got {trackedClient2.DisposeCount} (#356).");
+            $"Reconnect transport leaked: expected DisposeCount > 0, got {trackedClient2.DisposeCount}.");
 
         await client.DisposeAsync();
         await serverA.DisposeAsync();

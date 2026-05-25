@@ -3,7 +3,7 @@ using NetConduit.Internal;
 
 namespace NetConduit.UnitTests;
 
-// Regression for issue #291: control-channel slab pressure must not surface
+// Regression for issue: control-channel slab pressure must not surface
 // as a thrown exception out of ReadChannel.ReadAsync nor fault the mux reader
 // thread. TryWriteRawFrame returns false on slab-full; IChannelOwner.SendAck
 // is propagated through that, and ReadChannel.MaybeSendAck retains its
@@ -84,7 +84,7 @@ public sealed class ControlSlabBackpressureTests
         for (int i = 0; i < framesToCrossGate; i++)
             read.ReceivePayload(FrameFlags.Data, payload);
 
-        // Drain the second batch so the consumer-consumed counter (#394)
+        // Drain the second batch so the consumer-consumed counter
         // catches up to cumulative wire-received. Without this drain the
         // second batch is still buffered in the slab and the ACK position
         // would correctly reflect only the first batch under the new
@@ -105,7 +105,7 @@ public sealed class ControlSlabBackpressureTests
         Assert.NotEmpty(owner.SentAcks);
         ulong reportedPosition = owner.SentAcks[^1].Position;
         // Reported position must reflect cumulative bytes from every batch
-        // that the consumer has fully drained from the slab (#394).
+        // that the consumer has fully drained from the slab.
         Assert.True(reportedPosition >= (ulong)(frameBytesPerFrame * framesToCrossGate * 3),
             $"Reported position {reportedPosition} must include cumulative bytes from all drained batches");
     }

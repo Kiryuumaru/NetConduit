@@ -11,7 +11,7 @@ namespace NetConduit.Transport.WebSocket.IntegrationTests;
 public class WebSocketMuxListenerStaleSessionTests
 {
     /// <summary>
-    /// #236 regression: HandleAsync receiving a sessionId that does not exist in _sessions
+    /// HandleAsync receiving a sessionId that does not exist in _sessions
     /// must reject the reconnect with a PolicyViolation close frame instead of silently
     /// spinning up a fresh server-side mux. Otherwise:
     ///   - the connecting client's reconnect handshake fails terminally with
@@ -76,7 +76,7 @@ public class WebSocketMuxListenerStaleSessionTests
                 "_sessions",
                 BindingFlags.NonPublic | BindingFlags.Instance)!;
             var sessions = (System.Collections.IDictionary)sessionsField.GetValue(listener)!;
-            Assert.Equal(0, sessions.Count);
+            Assert.Empty(sessions);
         }
         finally
         {
@@ -86,7 +86,7 @@ public class WebSocketMuxListenerStaleSessionTests
     }
 
     /// <summary>
-    /// #236 regression: even under repeated stale-session reconnect storms, the listener
+    /// Even under repeated stale-session reconnect storms, the listener
     /// must not accumulate orphan muxes in _sessions.
     /// </summary>
     [Fact(Timeout = 60000)]
@@ -142,7 +142,7 @@ public class WebSocketMuxListenerStaleSessionTests
                 client.Dispose();
             }
 
-            Assert.Equal(0, sessions.Count);
+            Assert.Empty(sessions);
         }
         finally
         {

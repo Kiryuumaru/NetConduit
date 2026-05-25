@@ -766,7 +766,7 @@ public sealed class DuplexStreamTransitTests
 
     #endregion
 
-    #region IsConnected Both-Sides (#210)
+    #region IsConnected Both-Sides
 
     private sealed class FakeChannel(bool isConnected) : IWriteChannel, IReadChannel
     {
@@ -796,7 +796,7 @@ public sealed class DuplexStreamTransitTests
     [Fact]
     public void DuplexStreamTransit_IsConnected_False_WhenOnlyWriteSideConnected()
     {
-        // #210: IsConnected used OR, so a half-open duplex was reported connected.
+        // IsConnected used OR, so a half-open duplex was reported connected.
         // A duplex stream is only usable when BOTH directions are connected.
         var write = new FakeChannel(isConnected: true);
         var read = new FakeChannel(isConnected: false);
@@ -830,7 +830,7 @@ public sealed class DuplexStreamTransitTests
 
     #endregion
 
-    #region Dispose Aggregate-Errors (#305)
+    #region Dispose Aggregate-Errors
 
     private sealed class DisposeTrackingChannel(bool throwOnDispose) : IWriteChannel, IReadChannel
     {
@@ -880,7 +880,7 @@ public sealed class DuplexStreamTransitTests
     [Fact]
     public async Task DisposeAsync_WriteThrows_StillDisposesRead_AndSurfacesError()
     {
-        // #305: an exception from _writeChannel.DisposeAsync must not skip
+        // an exception from _writeChannel.DisposeAsync must not skip
         // _readChannel.DisposeAsync, otherwise the read slab leaks.
         var write = new DisposeTrackingChannel(throwOnDispose: true);
         var read = new DisposeTrackingChannel(throwOnDispose: false);

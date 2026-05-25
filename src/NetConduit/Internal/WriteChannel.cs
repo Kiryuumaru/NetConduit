@@ -19,7 +19,7 @@ internal sealed class WriteChannel : Stream, IWriteChannel
     private readonly byte[] _slab;
     private readonly Memory<byte> _slabMemory;
     // Mutable to support post-handshake reassignment when a pre-handshake
-    // OpenChannel allocated this channel from the wrong default parity (#237).
+    // OpenChannel allocated this channel from the wrong default parity.
     // The mux walks queued frames in the slab and patches the index bytes
     // before the writer thread starts; outside that single reassignment, the
     // index is stable for the channel's lifetime.
@@ -52,11 +52,11 @@ internal sealed class WriteChannel : Stream, IWriteChannel
     private volatile bool _isReady;
     private volatile bool _isConnected;
     // One-way latch: set true the first time the channel observes a completed
-    // handshake (#358). Once true, _owner.PeerMaxRecvPayload reflects the
+    // handshake. Once true, _owner.PeerMaxRecvPayload reflects the
     // last negotiated value and is safe to read across disconnect/reconnect
     // windows; before then it is still the 1 MiB default and unsafe.
     private volatile bool _peerCapNegotiated;
-    private int _connectedFired; // CAS guard: ensures Connected fires exactly once per connect transition (#357)
+    private int _connectedFired; // CAS guard: ensures Connected fires exactly once per connect transition
     private ChannelCloseReason? _closeReason;
     private Exception? _closeException;
 
@@ -145,7 +145,7 @@ internal sealed class WriteChannel : Stream, IWriteChannel
         // Promote Opening → Open atomically under _posLock so a concurrent
         // SetClosed/Abort that flips _state to Closed cannot land between the
         // check and the write and leave the channel resurrected to Open
-        // after its slab/handlers were already torn down (issue #163).
+        // after its slab/handlers were already torn down.
         // Closing/Closed/Open are all no-ops; only Opening promotes.
         bool promoted;
         lock (_posLock)
@@ -161,7 +161,7 @@ internal sealed class WriteChannel : Stream, IWriteChannel
             // Raise synchronous notifications first so handlers observe a ready channel,
             // then complete the TCS so async awaiters resume only after handlers ran.
             // Multicast-safe: a throwing user handler must not prevent the remaining
-            // handlers from running nor crash the producer thread (#286).
+            // handlers from running nor crash the producer thread.
             SafeEventRaiser.Raise(this, Ready, _owner.NotifyEventHandlerException);
             _owner.NotifyChannelOpened(ChannelId);
             _readyTcs.TrySetResult();
@@ -174,7 +174,7 @@ internal sealed class WriteChannel : Stream, IWriteChannel
         // successful handshake, and OpenChannel/AcceptChannel also call it on
         // the fast path when _isConnected is already true. A channel registered
         // between those two sites would otherwise receive two Connected events
-        // for a single transport-up transition (#357). CAS on _connectedFired
+        // for a single transport-up transition. CAS on _connectedFired
         // promotes 0->1 exactly once per connect transition; MarkDisconnected
         // resets the flag so a subsequent reconnect re-fires Connected.
         if (Interlocked.Exchange(ref _connectedFired, 1) == 1) return;
@@ -190,7 +190,7 @@ internal sealed class WriteChannel : Stream, IWriteChannel
     internal void MarkDisconnected(DisconnectReason reason, Exception? exception = null)
     {
         // Pair the _connectedFired reset with _isConnected = false so the next
-        // MarkConnected on this channel re-fires Connected (#357).
+        // MarkConnected on this channel re-fires Connected.
         if (Interlocked.Exchange(ref _connectedFired, 0) == 0) return;
         _isConnected = false;
         SafeEventRaiser.Raise(this, Disconnected, new DisconnectedEventArgs(reason, exception), _owner.NotifyEventHandlerException);
@@ -211,13 +211,13 @@ internal sealed class WriteChannel : Stream, IWriteChannel
         int frameSize = FrameHeader.Size + payloadLength;
 
         // A single frame must fit in BOTH the local slab AND the remote peer's
-        // advertised max-recv-payload (#180). Without the peer clamp, a peer
+        // advertised max-recv-payload. Without the peer clamp, a peer
         // with a smaller slab would receive a wire-legal but unbuffereable
         // frame, throw MultiplexerException(ProtocolError) from BufferInSlab,
         // and fault its reader loop on every reconnect — replaying the same
         // oversize frame until MaxAutoReconnectAttempts is exhausted.
         //
-        // Pre-handshake (#358): _owner.PeerMaxRecvPayload defaults to
+        // Pre-handshake: _owner.PeerMaxRecvPayload defaults to
         // FrameConstants.DefaultSlabSize (1 MiB) until the handshake completes
         // and StreamMultiplexer.PerformHandshakeAsync assigns the negotiated
         // value. A WriteAsync issued while the channel is still Opening — and
@@ -262,7 +262,7 @@ internal sealed class WriteChannel : Stream, IWriteChannel
             // writers via TryReleaseSpaceSignal precisely so they can unwind
             // here with ChannelClosedException instead of stalling for the
             // full SendTimeout or surfacing ObjectDisposedException when the
-            // semaphore is disposed by Abort (issue #230).
+            // semaphore is disposed by Abort.
             if (_state is not (ChannelState.Open or ChannelState.Opening))
                 throw new ChannelClosedException(ChannelId, _closeReason ?? ChannelCloseReason.LocalClose);
 
@@ -289,7 +289,7 @@ internal sealed class WriteChannel : Stream, IWriteChannel
         }
 
         // Build the complete frame in the slab (under lock to prevent races with TakeReady).
-        // Re-check state INSIDE the lock to prevent the slab-use-after-free race in #258:
+        // Re-check state INSIDE the lock to prevent the slab-use-after-free race in:
         // a concurrent SetClosed/Abort can flip _state to Closed and return _slab to the
         // ArrayPool while a writer is parked on _spaceAvailable.WaitAsync. Once the writer
         // wakes (the close path releases the semaphore), the entry-state check at the top
@@ -336,7 +336,7 @@ internal sealed class WriteChannel : Stream, IWriteChannel
     /// Reassigns this channel's wire index and rewrites the channel-index
     /// bytes of every queued frame in the slab. Used by the multiplexer to
     /// move a pre-handshake-allocated channel from the default-odd seed parity
-    /// into the post-handshake-decided parity space (#237). Must be called
+    /// into the post-handshake-decided parity space. Must be called
     /// before the writer thread starts transmitting from this slab and before
     /// any frame from this channel has been observed by the peer.
     /// </summary>
@@ -344,10 +344,10 @@ internal sealed class WriteChannel : Stream, IWriteChannel
     {
         lock (_posLock)
         {
-            // Walk every queued frame in [_sentPos.._writePos). Pre-handshake
+            // Walk every queued frame in [_sentPos._writePos). Pre-handshake
             // _sentPos is 0; in general the writer has not yet drained any
             // frame at the time this is called, so this collapses to the
-            // whole [0.._writePos) range. We still scan from _sentPos to keep
+            // whole [0._writePos) range. We still scan from _sentPos to keep
             // the invariant correct if the contract is ever loosened.
             int pos = _sentPos;
             while (pos + FrameHeader.Size <= _writePos)
@@ -415,7 +415,7 @@ internal sealed class WriteChannel : Stream, IWriteChannel
     // slab cannot currently fit the frame. Callers that produce coalescable
     // or retry-able frames (e.g. position-based ACKs) use this so transient
     // control-slab pressure cannot surface as a public exception or fault
-    // the mux reader thread (issue #291).
+    // the mux reader thread.
     internal bool TryWriteRawFrame(ReadOnlySpan<byte> frame)
     {
         lock (_posLock)
@@ -559,7 +559,7 @@ internal sealed class WriteChannel : Stream, IWriteChannel
     {
         // Atomically promote Opening/Open → Closing under _posLock so a concurrent
         // MarkOpen cannot resurrect the channel after we passed the state check
-        // (issue #163). Closing/Closed are no-ops.
+        // . Closing/Closed are no-ops.
         bool transitioned;
         lock (_posLock)
         {
@@ -606,7 +606,7 @@ internal sealed class WriteChannel : Stream, IWriteChannel
     {
         // Atomically commit the closed state alongside _closeReason/_closeException
         // and _isConnected so a concurrent MarkOpen cannot interleave between the
-        // close-state check and the close-state write (issue #163). Holding _posLock
+        // close-state check and the close-state write. Holding _posLock
         // also fences these writes against any in-flight reader of the same fields.
         lock (_posLock)
         {
@@ -634,9 +634,9 @@ internal sealed class WriteChannel : Stream, IWriteChannel
             // TakeReady/MarkSent can race with us, so the slab must be
             // returned unconditionally. Gating on !HasPendingData() leaks
             // the slab whenever the channel is torn down with bytes still
-            // queued (see issue #169). Serialize with _posLock so any
+            // queued. Serialize with _posLock so any
             // in-flight WriteAsync commit completes before the slab is
-            // released to the pool (issue #258).
+            // released to the pool.
             lock (_posLock) TryReturnSlab();
             // Registry cleared externally on mux dispose; unblock any DisposeAsync awaiters.
             _unregisteredTcs.TrySetResult();
@@ -647,7 +647,7 @@ internal sealed class WriteChannel : Stream, IWriteChannel
     {
         SetClosed(reason, exception);
         // Serialize with _posLock so any in-flight WriteAsync commit
-        // completes before the slab is released to the pool (issue #258).
+        // completes before the slab is released to the pool.
         lock (_posLock) TryReturnSlab();
         _spaceAvailable.Dispose();
     }
@@ -680,13 +680,13 @@ internal sealed class WriteChannel : Stream, IWriteChannel
         // so it stays valid for any concurrent TakeReady/MarkSent in progress.
         // Under terminal reasons (MuxDisposed / TransportFailed) the writer
         // loop is cancelled and will never drain; in those cases the slab
-        // must be returned unconditionally or it leaks (issue #169).
+        // must be returned unconditionally or it leaks.
         if (!HasPendingData()
             || _closeReason is ChannelCloseReason.MuxDisposed
                             or ChannelCloseReason.TransportFailed)
         {
             // Serialize with _posLock so any in-flight WriteAsync commit
-            // completes before the slab is released to the pool (issue #258).
+            // completes before the slab is released to the pool.
             lock (_posLock) TryReturnSlab();
         }
     }
@@ -761,7 +761,7 @@ internal sealed class WriteChannel : Stream, IWriteChannel
             // Best-effort: if the slab cannot fit FIN, finalize the close anyway
             // so Dispose never throws under normal conditions.
             // Promote Opening/Open → Closing atomically under _posLock so a concurrent
-            // MarkOpen cannot resurrect the channel after the check (issue #163).
+            // MarkOpen cannot resurrect the channel after the check.
             bool queueFin = false;
             lock (_posLock)
             {

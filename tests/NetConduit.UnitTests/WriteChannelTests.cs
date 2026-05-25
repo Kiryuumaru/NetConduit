@@ -288,7 +288,7 @@ public sealed class WriteChannelTests
     [Fact]
     public void SetClosed_MuxDisposed_WithPendingData_ReturnsSlab()
     {
-        // Reproduces issue #169: under MuxDisposed the writer loop is
+        // Reproduces issue: under MuxDisposed the writer loop is
         // cancelled and will never call MarkSent again. If HasPendingData()
         // gates slab return, the slab is leaked because no other path runs.
         var channel = CreateChannel();
@@ -343,7 +343,7 @@ public sealed class WriteChannelTests
     [Fact]
     public async Task WriteAsync_ChannelClosedWhileParked_ThrowsChannelClosedException_PromptlyNotTimeout()
     {
-        // Regression for #230: a writer parked in _spaceAvailable.WaitAsync
+        // Regression for: a writer parked in _spaceAvailable.WaitAsync
         // must unwind with ChannelClosedException promptly when the channel
         // closes, instead of stalling for the full SendTimeout and throwing
         // TimeoutException.
@@ -409,7 +409,7 @@ public sealed class WriteChannelTests
     [Fact]
     public async Task WriteAsync_ParkedWriter_StateClosedWhileSpaceFreed_ThrowsChannelClosedException()
     {
-        // #258: When a parked writer wakes because SetClosed/Abort released the
+        // When a parked writer wakes because SetClosed/Abort released the
         // _spaceAvailable semaphore AND the slab has become compactable (e.g.,
         // because the writer task drained and acked the buffer just before
         // close), the writer would otherwise break out of the wait loop into

@@ -158,7 +158,7 @@ public sealed class GoAwayTests
         await server.DisposeAsync();
     }
 
-    // Regression for #234: remote-initiated GoAway must terminally abort
+    // Regression for: remote-initiated GoAway must terminally abort
     // local channels so awaiting reads see EOF and writers see ChannelClosedException.
 
     private static (StreamMultiplexer Client, StreamMultiplexer Server) CreatePairWithShortDrain()

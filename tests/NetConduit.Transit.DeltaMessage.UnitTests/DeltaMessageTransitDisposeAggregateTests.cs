@@ -4,7 +4,7 @@ using Xunit;
 namespace NetConduit.Transit.DeltaMessage.UnitTests;
 
 /// <summary>
-/// Regression tests for #292: DeltaMessageTransit.DisposeAsync must run every step
+/// Regression tests for: DeltaMessageTransit.DisposeAsync must run every step
 /// even if an earlier one throws, and aggregate the failures. Otherwise a throwing
 /// _writeChannel.DisposeAsync skips _readChannel disposal (slab leak), and the
 /// SemaphoreSlim disposals.

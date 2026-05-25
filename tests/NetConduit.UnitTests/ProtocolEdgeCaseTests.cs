@@ -382,7 +382,7 @@ public sealed class ProtocolEdgeCaseTests
 
     #endregion
 
-    #region Frame Header Validation (#116)
+    #region Frame Header Validation
 
     [Fact]
     public void FrameHeader_OversizedPayloadLength_ThrowsProtocolError()
@@ -419,7 +419,7 @@ public sealed class ProtocolEdgeCaseTests
 
     #endregion
 
-    #region Slab Capacity Enforcement (#113, #180)
+    #region Slab Capacity Enforcement
 
     [Fact]
     public async Task ReceiverSmallerSlab_RejectsOversizedFrame()
@@ -456,7 +456,7 @@ public sealed class ProtocolEdgeCaseTests
         var reader = await server.AcceptChannelAsync("oversize-frame", cts.Token);
         await writer.WaitForReadyAsync(cts.Token);
 
-        // Post-#180: handshake advertises the receiver's 64 KiB default slab,
+        // Post-handshake: the receiver's 64 KiB default slab is advertised,
         // so WriteAsync clamps against it and refuses the 96 KiB payload BEFORE
         // touching the wire. The transport stays connected and the receiver's
         // reader loop is never asked to buffer a frame it cannot hold.
@@ -474,10 +474,10 @@ public sealed class ProtocolEdgeCaseTests
 
     #endregion
 
-    #region Slab Size Negotiation (#180)
+    #region Slab Size Negotiation
 
     /// <summary>
-    /// Regression for #180. With heterogeneous slab sizes, the handshake must
+    /// Regression for. With heterogeneous slab sizes, the handshake must
     /// advertise each peer's max-recv-payload so the sender clamps its writes
     /// against the smaller of (local slab, peer advertised). A successful write
     /// of a payload that fits in both slabs proves the negotiation works AND

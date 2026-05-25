@@ -122,7 +122,7 @@ public class UdpMultiplexerTests
     [Fact(Timeout = 30000)]
     public async Task SendsAndReceivesData_WhenAttackerInjectsTruncatedDataFrameMidStream()
     {
-        // Regression for #187: a data frame whose wire-declared `len` exceeds the actual
+        // Regression for: a data frame whose wire-declared `len` exceeds the actual
         // datagram payload size must NOT be silently truncated-and-ACKed. The receiver
         // must drop it so the legitimate sender retransmits and the multiplexer byte
         // stream stays aligned.
@@ -179,7 +179,7 @@ public class UdpMultiplexerTests
     [Fact(Timeout = 30000)]
     public async Task ServerFactory_StrayNonHelloPacket_DoesNotHijackListener()
     {
-        // #303: a single non-HELLO UDP datagram arriving before NC_HELLO must
+        // a single non-HELLO UDP datagram arriving before NC_HELLO must
         // not latch listener.Connect() to the rogue endpoint and short-circuit
         // the handshake. The factory must discard non-HELLO bytes and keep
         // accepting until a real NC_HELLO arrives, sending NC_HELLO_ACK back

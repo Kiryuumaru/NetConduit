@@ -47,7 +47,7 @@ public class WebSocketStreamTests
     [Fact]
     public async Task ReadAsync_PeerSendsTextFrame_ThrowsIOException()
     {
-        // Regression for #217: a Text-mode message must be rejected at the stream
+        // Regression for: a Text-mode message must be rejected at the stream
         // adapter — otherwise its UTF-8 bytes get fed to FrameHeader.Parse and
         // either tear down the mux with a misattributed ProtocolError or inject
         // bytes into the wrong channel's read stream.
@@ -92,7 +92,7 @@ public class WebSocketStreamTests
     [Fact]
     public async Task ReadAsync_PeerSendsZeroLengthBinaryFrame_ThrowsIOException()
     {
-        // Regression for #183: zero-length Binary frames are wire-legal per
+        // Regression for: zero-length Binary frames are wire-legal per
         // RFC 6455 §5.6 but the multiplexer never benefits from them (its writer
         // always emits frames >= FrameHeader.Size). Pre-fix the read loop fell
         // through both the Close branch and the Count > 0 branch, re-iterating

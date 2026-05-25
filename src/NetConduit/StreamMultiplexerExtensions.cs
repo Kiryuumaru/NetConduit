@@ -42,7 +42,7 @@ public static class StreamMultiplexerExtensions
         }
         catch
         {
-            // Issue #250: WaitForReadyAsync can throw on cancellation, peer rejection,
+            // WaitForReadyAsync can throw on cancellation, peer rejection,
             // mux disposal, or transport failure. Without this dispose, the channel
             // remains registered in ChannelRegistry — its slab, wire-index, and
             // channelId stay permanently allocated until the mux is disposed.

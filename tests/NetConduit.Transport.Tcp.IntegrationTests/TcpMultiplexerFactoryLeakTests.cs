@@ -8,7 +8,7 @@ namespace NetConduit.Transport.Tcp.IntegrationTests;
 public class TcpMultiplexerFactoryLeakTests
 {
     /// <summary>
-    /// Regression for #216: TcpMultiplexer.CreateOptions(host, port) StreamFactory must dispose
+    /// Regression for: TcpMultiplexer.CreateOptions(host, port) StreamFactory must dispose
     /// the constructed TcpClient when ConnectAsync throws. Pre-fix, each failed connect leaked
     /// the underlying Socket until GC finalization, causing handle/FD growth under retry loops.
     /// Uses cancellation-during-connect as the failure trigger to keep each iteration fast and

@@ -35,7 +35,7 @@ internal static class DeltaDiff
             // ContainsKey distinguishes "key absent" from "key present with
             // JSON null value" — JsonObject's indexer returns C# null for
             // both, which silently dropped newly-added null-valued
-            // properties from the diff (issue #211).
+            // properties from the diff.
             if (!oldObj.ContainsKey(prop.Key))
             {
                 ops.Add(new DeltaOperation(DeltaOp.Set, path, newValue?.DeepClone()));

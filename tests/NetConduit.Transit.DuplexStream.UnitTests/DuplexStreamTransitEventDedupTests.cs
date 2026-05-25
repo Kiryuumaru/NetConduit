@@ -21,7 +21,7 @@ public sealed class DuplexStreamTransitEventDedupTests
         return (client, server);
     }
 
-    // Regression for #191. Pre-fix the transit forwarded each underlying
+    // Regression for. Pre-fix the transit forwarded each underlying
     // half's Disconnected event independently, raising Disconnected twice per
     // logical disconnect. Post-fix the transit latches a single fire.
     [Fact]

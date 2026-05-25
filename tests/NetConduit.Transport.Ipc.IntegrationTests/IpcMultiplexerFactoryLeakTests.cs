@@ -6,7 +6,7 @@ namespace NetConduit.Transport.Ipc.IntegrationTests;
 public class IpcMultiplexerFactoryLeakTests
 {
     /// <summary>
-    /// Regression for #304: IpcMultiplexer.CreateOptions StreamFactory must dispose the
+    /// Regression for: IpcMultiplexer.CreateOptions StreamFactory must dispose the
     /// constructed TcpClient (Windows) / Socket (Unix) when ConnectAsync fails or is cancelled.
     /// Pre-fix, each failed connect leaked the underlying handle until GC finalization, causing
     /// FD growth under reconnect-storm conditions.

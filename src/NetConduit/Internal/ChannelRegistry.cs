@@ -61,7 +61,7 @@ internal sealed class ChannelRegistry
 
     /// <summary>
     /// Serializes pre-handshake index allocation against the post-handshake
-    /// parity reassignment walk (#237). Held by:
+    /// parity reassignment walk. Held by:
     ///   1. OpenChannel / TryRegisterChannels around AllocateChannelIndex +
     ///      RegisterWriteChannel + WriteInitFrame, so the channel is fully
     ///      published (and its INIT frame stamped) before any concurrent
@@ -97,7 +97,6 @@ internal sealed class ChannelRegistry
     /// (odd vs even). Used after the handshake's <see cref="SetIndexParity"/>
     /// to identify pre-handshake-allocated indices that landed on the wrong
     /// parity space and must be reassigned before any frame is transmitted
-    /// (#237).
     /// </summary>
     internal bool IsCurrentParity(ushort index)
     {
@@ -109,7 +108,7 @@ internal sealed class ChannelRegistry
     /// Atomically rekey a registered <see cref="WriteChannel"/> from
     /// <paramref name="oldIndex"/> to <paramref name="newIndex"/>. Used by the
     /// post-handshake reassignment for pre-handshake-allocated channels whose
-    /// indices need to move into the correct parity space (#237).
+    /// indices need to move into the correct parity space.
     /// </summary>
     internal void RekeyWriteChannel(ushort oldIndex, ushort newIndex, WriteChannel channel)
     {
@@ -140,7 +139,7 @@ internal sealed class ChannelRegistry
         {
             // Roll back the per-index insert so we do not leave an orphan
             // WriteChannel reachable via GetWriteChannel(index) /
-            // GetAllWriteChannels() after the throw (#268). The caller has no
+            // GetAllWriteChannels() after the throw. The caller has no
             // way to undo this themselves: they never received a successful
             // return and have no record of the allocated index.
             _writeChannels.TryRemove(new KeyValuePair<ushort, WriteChannel>(index, channel));
@@ -154,7 +153,7 @@ internal sealed class ChannelRegistry
             throw new MultiplexerException(ErrorCode.ChannelExists, $"Read channel with index {index} already exists.");
         if (!_idToIndex.TryAdd(channel.ChannelId, index))
         {
-            // Roll back the per-index insert (see RegisterWriteChannel; #268).
+            // Roll back the per-index insert.
             _readChannels.TryRemove(new KeyValuePair<ushort, ReadChannel>(index, channel));
             throw new MultiplexerException(ErrorCode.ChannelExists, $"A channel with ID '{channel.ChannelId}' already exists.");
         }
@@ -192,7 +191,7 @@ internal sealed class ChannelRegistry
         // Scope the _idToIndex removal to the (channelId, index) pair so a mismatched
         // call — e.g. cleanup after a failed-to-commit registration where _idToIndex
         // still points at a *different* (legitimate) channel under the same ChannelId
-        // — cannot tear down the legitimate mapping (#228).
+        // — cannot tear down the legitimate mapping.
         _idToIndex.TryRemove(new KeyValuePair<string, ushort>(channelId, index));
         return removed;
     }
@@ -227,7 +226,7 @@ internal sealed class ChannelRegistry
         // fully registered in _readChannels: we MUST route it to the catch-all
         // _acceptQueue (or a matching prefix subscription) instead of dropping
         // it on the floor, or the peer keeps the channel open and writes pile
-        // up unread in the orphan slab (#269).
+        // up unread in the orphan slab.
         if (_pendingAccepts.TryRemove(channel.ChannelId, out var tcs))
         {
             if (tcs.TrySetResult(channel))
@@ -235,10 +234,10 @@ internal sealed class ChannelRegistry
             // TrySetResult failed: TCS was already completed. If it was
             // completed via AcceptChannelAsync's fast-path with THIS same
             // channel reference, the named waiter has already received it —
-            // suppress to avoid double-delivery (#179, #229). Otherwise
+            // suppress to avoid double-delivery. Otherwise
             // (cancelled, or completed with a stale channel from a prior
             // close+reopen cycle of the same id), fall through so the new
-            // channel is still delivered somewhere (#269).
+            // channel is still delivered somewhere.
             if (tcs.Task.Status == TaskStatus.RanToCompletion &&
                 ReferenceEquals(tcs.Task.Result, channel))
                 return;
@@ -273,7 +272,7 @@ internal sealed class ChannelRegistry
         // but not yet called EnqueueForAccept. Returning directly from the
         // fast path would then let EnqueueForAccept fall through to
         // _acceptQueue, delivering the same ReadChannel to this caller AND
-        // a generic AcceptChannelsAsync consumer (#179, #229).
+        // a generic AcceptChannelsAsync consumer.
         var tcs = new TaskCompletionSource<ReadChannel>(TaskCreationOptions.RunContinuationsAsynchronously);
         _pendingAccepts[channelId] = tcs;
 
@@ -299,7 +298,7 @@ internal sealed class ChannelRegistry
         //
         // Only TrySetCanceled when we actually won the TryRemove. If we lost the
         // race to EnqueueForAccept, the TCS will be — or already is — completed
-        // by it, and EnqueueForAccept's TrySetResult-fallback path (#269) takes
+        // by it, and EnqueueForAccept's TrySetResult-fallback path takes
         // care of routing the channel to the catch-all queue when needed.
         await using var registration = ct.Register(() =>
         {

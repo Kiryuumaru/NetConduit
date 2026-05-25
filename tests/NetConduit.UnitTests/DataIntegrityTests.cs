@@ -354,7 +354,7 @@ public sealed class DataIntegrityTests
         var writeChannel = client.OpenChannel("boundaries");
         var readChannel = await server.AcceptChannelAsync("boundaries", cts.Token);
 
-        // Write at various sizes: 1, 2, 4, 8, ..., 65536
+        // Write at various sizes: 1, 2, 4, 8., 65536
         var allSent = new MemoryStream();
         var writeTask = Task.Run(async () =>
         {

@@ -57,7 +57,7 @@ public sealed class StreamPair : IStreamPair
     {
         // Every cleanup step must run unconditionally — an exception from the
         // read-stream dispose (e.g. RST'd socket, aborted QuicStream) must not
-        // leak the write stream or the owning transport handle (issue #218).
+        // leak the write stream or the owning transport handle.
         List<Exception>? errors = null;
 
         if (ReadStream != WriteStream)

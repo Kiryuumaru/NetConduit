@@ -3,7 +3,7 @@ using NetConduit.Interfaces;
 namespace NetConduit.UnitTests;
 
 /// <summary>
-/// Regression tests for issue #165: a remote <c>Ctrl/GoAway</c> must mirror the
+/// Regression tests for issue: a remote <c>Ctrl/GoAway</c> must mirror the
 /// drain semantics of the local <see cref="StreamMultiplexer.GoAwayAsync"/>
 /// path, otherwise frames already stamped into channel slabs by
 /// <c>WriteAsync</c> are silently dropped when the receiver of GoAway tears

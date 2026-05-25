@@ -304,7 +304,7 @@ public sealed class AfterReconnectionTests : IAsyncDisposable
     }
 
     // =====================================================================
-    // Regression for issue #161: when the reader has crossed the ACK threshold
+    // Regression for issue: when the reader has crossed the ACK threshold
     // (so the writer's _ackedPos was advanced via OnAck), reconnect must still
     // not duplicate-deliver any of the previously-acked bytes. Exercises the
     // new reconnect-handshake replay-base advertisement path together with the

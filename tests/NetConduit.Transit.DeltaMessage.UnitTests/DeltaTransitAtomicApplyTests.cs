@@ -8,7 +8,7 @@ using NetConduit.Transit.DeltaMessage.Internal;
 namespace NetConduit.Transit.DeltaMessage.UnitTests;
 
 /// <summary>
-/// Regression tests for #223: DeltaMessageTransit.ReceiveAsync must apply deltas
+/// Regression tests for: DeltaMessageTransit.ReceiveAsync must apply deltas
 /// atomically. A mid-batch failure must leave _lastReceivedState unchanged at the
 /// receiver, then clear it and request a resync so subsequent deltas never apply
 /// to a corrupt baseline.
@@ -96,7 +96,7 @@ public sealed class DeltaTransitAtomicApplyTests
             // permanently corrupting the receiver baseline. Post-fix, the apply is staged
             // on a clone and the original state is preserved.
             // Delta payload format from DeltaMessageTransit.SerializeDelta:
-            //   [ [opCode, [path], value?, index?], ... ]
+            //   [ [opCode, [path], value?, index?]. ]
             //   Set = 0, ArrayRemove = 12 (see NetConduit.Enums.DeltaOp)
             var badDelta = """[[0,["x"],1],[12,["items"],99]]"""u8.ToArray();
             await WriteFrameAsync(senderWrite, 0x01, badDelta, cts.Token);

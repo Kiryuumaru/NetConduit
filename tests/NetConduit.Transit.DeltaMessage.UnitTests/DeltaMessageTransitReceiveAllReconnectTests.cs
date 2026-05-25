@@ -8,7 +8,7 @@ using NetConduit.Models;
 namespace NetConduit.Transit.DeltaMessage.UnitTests;
 
 /// <summary>
-/// Regression for #297: <see cref="DeltaMessageTransit{T}.ReceiveAllAsync"/>'s loop
+/// Regression for: <see cref="DeltaMessageTransit{T}.ReceiveAllAsync"/>'s loop
 /// condition was <c>IsConnected</c>, which flips false on every transient transport
 /// disconnect — terminating the enumerable mid-session even when auto-reconnect was
 /// configured to recover. The fix mirrors <c>MessageTransit.ReceiveAllAsync</c> by

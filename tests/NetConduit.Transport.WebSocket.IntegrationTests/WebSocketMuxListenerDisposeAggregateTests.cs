@@ -9,7 +9,7 @@ using NetConduit.Transport.WebSocket;
 namespace NetConduit.Transport.WebSocket.IntegrationTests;
 
 /// <summary>
-/// #295: <see cref="WebSocketMuxListener.DisposeAsync"/> must continue disposing
+/// <see cref="WebSocketMuxListener.DisposeAsync"/> must continue disposing
 /// remaining sessions when one mux's <c>DisposeAsync</c> throws, must clear
 /// <c>_sessions</c>, and must surface the failure(s).
 /// </summary>
