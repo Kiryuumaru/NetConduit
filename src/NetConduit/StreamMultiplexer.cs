@@ -40,6 +40,7 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IChannelOwner
     private volatile bool _isReady;
     private volatile bool _isShuttingDown;
     private volatile bool _disconnectedFired;
+    private volatile bool _disposed;
     private DisconnectReason? _disconnectReason;
 
     internal static byte[] EncodeValidatedChannelId(string channelId, string paramName)
@@ -1158,7 +1159,11 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IChannelOwner
     /// <inheritdoc />
     public async ValueTask DisposeAsync()
     {
-        if (!_isRunning && _conn.Transport is null) return;
+        if (_disposed) return;
+        _disposed = true;
+
+        // Snapshot before reset: a never-started mux must not emit Disconnected.
+        bool wasStarted = _isRunning;
 
         _isRunning = false;
         _isConnected = false;
@@ -1193,7 +1198,7 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IChannelOwner
         _flushSignal.Dispose();
         _cts.Dispose();
 
-        if (!_disconnectedFired && _disconnectReason.HasValue)
+        if (wasStarted && !_disconnectedFired && _disconnectReason.HasValue)
             RaiseEvent(Disconnected, new DisconnectedEventArgs(_disconnectReason.Value, null));
     }
 
