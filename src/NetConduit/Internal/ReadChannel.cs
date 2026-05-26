@@ -76,19 +76,35 @@ internal sealed class ReadChannel : Stream, IReadChannel, IValueTaskSource<int>
     private int _connectedFired; // CAS guard: ensures Connected fires exactly once per connect transition
     private ChannelCloseReason? _closeReason;
     private Exception? _closeException;
-    // CAS guard: ensures the stats decrement and ChannelClosed event fire exactly once,
-    // regardless of whether the close path is the inbound FIN dispatcher or
-    // local DisposeAsync/Dispose. Issue.
+    // CAS guard: ensures the stats decrement (OpenChannels-- / TotalChannelsClosed++)
+    // runs exactly once across the inbound FIN dispatcher, local DisposeAsync/Dispose,
+    // and mux-level abort paths.
     private int _completionAccounted;
+    // CAS guard: ensures the mux-level ChannelClosed event fires exactly once for
+    // the inbound FIN path even when local DisposeAsync races and wins the
+    // _completionAccounted CAS. The mux ChannelClosed event is documented FIN-only,
+    // so it cannot share the all-paths accounting CAS — that would silently suppress
+    // the FIN event whenever local dispose claimed accounting first.
+    private int _remoteFinEventFired;
 
     /// <summary>
     /// Atomically claims the right to perform the one-shot close accounting
-    /// (stats decrement and <see cref="StreamMultiplexer.ChannelClosed"/>
-    /// event raise). Returns <c>true</c> exactly once across the lifetime of
-    /// the channel; subsequent callers receive <c>false</c>.
+    /// (stats decrement). Returns <c>true</c> exactly once across the
+    /// lifetime of the channel; subsequent callers receive <c>false</c>.
     /// </summary>
     internal bool TryClaimCompletionAccounting() =>
         Interlocked.CompareExchange(ref _completionAccounted, 1, 0) == 0;
+
+    /// <summary>
+    /// Atomically claims the right to fire the mux-level
+    /// <see cref="StreamMultiplexer.ChannelClosed"/> event for an inbound
+    /// FIN frame. Decoupled from <see cref="TryClaimCompletionAccounting"/>
+    /// so the FIN-only event contract is honoured even when local Dispose
+    /// claims accounting first (the two paths used to share one CAS, which
+    /// silently dropped the FIN event under that race).
+    /// </summary>
+    internal bool TryClaimRemoteFinEvent() =>
+        Interlocked.CompareExchange(ref _remoteFinEventFired, 1, 0) == 0;
 
     /// <summary>The string identifier for this channel.</summary>
     public string ChannelId { get; }

@@ -456,10 +456,26 @@ internal sealed class ChannelRegistry
             ChannelCloseReason.TransportFailed => DisconnectReason.TransportError,
             _ => DisconnectReason.LocalDispose,
         };
+        MarkAllChannelsDisconnected(disconnectReason, exception);
+    }
+
+    /// <summary>
+    /// Fires Disconnected on every registered write/read channel with the
+    /// exact DisconnectReason supplied. Use this overload when the channel-
+    /// level reason cannot be derived from a ChannelCloseReason, notably
+    /// GoAwayReceived on the peer-initiated shutdown path where the mux-
+    /// level Disconnected event reports GoAwayReceived and the per-channel
+    /// events must agree (otherwise applications subscribing to
+    /// IChannel.Disconnected see TransportError on every honest-peer GoAway
+    /// and take the wrong reconnect branch). Idempotent: channels already
+    /// disconnected this cycle are no-ops via their internal CAS guard.
+    /// </summary>
+    internal void MarkAllChannelsDisconnected(DisconnectReason reason, Exception? exception = null)
+    {
         foreach (var channel in _writeChannels.Values)
-            channel.MarkDisconnected(disconnectReason, exception);
+            channel.MarkDisconnected(reason, exception);
         foreach (var channel in _readChannels.Values)
-            channel.MarkDisconnected(disconnectReason, exception);
+            channel.MarkDisconnected(reason, exception);
         // Pending accepts were never connected - no Disconnected event to fire.
     }
 

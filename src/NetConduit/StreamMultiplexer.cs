@@ -783,12 +783,15 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IChannelOwner
         else if (readChannel is not null && readChannel.TryClaimCompletionAccounting())
         {
             // Read channels can be closed by inbound FIN, by local Dispose,
-            // or by mux-level abort — whichever runs first claims the accounting.
-            // Pre-fix this branch only fired on FIN, so a local-Dispose-before-FIN
-            // permanently inflated OpenChannels and skipped ChannelClosed.
+            // or by mux-level abort — whichever runs first claims the
+            // accounting. The stats decrement must run on every path so
+            // OpenChannels does not inflate when the local consumer disposes
+            // before FIN arrives. The mux-level ChannelClosed event is
+            // documented FIN-only (see IStreamMultiplexer.ChannelClosed) and
+            // is therefore fired only from the inbound-FIN handler. Per-
+            // channel close reasons are delivered via IChannel.Closed.
             Interlocked.Decrement(ref _stats._openChannels);
             Interlocked.Increment(ref _stats._totalChannelsClosed);
-            RaiseEvent(ChannelClosed, new ChannelClosedEventArgs(channelId, readChannel.CloseException));
         }
     }
 
@@ -1009,13 +1012,18 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IChannelOwner
 
         if (header.Flags == FrameFlags.Fin)
         {
-            // Single-decrement contract via CAS: whichever runs first
-            // (this FIN handler or NotifyChannelCompleted on local Dispose)
-            // claims the accounting; the other becomes a no-op.
+            // Stats accounting is shared across FIN / local Dispose / mux abort —
+            // whichever runs first decrements once via TryClaimCompletionAccounting.
             if (channel.TryClaimCompletionAccounting())
             {
                 Interlocked.Decrement(ref _stats._openChannels);
                 Interlocked.Increment(ref _stats._totalChannelsClosed);
+            }
+            // ChannelClosed is documented FIN-only and uses its own one-shot
+            // CAS so a local Dispose that wins TryClaimCompletionAccounting
+            // does not silently suppress the FIN event.
+            if (channel.TryClaimRemoteFinEvent())
+            {
                 RaiseEvent(ChannelClosed, new ChannelClosedEventArgs(channel.ChannelId, null));
             }
         }
@@ -1125,6 +1133,17 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IChannelOwner
         }
         finally
         {
+            // Pre-mark every connected channel as Disconnected with the
+            // already-set _disconnectReason (GoAwayReceived) before _cts
+            // wakes MainLoopAsync's natural-fault path. Otherwise the
+            // unconditional MarkDisconnected(TransportError) loop inside
+            // MainLoopAsync wins via the one-shot _connectedFired CAS and
+            // the per-channel Disconnected event reports TransportError on
+            // every honest peer GoAway (symmetric to the local-GoAway fix
+            // #391/#399).
+            try { _registry.MarkAllChannelsDisconnected(Enums.DisconnectReason.GoAwayReceived); }
+            catch { /* best-effort — must not block _cts.Cancel below */ }
+
             try { _cts.Cancel(); }
             catch (ObjectDisposedException) { /* DisposeAsync already ran */ }
         }
