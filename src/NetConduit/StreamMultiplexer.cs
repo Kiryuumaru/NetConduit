@@ -466,14 +466,16 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IChannelOwner
                     if (!_connectRetry.HasHandshakeRetryBudget(handshakeAttempt))
                         throw;
 
-                    try
-                    {
-                        await Task.Delay(_options.AutoReconnectDelay, ct);
-                    }
-                    catch (OperationCanceledException) when (ct.IsCancellationRequested)
-                    {
-                        throw;
-                    }
+                    // Route the inter-attempt delay through the shared retry
+                    // helper so handshake retries honor the same backoff curve
+                    // (AutoReconnectBackoffMultiplier, MaxAutoReconnectDelay)
+                    // and emit the same Reconnecting telemetry as the
+                    // connect-retry path. A flat Task.Delay here would diverge
+                    // from the connect-retry path's behavior on the very same
+                    // MultiplexerOptions, leaving observers blind to handshake
+                    // retries and pinning the inter-attempt delay at the base
+                    // regardless of multiplier or cap.
+                    await _connectRetry.AwaitHandshakeRetryDelayAsync(handshakeAttempt, ct);
 
                     continue;
                 }
