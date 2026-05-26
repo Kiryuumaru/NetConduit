@@ -387,8 +387,12 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IChannelOwner
         }
         catch (OperationCanceledException) { /* timeout or caller cancel — proceed to terminal cleanup */ }
 
-        // Abort any channels that did not drain within the timeout so they observe MuxDisposed instead of Open.
-        _registry.AbortAllChannels(ChannelCloseReason.MuxDisposed);
+        // Phase 1 (signal): fire channel Disconnected with LocalDispose
+        // before the natural-fault path inside MainLoopAsync would otherwise
+        // fire it with TransportError (fixes #391-style reason inversion).
+        // MarkAllChannelsDisconnected does not touch slabs - the writer may
+        // still be inside writeStream.Write at this point.
+        _registry.MarkAllChannelsDisconnected(ChannelCloseReason.MuxDisposed);
         _registry.CancelAllPendingAccepts();
 
         _disconnectReason = Enums.DisconnectReason.LocalDispose;
@@ -407,6 +411,24 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IChannelOwner
         }
 
         _cts.Cancel();
+
+        // Phase 2 (drain): await MainLoopAsync exit so the writer can no
+        // longer be inside writeStream.Write(frames.Span) when we return slabs
+        // to ArrayPool (fixes #368). The natural-fault path inside
+        // MainLoopAsync already awaits the writer via WaitForLoopsAsync,
+        // so when MainLoopTask completes the writer is guaranteed exited.
+        if (_conn.MainLoopTask is not null)
+        {
+            try { await _conn.MainLoopTask.WaitAsync(ct); }
+            catch (OperationCanceledException) { }
+            catch { /* swallow during teardown */ }
+        }
+
+        // Phase 3 (release): now safe to SetClosed every channel, which
+        // returns its slab to ArrayPool. Before this restructure, the
+        // AbortAllChannels call ran synchronously before _cts.Cancel and
+        // raced the writer.
+        _registry.CloseAllChannels(ChannelCloseReason.MuxDisposed);
     }
 
     /// <inheritdoc />
@@ -1246,17 +1268,35 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IChannelOwner
         // prior TrySetResult on the happy path.
         _readyTcs.TrySetCanceled();
 
-        _cts.Cancel();
-
-        _registry.AbortAllChannels(ChannelCloseReason.MuxDisposed);
+        // Two-phase teardown to fix #368 (use-after-free of channel slabs).
+        //
+        // Phase 1 (signal): fire Disconnected on every connected channel with
+        // LocalDispose semantics so subscribers observe the documented
+        // shutdown reason before the natural-fault path inside MainLoopAsync
+        // runs MarkDisconnected(TransportError) on the same channels (which
+        // would otherwise win the race and report a misleading reason).
+        // MarkAllChannelsDisconnected does NOT change channel state and does
+        // NOT return slabs - the writer may still be inside
+        // writeStream.Write(frames.Span) at this point.
+        _registry.MarkAllChannelsDisconnected(ChannelCloseReason.MuxDisposed);
         _registry.CancelAllPendingAccepts();
 
+        _cts.Cancel();
+
+        // Phase 2 (drain): wait for MainLoopAsync (and through it the writer
+        // task via WaitForLoopsAsync) to actually exit. Only after this is the
+        // writer guaranteed to no longer be touching any channel slab.
         if (_conn.MainLoopTask is not null)
         {
             try { await _conn.MainLoopTask; }
             catch (OperationCanceledException) { }
             catch { /* swallow during dispose */ }
         }
+
+        // Phase 3 (release): now safe to SetClosed every channel, which
+        // returns its slab to ArrayPool. Before this restructure, this loop
+        // ran synchronously before the await above and raced the writer.
+        _registry.CloseAllChannels(ChannelCloseReason.MuxDisposed);
 
         if (_conn.Transport is not null)
         {

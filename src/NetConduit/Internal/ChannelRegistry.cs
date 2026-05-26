@@ -433,6 +433,23 @@ internal sealed class ChannelRegistry
         // MarkDisconnected is idempotent (no-op on never-connected channels and
         // on channels already disconnected this cycle), so the natural-drop
         // path's explicit pre-call still suppresses a duplicate fire here.
+        MarkAllChannelsDisconnected(reason, exception);
+        CloseAllChannels(reason, exception);
+    }
+
+    /// <summary>
+    /// Fires <see cref="IChannel.Disconnected"/> on every registered
+    /// write/read channel that was previously marked connected. Idempotent
+    /// (channels already disconnected this cycle are no-ops). Does NOT touch
+    /// channel state or return slab buffers - that is
+    /// <see cref="CloseAllChannels"/>'s responsibility, which the shutdown
+    /// paths must defer until after the writer task has exited to avoid a
+    /// use-after-free where the writer is still inside
+    /// <c>writeStream.Write(frames.Span)</c> when the slab is returned to
+    /// <see cref="System.Buffers.ArrayPool{T}"/> (fixes #368).
+    /// </summary>
+    internal void MarkAllChannelsDisconnected(ChannelCloseReason reason, Exception? exception = null)
+    {
         DisconnectReason disconnectReason = reason switch
         {
             ChannelCloseReason.MuxDisposed => DisconnectReason.LocalDispose,
@@ -443,8 +460,18 @@ internal sealed class ChannelRegistry
             channel.MarkDisconnected(disconnectReason, exception);
         foreach (var channel in _readChannels.Values)
             channel.MarkDisconnected(disconnectReason, exception);
-        // Pending accepts were never connected — no Disconnected event to fire.
+        // Pending accepts were never connected - no Disconnected event to fire.
+    }
 
+    /// <summary>
+    /// Transitions every registered channel to Closed and returns its slab to
+    /// <see cref="System.Buffers.ArrayPool{T}"/>. MUST only be called after
+    /// the writer task has exited; otherwise the writer can be mid
+    /// <c>writeStream.Write(frames.Span)</c> while the slab is rented by
+    /// another caller and overwritten (#368).
+    /// </summary>
+    internal void CloseAllChannels(ChannelCloseReason reason, Exception? exception = null)
+    {
         foreach (var channel in _writeChannels.Values)
             channel.SetClosed(reason, exception);
         foreach (var channel in _readChannels.Values)
