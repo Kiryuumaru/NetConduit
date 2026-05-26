@@ -801,6 +801,25 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IChannelOwner
         _registry.RemovePendingAcceptChannel(channelId);
     }
 
+    void IChannelOwner.CompletePendingAcceptCancel(string channelId, Action closeAction)
+    {
+        // Runs the channel's local-close (SetClosed) + pending-map removal
+        // under the same AcceptLock that HandleInitFrame holds while it reads
+        // the channel's State and decides whether to adopt it. Without this
+        // ordering, a Dispose on a pending-accept channel races the
+        // dispatcher: SetClosed could land after the dispatcher's lock-free
+        // State read but before the AcceptLock-protected RegisterReadChannel
+        // commits, publishing a Closed instance whose slab has already been
+        // returned to ArrayPool<byte>.Shared. With the closeAction running
+        // under AcceptLock, the dispatcher observes either "still pending,
+        // adopt" or "already Closed, evict" — never an intermediate state.
+        lock (_registry.AcceptLock)
+        {
+            closeAction();
+            _registry.RemovePendingAcceptChannel(channelId);
+        }
+    }
+
     void IChannelOwner.NotifyEventHandlerException(Exception exception)
     {
         // Forward channel-level event handler failures to the mux's Error
@@ -923,6 +942,20 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IChannelOwner
                 _registry.RemovePendingAcceptChannel(channelId);
                 pendingChannel = null;
             }
+
+            // Symmetric "no new channels after GoAwayAsync" guard with the
+            // local OpenChannel / AcceptChannel paths. A peer-sent INIT for a
+            // brand-new channel id that arrives after the local shutdown
+            // latch is dropped: the local side has declared no further
+            // channels will be created, so registering this one would (a)
+            // violate the public invariant, (b) extend GoAwayAsync's drain
+            // wait because ActiveChannelCount stays > 0 for a channel that
+            // can never carry user data, and (c) leak the slab rent until
+            // GoAwayTimeout abort. A pre-existing pending AcceptChannel for
+            // the same id IS honoured — that caller declared its intent
+            // before shutdown and the contract is to satisfy it.
+            if (_isShuttingDown && pendingChannel is null)
+                return;
 
             if (pendingChannel is not null)
             {
