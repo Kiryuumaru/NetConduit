@@ -112,6 +112,91 @@ public sealed class ReconnectTransportLeakTests
         await serverB.DisposeAsync();
     }
 
+    [Fact]
+    public async Task Reconnect_CancelledMidHandshake_DisposesFreshlyConnectedTransport()
+    {
+        // Phase 1: client connects to a real server through duplex1.
+        var duplex1 = new DuplexMemoryStream();
+        var killableClient1 = new KillableStreamPair(duplex1.SideA);
+        var killableServer1 = new KillableStreamPair(duplex1.SideB);
+
+        // Phase 2: client reconnect attempt connects through duplex2, but the
+        // peer side of duplex2 is owned by no mux — its ReadStream blocks
+        // forever. The reconnect handshake will write its Reconnect frame
+        // (succeeds — the write side is unblocked) then block awaiting the
+        // peer's Reconnect frame on ReadStream. We use this hang point to
+        // inject cancellation via client.DisposeAsync().
+        var duplex2 = new DuplexMemoryStream();
+        var trackedClient2 = new DisposeCountingStreamPair(duplex2.SideA);
+
+        int clientConnectCount = 0;
+        var reconnectTransportHandedOut = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        var client = StreamMultiplexer.Create(new MultiplexerOptions
+        {
+            StreamFactory = _ =>
+            {
+                int n = Interlocked.Increment(ref clientConnectCount);
+                if (n == 1)
+                    return Task.FromResult<IStreamPair>(killableClient1);
+                if (n == 2)
+                {
+                    reconnectTransportHandedOut.TrySetResult();
+                    return Task.FromResult<IStreamPair>(trackedClient2);
+                }
+                throw new InvalidOperationException(
+                    $"Unexpected client connect attempt {n}; client should not reconnect again after dispose.");
+            },
+            PingInterval = TimeSpan.Zero,
+            MaxAutoReconnectAttempts = 5,
+            AutoReconnectDelay = TimeSpan.FromMilliseconds(10),
+        });
+
+        var serverA = StreamMultiplexer.Create(new MultiplexerOptions
+        {
+            StreamFactory = _ => Task.FromResult<IStreamPair>(killableServer1),
+            PingInterval = TimeSpan.Zero,
+            MaxAutoReconnectAttempts = 0,
+        });
+
+        client.Start();
+        serverA.Start();
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(60));
+        await Task.WhenAll(
+            client.WaitForReadyAsync(cts.Token),
+            serverA.WaitForReadyAsync(cts.Token));
+
+        // Kill phase-1 transport. Client retries; second connect returns the
+        // tracked duplex2 pair; reconnect handshake writes its Reconnect frame
+        // then blocks awaiting the peer's response (duplex2.SideB is never
+        // read or written by anyone). Wait until the reconnect transport has
+        // actually been handed out, then dispose the client.
+        killableClient1.Kill();
+        killableServer1.Kill();
+
+        await reconnectTransportHandedOut.Task.WaitAsync(cts.Token);
+
+        // Give the reconnect handshake a moment to write its frame and park on
+        // the read await — the cancellation must land while we're inside
+        // PerformReconnectHandshakeAsync's await, otherwise the in-flight await
+        // completes synchronously and the cancellation point shifts.
+        await Task.Delay(100, cts.Token);
+
+        await client.DisposeAsync();
+
+        // The freshly-connected reconnect transport must have been disposed.
+        // Without the fix, the OperationCanceledException rethrow in
+        // MainLoopAsync's handshake catch arm exits the try-block without
+        // calling transport.DisposeAsync, and _conn.Transport was never
+        // assigned on the reconnect path so the outer DisposeAsync safety
+        // net cannot reach it either — DisposeCount stays at 0.
+        Assert.True(
+            trackedClient2.DisposeCount > 0,
+            $"Reconnect transport leaked on cancellation: expected DisposeCount > 0, got {trackedClient2.DisposeCount}.");
+
+        await serverA.DisposeAsync();
+    }
+
     /// <summary>
     /// IStreamPair wrapper that counts DisposeAsync invocations on itself.
     /// Delegates streams directly to the inner pair — only the pair's
