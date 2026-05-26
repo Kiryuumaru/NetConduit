@@ -40,16 +40,29 @@ ch.Ready                        (per channel)
 ch.Connected                    (per channel)
 ```
 
-Graceful shutdown:
+Graceful shutdown — initiator side (the multiplexer that called `GoAwayAsync`):
 
 ```
 GoAwayAsync()
-  ↓ remote acks drain
-mux.ChannelClosed(...)         (one per channel)
-ch.Closed                      (per channel)
-mux.Disconnected(GoAwayReceived)
-mux.DisposeAsync() finishes
+  ↓ remote acks drain (up to GoAwayTimeout)
+ch.Disconnected(LocalDispose)   (per open channel; before any Closed event)
+mux.Disconnected(LocalDispose)
+ch.Closed(MuxDisposed)          (per open channel; after mux.Disconnected)
+mux.ChannelClosed(...)          (one per channel)
+GoAwayAsync() returns
+mux.DisposeAsync() returns      (terminal events have already fired)
 ```
+
+Graceful shutdown — receiver side (the peer that received the `Ctrl/GoAway`):
+
+```
+ch.Disconnected(GoAwayReceived) (per open channel)
+ch.Closed(MuxDisposed)          (per open channel)
+mux.ChannelClosed(...)          (one per channel)
+mux.Disconnected(GoAwayReceived)
+```
+
+The initiator's reason is `LocalDispose` (it tore down its own side); the receiver's reason is `GoAwayReceived`. Switching on `DisconnectReason` is how a handler distinguishes "I initiated the close" from "the remote initiated the close" via the public event surface.
 
 Reconnect (`MaxAutoReconnectAttempts != 0` — the default `-1` enables this):
 
