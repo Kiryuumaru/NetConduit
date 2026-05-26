@@ -47,6 +47,15 @@ internal sealed class WriteChannel : Stream, IWriteChannel
     private bool _routerReading; // true between TakeReady and MarkSent — blocks compaction
     private int _completionNotified; // CAS guard: ensures NotifyChannelCompleted fires exactly once
     private int _slabReturned; // CAS guard: ensures slab is returned to pool exactly once
+    // INIT frame bytes still pinned in the slab. The peer's HandleInitFrame
+    // consumes the INIT inline and never buffers those bytes in its read-slab,
+    // so they MUST NOT count against the peer-cap admission bound in
+    // WriteAsync — otherwise the very first data frame is mis-throttled and
+    // deadlocks when no consumer is reading. Set by WriteInitFrame; cleared
+    // by TryCompactLocked once the peer's cumulative ACK has covered them
+    // (at which point the INIT bytes are physically compacted out of the
+    // slab and no longer occupy any position).
+    private int _initFrameBytesInSlab;
 
     private volatile ChannelState _state = ChannelState.Opening;
     private volatile bool _isReady;
@@ -249,13 +258,34 @@ internal sealed class WriteChannel : Stream, IWriteChannel
                 $"configure a larger ChannelOptions.SlabSize on both peers, or split the payload before writing.");
         }
 
-        // Wait for space in the slab if needed
+        // Wait for space in the slab if needed.
+        //
+        // Two distinct bounds must both hold to admit a frame:
+        //
+        //   1. Local slab safety:   _slabSize - _writePos >= frameSize
+        //      The slab is a finite ArrayPool rental; staging beyond it
+        //      corrupts memory.
+        //
+        //   2. Peer slab flow control:
+        //          effectiveSlab - (_writePos - _initFrameBytesInSlab) >= frameSize
+        //      Outstanding bytes consumed in the peer's ReadChannel slab are
+        //      bounded by the peer's advertised receive-slab capacity. Using
+        //      _slabSize alone (the broken historical bound) admits cumulative
+        //      bursts of in-budget frames that overflow the peer's slab — the
+        //      peer faults its reader loop with ErrorCode.ProtocolError on
+        //      BufferInSlab, and every reconnect replays the same overflow
+        //      until MaxAutoReconnectAttempts is exhausted. The peer
+        //      processes INIT inline (HandleInitFrame) and never buffers
+        //      those bytes in its read-slab, so _initFrameBytesInSlab is
+        //      subtracted from the outstanding count.
         while (true)
         {
             lock (_posLock)
             {
                 TryCompactLocked();
-                if (_slabSize - _writePos >= frameSize) break;
+                int localFree = _slabSize - _writePos;
+                int peerFree = effectiveSlab - (_writePos - _initFrameBytesInSlab);
+                if (Math.Min(localFree, peerFree) >= frameSize) break;
             }
 
             // Re-check state before re-parking. SetClosed/Abort wake parked
@@ -328,6 +358,9 @@ internal sealed class WriteChannel : Stream, IWriteChannel
             channelIdUtf8.CopyTo(_slab.AsSpan(frameStart + FrameHeader.Size, channelIdUtf8.Length));
             _writePos = frameStart + frameSize;
             _pendingPos = _writePos;
+            // The INIT frame is processed inline by the peer and never enters
+            // its read-slab; exclude these bytes from peer-cap admission.
+            _initFrameBytesInSlab = frameSize;
         }
         _owner.NotifyReady(this);
     }
@@ -713,6 +746,13 @@ internal sealed class WriteChannel : Stream, IWriteChannel
         {
             _slab.AsSpan(acked, unackedLength).CopyTo(_slab.AsSpan(0, unackedLength));
         }
+
+        // Once the peer's cumulative ACK reaches the INIT frame's tail, the
+        // INIT bytes have been physically compacted out of the slab and no
+        // longer occupy any position. Drop the peer-cap exclusion so future
+        // bound checks treat the slab as data-only.
+        if (_initFrameBytesInSlab > 0 && acked >= _initFrameBytesInSlab)
+            _initFrameBytesInSlab = 0;
 
         _compactionOffset += acked;
         _sentPos -= acked;
