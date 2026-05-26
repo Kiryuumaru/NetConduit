@@ -185,6 +185,27 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IChannelOwner
                 $"SendTimeout must not exceed {int.MaxValue} milliseconds (approximately 24.86 days).");
     }
 
+    /// <summary>
+    /// Rejects <paramref name="value"/> when it exceeds
+    /// <see cref="int.MaxValue"/> milliseconds (approximately 24.86 days).
+    /// <see cref="Task.Delay(TimeSpan, CancellationToken)"/> and
+    /// <see cref="CancellationTokenSource(TimeSpan)"/> both throw
+    /// <see cref="ArgumentOutOfRangeException"/> at that boundary; without a
+    /// matching fail-fast at construction, an oversized timing option passed
+    /// validation and faulted the first keepalive tick / drain wait / connect
+    /// retry, surfacing as a confusing internal exception with no link back
+    /// to the misconfigured field (parallel of #387 for Task.Delay sinks).
+    /// Mirrors <see cref="ValidateSendTimeout"/>'s SemaphoreSlim boundary check.
+    /// </summary>
+    private static void ValidateTaskDelayUpperBound(TimeSpan value, string fieldName)
+    {
+        if (value.TotalMilliseconds > int.MaxValue)
+            throw new ArgumentOutOfRangeException(
+                nameof(MultiplexerOptions),
+                value,
+                $"{fieldName} must not exceed {int.MaxValue} milliseconds (approximately 24.86 days).");
+    }
+
     private static void ValidateTimingOptions(MultiplexerOptions options)
     {
         if (options.PingInterval < TimeSpan.Zero)
@@ -192,6 +213,7 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IChannelOwner
                 nameof(options),
                 options.PingInterval,
                 "PingInterval must be non-negative. Use TimeSpan.Zero to disable keepalive.");
+        ValidateTaskDelayUpperBound(options.PingInterval, nameof(options.PingInterval));
 
         if (options.PingInterval > TimeSpan.Zero)
         {
@@ -200,6 +222,7 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IChannelOwner
                     nameof(options),
                     options.PingTimeout,
                     "PingTimeout must be positive when keepalive is enabled (PingInterval > TimeSpan.Zero).");
+            ValidateTaskDelayUpperBound(options.PingTimeout, nameof(options.PingTimeout));
 
             if (options.MaxMissedPings < 1)
                 throw new ArgumentOutOfRangeException(
@@ -213,18 +236,21 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IChannelOwner
                 nameof(options),
                 options.GoAwayTimeout,
                 "GoAwayTimeout must be non-negative.");
+        ValidateTaskDelayUpperBound(options.GoAwayTimeout, nameof(options.GoAwayTimeout));
 
         if (options.AutoReconnectDelay < TimeSpan.Zero)
             throw new ArgumentOutOfRangeException(
                 nameof(options),
                 options.AutoReconnectDelay,
                 "AutoReconnectDelay must be non-negative.");
+        ValidateTaskDelayUpperBound(options.AutoReconnectDelay, nameof(options.AutoReconnectDelay));
 
         if (options.MaxAutoReconnectDelay < options.AutoReconnectDelay)
             throw new ArgumentOutOfRangeException(
                 nameof(options),
                 options.MaxAutoReconnectDelay,
                 $"MaxAutoReconnectDelay ({options.MaxAutoReconnectDelay}) must be greater than or equal to AutoReconnectDelay ({options.AutoReconnectDelay}).");
+        ValidateTaskDelayUpperBound(options.MaxAutoReconnectDelay, nameof(options.MaxAutoReconnectDelay));
 
         if (double.IsNaN(options.AutoReconnectBackoffMultiplier) || options.AutoReconnectBackoffMultiplier < 1.0)
             throw new ArgumentOutOfRangeException(
@@ -237,6 +263,8 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IChannelOwner
                 nameof(options),
                 options.ConnectionTimeout,
                 "ConnectionTimeout must be non-negative, or Timeout.InfiniteTimeSpan to disable per-attempt timeout.");
+        if (options.ConnectionTimeout != Timeout.InfiniteTimeSpan)
+            ValidateTaskDelayUpperBound(options.ConnectionTimeout, nameof(options.ConnectionTimeout));
     }
 
     /// <inheritdoc />
