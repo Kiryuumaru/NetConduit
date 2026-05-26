@@ -635,11 +635,10 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IChannelOwner
                 }
                 hasConnectedBefore = true;
 
-                // Notify all channels that transport is connected
-                foreach (var ch in _registry.GetAllWriteChannels())
-                    ch.MarkConnected();
-                foreach (var ch in _registry.GetAllReadChannels())
-                    ch.MarkConnected();
+                // Notify all channels that transport is connected. Includes
+                // pending accepts so a pre-armed AcceptChannel reflects the
+                // reconnect up-edge (fixes #427).
+                _registry.MarkAllChannelsConnected();
 
                 // Block until any loop faults (transport died)
                 var faulted = await Task.WhenAny(
@@ -652,11 +651,12 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IChannelOwner
                 _isConnected = false;
                 _conn.LoopCts.Cancel();
 
-                // Notify all channels that transport is disconnected
-                foreach (var ch in _registry.GetAllWriteChannels())
-                    ch.MarkDisconnected(Enums.DisconnectReason.TransportError, null);
-                foreach (var ch in _registry.GetAllReadChannels())
-                    ch.MarkDisconnected(Enums.DisconnectReason.TransportError, null);
+                // Notify all channels that transport is disconnected. Includes
+                // pending accepts so a pre-armed AcceptChannel that observed
+                // Connected at register time also observes the down-edge
+                // (fixes #427, #435). MarkAllChannelsDisconnected centralizes
+                // the iteration over writes + reads + pending accepts.
+                _registry.MarkAllChannelsDisconnected(ChannelCloseReason.TransportFailed);
 
                 await WaitForLoopsAsync();
                 _conn.LoopCts.Dispose();

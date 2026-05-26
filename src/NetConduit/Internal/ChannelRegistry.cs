@@ -460,7 +460,33 @@ internal sealed class ChannelRegistry
             channel.MarkDisconnected(disconnectReason, exception);
         foreach (var channel in _readChannels.Values)
             channel.MarkDisconnected(disconnectReason, exception);
-        // Pending accepts were never connected - no Disconnected event to fire.
+        // Pending accepts MAY have had MarkConnected called on them by
+        // AcceptChannel / ChannelBatchRegistrar when _isConnected was true at
+        // register time (fixes #427, #435). MarkDisconnected is CAS-guarded on
+        // _connectedFired so never-connected pending channels are no-ops; only
+        // promoted ones fire Disconnected, preserving the documented
+        // Connected/Disconnected alternation on IChannel.
+        foreach (var channel in _pendingAcceptChannels.Values)
+            channel.MarkDisconnected(disconnectReason, exception);
+    }
+
+    /// <summary>
+    /// Fires <see cref="IChannel.Connected"/> on every registered write/read
+    /// channel and every pending-accept channel. Idempotent
+    /// (<see cref="ReadChannel.MarkConnected"/> /
+    /// <see cref="WriteChannel.MarkConnected"/> are CAS-guarded on
+    /// <c>_connectedFired</c>), so channels already connected this cycle are
+    /// no-ops. Pending accepts are included so a pre-armed accept observes the
+    /// reconnect's up-edge after a transient transport drop (fixes #427).
+    /// </summary>
+    internal void MarkAllChannelsConnected()
+    {
+        foreach (var channel in _writeChannels.Values)
+            channel.MarkConnected();
+        foreach (var channel in _readChannels.Values)
+            channel.MarkConnected();
+        foreach (var channel in _pendingAcceptChannels.Values)
+            channel.MarkConnected();
     }
 
     /// <summary>
