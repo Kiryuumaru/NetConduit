@@ -8,8 +8,8 @@ Accessed via `IStreamMultiplexer.Stats`:
 
 | Property | Type | Meaning |
 | --- | --- | --- |
-| `BytesSent` | `long` | Total bytes sent across all channels (control frames excluded). |
-| `BytesReceived` | `long` | Total bytes received across all channels. |
+| `BytesSent` | `long` | Total wire bytes written by the multiplexer's writer loop, including 8-byte frame headers and control-frame traffic (Ping/Pong, GoAway, INIT, FIN, Ack, Err). |
+| `BytesReceived` | `long` | Total wire bytes read by the multiplexer's reader loop, including 8-byte frame headers and control-frame traffic. |
 | `OpenChannels` | `int` | Channels currently open. |
 | `TotalChannelsOpened` | `int` | Channels opened since `Start()`. |
 | `TotalChannelsClosed` | `int` | Channels closed since `Start()`. |

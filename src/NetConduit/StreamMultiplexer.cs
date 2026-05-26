@@ -185,6 +185,27 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IChannelOwner
                 $"SendTimeout must not exceed {int.MaxValue} milliseconds (approximately 24.86 days).");
     }
 
+    /// <summary>
+    /// Rejects <paramref name="value"/> when it exceeds
+    /// <see cref="int.MaxValue"/> milliseconds (approximately 24.86 days).
+    /// <see cref="Task.Delay(TimeSpan, CancellationToken)"/> and
+    /// <see cref="CancellationTokenSource(TimeSpan)"/> both throw
+    /// <see cref="ArgumentOutOfRangeException"/> at that boundary; without a
+    /// matching fail-fast at construction, an oversized timing option passed
+    /// validation and faulted the first keepalive tick / drain wait / connect
+    /// retry, surfacing as a confusing internal exception with no link back
+    /// to the misconfigured field (parallel of #387 for Task.Delay sinks).
+    /// Mirrors <see cref="ValidateSendTimeout"/>'s SemaphoreSlim boundary check.
+    /// </summary>
+    private static void ValidateTaskDelayUpperBound(TimeSpan value, string fieldName)
+    {
+        if (value.TotalMilliseconds > int.MaxValue)
+            throw new ArgumentOutOfRangeException(
+                nameof(MultiplexerOptions),
+                value,
+                $"{fieldName} must not exceed {int.MaxValue} milliseconds (approximately 24.86 days).");
+    }
+
     private static void ValidateTimingOptions(MultiplexerOptions options)
     {
         if (options.PingInterval < TimeSpan.Zero)
@@ -192,6 +213,7 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IChannelOwner
                 nameof(options),
                 options.PingInterval,
                 "PingInterval must be non-negative. Use TimeSpan.Zero to disable keepalive.");
+        ValidateTaskDelayUpperBound(options.PingInterval, nameof(options.PingInterval));
 
         if (options.PingInterval > TimeSpan.Zero)
         {
@@ -200,6 +222,7 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IChannelOwner
                     nameof(options),
                     options.PingTimeout,
                     "PingTimeout must be positive when keepalive is enabled (PingInterval > TimeSpan.Zero).");
+            ValidateTaskDelayUpperBound(options.PingTimeout, nameof(options.PingTimeout));
 
             if (options.MaxMissedPings < 1)
                 throw new ArgumentOutOfRangeException(
@@ -213,18 +236,21 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IChannelOwner
                 nameof(options),
                 options.GoAwayTimeout,
                 "GoAwayTimeout must be non-negative.");
+        ValidateTaskDelayUpperBound(options.GoAwayTimeout, nameof(options.GoAwayTimeout));
 
         if (options.AutoReconnectDelay < TimeSpan.Zero)
             throw new ArgumentOutOfRangeException(
                 nameof(options),
                 options.AutoReconnectDelay,
                 "AutoReconnectDelay must be non-negative.");
+        ValidateTaskDelayUpperBound(options.AutoReconnectDelay, nameof(options.AutoReconnectDelay));
 
         if (options.MaxAutoReconnectDelay < options.AutoReconnectDelay)
             throw new ArgumentOutOfRangeException(
                 nameof(options),
                 options.MaxAutoReconnectDelay,
                 $"MaxAutoReconnectDelay ({options.MaxAutoReconnectDelay}) must be greater than or equal to AutoReconnectDelay ({options.AutoReconnectDelay}).");
+        ValidateTaskDelayUpperBound(options.MaxAutoReconnectDelay, nameof(options.MaxAutoReconnectDelay));
 
         if (double.IsNaN(options.AutoReconnectBackoffMultiplier) || options.AutoReconnectBackoffMultiplier < 1.0)
             throw new ArgumentOutOfRangeException(
@@ -237,6 +263,8 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IChannelOwner
                 nameof(options),
                 options.ConnectionTimeout,
                 "ConnectionTimeout must be non-negative, or Timeout.InfiniteTimeSpan to disable per-attempt timeout.");
+        if (options.ConnectionTimeout != Timeout.InfiniteTimeSpan)
+            ValidateTaskDelayUpperBound(options.ConnectionTimeout, nameof(options.ConnectionTimeout));
     }
 
     /// <inheritdoc />
@@ -635,11 +663,10 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IChannelOwner
                 }
                 hasConnectedBefore = true;
 
-                // Notify all channels that transport is connected
-                foreach (var ch in _registry.GetAllWriteChannels())
-                    ch.MarkConnected();
-                foreach (var ch in _registry.GetAllReadChannels())
-                    ch.MarkConnected();
+                // Notify all channels that transport is connected. Includes
+                // pending accepts so a pre-armed AcceptChannel reflects the
+                // reconnect up-edge (fixes #427).
+                _registry.MarkAllChannelsConnected();
 
                 // Block until any loop faults (transport died)
                 var faulted = await Task.WhenAny(
@@ -652,11 +679,12 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IChannelOwner
                 _isConnected = false;
                 _conn.LoopCts.Cancel();
 
-                // Notify all channels that transport is disconnected
-                foreach (var ch in _registry.GetAllWriteChannels())
-                    ch.MarkDisconnected(Enums.DisconnectReason.TransportError, null);
-                foreach (var ch in _registry.GetAllReadChannels())
-                    ch.MarkDisconnected(Enums.DisconnectReason.TransportError, null);
+                // Notify all channels that transport is disconnected. Includes
+                // pending accepts so a pre-armed AcceptChannel that observed
+                // Connected at register time also observes the down-edge
+                // (fixes #427, #435). MarkAllChannelsDisconnected centralizes
+                // the iteration over writes + reads + pending accepts.
+                _registry.MarkAllChannelsDisconnected(ChannelCloseReason.TransportFailed);
 
                 await WaitForLoopsAsync();
                 _conn.LoopCts.Dispose();
@@ -804,6 +832,25 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IChannelOwner
         _registry.RemovePendingAcceptChannel(channelId);
     }
 
+    void IChannelOwner.CompletePendingAcceptCancel(string channelId, Action closeAction)
+    {
+        // Runs the channel's local-close (SetClosed) + pending-map removal
+        // under the same AcceptLock that HandleInitFrame holds while it reads
+        // the channel's State and decides whether to adopt it. Without this
+        // ordering, a Dispose on a pending-accept channel races the
+        // dispatcher: SetClosed could land after the dispatcher's lock-free
+        // State read but before the AcceptLock-protected RegisterReadChannel
+        // commits, publishing a Closed instance whose slab has already been
+        // returned to ArrayPool<byte>.Shared. With the closeAction running
+        // under AcceptLock, the dispatcher observes either "still pending,
+        // adopt" or "already Closed, evict" — never an intermediate state.
+        lock (_registry.AcceptLock)
+        {
+            closeAction();
+            _registry.RemovePendingAcceptChannel(channelId);
+        }
+    }
+
     void IChannelOwner.NotifyEventHandlerException(Exception exception)
     {
         // Forward channel-level event handler failures to the mux's Error
@@ -875,6 +922,13 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IChannelOwner
                     if (rentedBuf is not null)
                         System.Buffers.ArrayPool<byte>.Shared.Return(rentedBuf);
                 }
+
+                // Retry any INIT-ACK whose original send failed because the
+                // control slab was transiently full. Per the comment on
+                // MuxConnection.PendingInitAcks: "Drained on every reader-loop
+                // iteration." Without this call the queue grows monotonically
+                // and every peer open that hit back-pressure stalls forever.
+                DrainPendingInitAcks(conn);
             }
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
@@ -926,6 +980,20 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IChannelOwner
                 _registry.RemovePendingAcceptChannel(channelId);
                 pendingChannel = null;
             }
+
+            // Symmetric "no new channels after GoAwayAsync" guard with the
+            // local OpenChannel / AcceptChannel paths. A peer-sent INIT for a
+            // brand-new channel id that arrives after the local shutdown
+            // latch is dropped: the local side has declared no further
+            // channels will be created, so registering this one would (a)
+            // violate the public invariant, (b) extend GoAwayAsync's drain
+            // wait because ActiveChannelCount stays > 0 for a channel that
+            // can never carry user data, and (c) leak the slab rent until
+            // GoAwayTimeout abort. A pre-existing pending AcceptChannel for
+            // the same id IS honoured — that caller declared its intent
+            // before shutdown and the contract is to satisfy it.
+            if (_isShuttingDown && pendingChannel is null)
+                return;
 
             if (pendingChannel is not null)
             {
@@ -979,8 +1047,14 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IChannelOwner
         readChannel.MarkOpen();
         readChannel.MarkConnected();
 
-        // Send init-ack so the opener knows the channel is established
-        SendInitAck(header.ChannelIndex);
+        // Send init-ack so the opener knows the channel is established. Under
+        // transient control-slab pressure SendInitAck returns false; queue the
+        // index so DrainPendingInitAcks retries on a later reader-loop iteration
+        // once the slab compacts. Discarding the failure here would orphan the
+        // peer's WriteChannel in Opening state forever, since duplicate INIT
+        // frames replayed across reconnect are dropped by the dedup guard above.
+        if (!SendInitAck(header.ChannelIndex))
+            _conn.PendingInitAcks.Enqueue(header.ChannelIndex);
 
         Interlocked.Increment(ref _stats._openChannels);
         Interlocked.Increment(ref _stats._totalChannelsOpened);

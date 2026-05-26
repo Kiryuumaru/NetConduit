@@ -11,7 +11,7 @@ public enum FrameFlags : byte
     Init = 0x01,
     /// <summary>Close channel gracefully.</summary>
     Fin = 0x02,
-    /// <summary>Acknowledge received bytes (payload = 4B position).</summary>
+    /// <summary>Acknowledge received bytes (payload = 8B big-endian UInt64 position).</summary>
     Ack = 0x03,
     /// <summary>Error (payload = error code + message).</summary>
     Err = 0x04,

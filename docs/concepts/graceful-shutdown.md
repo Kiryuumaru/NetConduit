@@ -46,8 +46,8 @@ await mux.GoAwayAsync(ct);   // best-effort drain
 While `IsShuttingDown` is `true`:
 
 - Existing channels accept the last writes you queued, finish flushing, and close.
-- `mux.OpenChannel` still works (a remote could legitimately need to accept a final response), but new opens are not recommended.
-- Inbound channels (`AcceptChannelsAsync`) stop yielding.
+- `mux.OpenChannel(...)` and `mux.AcceptChannel(...)` throw `InvalidOperationException("Cannot open new channels after GoAwayAsync.")`. Queue any final responses on channels you opened *before* calling `GoAwayAsync`. The regression guard is `tests/NetConduit.UnitTests/GoAwayTests.cs::GoAway_RejectsNewOpenChannel`.
+- Inbound channels (`AcceptChannelsAsync`) stop yielding new channels once the shutdown drain completes.
 
 The remote sees a `Ctrl/GoAway`, raises its own `Disconnected` once the close completes, and learns the reason as `DisconnectReason.GoAwayReceived`.
 

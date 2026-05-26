@@ -638,17 +638,30 @@ internal sealed class ReadChannel : Stream, IReadChannel, IValueTaskSource<int>
     /// <inheritdoc />
     public override async ValueTask DisposeAsync()
     {
+        // A pending-accept channel disposed before the peer's INIT arrives
+        // (_channelIndex == 0, never wired) must perform SetClosed + pending-
+        // map removal atomically with respect to the dispatcher's adoption
+        // path. Otherwise the dispatcher can read _state == Open under
+        // AcceptLock, release the lock, and only then have SetClosed land —
+        // registering a Closed instance whose slab has been returned to
+        // ArrayPool. Routing through CompletePendingAcceptCancel runs both
+        // steps under the same AcceptLock that HandleInitFrame holds.
         if (_state is not ChannelState.Closed)
         {
-            SetClosed(ChannelCloseReason.LocalClose);
+            if (_channelIndex == 0 && _owner is not null)
+            {
+                _owner.CompletePendingAcceptCancel(ChannelId, () =>
+                {
+                    if (_state is not ChannelState.Closed)
+                        SetClosed(ChannelCloseReason.LocalClose);
+                });
+            }
+            else
+            {
+                SetClosed(ChannelCloseReason.LocalClose);
+            }
         }
         TryReturnSlab();
-        // A pending-accept channel disposed before the peer's INIT arrives
-        // (_channelIndex == 0, never wired) must remove itself from the
-        // pending-accept map so the dispatcher does not resurrect this
-        // disposed instance when INIT eventually arrives.
-        if (_channelIndex == 0)
-            _owner?.NotifyPendingAcceptCancelled(ChannelId);
         _owner?.NotifyChannelCompleted(_channelIndex, ChannelId);
         await base.DisposeAsync();
     }
@@ -660,11 +673,20 @@ internal sealed class ReadChannel : Stream, IReadChannel, IValueTaskSource<int>
         {
             if (_state is not ChannelState.Closed)
             {
-                SetClosed(ChannelCloseReason.LocalClose);
+                if (_channelIndex == 0 && _owner is not null)
+                {
+                    _owner.CompletePendingAcceptCancel(ChannelId, () =>
+                    {
+                        if (_state is not ChannelState.Closed)
+                            SetClosed(ChannelCloseReason.LocalClose);
+                    });
+                }
+                else
+                {
+                    SetClosed(ChannelCloseReason.LocalClose);
+                }
             }
             TryReturnSlab();
-            if (_channelIndex == 0)
-                _owner?.NotifyPendingAcceptCancelled(ChannelId);
             _owner?.NotifyChannelCompleted(_channelIndex, ChannelId);
         }
         base.Dispose(disposing);

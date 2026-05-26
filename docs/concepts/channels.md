@@ -29,6 +29,10 @@ Either side may be the opener. There is no client/server asymmetry at the channe
 
 ## State machine
 
+The two channel directions share the same `Opening → Open` entry but differ on close. Only `IWriteChannel` ever visits `Closing` (it holds there while a queued FIN drains out); `IReadChannel` transitions `Open → Closed` directly on every close path.
+
+`IWriteChannel`:
+
 ```
                  OpenChannel / AcceptChannel
                               |
@@ -46,16 +50,43 @@ Either side may be the opener. There is no client/server asymmetry at the channe
                  CloseAsync   |   remote FIN / RemoteError / TransportFailed / MuxDisposed
                               v
                        +-------------+
-                       |   Closing   |   (FIN sent, draining)
+                       |   Closing   |   (FIN queued, draining sent bytes)
                        +-------------+
                               |
                               v
                        +-------------+
-                       |   Closed    |   (no more reads or writes)
+                       |   Closed    |   (no more writes)
                        +-------------+
 ```
 
+`IReadChannel`:
+
+```
+                 OpenChannel / AcceptChannel
+                              |
+                              v
+                       +-------------+
+                       |   Opening   |
+                       +-------------+
+                              |
+                  remote ACK  |
+                              v
+                       +-------------+
+                       |    Open     |   (IsReady = true; data flows)
+                       +-------------+
+                              |
+                              |   CloseAsync / remote FIN / RemoteError /
+                              |   TransportFailed / MuxDisposed
+                              v
+                       +-------------+
+                       |   Closed    |   (no further state; buffered bytes
+                       +-------------+    may still be returned by ReadAsync
+                                          until it returns 0)
+```
+
 `State` reflects the current node. `IsReady` flips to `true` on `Opening → Open` and stays `true` for the lifetime of the channel.
+
+For a read channel, `State == Closed` does **not** mean `ReadAsync` will return 0 on the next call. Keep reading until `ReadAsync` returns 0 to fully drain buffered data.
 
 ## Channel IDs
 
@@ -117,7 +148,7 @@ Stream s = ch.AsStream();
 
 | Action | Effect |
 | --- | --- |
-| `await ch.CloseAsync()` | Flushes pending writes, sends FIN, transitions to `Closing` then `Closed`. |
+| `await ch.CloseAsync()` | On `IWriteChannel`: flushes pending writes, sends FIN, transitions `Closing → Closed`. On `IReadChannel`: transitions directly to `Closed`; buffered bytes remain readable until `ReadAsync` returns 0. |
 | `ch.Dispose()` / `await ch.DisposeAsync()` | Equivalent to close. Safe to call multiple times. |
 
 After close, `CloseReason` is set:
