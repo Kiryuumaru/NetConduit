@@ -117,76 +117,154 @@ public sealed class InitAckBackpressureWiringTests
     /// <summary>
     /// Reproduces issue #431 (producer half).
     ///
-    /// Saturates the server's control-channel slab from outside the mux so
-    /// that <c>TryWriteRawFrame</c> (and therefore <c>SendInitAck</c>) cannot
-    /// stage a fresh frame. A keeper task re-fills the slab whenever the
-    /// writer drains a slot, holding it at saturation across the test window.
-    /// The client then opens a real channel; its INIT is processed by the
-    /// server's reader thread, which calls <c>SendInitAck</c>, which fails.
+    /// Wraps the server's transport in a pausable stream pair, completes the
+    /// initial handshake, then pauses the server-to-client write direction so
+    /// the server's writer task blocks on its underlying <c>WriteAsync</c>.
+    /// Saturating the control slab from the test thread no longer races
+    /// against the writer's drain, so when the client opens channels the
+    /// server's reader calls <c>SendInitAck</c> against a deterministically
+    /// full slab and the call site must enqueue the rejected index.
     ///
     /// Pre-fix: the boolean return of <c>SendInitAck</c> is discarded, so
-    /// the failure is silently dropped and <c>PendingInitAcks</c> stays
+    /// every failure is silently dropped and <c>PendingInitAcks</c> stays
     /// empty — the assertion fails.
     ///
-    /// Post-fix: the call site enqueues <c>header.ChannelIndex</c> when
-    /// <c>SendInitAck</c> returns false, so the queue grows to at least 1.
+    /// Post-fix: every failed INIT-ACK is enqueued for retry, so the
+    /// queue grows to at least one entry per opened channel.
     /// </summary>
     [Fact]
     public async Task HandleInitFrame_EnqueuesIndex_WhenControlSlabSaturated()
     {
-        var (client, server) = await CreateReadyPairAsync();
-        using var keeperCts = new CancellationTokenSource();
+        var duplex = new DuplexMemoryStream();
+        var pausableServerSide = new PausableStreamPair(duplex.SideB);
+        var client = StreamMultiplexer.Create(new MultiplexerOptions
+        {
+            StreamFactory = _ => Task.FromResult<IStreamPair>(duplex.SideA),
+        });
+        var server = StreamMultiplexer.Create(new MultiplexerOptions
+        {
+            StreamFactory = _ => Task.FromResult<IStreamPair>(pausableServerSide),
+        });
+        client.Start();
+        server.Start();
+        await Task.WhenAll(client.WaitForReadyAsync(), server.WaitForReadyAsync());
+
         try
         {
             var serverConn = GetMuxConnection(server);
             var control = serverConn.ControlChannel
                 ?? throw new InvalidOperationException("Server control channel not initialized.");
 
-            // Pre-saturate, then keep the slab full with a background filler.
-            // 16-byte ACK frames are the smallest control payload, so the
-            // saturation persists in tight memory.
+            // Pause the server's outbound write direction. The server's writer
+            // task will block on WriteAsync as soon as the next signal lands,
+            // so the control slab cannot drain.
+            pausableServerSide.PauseWrites();
+
+            // Trigger one round of drain to ensure the writer is parked inside
+            // the paused WriteAsync (it may already be parked from idle).
             byte[] filler = ControlFrameBuilder.BuildAckFrame(channelIndex: 1, consumedPosition: 0);
+            for (int i = 0; i < 8; i++)
+                control.TryWriteRawFrame(filler);
+            await Task.Delay(50);
+
+            // Saturate the rest of the slab. With the writer parked these
+            // bytes accumulate and stay there.
             int prefill = 0;
             while (control.TryWriteRawFrame(filler) && prefill < 100_000)
                 prefill++;
-
-            // Precondition: the slab must be full so the next attempt is
-            // guaranteed to fail.
             Assert.False(control.TryWriteRawFrame(filler),
                 "Test precondition: server control slab must be saturated before triggering INIT.");
 
-            var keeperToken = keeperCts.Token;
-            var keeper = Task.Run(() =>
+            // Open channels from the client. INIT frames arrive at the server
+            // and trigger SendInitAck — which must fail (slab full) and enqueue.
+            var opens = new List<IDisposable>();
+            for (int i = 0; i < 8; i++)
             {
-                while (!keeperToken.IsCancellationRequested)
-                {
-                    if (!control.TryWriteRawFrame(filler))
-                        Thread.SpinWait(50);
-                }
-            }, keeperToken);
-
-            // Open a fresh channel from the client; its INIT lands on the
-            // server while the slab is saturated.
-            await using var ch = (NetConduit.Interfaces.IWriteChannel)client.OpenChannel(new ChannelOptions
-            {
-                ChannelId = "saturated-open",
-            });
+                opens.Add(client.OpenChannel(new ChannelOptions { ChannelId = $"saturated-open-{i}" }));
+            }
 
             bool enqueued = await WaitUntilAsync(
                 () => !serverConn.PendingInitAcks.IsEmpty,
                 TimeSpan.FromSeconds(3));
 
             Assert.True(enqueued,
-                "HandleInitFrame must enqueue the channel index into PendingInitAcks when SendInitAck returns false.");
+                $"HandleInitFrame must enqueue the channel index into PendingInitAcks when SendInitAck returns false. Current count: {serverConn.PendingInitAcks.Count}.");
 
-            keeperCts.Cancel();
-            try { await keeper; } catch (OperationCanceledException) { }
+            // Resume writes so DisposeAsync can drain cleanly.
+            pausableServerSide.ResumeWrites();
+
+            foreach (var ch in opens)
+            {
+                if (ch is IAsyncDisposable a) await a.DisposeAsync();
+                else ch.Dispose();
+            }
         }
         finally
         {
-            keeperCts.Cancel();
+            pausableServerSide.ResumeWrites();
             await client.DisposeAsync();
             await server.DisposeAsync();
         }
+    }
+
+    /// <summary>
+    /// Wraps an <see cref="IStreamPair"/> with a pausable write stream so
+    /// tests can hold the underlying writer parked inside its WriteAsync
+    /// while they manipulate slab state from another thread.
+    /// </summary>
+    private sealed class PausableStreamPair : IStreamPair
+    {
+        private readonly IStreamPair _inner;
+        private readonly PausableWriteStream _write;
+
+        public PausableStreamPair(IStreamPair inner)
+        {
+            _inner = inner;
+            _write = new PausableWriteStream(inner.WriteStream);
+        }
+
+        public Stream ReadStream => _inner.ReadStream;
+        public Stream WriteStream => _write;
+
+        public void PauseWrites() => _write.Pause();
+        public void ResumeWrites() => _write.Resume();
+
+        public ValueTask DisposeAsync() => _inner.DisposeAsync();
+    }
+
+    private sealed class PausableWriteStream(Stream inner) : Stream
+    {
+        private readonly ManualResetEventSlim _gate = new(initialState: true);
+
+        public override bool CanRead => false;
+        public override bool CanSeek => false;
+        public override bool CanWrite => true;
+        public override long Length => throw new NotSupportedException();
+        public override long Position
+        {
+            get => throw new NotSupportedException();
+            set => throw new NotSupportedException();
+        }
+
+        public void Pause() => _gate.Reset();
+        public void Resume() => _gate.Set();
+
+        public override void Write(byte[] buffer, int offset, int count)
+        {
+            _gate.Wait();
+            inner.Write(buffer, offset, count);
+        }
+
+        public override async ValueTask WriteAsync(ReadOnlyMemory<byte> buffer, CancellationToken ct = default)
+        {
+            while (!_gate.Wait(20, ct)) { }
+            await inner.WriteAsync(buffer, ct);
+        }
+
+        public override void Flush() => inner.Flush();
+        public override Task FlushAsync(CancellationToken ct) => inner.FlushAsync(ct);
+        public override int Read(byte[] buffer, int offset, int count) => throw new NotSupportedException();
+        public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();
+        public override void SetLength(long value) => throw new NotSupportedException();
     }
 }
