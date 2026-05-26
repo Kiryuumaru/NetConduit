@@ -70,6 +70,7 @@ internal sealed class ChannelBatchRegistrar(
                             nameof(registrations));
                     }
                     StreamMultiplexer.ValidateSlabSize(reg.Options.SlabSize, $"{paramPath}.{nameof(ChannelRegistration.Options)}.{nameof(ChannelOptions.SlabSize)}");
+                    StreamMultiplexer.ValidateSendTimeout(reg.Options.SendTimeout, $"{paramPath}.{nameof(ChannelRegistration.Options)}.{nameof(ChannelOptions.SendTimeout)}");
                     effectiveOptions = reg.Options;
                 }
                 else

@@ -141,6 +141,7 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IChannelOwner
                 "MaxAutoReconnectAttempts must be -1 (unlimited), 0 (no reconnect), or a positive bound.");
         }
         ValidateSlabSize(options.DefaultChannelOptions.SlabSize, $"{nameof(options)}.{nameof(MultiplexerOptions.DefaultChannelOptions)}.{nameof(DefaultChannelOptions.SlabSize)}");
+        ValidateSendTimeout(options.DefaultChannelOptions.SendTimeout, $"{nameof(options)}.{nameof(MultiplexerOptions.DefaultChannelOptions)}.{nameof(DefaultChannelOptions.SendTimeout)}");
         ValidateTimingOptions(options);
         return new StreamMultiplexer(options, useOddIndices: true);
     }
@@ -154,6 +155,34 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IChannelOwner
                 slabSize,
                 $"SlabSize must be between {FrameConstants.MinSlabSize} ({FrameConstants.MinSlabSize / 1024} KiB) and {FrameConstants.MaxSlabSize} ({FrameConstants.MaxSlabSize / (1024 * 1024)} MiB) inclusive.");
         }
+    }
+
+    /// <summary>
+    /// Validates that <paramref name="sendTimeout"/> is a value
+    /// <see cref="SemaphoreSlim.WaitAsync(TimeSpan, CancellationToken)"/> will
+    /// accept. The accepted shape mirrors SemaphoreSlim's own contract:
+    /// <see cref="Timeout.InfiniteTimeSpan"/> (the documented "wait forever"
+    /// sentinel) is allowed; every other negative value is rejected; and
+    /// values greater than <see cref="int.MaxValue"/> milliseconds are
+    /// rejected because SemaphoreSlim cannot represent them. Without this
+    /// boundary check, a misconfigured SendTimeout surfaces as a confusing
+    /// ArgumentOutOfRangeException from SemaphoreSlim.WaitAsync deep inside
+    /// WriteChannel.WriteAsync only after the channel is open and the first
+    /// write parks on backpressure (fixes #387).
+    /// </summary>
+    internal static void ValidateSendTimeout(TimeSpan sendTimeout, string paramName)
+    {
+        if (sendTimeout == Timeout.InfiniteTimeSpan) return;
+        if (sendTimeout < TimeSpan.Zero)
+            throw new ArgumentOutOfRangeException(
+                paramName,
+                sendTimeout,
+                "SendTimeout must be non-negative, or Timeout.InfiniteTimeSpan to disable the timeout.");
+        if (sendTimeout.TotalMilliseconds > int.MaxValue)
+            throw new ArgumentOutOfRangeException(
+                paramName,
+                sendTimeout,
+                $"SendTimeout must not exceed {int.MaxValue} milliseconds (approximately 24.86 days).");
     }
 
     private static void ValidateTimingOptions(MultiplexerOptions options)
@@ -230,6 +259,7 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IChannelOwner
         ArgumentNullException.ThrowIfNull(options);
         byte[] channelIdBytes = EncodeValidatedChannelId(options.ChannelId, nameof(options));
         ValidateSlabSize(options.SlabSize, $"{nameof(options)}.{nameof(ChannelOptions.SlabSize)}");
+        ValidateSendTimeout(options.SendTimeout, $"{nameof(options)}.{nameof(ChannelOptions.SendTimeout)}");
 
         if (!_isRunning)
             throw new InvalidOperationException("Multiplexer has not been started.");
