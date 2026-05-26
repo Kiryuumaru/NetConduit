@@ -43,7 +43,7 @@ Priority does not preempt a frame in flight — once an 8-byte header and its pa
 | Background telemetry, logs | `Low` |
 | Bulk uploads, file transfer | `Low` or `Lowest` |
 
-The multiplexer's own control frames (pings, ACKs, channel INIT/FIN) are sent on an internal control channel and are not subject to your priority choices.
+The multiplexer's keepalive (Ping/Pong) and session-level control frames (GoAway, Reconnect) are sent on an internal `__control__` channel at `ChannelPriority.Highest` and are not subject to your priority choices. Per-channel framing — `Init`, `Fin`, and `Ack` — is queued in the **data channel's own slab** and rides the data channel's priority alongside its `Data` frames. Consequence: a low-priority channel's `FIN` does not overtake higher-priority channels that have bytes ready, and a low-priority channel's `Ack` (which drives the peer's send-window relief) is queued at the data channel's priority too.
 
 ## Default priority
 
