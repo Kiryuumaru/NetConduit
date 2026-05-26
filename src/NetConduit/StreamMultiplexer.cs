@@ -872,6 +872,13 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IChannelOwner
                     if (rentedBuf is not null)
                         System.Buffers.ArrayPool<byte>.Shared.Return(rentedBuf);
                 }
+
+                // Retry any INIT-ACK whose original send failed because the
+                // control slab was transiently full. Per the comment on
+                // MuxConnection.PendingInitAcks: "Drained on every reader-loop
+                // iteration." Without this call the queue grows monotonically
+                // and every peer open that hit back-pressure stalls forever.
+                DrainPendingInitAcks(conn);
             }
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
@@ -976,8 +983,14 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IChannelOwner
         readChannel.MarkOpen();
         readChannel.MarkConnected();
 
-        // Send init-ack so the opener knows the channel is established
-        SendInitAck(header.ChannelIndex);
+        // Send init-ack so the opener knows the channel is established. Under
+        // transient control-slab pressure SendInitAck returns false; queue the
+        // index so DrainPendingInitAcks retries on a later reader-loop iteration
+        // once the slab compacts. Discarding the failure here would orphan the
+        // peer's WriteChannel in Opening state forever, since duplicate INIT
+        // frames replayed across reconnect are dropped by the dedup guard above.
+        if (!SendInitAck(header.ChannelIndex))
+            _conn.PendingInitAcks.Enqueue(header.ChannelIndex);
 
         Interlocked.Increment(ref _stats._openChannels);
         Interlocked.Increment(ref _stats._totalChannelsOpened);
