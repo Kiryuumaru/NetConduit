@@ -42,14 +42,18 @@ With the defaults (1 s → ×2 → cap 30 s), the sequence is **1, 2, 4, 8, 16, 
 ```
 Disconnected (DisconnectReason.TransportError)
    |
-   | wait AutoReconnectDelay
    v
 Reconnecting (Attempt = 1)
+   |
+   | wait (AutoReconnectDelay * AutoReconnectBackoffMultiplier^(attempt-1),
+   |       capped at MaxAutoReconnectDelay)
    |
    | factory call (within ConnectionTimeout)
    v
 Connected     (transport up; handshake done)
 ```
+
+`Reconnecting` fires *before* the back-off wait — it announces that an attempt is being planned, then the wait runs, then the transport-factory call. This means `Disconnected → Reconnecting` is effectively immediate, while `Reconnecting → Connected` covers `wait + factory + handshake`.
 
 `Reconnecting` fires with a 1-based attempt number. `Connected` (the event) fires on every successful reconnect; `Ready` does **not** fire again (it's once-per-multiplexer).
 
