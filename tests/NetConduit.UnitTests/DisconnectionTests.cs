@@ -1,5 +1,7 @@
 namespace NetConduit.UnitTests;
 
+using System.Reflection;
+
 public sealed class DisconnectionTests
 {
     private static (StreamMultiplexer Client, StreamMultiplexer Server) CreatePair()
@@ -14,6 +16,56 @@ public sealed class DisconnectionTests
             StreamFactory = _ => Task.FromResult<IStreamPair>(duplex.SideB),
         });
         return (client, server);
+    }
+
+    [Fact]
+    public async Task ConcurrentGoAway_CallsEmitDisconnectedExactlyOnce()
+    {
+        const int iterations = 500;
+        const int callers = 32;
+
+        for (int i = 0; i < iterations; i++)
+        {
+            var (client, server) = CreatePair();
+            client.Start();
+            server.Start();
+            await Task.WhenAll(client.WaitForReadyAsync(), server.WaitForReadyAsync());
+
+            int disconnectedCount = 0;
+            client.Disconnected += (_, args) =>
+            {
+                Assert.Equal(DisconnectReason.LocalDispose, args.Reason);
+                Interlocked.Increment(ref disconnectedCount);
+            };
+
+            // Force GoAwayAsync into its retry+yield path before shutdown is latched,
+            // which widens the check-then-set race window for concurrent callers.
+            var connField = typeof(StreamMultiplexer).GetField("_conn", BindingFlags.Instance | BindingFlags.NonPublic)
+                ?? throw new InvalidOperationException("_conn field not found");
+            var conn = connField.GetValue(client) ?? throw new InvalidOperationException("_conn was null");
+            var controlChannelField = conn.GetType().GetField("ControlChannel", BindingFlags.Instance | BindingFlags.Public)
+                ?? throw new InvalidOperationException("ControlChannel field not found");
+            controlChannelField.SetValue(conn, null);
+
+            using var barrier = new Barrier(callers + 1);
+            var tasks = new Task[callers];
+            for (int caller = 0; caller < callers; caller++)
+            {
+                tasks[caller] = Task.Run(async () =>
+                {
+                    barrier.SignalAndWait();
+                    await client.GoAwayAsync();
+                });
+            }
+
+            barrier.SignalAndWait();
+            await Task.WhenAll(tasks);
+
+            Assert.Equal(1, disconnectedCount);
+
+            await client.DisposeAsync();
+            await server.DisposeAsync();
+        }
     }
 
     [Fact]

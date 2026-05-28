@@ -38,8 +38,8 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IChannelOwner
     private volatile bool _isRunning;
     private volatile bool _isConnected;
     private volatile bool _isReady;
-    private volatile bool _isShuttingDown;
-    private volatile bool _disconnectedFired;
+    private int _isShuttingDown;
+    private int _disconnectedFired;
     private volatile bool _disposed;
     private DisconnectReason? _disconnectReason;
 
@@ -77,7 +77,7 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IChannelOwner
     public bool IsRunning => _isRunning;
 
     /// <inheritdoc />
-    public bool IsShuttingDown => _isShuttingDown;
+    public bool IsShuttingDown => Volatile.Read(ref _isShuttingDown) != 0;
 
     /// <inheritdoc />
     public Guid SessionId => _conn.SessionId;
@@ -292,7 +292,7 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IChannelOwner
         if (!_isRunning)
             throw new InvalidOperationException("Multiplexer has not been started.");
 
-        if (_isShuttingDown)
+        if (IsShuttingDown)
             throw new InvalidOperationException("Cannot open new channels after GoAwayAsync.");
 
         bool enableReplay = _options.MaxAutoReconnectAttempts != 0;
@@ -351,7 +351,7 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IChannelOwner
         if (!_isRunning)
             throw new InvalidOperationException("Multiplexer has not been started.");
 
-        if (_isShuttingDown)
+        if (IsShuttingDown)
             throw new InvalidOperationException("Cannot accept new channels after GoAwayAsync.");
 
         // Atomically observe registry state and either return an existing channel
@@ -397,7 +397,7 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IChannelOwner
     {
         if (!_isRunning)
             throw new InvalidOperationException("Multiplexer has not been started.");
-        if (_isShuttingDown)
+        if (IsShuttingDown)
             throw new InvalidOperationException("Cannot register new channels after GoAwayAsync.");
         if (registrations.IsEmpty)
             throw new ArgumentException("At least one registration is required.", nameof(registrations));
@@ -414,14 +414,11 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IChannelOwner
     /// <inheritdoc />
     public async ValueTask GoAwayAsync(CancellationToken ct = default)
     {
-        if (_isShuttingDown) return;
+        if (Interlocked.CompareExchange(ref _isShuttingDown, 1, 0) != 0) return;
 
-        // Try to stage the GoAway frame BEFORE latching _isShuttingDown so a
-        // transient slab-full does not leave the mux in half-shutdown limbo
-        // with no GoAway on the wire. Short retry budget; if the slab
-        // is still full after, proceed anyway - peer observes transport close
-        // and reports TransportError instead of GoAwayReceived, but the local
-        // mux still tears down cleanly.
+        // The compare-exchange above is the single entry gate for GoAwayAsync.
+        // We still attempt best-effort GoAway frame staging before cancellation,
+        // but concurrent callers now exit immediately without duplicating teardown.
         byte[] goAwayPayload = [CtrlSubtype.GoAway];
         const int MaxGoAwayAttempts = 5;
         for (int attempt = 0; attempt < MaxGoAwayAttempts; attempt++)
@@ -429,8 +426,6 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IChannelOwner
             if (SendControlFrame(FrameFlags.Ctrl, goAwayPayload)) break;
             await Task.Yield();
         }
-
-        _isShuttingDown = true;
 
         // Wait up to GoAwayTimeout for already-open channels to drain. The caller token cancels the wait;
         // GoAwayTimeout bounds it. Either path falls through to forced abort below.
@@ -462,11 +457,7 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IChannelOwner
         // emission across GoAwayAsync, the remote-GoAway branch in
         // MainLoopAsync, and DisposeAsync, guaranteeing exactly-once
         // delivery regardless of which teardown trigger fires first.
-        if (!_disconnectedFired)
-        {
-            _disconnectedFired = true;
-            RaiseEvent(Disconnected, new DisconnectedEventArgs(Enums.DisconnectReason.LocalDispose, null));
-        }
+        TryRaiseDisconnected(Enums.DisconnectReason.LocalDispose, null);
 
         _cts.Cancel();
 
@@ -667,7 +658,7 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IChannelOwner
                 // Without this reset, _disconnectedFired is a lifetime latch and
                 // any mux that ever experienced ≥1 transient drop silently
                 // suppresses its terminal Disconnected(LocalDispose) on dispose.
-                _disconnectedFired = false;
+                Volatile.Write(ref _disconnectedFired, 0);
 
                 if (!hasConnectedBefore)
                 {
@@ -715,7 +706,7 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IChannelOwner
                 await transport.DisposeAsync();
                 _conn.Transport = null;
 
-                if (_isShuttingDown)
+                if (IsShuttingDown)
                 {
                     if (_disconnectReason == Enums.DisconnectReason.GoAwayReceived)
                     {
@@ -727,8 +718,7 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IChannelOwner
                         // reads see EOF and writers see ChannelClosedException promptly.
                         _registry.AbortAllChannels(ChannelCloseReason.MuxDisposed);
                         _registry.CancelAllPendingAccepts();
-                        _disconnectedFired = true;
-                        RaiseEvent(Disconnected, new DisconnectedEventArgs(Enums.DisconnectReason.GoAwayReceived, null));
+                        TryRaiseDisconnected(Enums.DisconnectReason.GoAwayReceived, null);
                     }
                     break;
                 }
@@ -737,8 +727,7 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IChannelOwner
                 if (ct.IsCancellationRequested)
                     break;
 
-                _disconnectedFired = true;
-                RaiseEvent(Disconnected, new DisconnectedEventArgs(Enums.DisconnectReason.TransportError, transportEx));
+                TryRaiseDisconnected(Enums.DisconnectReason.TransportError, transportEx);
             }
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
@@ -1008,7 +997,7 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IChannelOwner
             // GoAwayTimeout abort. A pre-existing pending AcceptChannel for
             // the same id IS honoured — that caller declared its intent
             // before shutdown and the contract is to satisfy it.
-            if (_isShuttingDown && pendingChannel is null)
+            if (IsShuttingDown && pendingChannel is null)
                 return;
 
             if (pendingChannel is not null)
@@ -1171,8 +1160,7 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IChannelOwner
     {
         // If local already initiated shutdown (via GoAwayAsync or DisposeAsync),
         // the existing path owns teardown. Don't double-drive it.
-        if (_isShuttingDown) return;
-        _isShuttingDown = true;
+        if (Interlocked.CompareExchange(ref _isShuttingDown, 1, 0) != 0) return;
         _disconnectReason = Enums.DisconnectReason.GoAwayReceived;
 
         // Mirror GoAwayAsync's drain-then-cancel semantics on the remote-initiated
@@ -1454,8 +1442,17 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IChannelOwner
         _flushSignal.Dispose();
         _cts.Dispose();
 
-        if (wasStarted && !_disconnectedFired && _disconnectReason.HasValue)
-            RaiseEvent(Disconnected, new DisconnectedEventArgs(_disconnectReason.Value, null));
+        if (wasStarted && _disconnectReason.HasValue)
+            TryRaiseDisconnected(_disconnectReason.Value, null);
+    }
+
+    private bool TryRaiseDisconnected(DisconnectReason reason, Exception? exception)
+    {
+        if (Interlocked.CompareExchange(ref _disconnectedFired, 1, 0) != 0)
+            return false;
+
+        RaiseEvent(Disconnected, new DisconnectedEventArgs(reason, exception));
+        return true;
     }
 
     // Multicast-safe event raise. A throwing handler must not prevent the remaining
