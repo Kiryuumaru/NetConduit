@@ -533,6 +533,22 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IChannelOwner
                 }
                 catch (OperationCanceledException) when (ct.IsCancellationRequested)
                 {
+                    // On the reconnect path _conn.Transport was never assigned,
+                    // so the outer DisposeAsync safety net cannot reach the
+                    // freshly-connected transport here. Mirror the other two
+                    // handshake catch arms below and dispose it explicitly
+                    // before rethrowing, otherwise an honest mux.DisposeAsync
+                    // racing a reconnect handshake leaks one socket/pipe/QUIC
+                    // connection per cancelled reconnect cycle.
+                    //
+                    // On the initial-connect path _conn.Transport = transport
+                    // ran before PerformHandshakeAsync, so the outer
+                    // DisposeAsync already owns it — disposing here would
+                    // double-dispose. Guard on hasConnectedBefore.
+                    if (hasConnectedBefore)
+                    {
+                        try { await transport.DisposeAsync(); } catch { }
+                    }
                     throw;
                 }
                 catch (HandshakeTransportException handshakeEx)
