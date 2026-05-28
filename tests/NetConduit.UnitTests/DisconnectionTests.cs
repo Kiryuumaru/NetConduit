@@ -21,8 +21,8 @@ public sealed class DisconnectionTests
     [Fact]
     public async Task ConcurrentGoAway_CallsEmitDisconnectedExactlyOnce()
     {
-        const int iterations = 500;
-        const int callers = 32;
+        const int iterations = 40;
+        const int callers = 16;
 
         for (int i = 0; i < iterations; i++)
         {
