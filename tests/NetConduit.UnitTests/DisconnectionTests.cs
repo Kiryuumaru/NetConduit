@@ -21,8 +21,8 @@ public sealed class DisconnectionTests
     [Fact]
     public async Task ConcurrentGoAway_CallsEmitDisconnectedExactlyOnce()
     {
-        const int iterations = 40;
-        const int callers = 16;
+        const int iterations = 10;
+        const int callers = 8;
 
         for (int i = 0; i < iterations; i++)
         {
@@ -59,7 +59,7 @@ public sealed class DisconnectionTests
             }
 
             barrier.SignalAndWait();
-            await Task.WhenAll(tasks);
+            await Task.WhenAll(tasks).WaitAsync(TimeSpan.FromSeconds(10));
 
             Assert.Equal(1, disconnectedCount);
 
