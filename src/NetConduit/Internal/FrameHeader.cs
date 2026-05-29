@@ -26,8 +26,20 @@ internal readonly struct FrameHeader
     internal static FrameHeader Parse(ReadOnlySpan<byte> source)
     {
         ushort channelIndex = BinaryPrimitives.ReadUInt16BigEndian(source);
-        var flags = (FrameFlags)source[2];
-        // source[3] is reserved
+        if (channelIndex == ChannelConstants.Reserved)
+            throw new MultiplexerException(ErrorCode.ProtocolError,
+                $"Reserved channel index 0x{ChannelConstants.Reserved:X4} is not valid in frame headers.");
+
+        byte rawFlags = source[2];
+        if (rawFlags > (byte)FrameFlags.Ctrl)
+            throw new MultiplexerException(ErrorCode.ProtocolError,
+                $"Unknown frame flags byte: 0x{rawFlags:X2}");
+
+        if (source[3] != 0)
+            throw new MultiplexerException(ErrorCode.ProtocolError,
+                $"Reserved header byte must be zero: 0x{source[3]:X2}");
+
+        var flags = (FrameFlags)rawFlags;
         uint rawLength = BinaryPrimitives.ReadUInt32BigEndian(source[4..]);
         if (rawLength > (uint)FrameConstants.MaxFramePayloadSize)
             throw new MultiplexerException(ErrorCode.ProtocolError,
