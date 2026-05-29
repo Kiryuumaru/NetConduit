@@ -1113,26 +1113,28 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IChannelOwner
         switch (header.Flags)
         {
             case FrameFlags.Ping:
-                // Respond with Pong on control channel (echo the payload)
+                if (payload.Length != sizeof(long))
+                    throw new MultiplexerException(ErrorCode.ProtocolError, $"Ping payload must be {sizeof(long)} bytes, got {payload.Length}.");
+
                 SendControlFrame(FrameFlags.Pong, payload);
                 break;
             case FrameFlags.Pong:
+                if (payload.Length != sizeof(long))
+                    throw new MultiplexerException(ErrorCode.ProtocolError, $"Pong payload must be {sizeof(long)} bytes, got {payload.Length}.");
+
                 // Correlate the echoed 8-byte token to the currently outstanding ping.
                 // A late pong from a previous (timed-out) ping must not satisfy the
                 // *next* ping's TCS — that would mask real liveness failures by
                 // resetting the missed-ping counter.
-                if (payload.Length >= 8)
+                long echoedToken = BinaryPrimitives.ReadInt64BigEndian(payload);
+                var pending = Volatile.Read(ref conn.PendingPong);
+                if (pending is not null
+                    && pending.ExpectedToken == echoedToken
+                    && Interlocked.CompareExchange(ref conn.PendingPong, null, pending) == pending)
                 {
-                    long echoedToken = BinaryPrimitives.ReadInt64BigEndian(payload);
-                    var pending = Volatile.Read(ref conn.PendingPong);
-                    if (pending is not null
-                        && pending.ExpectedToken == echoedToken
-                        && Interlocked.CompareExchange(ref conn.PendingPong, null, pending) == pending)
-                    {
-                        pending.Tcs.TrySetResult();
-                    }
-                    // else: stale or already-cleared — drop silently.
+                    pending.Tcs.TrySetResult();
                 }
+                // else: stale or already-cleared — drop silently.
                 break;
             case FrameFlags.Ctrl:
                 ProcessCtrlSubframe(payload);
@@ -1146,17 +1148,26 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IChannelOwner
 
     private void ProcessCtrlSubframe(ReadOnlySpan<byte> payload)
     {
-        if (payload.Length == 0) return;
+        if (payload.Length == 0)
+            throw new MultiplexerException(ErrorCode.ProtocolError, "Control subframe payload must include a subtype byte.");
 
         byte subtype = payload[0];
         switch (subtype)
         {
             case CtrlSubtype.GoAway:
+                if (payload.Length != 1)
+                    throw new MultiplexerException(ErrorCode.ProtocolError, $"GoAway control payload must be 1 byte, got {payload.Length}.");
+
                 HandleRemoteGoAway();
                 break;
             case CtrlSubtype.Reconnect:
-                // Reconnection handled separately
-                break;
+                throw new MultiplexerException(
+                    ErrorCode.ProtocolError,
+                    "Reconnect control frames are only valid during reconnect handshakes.");
+            case CtrlSubtype.ReconnectAck:
+                throw new MultiplexerException(ErrorCode.ProtocolError, "ReconnectAck control frames are reserved.");
+            default:
+                throw new MultiplexerException(ErrorCode.ProtocolError, $"Unknown control subtype: 0x{subtype:X2}.");
         }
     }
 

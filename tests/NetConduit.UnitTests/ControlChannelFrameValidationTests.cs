@@ -71,6 +71,61 @@ public sealed class ControlChannelFrameValidationTests
         await AssertProtocolErrorAsync(errorTask, cts.Token);
     }
 
+    [Fact]
+    public async Task ControlChannelPingWithEmptyPayload_RaisesProtocolError()
+    {
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        await using var context = await RawMuxContext.CreateAsync(cts.Token);
+        var errorTask = context.CaptureNextError();
+
+        await context.SendControlFrameAsync(FrameFlags.Ping, ReadOnlyMemory<byte>.Empty, cts.Token);
+
+        await AssertProtocolErrorAsync(errorTask, cts.Token);
+    }
+
+    [Fact]
+    public async Task ControlChannelUnknownCtrlSubtype_RaisesProtocolError()
+    {
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        await using var context = await RawMuxContext.CreateAsync(cts.Token);
+        var errorTask = context.CaptureNextError();
+        byte[] payload = [0xFF];
+
+        await context.SendControlFrameAsync(FrameFlags.Ctrl, payload, cts.Token);
+
+        await AssertProtocolErrorAsync(errorTask, cts.Token);
+    }
+
+    [Fact]
+    public async Task ControlChannelGoAwayWithTrailingPayload_RaisesProtocolError()
+    {
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        await using var context = await RawMuxContext.CreateAsync(cts.Token);
+        var errorTask = context.CaptureNextError();
+        byte[] payload = [CtrlSubtype.GoAway, 0xAA, 0xBB];
+
+        await context.SendControlFrameAsync(FrameFlags.Ctrl, payload, cts.Token);
+
+        await AssertProtocolErrorAsync(errorTask, cts.Token);
+    }
+
+    [Fact]
+    public async Task ControlChannelReconnectDuringEstablishedSession_RaisesProtocolError()
+    {
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        await using var context = await RawMuxContext.CreateAsync(cts.Token);
+        var errorTask = context.CaptureNextError();
+        byte[] payload = new byte[23];
+        payload[0] = CtrlSubtype.Reconnect;
+        Guid.NewGuid().TryWriteBytes(payload.AsSpan(1, 16));
+        BinaryPrimitives.WriteUInt32BigEndian(payload.AsSpan(17, sizeof(uint)), (uint)FrameConstants.DefaultSlabSize);
+        BinaryPrimitives.WriteUInt16BigEndian(payload.AsSpan(21, sizeof(ushort)), 0);
+
+        await context.SendControlFrameAsync(FrameFlags.Ctrl, payload, cts.Token);
+
+        await AssertProtocolErrorAsync(errorTask, cts.Token);
+    }
+
     private static async Task AssertProtocolErrorAsync(Task<Exception> errorTask, CancellationToken ct)
     {
         var timeoutTask = Task.Delay(TimeSpan.FromSeconds(3), ct);
