@@ -326,7 +326,7 @@ internal sealed class ReadChannel : Stream, IReadChannel, IValueTaskSource<int>
                         // Flush any pending ACK now that the gate-relevant
                         // counter advanced; otherwise an ACK could be stranded
                         // until the next inbound frame triggers MaybeSendAck.
-                        MaybeSendAck();
+                        MaybeSendAck(force: true);
                     }
                     // If the consumer just drained the last buffered bytes
                     // after the channel closed, release the slab now.
@@ -349,7 +349,7 @@ internal sealed class ReadChannel : Stream, IReadChannel, IValueTaskSource<int>
             // moment to flush any sub-threshold ACK so the writer's slab can
             // compact while we park, instead of pinning unacked bytes until
             // the next burst trips the receive-side threshold.
-            MaybeSendAck();
+            MaybeSendAck(force: true);
 
             // Slow path: register for direct delivery
             _pendingUserBuffer = buffer;
@@ -511,7 +511,7 @@ internal sealed class ReadChannel : Stream, IReadChannel, IValueTaskSource<int>
             if (_receivedPos == _consumedPos)
             {
                 _drainedFrameBytes = _frameBytesReceived;
-                MaybeSendAck();
+                MaybeSendAck(force: true);
             }
 
             // Detach the cancellation callback now that the read has
@@ -583,7 +583,7 @@ internal sealed class ReadChannel : Stream, IReadChannel, IValueTaskSource<int>
     // monotonic position without any unit conversion. Called from the
     // receive path on every Data frame and from ReadAsync's slow path when
     // the reader catches up: same gate, no duplicate policy.
-    private void MaybeSendAck()
+    private void MaybeSendAck(bool force = false)
     {
         if (_owner is null) return;
         // Report consumer-drained bytes, not wire-received bytes.
@@ -592,7 +592,7 @@ internal sealed class ReadChannel : Stream, IReadChannel, IValueTaskSource<int>
         // consumer lags the wire, _drainedFrameBytes stays behind and the
         // writer naturally throttles.
         long delta = _drainedFrameBytes - _ackSentFrameBytes;
-        if (delta >= _slabSize / 16)
+        if (delta > 0 && (force || delta >= _slabSize / 16))
         {
             // Only advance the high-water mark when the ACK was actually
             // staged. If the control-channel slab is currently full, retain
