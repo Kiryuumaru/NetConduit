@@ -33,8 +33,8 @@ public sealed class ReliableUdpOptions
 
 | Property | Default | Meaning |
 | --- | --- | --- |
-| `Mtu` | 1200 | Maximum datagram size including the 7-byte header. Valid range: 8 to 65542. |
-| `RetransmitTimeout` | 1 s | Time to wait for an ACK before retransmitting a datagram. |
+| `Mtu` | 1200 | Maximum datagram size including the 7-byte header. Valid range: 8 to 65,507. |
+| `RetransmitTimeout` | 1 s | Time to wait for an ACK before retransmitting a datagram. Must be non-negative and no greater than 2,147,483,647 milliseconds. |
 | `MaxRetransmits` | 5 | Retransmit attempts before considering the link dead. |
 
 ## Client
