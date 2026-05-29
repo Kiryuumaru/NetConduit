@@ -8,6 +8,15 @@ namespace NetConduit.Transport.WebSocket.IntegrationTests;
 
 public class WebSocketMultiplexerTests
 {
+    [Fact]
+    public void CreateOptions_NonWebSocketUri_ThrowsArgumentException()
+    {
+        var exception = Assert.Throws<ArgumentException>(() =>
+            WebSocketMultiplexer.CreateOptions("http://localhost:5000/chat"));
+
+        Assert.Equal("url", exception.ParamName);
+    }
+
     [Fact(Timeout = 30000)]
     public async Task CreateOptions_ConnectsAndTransfersData()
     {
