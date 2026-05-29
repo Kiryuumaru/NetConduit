@@ -22,6 +22,8 @@ namespace NetConduit;
 /// </summary>
 public sealed class StreamMultiplexer : IStreamMultiplexer, IChannelOwner
 {
+    private static readonly UTF8Encoding StrictChannelIdDecoder = new(false, true);
+
     private readonly MultiplexerOptions _options;
     private readonly ChannelRegistry _registry;
     private readonly MultiplexerStats _stats = new();
@@ -955,10 +957,7 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IChannelOwner
 
     private void HandleInitFrame(FrameHeader header, ReadOnlySpan<byte> payload)
     {
-        if (payload.Length > ChannelConstants.MaxChannelIdLength)
-            return; // channel name too long — drop frame
-
-        string channelId = Encoding.UTF8.GetString(payload);
+        string channelId = DecodeInboundChannelId(payload);
         ReadChannel readChannel;
         bool isNewlyAccepted;
 
@@ -970,8 +969,15 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IChannelOwner
             // After reconnect, Init frames are replayed from the slab.
             // If the channel already exists, skip re-registration.
             var existing = _registry.GetReadChannel(header.ChannelIndex);
-            if (existing is not null)
+            if (existing is not null && existing.ChannelId == channelId)
                 return;
+
+            if (existing is not null)
+            {
+                throw new MultiplexerException(
+                    ErrorCode.ProtocolError,
+                    $"INIT for channel index {header.ChannelIndex} conflicts with existing channel '{existing.ChannelId}'.");
+            }
 
             // Check if a pending accept channel was pre-created via AcceptChannel.
             // A pending entry whose state is already Closed was disposed by the
@@ -1068,6 +1074,30 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IChannelOwner
         // Only enqueue for generic AcceptChannelsAsync if no specific accept claimed it.
         if (!isNewlyAccepted)
             _registry.EnqueueForAccept(readChannel);
+    }
+
+    private static string DecodeInboundChannelId(ReadOnlySpan<byte> payload)
+    {
+        if (payload.Length == 0)
+        {
+            throw new MultiplexerException(ErrorCode.ProtocolError, "INIT payload must contain a channel ID.");
+        }
+
+        if (payload.Length > ChannelConstants.MaxChannelIdLength)
+        {
+            throw new MultiplexerException(
+                ErrorCode.ProtocolError,
+                $"INIT channel ID must be at most {ChannelConstants.MaxChannelIdLength} UTF-8 bytes.");
+        }
+
+        try
+        {
+            return StrictChannelIdDecoder.GetString(payload);
+        }
+        catch (DecoderFallbackException ex)
+        {
+            throw new MultiplexerException(ErrorCode.ProtocolError, "INIT channel ID must be valid UTF-8.", ex);
+        }
     }
 
     private void DispatchExistingChannelFrame(FrameHeader header, ReadOnlySpan<byte> payload)
