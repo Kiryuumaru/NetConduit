@@ -84,6 +84,15 @@ public class CoalescingSignalTests
     }
 
     [Fact]
+    public void Wait_after_Dispose_does_not_throw_ObjectDisposedException()
+    {
+        var signal = new CoalescingSignal();
+        signal.Dispose();
+
+        signal.Wait(CancellationToken.None);
+    }
+
+    [Fact]
     public void Dispose_is_idempotent()
     {
         var signal = new CoalescingSignal();
