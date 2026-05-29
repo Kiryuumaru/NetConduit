@@ -1,4 +1,5 @@
 using NetConduit.Internal;
+using NetConduit.Exceptions;
 
 namespace NetConduit.UnitTests;
 
@@ -80,5 +81,42 @@ public sealed class FrameHeaderTests
     public void HeaderSize_IsEight()
     {
         Assert.Equal(8, FrameHeader.Size);
+    }
+
+    [Fact]
+    public void Parse_UnknownFrameFlag_ThrowsProtocolError()
+    {
+        Span<byte> buf = stackalloc byte[FrameHeader.Size];
+        FrameHeader.WriteTo(buf, channelIndex: 1, flags: (FrameFlags)0xFF, payloadLength: 0);
+        byte[] header = buf.ToArray();
+
+        var ex = Assert.Throws<MultiplexerException>(() => FrameHeader.Parse(header));
+
+        Assert.Equal(ErrorCode.ProtocolError, ex.ErrorCode);
+    }
+
+    [Fact]
+    public void Parse_NonZeroReservedHeaderByte_ThrowsProtocolError()
+    {
+        Span<byte> buf = stackalloc byte[FrameHeader.Size];
+        FrameHeader.WriteTo(buf, channelIndex: 0, flags: FrameFlags.Ping, payloadLength: 8);
+        buf[3] = 0xAA;
+        byte[] header = buf.ToArray();
+
+        var ex = Assert.Throws<MultiplexerException>(() => FrameHeader.Parse(header));
+
+        Assert.Equal(ErrorCode.ProtocolError, ex.ErrorCode);
+    }
+
+    [Fact]
+    public void Parse_ReservedChannelIndex_ThrowsProtocolError()
+    {
+        Span<byte> buf = stackalloc byte[FrameHeader.Size];
+        FrameHeader.WriteTo(buf, channelIndex: 0xFFFF, flags: FrameFlags.Init, payloadLength: 1);
+        byte[] header = buf.ToArray();
+
+        var ex = Assert.Throws<MultiplexerException>(() => FrameHeader.Parse(header));
+
+        Assert.Equal(ErrorCode.ProtocolError, ex.ErrorCode);
     }
 }
