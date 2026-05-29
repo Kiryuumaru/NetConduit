@@ -43,12 +43,12 @@ public static class QuicMultiplexer
             throw new PlatformNotSupportedException("QUIC is not supported on this platform.");
 
         ArgumentNullException.ThrowIfNull(host);
+        var applicationProtocol = CreateApplicationProtocol(alpn);
 
         return new MultiplexerOptions
         {
             StreamFactory = async ct =>
             {
-                var applicationProtocol = new SslApplicationProtocol(alpn ?? DefaultAlpn);
                 var endpoints = await Dns.GetHostAddressesAsync(host, ct).ConfigureAwait(false);
                 return await ConnectToAnyEndpointAsync(endpoints, port, host, applicationProtocol, allowInsecure, ct)
                     .ConfigureAwait(false);
@@ -184,7 +184,10 @@ public static class QuicMultiplexer
         ArgumentNullException.ThrowIfNull(endPoint);
         ArgumentNullException.ThrowIfNull(certificate);
 
-        var applicationProtocol = new SslApplicationProtocol(alpn ?? DefaultAlpn);
+        if (!certificate.HasPrivateKey)
+            throw new ArgumentException("QUIC server certificate must have a private key.", nameof(certificate));
+
+        var applicationProtocol = CreateApplicationProtocol(alpn);
 
         var listenerOptions = new QuicListenerOptions
         {
@@ -207,6 +210,15 @@ public static class QuicMultiplexer
 
         var listener = await QuicListener.ListenAsync(listenerOptions, cancellationToken).ConfigureAwait(false);
         return listener;
+    }
+
+    private static SslApplicationProtocol CreateApplicationProtocol(string? alpn)
+    {
+        var protocol = alpn ?? DefaultAlpn;
+        if (protocol.Length == 0)
+            throw new ArgumentException("QUIC ALPN value must not be empty.", nameof(alpn));
+
+        return new SslApplicationProtocol(protocol);
     }
 
     /// <summary>

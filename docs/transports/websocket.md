@@ -23,7 +23,7 @@ public static class WebSocketMultiplexer
 
 | Helper | Behavior |
 | --- | --- |
-| `CreateOptions(uri[, clientOptions])` | Each factory call opens a fresh `ClientWebSocket` to `uri`. `clientOptions` lets you set headers, sub-protocols, credentials. Reconnect-friendly. |
+| `CreateOptions(uri[, clientOptions])` | Each factory call opens a fresh `ClientWebSocket` to an absolute `ws://` or `wss://` URI. `clientOptions` lets you set headers, sub-protocols, credentials. Reconnect-friendly. |
 | `CreateServerOptions(webSocket)` | Wraps an already-accepted server-side `WebSocket`. Use after `HttpListener.AcceptWebSocketAsync` or ASP.NET's `HttpContext.WebSockets.AcceptWebSocketAsync`. Single accept only. |
 
 ## Client
