@@ -1106,11 +1106,17 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IChannelOwner
         var channel = _registry.GetReadChannel(header.ChannelIndex);
         if (channel is null)
         {
-            // Could be an ACK for our write channel
             var writeChannel = _registry.GetWriteChannel(header.ChannelIndex);
-            if (writeChannel is not null && header.Flags == FrameFlags.Ack && payload.Length >= 8)
+            if (writeChannel is not null)
             {
-                long ackPos = (long)BinaryPrimitives.ReadUInt64BigEndian(payload);
+                if (header.Flags != FrameFlags.Ack)
+                {
+                    throw new MultiplexerException(
+                        ErrorCode.ProtocolError,
+                        $"Frame type {header.Flags} is not valid for local write channel index {header.ChannelIndex}.");
+                }
+
+                long ackPos = DecodeWriteChannelAck(writeChannel, header.ChannelIndex, payload);
                 writeChannel.OnAck(ackPos);
                 return;
             }
@@ -1136,6 +1142,26 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IChannelOwner
                 RaiseEvent(ChannelClosed, new ChannelClosedEventArgs(channel.ChannelId, null));
             }
         }
+    }
+
+    private static long DecodeWriteChannelAck(WriteChannel writeChannel, ushort channelIndex, ReadOnlySpan<byte> payload)
+    {
+        if (payload.Length != sizeof(ulong))
+        {
+            throw new MultiplexerException(
+                ErrorCode.ProtocolError,
+                $"ACK frame for local write channel index {channelIndex} must contain exactly {sizeof(ulong)} bytes.");
+        }
+
+        long ackPos = (long)BinaryPrimitives.ReadUInt64BigEndian(payload);
+        if (!writeChannel.IsReady && ackPos != 0)
+        {
+            throw new MultiplexerException(
+                ErrorCode.ProtocolError,
+                $"Initial ACK for local write channel index {channelIndex} must acknowledge position 0.");
+        }
+
+        return ackPos;
     }
 
     private void ProcessControlFrame(MuxConnection conn, FrameHeader header, ReadOnlySpan<byte> payload)
