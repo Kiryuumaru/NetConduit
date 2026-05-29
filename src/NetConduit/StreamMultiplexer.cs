@@ -1137,6 +1137,10 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IChannelOwner
             case FrameFlags.Ctrl:
                 ProcessCtrlSubframe(payload);
                 break;
+            default:
+                throw new MultiplexerException(
+                    ErrorCode.ProtocolError,
+                    $"Frame type {header.Flags} is not valid on the control channel.");
         }
     }
 
