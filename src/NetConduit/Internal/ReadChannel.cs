@@ -1,5 +1,6 @@
 using System.Buffers;
 using System.Buffers.Binary;
+using System.Text;
 using System.Threading.Tasks.Sources;
 using NetConduit.Enums;
 using NetConduit.Events;
@@ -15,6 +16,10 @@ namespace NetConduit.Internal;
 /// </summary>
 internal sealed class ReadChannel : Stream, IReadChannel, IValueTaskSource<int>
 {
+    private const int AckPayloadSize = sizeof(ulong);
+    private const int ErrorCodePayloadSize = sizeof(ushort);
+    private static readonly UTF8Encoding StrictErrorMessageDecoder = new(false, true);
+
     private readonly byte[] _slab;
     private readonly Memory<byte> _slabMemory;
     private ushort _channelIndex;
@@ -295,6 +300,10 @@ internal sealed class ReadChannel : Stream, IReadChannel, IValueTaskSource<int>
                 if (_state == ChannelState.Closed && _receivedPos <= _consumedPos)
                 {
                     returnSlabAfter = true;
+                    var exception = CreateReadClosedException();
+                    if (exception is not null)
+                        throw exception;
+
                     return new ValueTask<int>(0); // EOF
                 }
 
@@ -329,6 +338,10 @@ internal sealed class ReadChannel : Stream, IReadChannel, IValueTaskSource<int>
                 if (_state == ChannelState.Closed)
                 {
                     returnSlabAfter = true;
+                    var exception = CreateReadClosedException();
+                    if (exception is not null)
+                        throw exception;
+
                     return new ValueTask<int>(0); // EOF
                 }
 
@@ -378,6 +391,9 @@ internal sealed class ReadChannel : Stream, IReadChannel, IValueTaskSource<int>
         switch (flags)
         {
             case FrameFlags.Data:
+                if (payload.IsEmpty)
+                    throw new MultiplexerException(ErrorCode.ProtocolError, "DATA payload must not be empty.");
+
                 Interlocked.Increment(ref Stats._framesReceived);
                 lock (_lock)
                 {
@@ -408,21 +424,65 @@ internal sealed class ReadChannel : Stream, IReadChannel, IValueTaskSource<int>
                 break;
 
             case FrameFlags.Ack:
-                if (payload.Length >= 8)
-                {
-                    long ackPos = (long)BinaryPrimitives.ReadUInt64BigEndian(payload);
-                    _ackChannel?.OnAck(ackPos);
-                }
+                if (payload.Length != AckPayloadSize)
+                    throw new MultiplexerException(ErrorCode.ProtocolError, $"ACK payload must be {AckPayloadSize} bytes, got {payload.Length}.");
+
+                long ackPos = (long)BinaryPrimitives.ReadUInt64BigEndian(payload);
+                _ackChannel?.OnAck(ackPos);
                 break;
 
             case FrameFlags.Fin:
+                if (!payload.IsEmpty)
+                    throw new MultiplexerException(ErrorCode.ProtocolError, "FIN payload must be empty.");
+
                 SetClosed(ChannelCloseReason.RemoteFin);
                 break;
 
             case FrameFlags.Err:
-                SetClosed(ChannelCloseReason.RemoteError);
+                SetClosed(ChannelCloseReason.RemoteError, ParseRemoteError(payload));
                 break;
+
+            default:
+                throw new MultiplexerException(
+                    ErrorCode.ProtocolError,
+                    $"Frame type {flags} is not valid on a user channel.");
         }
+    }
+
+    private static MultiplexerException ParseRemoteError(ReadOnlySpan<byte> payload)
+    {
+        if (payload.Length < ErrorCodePayloadSize)
+        {
+            throw new MultiplexerException(
+                ErrorCode.ProtocolError,
+                $"ERR payload must contain at least a {ErrorCodePayloadSize}-byte error code.");
+        }
+
+        var errorCode = (ErrorCode)BinaryPrimitives.ReadUInt16BigEndian(payload[..ErrorCodePayloadSize]);
+        if (errorCode == ErrorCode.None)
+        {
+            throw new MultiplexerException(ErrorCode.ProtocolError, "ERR payload must not use reserved ErrorCode.None.");
+        }
+
+        if (!Enum.IsDefined(errorCode))
+        {
+            throw new MultiplexerException(ErrorCode.ProtocolError, $"ERR payload contains undefined error code 0x{(ushort)errorCode:X4}.");
+        }
+
+        string message;
+        try
+        {
+            message = StrictErrorMessageDecoder.GetString(payload[ErrorCodePayloadSize..]);
+        }
+        catch (DecoderFallbackException ex)
+        {
+            throw new MultiplexerException(ErrorCode.ProtocolError, "ERR message must be valid UTF-8.", ex);
+        }
+
+        if (message.Length == 0)
+            message = $"Remote channel error: {errorCode}.";
+
+        return new MultiplexerException(errorCode, message);
     }
 
     private bool TryDirectDeliver(ReadOnlySpan<byte> payload)
@@ -577,7 +637,11 @@ internal sealed class ReadChannel : Stream, IReadChannel, IValueTaskSource<int>
                 var reg = _readCancelReg;
                 _readCancelReg = default;
                 reg.Unregister();
-                _readCompletion.Core.SetResult(0);
+                var readException = CreateReadClosedException(reason, exception);
+                if (readException is not null)
+                    _readCompletion.Core.SetException(readException);
+                else
+                    _readCompletion.Core.SetResult(0);
             }
 
             // Slab return policy on close:
@@ -605,6 +669,14 @@ internal sealed class ReadChannel : Stream, IReadChannel, IValueTaskSource<int>
         if (returnSlabNow)
             TryReturnSlab();
     }
+
+    private ChannelClosedException? CreateReadClosedException() =>
+        _closeReason is { } reason ? CreateReadClosedException(reason, _closeException) : null;
+
+    private ChannelClosedException? CreateReadClosedException(ChannelCloseReason reason, Exception? exception) =>
+        reason is ChannelCloseReason.RemoteError
+            ? new ChannelClosedException(ChannelId, reason, exception)
+            : null;
 
     private void TryReturnSlab()
     {
