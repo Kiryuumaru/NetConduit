@@ -42,19 +42,64 @@ public sealed class PreHandshakePeerCapTests
     }
 
     [Fact]
-    public async Task WriteAsync_PreHandshake_PayloadExceedsMinSlabCap_Throws()
+    public async Task WriteAsync_PreHandshake_PayloadExceedsMinSlabCap_SplitsIntoMinSlabFrames()
     {
         // Local slab is 1 MiB so the local-only check would pass; the peer cap
-        // must be the binding constraint pre-handshake.
+        // must be the per-frame binding constraint pre-handshake.
         var channel = CreateChannel(slabSize: FrameConstants.DefaultSlabSize);
 
         // 900 KiB — the example payload from issue.
         byte[] payload = new byte[900 * 1024];
 
-        var ex = await Assert.ThrowsAsync<ArgumentOutOfRangeException>(
-            () => channel.WriteAsync(payload).AsTask());
-        Assert.Contains("pre-handshake", ex.Message);
-        Assert.Contains("WaitForReadyAsync", ex.Message);
+        var writeTask = channel.WriteAsync(payload).AsTask();
+        int stagedPayloadBytes = 0;
+        int maxObservedPayload = 0;
+        while (!writeTask.IsCompleted)
+        {
+            var ready = channel.TakeReady();
+            if (ready.IsEmpty)
+            {
+                await Task.Delay(10);
+                continue;
+            }
+
+            var result = CountDataPayloadBytes(ready.Span);
+            stagedPayloadBytes += result.TotalBytes;
+            maxObservedPayload = Math.Max(maxObservedPayload, result.MaxPayloadBytes);
+            channel.MarkSent(ready.Length);
+        }
+
+        var remaining = channel.TakeReady();
+        if (!remaining.IsEmpty)
+        {
+            var result = CountDataPayloadBytes(remaining.Span);
+            stagedPayloadBytes += result.TotalBytes;
+            maxObservedPayload = Math.Max(maxObservedPayload, result.MaxPayloadBytes);
+            channel.MarkSent(remaining.Length);
+        }
+
+        await writeTask;
+
+        Assert.Equal(payload.Length, stagedPayloadBytes);
+        Assert.True(maxObservedPayload <= FrameConstants.MinSlabSize - FrameHeader.Size);
+    }
+
+    private static (int TotalBytes, int MaxPayloadBytes) CountDataPayloadBytes(ReadOnlySpan<byte> frames)
+    {
+        int total = 0;
+        int maxPayload = 0;
+        int position = 0;
+        while (position < frames.Length)
+        {
+            var header = FrameHeader.Parse(frames[position..]);
+            Assert.Equal(FrameFlags.Data, header.Flags);
+            total += header.PayloadLength;
+            maxPayload = Math.Max(maxPayload, header.PayloadLength);
+            position += header.FrameSize;
+        }
+
+        Assert.Equal(frames.Length, position);
+        return (total, maxPayload);
     }
 
     [Fact]

@@ -30,7 +30,7 @@ public sealed class BoundaryFixesTests
     // --- Bug: oversized WriteAsync ----------------------------------
 
     [Fact]
-    public async Task WriteAsync_PayloadExceedsSlab_ThrowsArgumentOutOfRange()
+    public async Task WriteAsync_PayloadExceedsSlab_SplitsAcrossFrames()
     {
         var owner = new StubChannelOwner();
         var channel = new WriteChannel(
@@ -44,12 +44,48 @@ public sealed class BoundaryFixesTests
 
         byte[] payload = new byte[128 * 1024];
 
-        var ex = await Assert.ThrowsAsync<ArgumentOutOfRangeException>(async () =>
-            await channel.WriteAsync(payload));
+        var writeTask = channel.WriteAsync(payload).AsTask();
+        int stagedPayloadBytes = 0;
+        while (!writeTask.IsCompleted)
+        {
+            var ready = channel.TakeReady();
+            if (ready.IsEmpty)
+            {
+                await Task.Delay(10);
+                continue;
+            }
 
-        Assert.Equal("data", ex.ParamName);
-        Assert.Contains("65528", ex.Message); // slabSize - FrameHeader.Size
-        Assert.Contains("oversize", ex.Message);
+            stagedPayloadBytes += CountDataPayloadBytes(ready.Span);
+            channel.MarkSent(ready.Length);
+        }
+
+        var remaining = channel.TakeReady();
+        if (!remaining.IsEmpty)
+        {
+            stagedPayloadBytes += CountDataPayloadBytes(remaining.Span);
+            channel.MarkSent(remaining.Length);
+        }
+
+        await writeTask;
+
+        Assert.Equal(payload.Length, stagedPayloadBytes);
+        Assert.Equal(3, Volatile.Read(ref channel.Stats._framesSent));
+    }
+
+    private static int CountDataPayloadBytes(ReadOnlySpan<byte> frames)
+    {
+        int total = 0;
+        int position = 0;
+        while (position < frames.Length)
+        {
+            var header = FrameHeader.Parse(frames[position..]);
+            Assert.Equal(FrameFlags.Data, header.Flags);
+            total += header.PayloadLength;
+            position += header.FrameSize;
+        }
+
+        Assert.Equal(frames.Length, position);
+        return total;
     }
 
     [Fact]
