@@ -16,10 +16,10 @@ public sealed class PreHandshakePeerCapTests
     private sealed class TestRouter : IChannelOwner
     {
         public void NotifyReady(WriteChannel channel) { }
-        public void NotifyChannelCompleted(ushort channelIndex, string channelId) { }
+        public void NotifyChannelCompleted(uint channelIndex, string channelId) { }
         public void NotifyPendingAcceptCancelled(string channelId) { }
         public void NotifyChannelOpened(string channelId) { }
-        public bool SendAck(ushort channelIndex, ulong consumedPosition) => true;
+        public bool SendAck(uint channelIndex, ulong consumedPosition) => true;
         public void NotifyEventHandlerException(Exception exception) { }
         // Advertise the maximum so post-handshake writes are unconstrained by
         // the peer cap; the only relevant clamp in these tests is the

@@ -135,9 +135,9 @@ public sealed class KeepalivePongCorrelationTests
 
                 if (_headerFilled == FrameHeader.Size)
                 {
-                    ushort channel = BinaryPrimitives.ReadUInt16BigEndian(_headerBuf);
-                    var flags = (FrameFlags)_headerBuf[2];
-                    int length = (int)BinaryPrimitives.ReadUInt32BigEndian(_headerBuf.AsSpan(4));
+                    uint channel = BinaryPrimitives.ReadUInt32BigEndian(_headerBuf);
+                    var flags = (FrameFlags)_headerBuf[4];
+                    int length = (int)BinaryPrimitives.ReadUInt32BigEndian(_headerBuf.AsSpan(8));
                     _payloadRemaining = length;
                     _payloadIsPong = channel == ChannelConstants.ControlChannel
                         && flags == FrameFlags.Pong

@@ -115,11 +115,11 @@ public sealed class ControlChannelFrameValidationTests
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
         await using var context = await RawMuxContext.CreateAsync(cts.Token);
         var errorTask = context.CaptureNextError();
-        byte[] payload = new byte[23];
+        byte[] payload = new byte[25];
         payload[0] = CtrlSubtype.Reconnect;
         Guid.NewGuid().TryWriteBytes(payload.AsSpan(1, 16));
         BinaryPrimitives.WriteUInt32BigEndian(payload.AsSpan(17, sizeof(uint)), (uint)FrameConstants.DefaultSlabSize);
-        BinaryPrimitives.WriteUInt16BigEndian(payload.AsSpan(21, sizeof(ushort)), 0);
+        BinaryPrimitives.WriteUInt32BigEndian(payload.AsSpan(21, sizeof(uint)), 0);
 
         await context.SendControlFrameAsync(FrameFlags.Ctrl, payload, cts.Token);
 

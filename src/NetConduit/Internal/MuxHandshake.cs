@@ -20,9 +20,9 @@ internal static class MuxHandshake
     //               = 20B
     //   Reconnect : [CtrlSubtype.Reconnect : 1B][sessionId : 16B]
     //               [maxRecvPayload : 4B big-endian uint32]
-    //               [channelCount : 2B big-endian uint16]
-    //               [channelIndex : 2B BE][frameBytesReceived : 8B BE] * channelCount
-    //               = 23B header + 10B per channel entry
+    //               [channelCount : 4B big-endian uint32]
+    //               [channelIndex : 4B BE][frameBytesReceived : 8B BE] * channelCount
+    //               = 25B header + 12B per channel entry
     //
     // The 4-byte max-recv-payload tail advertises the largest single
     // frame payload this peer will accept on any inbound channel — equal to
@@ -40,12 +40,13 @@ internal static class MuxHandshake
     // bytes to ReadAsync.
     internal const int InitialPayloadLength = 20;
     private const int MaxRecvPayloadFieldSize = 4;
-    // Reconnect payload header = [subtype:1][sessionId:16][maxRecvPayload:4][channelCount:uint16-BE].
-    internal const int ReconnectHeaderLength = 23;
-    // Per-channel position entry = [channelIndex:uint16-BE][frameBytesReceived:uint64-BE].
-    internal const int ReconnectChannelEntrySize = 10;
+    // Reconnect payload header = [subtype:1][sessionId:16][maxRecvPayload:4][channelCount:uint32-BE].
+    internal const int ReconnectHeaderLength = 25;
+    // Per-channel position entry = [channelIndex:uint32-BE][frameBytesReceived:uint64-BE].
+    internal const int ReconnectChannelEntrySize = 12;
     // Defensive upper bound for any handshake frame the read path will allocate for.
-    // Comfortably covers ushort.MaxValue channels worth of position entries.
+    // Bounds reconnect replay metadata so a malformed peer cannot force
+    // unbounded allocation before protocol validation runs.
     internal const int MaxPayloadLength = 1 << 20;
 
     /// <summary>
@@ -161,7 +162,8 @@ internal static class MuxHandshake
         // re-negotiated max-recv-payload and a per-channel position vector
         //  that lets each side rewind its writer's replay base to the peer's
         // actually-received position.
-        if (localPositions.Count > ushort.MaxValue)
+        int maxReplayPositions = (MaxPayloadLength - ReconnectHeaderLength) / ReconnectChannelEntrySize;
+        if (localPositions.Count > maxReplayPositions)
             throw new MultiplexerException(ErrorCode.Internal, "Too many channels for reconnect handshake.");
 
         int payloadLength = ReconnectHeaderLength + localPositions.Count * ReconnectChannelEntrySize;
@@ -171,14 +173,14 @@ internal static class MuxHandshake
         BinaryPrimitives.WriteUInt32BigEndian(
             reconnectPayload.AsSpan(17, MaxRecvPayloadFieldSize),
             (uint)localMaxRecvPayload);
-        BinaryPrimitives.WriteUInt16BigEndian(reconnectPayload.AsSpan(21, 2), (ushort)localPositions.Count);
+        BinaryPrimitives.WriteUInt32BigEndian(reconnectPayload.AsSpan(21, 4), (uint)localPositions.Count);
 
         int offset = ReconnectHeaderLength;
         for (int i = 0; i < localPositions.Count; i++)
         {
             var pos = localPositions[i];
-            BinaryPrimitives.WriteUInt16BigEndian(reconnectPayload.AsSpan(offset, 2), pos.ChannelIndex);
-            BinaryPrimitives.WriteUInt64BigEndian(reconnectPayload.AsSpan(offset + 2, 8), (ulong)pos.FrameBytesReceived);
+            BinaryPrimitives.WriteUInt32BigEndian(reconnectPayload.AsSpan(offset, 4), pos.ChannelIndex);
+            BinaryPrimitives.WriteUInt64BigEndian(reconnectPayload.AsSpan(offset + 4, 8), (ulong)pos.FrameBytesReceived);
             offset += ReconnectChannelEntrySize;
         }
 
@@ -266,8 +268,12 @@ internal static class MuxHandshake
         if (reconnectPayload.Length < ReconnectHeaderLength)
             return Array.Empty<ChannelReplayPosition>();
 
-        int channelCount = BinaryPrimitives.ReadUInt16BigEndian(reconnectPayload.Slice(21, 2));
-        int expectedLength = ReconnectHeaderLength + channelCount * ReconnectChannelEntrySize;
+        uint rawChannelCount = BinaryPrimitives.ReadUInt32BigEndian(reconnectPayload.Slice(21, 4));
+        if (rawChannelCount > int.MaxValue)
+            throw new MultiplexerException(ErrorCode.ProtocolError, "Reconnect payload channel count is too large.");
+
+        int channelCount = (int)rawChannelCount;
+        long expectedLength = ReconnectHeaderLength + (long)channelCount * ReconnectChannelEntrySize;
         if (reconnectPayload.Length != expectedLength)
             throw new MultiplexerException(ErrorCode.ProtocolError, "Reconnect payload length does not match channel count.");
 
@@ -278,8 +284,8 @@ internal static class MuxHandshake
         int offset = ReconnectHeaderLength;
         for (int i = 0; i < channelCount; i++)
         {
-            ushort channelIndex = BinaryPrimitives.ReadUInt16BigEndian(reconnectPayload.Slice(offset, 2));
-            ulong peerReceivedPosition = BinaryPrimitives.ReadUInt64BigEndian(reconnectPayload.Slice(offset + 2, 8));
+            uint channelIndex = BinaryPrimitives.ReadUInt32BigEndian(reconnectPayload.Slice(offset, 4));
+            ulong peerReceivedPosition = BinaryPrimitives.ReadUInt64BigEndian(reconnectPayload.Slice(offset + 4, 8));
             offset += ReconnectChannelEntrySize;
             positions[i] = new ChannelReplayPosition(channelIndex, (long)peerReceivedPosition);
         }
@@ -304,14 +310,14 @@ internal static class MuxHandshake
             return false;
         }
 
-        // Trailing bytes after the 23-byte header must be an integral number of
-        // [channelIndex:2][frameBytesReceived:8] entries that match the advertised count.
+        // Trailing bytes after the 25-byte header must be an integral number of
+        // [channelIndex:4][frameBytesReceived:8] entries that match the advertised count.
         int trailing = payload.Length - ReconnectHeaderLength;
         if (trailing % ReconnectChannelEntrySize != 0)
             return false;
 
-        int channelCount = BinaryPrimitives.ReadUInt16BigEndian(payload.Slice(21, 2));
-        return trailing / ReconnectChannelEntrySize == channelCount;
+        uint channelCount = BinaryPrimitives.ReadUInt32BigEndian(payload.Slice(21, 4));
+        return channelCount <= int.MaxValue && trailing / ReconnectChannelEntrySize == channelCount;
     }
 
     private static async Task<(FrameHeader Header, byte[] Payload)> ReadHandshakeFrameAsync(Stream stream, CancellationToken ct)

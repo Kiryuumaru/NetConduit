@@ -12,13 +12,13 @@ public sealed class BoundaryFixesTests
     private sealed class StubChannelOwner : IChannelOwner
     {
         public int NotifyReadyCount;
-        public List<(ushort Index, ulong Position)> SentAcks { get; } = [];
+        public List<(uint Index, ulong Position)> SentAcks { get; } = [];
 
         public void NotifyReady(WriteChannel channel) => Interlocked.Increment(ref NotifyReadyCount);
-        public void NotifyChannelCompleted(ushort channelIndex, string channelId) { }
+        public void NotifyChannelCompleted(uint channelIndex, string channelId) { }
         public void NotifyPendingAcceptCancelled(string channelId) { }
         public void NotifyChannelOpened(string channelId) { }
-        public bool SendAck(ushort channelIndex, ulong consumedPosition)
+        public bool SendAck(uint channelIndex, ulong consumedPosition)
         {
             SentAcks.Add((channelIndex, consumedPosition));
             return true;
@@ -126,7 +126,7 @@ public sealed class BoundaryFixesTests
             owner: owner);
         channel.MarkOpen();
 
-        // Fill the slab so the FIN frame (8 bytes) cannot fit.
+        // Fill the slab so the FIN frame header cannot fit.
         byte[] big = new byte[slabSize - FrameHeader.Size];
         await channel.WriteAsync(big);
 

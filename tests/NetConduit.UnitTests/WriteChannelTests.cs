@@ -15,10 +15,10 @@ public sealed class WriteChannelTests
             Interlocked.Increment(ref NotifyCount);
         }
 
-        public void NotifyChannelCompleted(ushort channelIndex, string channelId) { }
+        public void NotifyChannelCompleted(uint channelIndex, string channelId) { }
         public void NotifyPendingAcceptCancelled(string channelId) { }
         public void NotifyChannelOpened(string channelId) { }
-        public bool SendAck(ushort channelIndex, ulong consumedPosition) => true;
+        public bool SendAck(uint channelIndex, ulong consumedPosition) => true;
         public void NotifyEventHandlerException(Exception exception) { }
         public int PeerMaxRecvPayload => FrameConstants.MaxSlabSize;
     }
@@ -51,7 +51,7 @@ public sealed class WriteChannelTests
 
         // Parse the header
         var header = FrameHeader.Parse(ready.Span);
-        Assert.Equal(1, header.ChannelIndex);
+        Assert.Equal(1u, header.ChannelIndex);
         Assert.Equal(FrameFlags.Data, header.Flags);
         Assert.Equal(5, header.PayloadLength);
 

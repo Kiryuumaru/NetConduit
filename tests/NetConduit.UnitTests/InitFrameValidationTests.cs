@@ -7,7 +7,7 @@ using NetConduit.Internal;
 [Collection("Sequential")]
 public sealed class InitFrameValidationTests
 {
-    private const ushort UserChannelIndex = 1;
+    private const uint UserChannelIndex = 1;
 
     [Fact]
     public async Task EmptyInitChannelId_RaisesProtocolError()
@@ -88,7 +88,7 @@ public sealed class InitFrameValidationTests
             return error.Task;
         }
 
-        public async ValueTask SendUserFrameAsync(ushort channelIndex, FrameFlags flags, ReadOnlyMemory<byte> payload, CancellationToken ct)
+        public async ValueTask SendUserFrameAsync(uint channelIndex, FrameFlags flags, ReadOnlyMemory<byte> payload, CancellationToken ct)
         {
             byte[] frame = new byte[FrameHeader.Size + payload.Length];
             FrameHeader.WriteTo(frame, channelIndex, flags, payload.Length);

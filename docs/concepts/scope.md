@@ -8,7 +8,7 @@ That is the entire job. This page lists what is in scope, what is not, and why.
 
 | Area | What NetConduit provides |
 | --- | --- |
-| Framing | 8-byte header, frame and control subtypes, bounded payload size. See [Framing protocol](framing-protocol.md). |
+| Framing | 12-byte header, frame and control subtypes, bounded payload size. See [Framing protocol](framing-protocol.md). |
 | Channels | Open/accept rendezvous, lifecycle, write/read split. See [Channels](channels.md). |
 | Backpressure | Per-channel slabs and credit-based flow control. See [Backpressure](backpressure.md). |
 | Priority | Writer ordering across channels. See [Priority](priority.md). |

@@ -4,13 +4,15 @@ NetConduit speaks a simple binary frame protocol over the transport stream. You 
 
 ## Frame layout
 
-Every frame starts with an 8-byte fixed header followed by an optional payload:
+Every frame starts with a 12-byte fixed header followed by an optional payload:
 
 ```
  0                   1                   2                   3
  0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
 +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-|        channel index (u16)    |   flags (u8)  |  reserved (u8)|
+|                  channel index (u32, big-endian)               |
++-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+|   flags (u8)  |        reserved (24 bits, must be zero)        |
 +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
 |                       payload length (u32, big-endian)         |
 +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
@@ -23,7 +25,7 @@ Limits (internal `FrameConstants` in `NetConduit.Constants`):
 
 | Constant | Value | Meaning |
 | --- | --- | --- |
-| `HeaderSize` | 8 | Bytes in the fixed header. |
+| `HeaderSize` | 12 | Bytes in the fixed header. |
 | `MaxFramePayloadSize` | 16 MiB | Hard cap on a single frame's payload. |
 | `DefaultSlabSize` | 1 MiB | Default per-channel buffer (and typical frame size). |
 
@@ -44,11 +46,11 @@ Limits (internal `FrameConstants` in `NetConduit.Constants`):
 
 ## Channel indices
 
-- `0x0000` is the **control channel** for session-level frames (GoAway, Reconnect handshake).
-- `0x0001`..`0xFFFE` are user channels.
-- `0xFFFF` is reserved.
+- `0x00000000` is the **control channel** for session-level frames (GoAway, Reconnect handshake).
+- `0x00000001`..`0xFFFFFFFE` are user channels.
+- `0xFFFFFFFF` is reserved.
 
-Channel **indices** (u16) are an internal wire detail. Your code uses channel **IDs** (strings). The multiplexer assigns indices when you `OpenChannel` and announces the (id, index) mapping in an `Init` frame.
+Channel **indices** (`u32`) are an internal wire detail. Your code uses channel **IDs** (strings). The multiplexer assigns indices when you `OpenChannel` and announces the (id, index) mapping in an `Init` frame.
 
 ## Control subtypes
 
@@ -77,21 +79,21 @@ Initial handshake payload (`20` bytes):
 
 On reconnect, the `Ctrl/Reconnect` exchange verifies session ID continuity. If the remote session ID matches, both sides replay their write channel buffers and the reader skips already-received bytes.
 
-Reconnect payload uses a `23`-byte header plus one `10`-byte replay entry per active inbound channel:
+Reconnect payload uses a `25`-byte header plus one `12`-byte replay entry per active inbound channel:
 
 | Offset | Field | Encoding |
 | --- | --- | --- |
 | `0` | `subtype` | `0x02` (`Ctrl/Reconnect`). |
 | `1..16` | `sessionId` | 16-byte GUID in the byte order written by `Guid.TryWriteBytes`. |
 | `17..20` | `maxRecvPayload` | `u32`, big-endian. Re-advertises the peer's receive payload limit because it can change across reconnects. |
-| `21..22` | `channelCount` | `u16`, big-endian. Number of replay entries that follow. |
+| `21..24` | `channelCount` | `u32`, big-endian. Number of replay entries that follow. |
 
 Each replay entry:
 
 | Offset within entry | Field | Encoding |
 | --- | --- | --- |
-| `0..1` | `channelIndex` | `u16`, big-endian. |
-| `2..9` | `frameBytesReceived` | `u64`, big-endian. The cumulative frame-byte position already delivered to that reader. |
+| `0..3` | `channelIndex` | `u32`, big-endian. |
+| `4..11` | `frameBytesReceived` | `u64`, big-endian. The cumulative frame-byte position already delivered to that reader. |
 
 The receiver uses the replay vector to skip bytes it already delivered before the interruption. The writer uses the peer's `maxRecvPayload` to clamp later data frames to the peer's current receive slab.
 

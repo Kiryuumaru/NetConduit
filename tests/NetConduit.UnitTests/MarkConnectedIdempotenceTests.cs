@@ -193,10 +193,10 @@ public sealed class MarkConnectedIdempotenceTests
     private sealed class TestRouter : IChannelOwner
     {
         public void NotifyReady(WriteChannel channel) { }
-        public void NotifyChannelCompleted(ushort channelIndex, string channelId) { }
+        public void NotifyChannelCompleted(uint channelIndex, string channelId) { }
         public void NotifyPendingAcceptCancelled(string channelId) { }
         public void NotifyChannelOpened(string channelId) { }
-        public bool SendAck(ushort channelIndex, ulong consumedPosition) => true;
+        public bool SendAck(uint channelIndex, ulong consumedPosition) => true;
         public void NotifyEventHandlerException(Exception exception) { }
         public int PeerMaxRecvPayload => FrameConstants.MaxSlabSize;
     }

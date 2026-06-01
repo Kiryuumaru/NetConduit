@@ -21,7 +21,7 @@ internal interface IChannelOwner
     /// (all frames sent for write channels, disposed for read channels).
     /// The owner unregisters the channel and updates stats.
     /// </summary>
-    void NotifyChannelCompleted(ushort channelIndex, string channelId);
+    void NotifyChannelCompleted(uint channelIndex, string channelId);
 
     /// <summary>
     /// Called by a pending-accept <see cref="ReadChannel"/> (created via
@@ -62,7 +62,7 @@ internal interface IChannelOwner
     /// return is non-fatal: the receive-side accumulator keeps growing and the
     /// next ACK gate will retry with the latest cumulative position.
     /// </summary>
-    bool SendAck(ushort channelIndex, ulong consumedPosition);
+    bool SendAck(uint channelIndex, ulong consumedPosition);
 
     /// <summary>
     /// Called by a channel when one of its public events (Ready / Connected /

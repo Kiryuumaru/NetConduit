@@ -27,6 +27,44 @@ public sealed class DataIntegrityTests
     }
 
     [Fact]
+    public async Task CloseImmediatelyAfterSingleWrite_DeliversDataBeforeEof()
+    {
+        var (client, server) = CreatePair();
+        client.Start();
+        server.Start();
+        await Task.WhenAll(client.WaitForReadyAsync(), server.WaitForReadyAsync());
+
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(120));
+        byte[] data = new byte[1024];
+        Random.Shared.NextBytes(data);
+
+        var writeChannel = client.OpenChannel("single-write-close");
+        Task writer = Task.Run(async () =>
+        {
+            await writeChannel.WriteAsync(data, cts.Token);
+            await writeChannel.CloseAsync(cts.Token);
+        }, cts.Token);
+
+        var readChannel = await server.AcceptChannelAsync("single-write-close", cts.Token);
+        byte[] received = new byte[data.Length];
+        int totalRead = 0;
+        while (totalRead < received.Length)
+        {
+            int read = await readChannel.ReadAsync(received.AsMemory(totalRead), cts.Token);
+            if (read == 0) break;
+            totalRead += read;
+        }
+
+        await writer;
+
+        Assert.Equal(data.Length, totalRead);
+        Assert.Equal(data, received);
+
+        await client.DisposeAsync();
+        await server.DisposeAsync();
+    }
+
+    [Fact]
     public async Task HeavyLoad_MultipleChannels_ChecksumVerification()
     {
         var (client, server) = CreatePair();

@@ -157,4 +157,4 @@ await foreach (var req in t.ReceiveAllAsync())
 +----------+----------+----------+----------+--------- ... ---------+
 ```
 
-The 4-byte length is per **message** (not per multiplexer frame). NetConduit's own 8-byte frame header sits underneath and may split or merge messages across multiple `Data` frames.
+The 4-byte length is per **message** (not per multiplexer frame). NetConduit's own 12-byte frame header sits underneath and may split or merge messages across multiple `Data` frames.

@@ -22,7 +22,7 @@ Available via `IStreamMultiplexer.Stats`.
 
 | Counter | Meaning |
 | --- | --- |
-| `BytesSent` | Total **wire** bytes written by the writer loop, **including** 8-byte frame headers and control-frame traffic (Ping/Pong, GoAway, INIT, FIN). Use this to measure transport throughput. |
+| `BytesSent` | Total **wire** bytes written by the writer loop, **including** 12-byte frame headers and control-frame traffic (Ping/Pong, GoAway, INIT, FIN). Use this to measure transport throughput. |
 | `BytesReceived` | Total **wire** bytes read from the transport, including frame headers and control-frame traffic. |
 | `OpenChannels` | Currently open channels (excluding `Opening`/`Closing`). |
 | `TotalChannelsOpened` | Count of channels opened during this session. |

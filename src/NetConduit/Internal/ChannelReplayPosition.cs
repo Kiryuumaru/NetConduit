@@ -8,4 +8,4 @@ namespace NetConduit.Internal;
 /// the post-reconnect replay does not duplicate-deliver bytes that crossed
 /// the wire under a lost ACK frame.
 /// </summary>
-internal readonly record struct ChannelReplayPosition(ushort ChannelIndex, long FrameBytesReceived);
+internal readonly record struct ChannelReplayPosition(uint ChannelIndex, long FrameBytesReceived);

@@ -305,7 +305,7 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IChannelOwner
         // we observe the already-flipped parity and allocate correctly.
         lock (_registry.ChannelIndexLock)
         {
-            ushort index = _registry.AllocateChannelIndex();
+            uint index = _registry.AllocateChannelIndex();
             channel = new WriteChannel(
                 options.ChannelId,
                 index,
@@ -799,7 +799,7 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IChannelOwner
         RaiseEvent(ChannelOpened, new ChannelEventArgs(channelId));
     }
 
-    void IChannelOwner.NotifyChannelCompleted(ushort channelIndex, string channelId)
+    void IChannelOwner.NotifyChannelCompleted(uint channelIndex, string channelId)
     {
         // Capture role BEFORE unregistering, since GetWriteChannel/GetReadChannel
         // return null after the registry mutation.
@@ -872,7 +872,7 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IChannelOwner
 
     // =====================================================================
     // Reader Thread — THE DISPATCHER (receive side)
-    // Reads 8-byte header, routes payload to the correct channel.
+    // Reads fixed frame headers, routes payload to the correct channel.
     // =====================================================================
     private async Task RunReaderLoopAsync(MuxConnection conn, CancellationToken ct)
     {
@@ -888,7 +888,7 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IChannelOwner
         {
             while (!ct.IsCancellationRequested)
             {
-                // 1. Read exactly 8 bytes (frame header)
+                // 1. Read exactly one fixed frame header
                 await ReadExactAsync(readStream, headerBuf, ct);
                 var header = FrameHeader.Parse(headerBuf);
 
@@ -1150,7 +1150,7 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IChannelOwner
         }
     }
 
-    private static long DecodeWriteChannelAck(WriteChannel writeChannel, ushort channelIndex, ReadOnlySpan<byte> payload)
+    private static long DecodeWriteChannelAck(WriteChannel writeChannel, uint channelIndex, ReadOnlySpan<byte> payload)
     {
         if (payload.Length != sizeof(ulong))
         {
@@ -1315,7 +1315,7 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IChannelOwner
         return _conn.ControlChannel.TryWriteRawFrame(ControlFrameBuilder.BuildControlFrame(flags, payload));
     }
 
-    private bool SendInitAck(ushort channelIndex)
+    private bool SendInitAck(uint channelIndex)
     {
         if (_conn.ControlChannel is null) return false;
         return _conn.ControlChannel.TryWriteRawFrame(ControlFrameBuilder.BuildAckFrame(channelIndex, 0));
@@ -1330,7 +1330,7 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IChannelOwner
         if (conn.PendingInitAcks.IsEmpty) return;
         int initialCount = conn.PendingInitAcks.Count;
         int requeue = 0;
-        while (requeue < initialCount && conn.PendingInitAcks.TryDequeue(out ushort idx))
+        while (requeue < initialCount && conn.PendingInitAcks.TryDequeue(out uint idx))
         {
             if (!SendInitAck(idx))
             {
@@ -1340,7 +1340,7 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IChannelOwner
         }
     }
 
-    bool IChannelOwner.SendAck(ushort channelIndex, ulong consumedPosition)
+    bool IChannelOwner.SendAck(uint channelIndex, ulong consumedPosition)
     {
         // Return false (without throwing) when the control channel is gone or
         // its slab is currently full. The caller (ReadChannel.MaybeSendAck) is
@@ -1430,8 +1430,8 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IChannelOwner
             if (_registry.IsCurrentParity(channel.ChannelIndex))
                 continue;
 
-            ushort oldIndex = channel.ChannelIndex;
-            ushort newIndex = _registry.AllocateChannelIndex();
+            uint oldIndex = channel.ChannelIndex;
+            uint newIndex = _registry.AllocateChannelIndex();
             channel.RestampChannelIndex(newIndex);
             _registry.RekeyWriteChannel(oldIndex, newIndex, channel);
         }

@@ -7,8 +7,8 @@ using NetConduit.Internal;
 [Collection("Sequential")]
 public sealed class ReadChannelFrameValidationTests
 {
-    private const ushort UserChannelIndex = 1;
-    private const ushort UnknownUserChannelIndex = 123;
+    private const uint UserChannelIndex = 1;
+    private const uint UnknownUserChannelIndex = 123;
 
     [Fact]
     public async Task DataFrameForUnknownChannel_RaisesUnknownChannel()
@@ -171,7 +171,7 @@ public sealed class ReadChannelFrameValidationTests
             return accepted;
         }
 
-        public async ValueTask SendUserFrameAsync(ushort channelIndex, FrameFlags flags, ReadOnlyMemory<byte> payload, CancellationToken ct)
+        public async ValueTask SendUserFrameAsync(uint channelIndex, FrameFlags flags, ReadOnlyMemory<byte> payload, CancellationToken ct)
         {
             byte[] frame = new byte[FrameHeader.Size + payload.Length];
             FrameHeader.WriteTo(frame, channelIndex, flags, payload.Length);

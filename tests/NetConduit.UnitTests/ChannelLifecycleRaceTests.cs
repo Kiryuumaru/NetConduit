@@ -20,7 +20,7 @@ public sealed class ChannelLifecycleRaceTests
         for (int i = 0; i < iterations; i++)
         {
             var channel = new WriteChannel(
-                $"c{i}", (ushort)((i % 32_000) + 1), ChannelPriority.Normal,
+                $"c{i}", (uint)((i % 32_000) + 1), ChannelPriority.Normal,
                 64 * 1024, TimeSpan.FromSeconds(30), owner);
 
             using var barrier = new Barrier(2);
@@ -42,7 +42,7 @@ public sealed class ChannelLifecycleRaceTests
         for (int i = 0; i < iterations; i++)
         {
             var channel = new ReadChannel(
-                $"r{i}", (ushort)((i % 32_000) + 2), ChannelPriority.Normal, 64 * 1024);
+                $"r{i}", (uint)((i % 32_000) + 2), ChannelPriority.Normal, 64 * 1024);
 
             using var barrier = new Barrier(2);
             var openTask = Task.Run(() => { barrier.SignalAndWait(); channel.MarkOpen(); });
@@ -56,10 +56,10 @@ public sealed class ChannelLifecycleRaceTests
     private sealed class NoopOwner : IChannelOwner
     {
         public void NotifyReady(WriteChannel channel) { }
-        public void NotifyChannelCompleted(ushort channelIndex, string channelId) { }
+        public void NotifyChannelCompleted(uint channelIndex, string channelId) { }
         public void NotifyPendingAcceptCancelled(string channelId) { }
         public void NotifyChannelOpened(string channelId) { }
-        public bool SendAck(ushort channelIndex, ulong consumedPosition) => true;
+        public bool SendAck(uint channelIndex, ulong consumedPosition) => true;
         public void NotifyEventHandlerException(Exception exception) { }
         public int PeerMaxRecvPayload => FrameConstants.MaxSlabSize;
     }

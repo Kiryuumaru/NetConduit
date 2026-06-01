@@ -130,7 +130,7 @@ public sealed class FrameAccountingAndRoutingTests
         // Poll briefly for the FIN to appear on the wire — the writer loop
         // may flush a tick after Dispose returns.
         var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(2);
-        IReadOnlyList<ushort> finFrames;
+        IReadOnlyList<uint> finFrames;
         do
         {
             finFrames = capturedSide.GetFramesOfType(FrameFlags.Fin);
@@ -140,7 +140,7 @@ public sealed class FrameAccountingAndRoutingTests
 
         Assert.NotEmpty(finFrames);
 
-        foreach (ushort channelIndex in finFrames)
+        foreach (uint channelIndex in finFrames)
         {
             Assert.NotEqual(ChannelConstants.ControlChannel, channelIndex);
         }
@@ -162,20 +162,20 @@ public sealed class FrameAccountingAndRoutingTests
 
         public Stream ReadStream => inner.ReadStream;
         public Stream WriteStream => _write;
-        public IReadOnlyList<ushort> GetFramesOfType(FrameFlags flags) => _write.GetFramesOfType(flags);
+        public IReadOnlyList<uint> GetFramesOfType(FrameFlags flags) => _write.GetFramesOfType(flags);
         public ValueTask DisposeAsync() => inner.DisposeAsync();
 
         private sealed class CapturingWriteStream(Stream inner) : Stream
         {
             private readonly List<byte> _buffer = [];
-            private readonly List<(FrameFlags Flags, ushort ChannelIndex)> _frames = [];
+            private readonly List<(FrameFlags Flags, uint ChannelIndex)> _frames = [];
             private int _parsePos;
 
-            public IReadOnlyList<ushort> GetFramesOfType(FrameFlags flags)
+            public IReadOnlyList<uint> GetFramesOfType(FrameFlags flags)
             {
                 lock (_buffer)
                 {
-                    var result = new List<ushort>();
+                    var result = new List<uint>();
                     foreach (var f in _frames)
                     {
                         if (f.Flags == flags) result.Add(f.ChannelIndex);
@@ -231,9 +231,9 @@ public sealed class FrameAccountingAndRoutingTests
                 while (_parsePos + FrameHeader.Size <= _buffer.Count)
                 {
                     byte[] hdr = [.. _buffer.GetRange(_parsePos, FrameHeader.Size)];
-                    ushort channelIndex = BinaryPrimitives.ReadUInt16BigEndian(hdr);
-                    var flags = (FrameFlags)hdr[2];
-                    uint payloadLen = BinaryPrimitives.ReadUInt32BigEndian(hdr.AsSpan(4));
+                    uint channelIndex = BinaryPrimitives.ReadUInt32BigEndian(hdr);
+                    var flags = (FrameFlags)hdr[4];
+                    uint payloadLen = BinaryPrimitives.ReadUInt32BigEndian(hdr.AsSpan(8));
                     int frameSize = FrameHeader.Size + (int)payloadLen;
                     if (_parsePos + frameSize > _buffer.Count) break;
                     _frames.Add((flags, channelIndex));

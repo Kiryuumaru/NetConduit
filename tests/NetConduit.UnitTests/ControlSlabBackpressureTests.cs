@@ -25,8 +25,7 @@ public sealed class ControlSlabBackpressureTests
             owner: router);
         control.MarkOpen();
 
-        // 17-byte ACK frame: 8-byte header + 8-byte position payload + 1B slack? No — header is 8, payload is 8 -> 16 bytes. Use that.
-        byte[] ackFrame = ControlFrameBuilder.BuildAckFrame(channelIndex: 1, consumedPosition: 0);
+        byte[] ackFrame = ControlFrameBuilder.BuildAckFrame(channelIndex: 1u, consumedPosition: 0);
 
         int accepted = 0;
         int rejected = 0;
@@ -115,24 +114,24 @@ public sealed class ControlSlabBackpressureTests
         public int NotifyCount;
         public int PeerMaxRecvPayload => FrameConstants.MaxSlabSize;
         public void NotifyReady(WriteChannel channel) => Interlocked.Increment(ref NotifyCount);
-        public void NotifyChannelCompleted(ushort channelIndex, string channelId) { }
+        public void NotifyChannelCompleted(uint channelIndex, string channelId) { }
         public void NotifyPendingAcceptCancelled(string channelId) { }
         public void NotifyChannelOpened(string channelId) { }
-        public bool SendAck(ushort channelIndex, ulong consumedPosition) => true;
+        public bool SendAck(uint channelIndex, ulong consumedPosition) => true;
         public void NotifyEventHandlerException(Exception exception) { }
     }
 
     private sealed class ToggleableAckOwner : IChannelOwner
     {
         public bool AcceptNext;
-        public List<(ushort Index, ulong Position)> SentAcks { get; } = [];
+        public List<(uint Index, ulong Position)> SentAcks { get; } = [];
         public int PeerMaxRecvPayload => FrameConstants.MaxSlabSize;
 
         public void NotifyReady(WriteChannel channel) { }
-        public void NotifyChannelCompleted(ushort channelIndex, string channelId) { }
+        public void NotifyChannelCompleted(uint channelIndex, string channelId) { }
         public void NotifyPendingAcceptCancelled(string channelId) { }
         public void NotifyChannelOpened(string channelId) { }
-        public bool SendAck(ushort channelIndex, ulong consumedPosition)
+        public bool SendAck(uint channelIndex, ulong consumedPosition)
         {
             if (!AcceptNext) return false;
             SentAcks.Add((channelIndex, consumedPosition));

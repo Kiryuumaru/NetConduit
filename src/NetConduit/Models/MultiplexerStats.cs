@@ -28,7 +28,7 @@ public sealed class MultiplexerStats
 
     /// <summary>
     /// Total wire bytes written by the multiplexer's writer loop, including
-    /// 8-byte frame headers and control-frame traffic (Ping/Pong, GoAway,
+    /// 12-byte frame headers and control-frame traffic (Ping/Pong, GoAway,
     /// INIT, FIN, etc.). This is <b>not</b> the same quantity as the sum of
     /// per-channel <see cref="ChannelStats.BytesSent"/>, which counts only
     /// user payload bytes.
@@ -36,7 +36,7 @@ public sealed class MultiplexerStats
     public long BytesSent => Volatile.Read(ref _bytesSent);
 
     /// <summary>
-    /// Total wire bytes read from the transport, including 8-byte frame
+    /// Total wire bytes read from the transport, including 12-byte frame
     /// headers and control-frame traffic. This is <b>not</b> the same
     /// quantity as the sum of per-channel
     /// <see cref="ChannelStats.BytesReceived"/>, which counts only user

@@ -33,7 +33,7 @@ internal static class ControlFrameBuilder
     /// Builds an ACK frame for the supplied channel index carrying the consumed
     /// position as a big-endian uint64 payload.
     /// </summary>
-    internal static byte[] BuildAckFrame(ushort channelIndex, ulong consumedPosition)
+    internal static byte[] BuildAckFrame(uint channelIndex, ulong consumedPosition)
     {
         byte[] frame = new byte[FrameHeader.Size + AckPayloadSize];
         FrameHeader.WriteTo(frame, channelIndex, FrameFlags.Ack, AckPayloadSize);

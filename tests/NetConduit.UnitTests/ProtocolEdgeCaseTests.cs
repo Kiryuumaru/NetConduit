@@ -389,10 +389,10 @@ public sealed class ProtocolEdgeCaseTests
     {
         // 0xFFFFFFFF would wrap to -1 if cast to int without validation.
         byte[] header = new byte[NetConduit.Internal.FrameHeader.Size];
-        header[0] = 0; header[1] = 0;       // channel
-        header[2] = (byte)NetConduit.Enums.FrameFlags.Ctrl;
-        header[3] = 0;                       // reserved
-        header[4] = 0xFF; header[5] = 0xFF; header[6] = 0xFF; header[7] = 0xFF;
+        header[0] = 0; header[1] = 0; header[2] = 0; header[3] = 0;
+        header[4] = (byte)NetConduit.Enums.FrameFlags.Ctrl;
+        header[5] = 0; header[6] = 0; header[7] = 0;
+        header[8] = 0xFF; header[9] = 0xFF; header[10] = 0xFF; header[11] = 0xFF;
 
         var ex = Assert.Throws<NetConduit.Exceptions.MultiplexerException>(() =>
             NetConduit.Internal.FrameHeader.Parse(header));
@@ -404,14 +404,14 @@ public sealed class ProtocolEdgeCaseTests
     public void FrameHeader_MaxAllowedPayloadLength_Accepted()
     {
         byte[] header = new byte[NetConduit.Internal.FrameHeader.Size];
-        header[0] = 0; header[1] = 0;
-        header[2] = (byte)NetConduit.Enums.FrameFlags.Data;
-        header[3] = 0;
+        header[0] = 0; header[1] = 0; header[2] = 0; header[3] = 1;
+        header[4] = (byte)NetConduit.Enums.FrameFlags.Data;
+        header[5] = 0; header[6] = 0; header[7] = 0;
         uint max = (uint)NetConduit.Constants.FrameConstants.MaxFramePayloadSize;
-        header[4] = (byte)(max >> 24);
-        header[5] = (byte)(max >> 16);
-        header[6] = (byte)(max >> 8);
-        header[7] = (byte)max;
+        header[8] = (byte)(max >> 24);
+        header[9] = (byte)(max >> 16);
+        header[10] = (byte)(max >> 8);
+        header[11] = (byte)max;
 
         var parsed = NetConduit.Internal.FrameHeader.Parse(header);
         Assert.Equal(NetConduit.Constants.FrameConstants.MaxFramePayloadSize, parsed.PayloadLength);

@@ -22,7 +22,7 @@ internal sealed class ReadChannel : Stream, IReadChannel, IValueTaskSource<int>
 
     private readonly byte[] _slab;
     private readonly Memory<byte> _slabMemory;
-    private ushort _channelIndex;
+    private uint _channelIndex;
     private readonly int _slabSize;
     private readonly object _lock = new();
     private readonly TaskCompletionSource _readyTcs = new(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -34,7 +34,7 @@ internal sealed class ReadChannel : Stream, IReadChannel, IValueTaskSource<int>
     private readonly Action<Exception>? _onHandlerException;
     private int _slabReturned; // CAS guard: ensures slab is returned to pool exactly once
 
-    internal ushort ChannelIndex => _channelIndex;
+    internal uint ChannelIndex => _channelIndex;
 
     private int _receivedPos;
     private int _consumedPos;
@@ -169,7 +169,7 @@ internal sealed class ReadChannel : Stream, IReadChannel, IValueTaskSource<int>
 
     internal ReadChannel(
         string channelId,
-        ushort channelIndex,
+        uint channelIndex,
         ChannelPriority priority,
         int slabSize,
         IChannelOwner? owner = null)
@@ -282,7 +282,7 @@ internal sealed class ReadChannel : Stream, IReadChannel, IValueTaskSource<int>
 
     internal void SetAckChannel(WriteChannel ackChannel) => _ackChannel = ackChannel;
 
-    internal void SetChannelIndex(ushort index) => _channelIndex = index;
+    internal void SetChannelIndex(uint index) => _channelIndex = index;
 
     /// <summary>
     /// Reads data from the channel. Fast path: data already buffered → immediate return.

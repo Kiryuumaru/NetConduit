@@ -11,10 +11,10 @@ namespace NetConduit.Internal;
 
 internal sealed class ChannelRegistry
 {
-    private readonly ConcurrentDictionary<ushort, WriteChannel> _writeChannels = new();
-    private readonly ConcurrentDictionary<ushort, ReadChannel> _readChannels = new();
-    private readonly ConcurrentDictionary<ushort, byte> _retiredChannelIndices = new();
-    private readonly ConcurrentDictionary<string, ushort> _idToIndex = new();
+    private readonly ConcurrentDictionary<uint, WriteChannel> _writeChannels = new();
+    private readonly ConcurrentDictionary<uint, ReadChannel> _readChannels = new();
+    private readonly ConcurrentDictionary<uint, byte> _retiredChannelIndices = new();
+    private readonly ConcurrentDictionary<string, uint> _idToIndex = new();
     private readonly ConcurrentDictionary<string, TaskCompletionSource<ReadChannel>> _pendingAccepts = new();
     private readonly ConcurrentDictionary<string, ReadChannel> _pendingAcceptChannels = new();
     private readonly Channel<ReadChannel> _acceptQueue = Channel.CreateUnbounded<ReadChannel>();
@@ -77,8 +77,8 @@ internal sealed class ChannelRegistry
     /// </summary>
     internal readonly object ChannelIndexLock = new();
 
-    private int _nextChannelIndex;
-    private readonly int _indexStep = 2;
+    private long _nextChannelIndex;
+    private const long IndexStep = 2;
 
     internal ChannelRegistry(bool useOddIndices)
     {
@@ -99,10 +99,10 @@ internal sealed class ChannelRegistry
     /// to identify pre-handshake-allocated indices that landed on the wrong
     /// parity space and must be reassigned before any frame is transmitted
     /// </summary>
-    internal bool IsCurrentParity(ushort index)
+    internal bool IsCurrentParity(uint index)
     {
         bool useOdd = (Volatile.Read(ref _nextChannelIndex) & 1) == 1;
-        return ((index & 1) == 1) == useOdd;
+        return ((index & 1u) == 1u) == useOdd;
     }
 
     /// <summary>
@@ -111,7 +111,7 @@ internal sealed class ChannelRegistry
     /// post-handshake reassignment for pre-handshake-allocated channels whose
     /// indices need to move into the correct parity space.
     /// </summary>
-    internal void RekeyWriteChannel(ushort oldIndex, ushort newIndex, WriteChannel channel)
+    internal void RekeyWriteChannel(uint oldIndex, uint newIndex, WriteChannel channel)
     {
         if (oldIndex == newIndex) return;
         // Reserve the new slot first so a parallel allocation cannot land on it
@@ -120,20 +120,20 @@ internal sealed class ChannelRegistry
             throw new MultiplexerException(
                 ErrorCode.Internal,
                 $"Cannot rekey write channel '{channel.ChannelId}' to index {newIndex}: slot already occupied.");
-        _writeChannels.TryRemove(new KeyValuePair<ushort, WriteChannel>(oldIndex, channel));
+        _writeChannels.TryRemove(new KeyValuePair<uint, WriteChannel>(oldIndex, channel));
         _retiredChannelIndices.TryRemove(newIndex, out _);
         _idToIndex[channel.ChannelId] = newIndex;
     }
 
-    internal ushort AllocateChannelIndex()
+    internal uint AllocateChannelIndex()
     {
-        int index = Interlocked.Add(ref _nextChannelIndex, _indexStep) - _indexStep;
-        if (index > ChannelConstants.MaxDataChannel)
+        long index = Interlocked.Add(ref _nextChannelIndex, IndexStep) - IndexStep;
+        if ((ulong)index > ChannelConstants.MaxDataChannel)
             throw new MultiplexerException(ErrorCode.Internal, "Channel index space exhausted.");
-        return (ushort)index;
+        return (uint)index;
     }
 
-    internal void RegisterWriteChannel(ushort index, WriteChannel channel)
+    internal void RegisterWriteChannel(uint index, WriteChannel channel)
     {
         if (!_writeChannels.TryAdd(index, channel))
             throw new MultiplexerException(ErrorCode.ChannelExists, $"Write channel with index {index} already exists.");
@@ -144,38 +144,38 @@ internal sealed class ChannelRegistry
             // GetAllWriteChannels() after the throw. The caller has no
             // way to undo this themselves: they never received a successful
             // return and have no record of the allocated index.
-            _writeChannels.TryRemove(new KeyValuePair<ushort, WriteChannel>(index, channel));
+            _writeChannels.TryRemove(new KeyValuePair<uint, WriteChannel>(index, channel));
             throw new MultiplexerException(ErrorCode.ChannelExists, $"A channel with ID '{channel.ChannelId}' already exists.");
         }
         _retiredChannelIndices.TryRemove(index, out _);
     }
 
-    internal void RegisterReadChannel(ushort index, ReadChannel channel)
+    internal void RegisterReadChannel(uint index, ReadChannel channel)
     {
         if (!_readChannels.TryAdd(index, channel))
             throw new MultiplexerException(ErrorCode.ChannelExists, $"Read channel with index {index} already exists.");
         if (!_idToIndex.TryAdd(channel.ChannelId, index))
         {
             // Roll back the per-index insert.
-            _readChannels.TryRemove(new KeyValuePair<ushort, ReadChannel>(index, channel));
+            _readChannels.TryRemove(new KeyValuePair<uint, ReadChannel>(index, channel));
             throw new MultiplexerException(ErrorCode.ChannelExists, $"A channel with ID '{channel.ChannelId}' already exists.");
         }
         _retiredChannelIndices.TryRemove(index, out _);
     }
 
-    internal WriteChannel? GetWriteChannel(ushort index)
+    internal WriteChannel? GetWriteChannel(uint index)
     {
         _writeChannels.TryGetValue(index, out var channel);
         return channel;
     }
 
-    internal ReadChannel? GetReadChannel(ushort index)
+    internal ReadChannel? GetReadChannel(uint index)
     {
         _readChannels.TryGetValue(index, out var channel);
         return channel;
     }
 
-    internal bool IsRetiredChannelIndex(ushort index) => _retiredChannelIndices.ContainsKey(index);
+    internal bool IsRetiredChannelIndex(uint index) => _retiredChannelIndices.ContainsKey(index);
 
     internal WriteChannel? GetWriteChannelById(string channelId)
     {
@@ -191,7 +191,7 @@ internal sealed class ChannelRegistry
         return null;
     }
 
-    internal bool UnregisterChannel(ushort index, string channelId)
+    internal bool UnregisterChannel(uint index, string channelId)
     {
         bool removed = _writeChannels.TryRemove(index, out _) || _readChannels.TryRemove(index, out _);
         if (removed)
@@ -200,7 +200,7 @@ internal sealed class ChannelRegistry
         // call — e.g. cleanup after a failed-to-commit registration where _idToIndex
         // still points at a *different* (legitimate) channel under the same ChannelId
         // — cannot tear down the legitimate mapping.
-        _idToIndex.TryRemove(new KeyValuePair<string, ushort>(channelId, index));
+        _idToIndex.TryRemove(new KeyValuePair<string, uint>(channelId, index));
         return removed;
     }
 

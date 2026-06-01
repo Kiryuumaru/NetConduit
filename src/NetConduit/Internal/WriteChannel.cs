@@ -23,10 +23,10 @@ internal sealed class WriteChannel : Stream, IWriteChannel
     // The mux walks queued frames in the slab and patches the index bytes
     // before the writer thread starts; outside that single reassignment, the
     // index is stable for the channel's lifetime.
-    private ushort _channelIndex;
+    private uint _channelIndex;
     private readonly IChannelOwner _owner;
 
-    internal ushort ChannelIndex => _channelIndex;
+    internal uint ChannelIndex => _channelIndex;
     private readonly SemaphoreSlim _spaceAvailable = new(0, 1);
     private readonly object _posLock = new();
     private readonly int _slabSize;
@@ -129,7 +129,7 @@ internal sealed class WriteChannel : Stream, IWriteChannel
 
     internal WriteChannel(
         string channelId,
-        ushort channelIndex,
+        uint channelIndex,
         ChannelPriority priority,
         int slabSize,
         TimeSpan sendTimeout,
@@ -365,7 +365,7 @@ internal sealed class WriteChannel : Stream, IWriteChannel
     /// before the writer thread starts transmitting from this slab and before
     /// any frame from this channel has been observed by the peer.
     /// </summary>
-    internal void RestampChannelIndex(ushort newIndex)
+    internal void RestampChannelIndex(uint newIndex)
     {
         lock (_posLock)
         {
@@ -377,8 +377,8 @@ internal sealed class WriteChannel : Stream, IWriteChannel
             int pos = _sentPos;
             while (pos + FrameHeader.Size <= _writePos)
             {
-                BinaryPrimitives.WriteUInt16BigEndian(_slab.AsSpan(pos, 2), newIndex);
-                uint payloadLength = BinaryPrimitives.ReadUInt32BigEndian(_slab.AsSpan(pos + 4, 4));
+                BinaryPrimitives.WriteUInt32BigEndian(_slab.AsSpan(pos, 4), newIndex);
+                uint payloadLength = BinaryPrimitives.ReadUInt32BigEndian(_slab.AsSpan(pos + 8, 4));
                 pos += FrameHeader.Size + (int)payloadLength;
             }
             _channelIndex = newIndex;
@@ -659,6 +659,21 @@ internal sealed class WriteChannel : Stream, IWriteChannel
             _closeReason = reason;
             _closeException = exception;
             _isConnected = false;
+
+            if (reason == ChannelCloseReason.LocalClose
+                && !_isReady
+                && !_owner.IsTransportConnected
+                && !_routerReading)
+            {
+                // The peer has not confirmed this channel, and the transport
+                // is currently down. Replaying its INIT after the caller has
+                // already closed the channel would only retain a slab until a
+                // future reconnect, allowing outage-time open/close loops to
+                // accumulate unbounded closed-channel frames.
+                _sentPos = _pendingPos;
+                if (_ackedPos < _sentPos)
+                    _ackedPos = _sentPos;
+            }
         }
         // Wake anyone waiting for ready (channel will never open)
         _readyTcs.TrySetException(new ChannelClosedException(ChannelId, reason));

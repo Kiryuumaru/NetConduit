@@ -31,7 +31,7 @@ Priority controls **selection order**, not bandwidth allocation. With one `Highe
 - `Highest`'s frames go out as long as it has data and slab space.
 - `Normal`'s frames go out when `Highest` is idle (no data ready, or backpressured).
 
-Priority does not preempt a frame in flight — once an 8-byte header and its payload are being written, they finish.
+Priority does not preempt a frame in flight — once a 12-byte header and its payload are being written, they finish.
 
 ## Suggested mapping
 

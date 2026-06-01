@@ -223,15 +223,18 @@ public sealed class ChannelRegistryTests
     }
 
     [Fact]
-    public void AllocateChannelIndex_AfterClosedEphemeralChannels_ContinuesAllocating()
+    public void AllocateChannelIndex_AfterClosedEphemeralChannels_RecyclesAndContinuesAllocating()
     {
+        // Open and close 100,000 ephemeral channels on the same registry —
+        // far beyond the old 32,767-per-side ceiling. Recycling must keep
+        // the allocator from ever exhausting, regardless of total lifetime opens.
         var registry = new ChannelRegistry(useOddIndices: true);
         var owner = new NoopOwner();
 
-        for (int i = 0; i < 32_768; i++)
+        for (int i = 0; i < 100_000; i++)
         {
             string channelId = $"ephemeral-{i}";
-            ushort index = registry.AllocateChannelIndex();
+            uint index = registry.AllocateChannelIndex();
             var channel = new WriteChannel(channelId, index, ChannelPriority.Normal, 64 * 1024, TimeSpan.FromSeconds(30), owner);
 
             registry.RegisterWriteChannel(index, channel);
@@ -320,10 +323,10 @@ public sealed class ChannelRegistryTests
     private sealed class NoopOwner : IChannelOwner
     {
         public void NotifyReady(WriteChannel channel) { }
-        public void NotifyChannelCompleted(ushort channelIndex, string channelId) { }
+        public void NotifyChannelCompleted(uint channelIndex, string channelId) { }
         public void NotifyPendingAcceptCancelled(string channelId) { }
         public void NotifyChannelOpened(string channelId) { }
-        public bool SendAck(ushort channelIndex, ulong consumedPosition) => true;
+        public bool SendAck(uint channelIndex, ulong consumedPosition) => true;
         public void NotifyEventHandlerException(Exception exception) { }
         public int PeerMaxRecvPayload => FrameConstants.MaxSlabSize;
     }

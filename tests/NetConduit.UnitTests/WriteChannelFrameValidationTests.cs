@@ -91,7 +91,7 @@ public sealed class WriteChannelFrameValidationTests
             return error.Task;
         }
 
-        public async ValueTask<(IWriteChannel WriteChannel, ushort ChannelIndex)> OpenOutboundChannelAsync(string channelId, CancellationToken ct)
+        public async ValueTask<(IWriteChannel WriteChannel, uint ChannelIndex)> OpenOutboundChannelAsync(string channelId, CancellationToken ct)
         {
             var writeChannel = server.OpenChannel(channelId);
             byte[] headerBytes = new byte[FrameHeader.Size];
@@ -106,7 +106,7 @@ public sealed class WriteChannelFrameValidationTests
             return (writeChannel, header.ChannelIndex);
         }
 
-        public async ValueTask SendUserFrameAsync(ushort channelIndex, FrameFlags flags, ReadOnlyMemory<byte> payload, CancellationToken ct)
+        public async ValueTask SendUserFrameAsync(uint channelIndex, FrameFlags flags, ReadOnlyMemory<byte> payload, CancellationToken ct)
         {
             byte[] frame = new byte[FrameHeader.Size + payload.Length];
             FrameHeader.WriteTo(frame, channelIndex, flags, payload.Length);

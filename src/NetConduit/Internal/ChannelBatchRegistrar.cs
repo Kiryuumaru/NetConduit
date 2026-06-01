@@ -112,7 +112,7 @@ internal sealed class ChannelBatchRegistrar(
         // for the same id is reused. This is essential for composite transit
         // patterns where the peer's INIT for the inbound id may have arrived
         // before the local batch runs.
-        var committedWrites = new List<(ushort Index, WriteChannel Channel)>(count);
+        var committedWrites = new List<(uint Index, WriteChannel Channel)>(count);
         var committedPendingAccepts = new List<ReadChannel>(count);
         // Per-registration committed-channel handle, for Phase 3 assembly.
         var perRegChannel = new IChannel?[count];
@@ -145,7 +145,7 @@ internal sealed class ChannelBatchRegistrar(
                         return false;
                     }
 
-                    ushort idx = registry.AllocateChannelIndex();
+                    uint idx = registry.AllocateChannelIndex();
                     var wc = new WriteChannel(
                         id,
                         idx,
@@ -256,7 +256,7 @@ internal sealed class ChannelBatchRegistrar(
     }
 
     private void RollbackPartialBatch(
-        List<(ushort Index, WriteChannel Channel)> committedWrites,
+        List<(uint Index, WriteChannel Channel)> committedWrites,
         List<ReadChannel> committedPendingAccepts)
     {
         // Caller holds AcceptLock. Unregister in reverse insertion order; channel

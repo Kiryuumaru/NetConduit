@@ -9,7 +9,7 @@ Read these in order, or jump to the topic you need.
 | [Channels](channels.md) | Channel IDs, open vs. accept, state transitions, write/read split. |
 | [Transports](transports.md) | The role of `IStreamPair` and the `StreamFactoryDelegate`. |
 | [Transits](transits.md) | What a transit is and when to use one. |
-| [Framing protocol](framing-protocol.md) | The wire format: 8-byte header, frame types, control subtypes. |
+| [Framing protocol](framing-protocol.md) | The wire format: 12-byte header, frame types, control subtypes. |
 | [Backpressure](backpressure.md) | Slabs, credit-based flow control, `SendTimeout`. |
 | [Priority](priority.md) | How writer ordering works across channels. |
 | [Heartbeat](heartbeat.md) | `PingInterval`, `PingTimeout`, missed pings. |

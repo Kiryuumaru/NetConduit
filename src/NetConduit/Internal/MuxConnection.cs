@@ -44,7 +44,7 @@ internal sealed class MuxConnection
     // budget so unbounded growth is impossible. — the
     // reader thread can no longer throw InvalidOperationException("Slab full")
     // when the control slab is transiently full.
-    public readonly ConcurrentQueue<ushort> PendingInitAcks = new();
+    public readonly ConcurrentQueue<uint> PendingInitAcks = new();
 }
 
 // Pairs a keepalive ping's outstanding TaskCompletionSource with the 8-byte
