@@ -228,7 +228,7 @@ public sealed class ChannelRegistryTests
         var registry = new ChannelRegistry(useOddIndices: true);
         var owner = new NoopOwner();
 
-        for (int i = 0; i < 32_768; i++)
+        for (int i = 0; i < 100_000; i++)
         {
             string channelId = $"ephemeral-{i}";
             ushort index = registry.AllocateChannelIndex();
