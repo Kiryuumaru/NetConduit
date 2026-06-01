@@ -34,6 +34,26 @@ internal interface IChannelOwner
     void NotifyPendingAcceptCancelled(string channelId);
 
     /// <summary>
+    /// Runs <paramref name="closeAction"/> (typically the pending-accept
+    /// channel's local-close path) and the pending-accept-map removal as a
+    /// single atomic step against the same lock that <c>HandleInitFrame</c>
+    /// uses to read the channel's state and decide whether to adopt or
+    /// evict it. Eliminates the TOCTOU window where a consumer-driven
+    /// <c>Dispose</c> lands between the dispatcher's lock-free state check
+    /// and its registration of the channel, resulting in the registry
+    /// holding a <c>Closed</c> instance that silently black-holes inbound
+    /// frames.
+    /// </summary>
+    /// <remarks>
+    /// Default implementation simply runs the action — sufficient for test
+    /// fakes that exercise individual channels without a real multiplexer.
+    /// </remarks>
+    void CompletePendingAcceptCancel(string channelId, Action closeAction)
+    {
+        closeAction();
+    }
+
+    /// <summary>
     /// Sends a position-based ACK frame for the given channel back to the remote.
     /// Used by ReadChannel to inform the remote WriteChannel how far the consumer
     /// has consumed, so PrepareReplay on reconnect skips already-delivered bytes.

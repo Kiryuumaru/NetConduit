@@ -28,18 +28,17 @@ internal sealed class CoalescingSignal : IDisposable
     /// </summary>
     public void Wait(CancellationToken ct)
     {
-        _gate.Wait(ct);
+        try { _gate.Wait(ct); }
+        catch (ObjectDisposedException) when (_disposed) { return; }
 
         // Dispose() races with this method: Set() inside Dispose() can wake Wait()
         // *without* surfacing cancellation (the Set wins the wakeup), and Dispose()
-        // may then dispose the underlying gate before the woken consumer reaches
-        // Reset(). Without this guard, Reset() throws ObjectDisposedException on
-        // the consumer thread (typically the multiplexer writer/flusher thread) —
-        // issue. Tolerate the dispose-during-Reset race: the consumer's outer
-        // loop will exit on the next iteration via its own cancellation check.
+        // may dispose the underlying gate before a consumer reaches either Wait()
+        // or Reset(). Treat disposal as a normal wake/exit path; the consumer's
+        // outer loop exits on the next iteration via its own cancellation check.
         if (_disposed) return;
         try { _gate.Reset(); }
-        catch (ObjectDisposedException) { }
+        catch (ObjectDisposedException) when (_disposed) { }
     }
 
     public void Dispose()

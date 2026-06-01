@@ -422,20 +422,18 @@ public sealed class ProtocolEdgeCaseTests
     #region Slab Capacity Enforcement
 
     [Fact]
-    public async Task ReceiverSmallerSlab_RejectsOversizedFrame()
+    public async Task ReceiverSmallerSlab_SplitsOversizedWrite()
     {
         var duplex = new DuplexMemoryStream();
         await using var client = StreamMultiplexer.Create(new MultiplexerOptions
         {
             StreamFactory = _ => Task.FromResult<IStreamPair>(duplex.SideA),
             PingInterval = TimeSpan.Zero,
-            MaxAutoReconnectAttempts = 0,
         });
         await using var server = StreamMultiplexer.Create(new MultiplexerOptions
         {
             StreamFactory = _ => Task.FromResult<IStreamPair>(duplex.SideB),
             PingInterval = TimeSpan.Zero,
-            MaxAutoReconnectAttempts = 0,
             DefaultChannelOptions = new NetConduit.Models.DefaultChannelOptions
             {
                 SlabSize = 64 * 1024,
@@ -456,18 +454,28 @@ public sealed class ProtocolEdgeCaseTests
         var reader = await server.AcceptChannelAsync("oversize-frame", cts.Token);
         await writer.WaitForReadyAsync(cts.Token);
 
-        // Post-handshake: the receiver's 64 KiB default slab is advertised,
-        // so WriteAsync clamps against it and refuses the 96 KiB payload BEFORE
-        // touching the wire. The transport stays connected and the receiver's
-        // reader loop is never asked to buffer a frame it cannot hold.
         byte[] payload = new byte[96 * 1024];
-        var ex = await Assert.ThrowsAsync<ArgumentOutOfRangeException>(
-            async () => await writer.WriteAsync(payload, cts.Token));
-        Assert.Contains("remote peer", ex.Message, StringComparison.OrdinalIgnoreCase);
+        for (int i = 0; i < payload.Length; i++) payload[i] = (byte)(i & 0xFF);
 
-        // Both sides must remain healthy — no protocol error on the wire.
-        Assert.True(client.IsConnected, "Sender mux must stay connected; oversize was caught locally.");
-        Assert.True(server.IsConnected, "Receiver mux must stay connected; no oversize frame ever reached it.");
+        byte[] received = new byte[payload.Length];
+        var readTask = Task.Run(async () =>
+        {
+            int total = 0;
+            while (total < received.Length)
+            {
+                int n = await reader.ReadAsync(received.AsMemory(total), cts.Token);
+                Assert.NotEqual(0, n);
+                total += n;
+            }
+        }, cts.Token);
+
+        await writer.WriteAsync(payload, cts.Token);
+        await readTask;
+
+        Assert.Equal(payload, received);
+
+        Assert.True(client.IsConnected);
+        Assert.True(server.IsConnected);
 
         await writer.DisposeAsync();
     }
@@ -478,11 +486,11 @@ public sealed class ProtocolEdgeCaseTests
 
     /// <summary>
     /// Regression for. With heterogeneous slab sizes, the handshake must
-    /// advertise each peer's max-recv-payload so the sender clamps its writes
-    /// against the smaller of (local slab, peer advertised). A successful write
-    /// of a payload that fits in both slabs proves the negotiation works AND
+    /// advertise each peer's max-recv-payload so the sender frames writes
+    /// against the smaller of (local slab, peer advertised). Successful writes
+    /// with smaller and larger caller buffers prove the negotiation works AND
     /// that the handshake wire format extension is read on both sides without
-    /// breaking the parity / session-id derivation.
+    /// breaking the parity/session-id derivation.
     /// </summary>
     [Fact]
     public async Task SlabSizeNegotiation_PeerMaxRecvPayloadAdvertisedInHandshake()
@@ -492,7 +500,6 @@ public sealed class ProtocolEdgeCaseTests
         {
             StreamFactory = _ => Task.FromResult<IStreamPair>(duplex.SideA),
             PingInterval = TimeSpan.Zero,
-            MaxAutoReconnectAttempts = 0,
             DefaultChannelOptions = new NetConduit.Models.DefaultChannelOptions
             {
                 SlabSize = 4 * 1024 * 1024, // 4 MiB
@@ -502,7 +509,6 @@ public sealed class ProtocolEdgeCaseTests
         {
             StreamFactory = _ => Task.FromResult<IStreamPair>(duplex.SideB),
             PingInterval = TimeSpan.Zero,
-            MaxAutoReconnectAttempts = 0,
             DefaultChannelOptions = new NetConduit.Models.DefaultChannelOptions
             {
                 SlabSize = 256 * 1024, // 256 KiB
@@ -537,13 +543,25 @@ public sealed class ProtocolEdgeCaseTests
         }
         Assert.Equal(payload, received);
 
-        // A payload that exceeds the peer's 256 KiB slab but fits in our 4 MiB
-        // slab must be rejected at WriteAsync — without the handshake field,
-        // this would crash the peer's reader loop.
         var oversize = new byte[300 * 1024];
-        var ex = await Assert.ThrowsAsync<ArgumentOutOfRangeException>(
-            async () => await c2s.WriteAsync(oversize, cts.Token));
-        Assert.Contains("remote peer", ex.Message, StringComparison.OrdinalIgnoreCase);
+        for (int i = 0; i < oversize.Length; i++) oversize[i] = (byte)(255 - (i & 0xFF));
+
+        var oversizeReceived = new byte[oversize.Length];
+        var oversizeReadTask = Task.Run(async () =>
+        {
+            int oversizeTotal = 0;
+            while (oversizeTotal < oversizeReceived.Length)
+            {
+                int n = await c2sReader.ReadAsync(oversizeReceived.AsMemory(oversizeTotal), cts.Token);
+                Assert.NotEqual(0, n);
+                oversizeTotal += n;
+            }
+        }, cts.Token);
+
+        await c2s.WriteAsync(oversize, cts.Token);
+        await oversizeReadTask;
+
+        Assert.Equal(oversize, oversizeReceived);
 
         // Connections still healthy.
         Assert.True(client.IsConnected);

@@ -1,3 +1,4 @@
+using System.Buffers.Binary;
 using NetConduit.Internal;
 
 namespace NetConduit.UnitTests;
@@ -130,7 +131,10 @@ public sealed class ReadChannelTests
     public void ReceivePayload_Err_ClosesChannel()
     {
         var channel = CreateChannel();
-        channel.ReceivePayload(FrameFlags.Err, ReadOnlySpan<byte>.Empty);
+        Span<byte> payload = stackalloc byte[sizeof(ushort)];
+        BinaryPrimitives.WriteUInt16BigEndian(payload, (ushort)ErrorCode.ProtocolError);
+
+        channel.ReceivePayload(FrameFlags.Err, payload);
 
         Assert.Equal(ChannelState.Closed, channel.State);
         Assert.Equal(ChannelCloseReason.RemoteError, channel.CloseReason);

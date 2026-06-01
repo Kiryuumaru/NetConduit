@@ -22,6 +22,8 @@ namespace NetConduit;
 /// </summary>
 public sealed class StreamMultiplexer : IStreamMultiplexer, IChannelOwner
 {
+    private static readonly UTF8Encoding StrictChannelIdDecoder = new(false, true);
+
     private readonly MultiplexerOptions _options;
     private readonly ChannelRegistry _registry;
     private readonly MultiplexerStats _stats = new();
@@ -38,8 +40,8 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IChannelOwner
     private volatile bool _isRunning;
     private volatile bool _isConnected;
     private volatile bool _isReady;
-    private volatile bool _isShuttingDown;
-    private volatile bool _disconnectedFired;
+    private int _isShuttingDown;
+    private int _disconnectedFired;
     private volatile bool _disposed;
     private DisconnectReason? _disconnectReason;
 
@@ -77,7 +79,7 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IChannelOwner
     public bool IsRunning => _isRunning;
 
     /// <inheritdoc />
-    public bool IsShuttingDown => _isShuttingDown;
+    public bool IsShuttingDown => Volatile.Read(ref _isShuttingDown) != 0;
 
     /// <inheritdoc />
     public Guid SessionId => _conn.SessionId;
@@ -185,6 +187,27 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IChannelOwner
                 $"SendTimeout must not exceed {int.MaxValue} milliseconds (approximately 24.86 days).");
     }
 
+    /// <summary>
+    /// Rejects <paramref name="value"/> when it exceeds
+    /// <see cref="int.MaxValue"/> milliseconds (approximately 24.86 days).
+    /// <see cref="Task.Delay(TimeSpan, CancellationToken)"/> and
+    /// <see cref="CancellationTokenSource(TimeSpan)"/> both throw
+    /// <see cref="ArgumentOutOfRangeException"/> at that boundary; without a
+    /// matching fail-fast at construction, an oversized timing option passed
+    /// validation and faulted the first keepalive tick / drain wait / connect
+    /// retry, surfacing as a confusing internal exception with no link back
+    /// to the misconfigured field (parallel of #387 for Task.Delay sinks).
+    /// Mirrors <see cref="ValidateSendTimeout"/>'s SemaphoreSlim boundary check.
+    /// </summary>
+    private static void ValidateTaskDelayUpperBound(TimeSpan value, string fieldName)
+    {
+        if (value.TotalMilliseconds > int.MaxValue)
+            throw new ArgumentOutOfRangeException(
+                nameof(MultiplexerOptions),
+                value,
+                $"{fieldName} must not exceed {int.MaxValue} milliseconds (approximately 24.86 days).");
+    }
+
     private static void ValidateTimingOptions(MultiplexerOptions options)
     {
         if (options.PingInterval < TimeSpan.Zero)
@@ -192,6 +215,7 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IChannelOwner
                 nameof(options),
                 options.PingInterval,
                 "PingInterval must be non-negative. Use TimeSpan.Zero to disable keepalive.");
+        ValidateTaskDelayUpperBound(options.PingInterval, nameof(options.PingInterval));
 
         if (options.PingInterval > TimeSpan.Zero)
         {
@@ -200,6 +224,7 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IChannelOwner
                     nameof(options),
                     options.PingTimeout,
                     "PingTimeout must be positive when keepalive is enabled (PingInterval > TimeSpan.Zero).");
+            ValidateTaskDelayUpperBound(options.PingTimeout, nameof(options.PingTimeout));
 
             if (options.MaxMissedPings < 1)
                 throw new ArgumentOutOfRangeException(
@@ -213,18 +238,21 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IChannelOwner
                 nameof(options),
                 options.GoAwayTimeout,
                 "GoAwayTimeout must be non-negative.");
+        ValidateTaskDelayUpperBound(options.GoAwayTimeout, nameof(options.GoAwayTimeout));
 
         if (options.AutoReconnectDelay < TimeSpan.Zero)
             throw new ArgumentOutOfRangeException(
                 nameof(options),
                 options.AutoReconnectDelay,
                 "AutoReconnectDelay must be non-negative.");
+        ValidateTaskDelayUpperBound(options.AutoReconnectDelay, nameof(options.AutoReconnectDelay));
 
         if (options.MaxAutoReconnectDelay < options.AutoReconnectDelay)
             throw new ArgumentOutOfRangeException(
                 nameof(options),
                 options.MaxAutoReconnectDelay,
                 $"MaxAutoReconnectDelay ({options.MaxAutoReconnectDelay}) must be greater than or equal to AutoReconnectDelay ({options.AutoReconnectDelay}).");
+        ValidateTaskDelayUpperBound(options.MaxAutoReconnectDelay, nameof(options.MaxAutoReconnectDelay));
 
         if (double.IsNaN(options.AutoReconnectBackoffMultiplier) || options.AutoReconnectBackoffMultiplier < 1.0)
             throw new ArgumentOutOfRangeException(
@@ -237,6 +265,8 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IChannelOwner
                 nameof(options),
                 options.ConnectionTimeout,
                 "ConnectionTimeout must be non-negative, or Timeout.InfiniteTimeSpan to disable per-attempt timeout.");
+        if (options.ConnectionTimeout != Timeout.InfiniteTimeSpan)
+            ValidateTaskDelayUpperBound(options.ConnectionTimeout, nameof(options.ConnectionTimeout));
     }
 
     /// <inheritdoc />
@@ -264,7 +294,7 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IChannelOwner
         if (!_isRunning)
             throw new InvalidOperationException("Multiplexer has not been started.");
 
-        if (_isShuttingDown)
+        if (IsShuttingDown)
             throw new InvalidOperationException("Cannot open new channels after GoAwayAsync.");
 
         bool enableReplay = _options.MaxAutoReconnectAttempts != 0;
@@ -323,7 +353,7 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IChannelOwner
         if (!_isRunning)
             throw new InvalidOperationException("Multiplexer has not been started.");
 
-        if (_isShuttingDown)
+        if (IsShuttingDown)
             throw new InvalidOperationException("Cannot accept new channels after GoAwayAsync.");
 
         // Atomically observe registry state and either return an existing channel
@@ -369,7 +399,7 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IChannelOwner
     {
         if (!_isRunning)
             throw new InvalidOperationException("Multiplexer has not been started.");
-        if (_isShuttingDown)
+        if (IsShuttingDown)
             throw new InvalidOperationException("Cannot register new channels after GoAwayAsync.");
         if (registrations.IsEmpty)
             throw new ArgumentException("At least one registration is required.", nameof(registrations));
@@ -386,14 +416,11 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IChannelOwner
     /// <inheritdoc />
     public async ValueTask GoAwayAsync(CancellationToken ct = default)
     {
-        if (_isShuttingDown) return;
+        if (Interlocked.CompareExchange(ref _isShuttingDown, 1, 0) != 0) return;
 
-        // Try to stage the GoAway frame BEFORE latching _isShuttingDown so a
-        // transient slab-full does not leave the mux in half-shutdown limbo
-        // with no GoAway on the wire. Short retry budget; if the slab
-        // is still full after, proceed anyway - peer observes transport close
-        // and reports TransportError instead of GoAwayReceived, but the local
-        // mux still tears down cleanly.
+        // The compare-exchange above is the single entry gate for GoAwayAsync.
+        // We still attempt best-effort GoAway frame staging before cancellation,
+        // but concurrent callers now exit immediately without duplicating teardown.
         byte[] goAwayPayload = [CtrlSubtype.GoAway];
         const int MaxGoAwayAttempts = 5;
         for (int attempt = 0; attempt < MaxGoAwayAttempts; attempt++)
@@ -401,8 +428,6 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IChannelOwner
             if (SendControlFrame(FrameFlags.Ctrl, goAwayPayload)) break;
             await Task.Yield();
         }
-
-        _isShuttingDown = true;
 
         // Wait up to GoAwayTimeout for already-open channels to drain. The caller token cancels the wait;
         // GoAwayTimeout bounds it. Either path falls through to forced abort below.
@@ -434,11 +459,7 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IChannelOwner
         // emission across GoAwayAsync, the remote-GoAway branch in
         // MainLoopAsync, and DisposeAsync, guaranteeing exactly-once
         // delivery regardless of which teardown trigger fires first.
-        if (!_disconnectedFired)
-        {
-            _disconnectedFired = true;
-            RaiseEvent(Disconnected, new DisconnectedEventArgs(Enums.DisconnectReason.LocalDispose, null));
-        }
+        TryRaiseDisconnected(Enums.DisconnectReason.LocalDispose, null);
 
         _cts.Cancel();
 
@@ -505,6 +526,22 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IChannelOwner
                 }
                 catch (OperationCanceledException) when (ct.IsCancellationRequested)
                 {
+                    // On the reconnect path _conn.Transport was never assigned,
+                    // so the outer DisposeAsync safety net cannot reach the
+                    // freshly-connected transport here. Mirror the other two
+                    // handshake catch arms below and dispose it explicitly
+                    // before rethrowing, otherwise an honest mux.DisposeAsync
+                    // racing a reconnect handshake leaks one socket/pipe/QUIC
+                    // connection per cancelled reconnect cycle.
+                    //
+                    // On the initial-connect path _conn.Transport = transport
+                    // ran before PerformHandshakeAsync, so the outer
+                    // DisposeAsync already owns it — disposing here would
+                    // double-dispose. Guard on hasConnectedBefore.
+                    if (hasConnectedBefore)
+                    {
+                        try { await transport.DisposeAsync(); } catch { }
+                    }
                     throw;
                 }
                 catch (HandshakeTransportException handshakeEx)
@@ -623,7 +660,7 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IChannelOwner
                 // Without this reset, _disconnectedFired is a lifetime latch and
                 // any mux that ever experienced ≥1 transient drop silently
                 // suppresses its terminal Disconnected(LocalDispose) on dispose.
-                _disconnectedFired = false;
+                Volatile.Write(ref _disconnectedFired, 0);
 
                 if (!hasConnectedBefore)
                 {
@@ -635,11 +672,10 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IChannelOwner
                 }
                 hasConnectedBefore = true;
 
-                // Notify all channels that transport is connected
-                foreach (var ch in _registry.GetAllWriteChannels())
-                    ch.MarkConnected();
-                foreach (var ch in _registry.GetAllReadChannels())
-                    ch.MarkConnected();
+                // Notify all channels that transport is connected. Includes
+                // pending accepts so a pre-armed AcceptChannel reflects the
+                // reconnect up-edge (fixes #427).
+                _registry.MarkAllChannelsConnected();
 
                 // Block until any loop faults (transport died)
                 var faulted = await Task.WhenAny(
@@ -652,11 +688,12 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IChannelOwner
                 _isConnected = false;
                 _conn.LoopCts.Cancel();
 
-                // Notify all channels that transport is disconnected
-                foreach (var ch in _registry.GetAllWriteChannels())
-                    ch.MarkDisconnected(Enums.DisconnectReason.TransportError, null);
-                foreach (var ch in _registry.GetAllReadChannels())
-                    ch.MarkDisconnected(Enums.DisconnectReason.TransportError, null);
+                // Notify all channels that transport is disconnected. Includes
+                // pending accepts so a pre-armed AcceptChannel that observed
+                // Connected at register time also observes the down-edge
+                // (fixes #427, #435). MarkAllChannelsDisconnected centralizes
+                // the iteration over writes + reads + pending accepts.
+                _registry.MarkAllChannelsDisconnected(ChannelCloseReason.TransportFailed);
 
                 await WaitForLoopsAsync();
                 _conn.LoopCts.Dispose();
@@ -671,7 +708,7 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IChannelOwner
                 await transport.DisposeAsync();
                 _conn.Transport = null;
 
-                if (_isShuttingDown)
+                if (IsShuttingDown)
                 {
                     if (_disconnectReason == Enums.DisconnectReason.GoAwayReceived)
                     {
@@ -683,8 +720,7 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IChannelOwner
                         // reads see EOF and writers see ChannelClosedException promptly.
                         _registry.AbortAllChannels(ChannelCloseReason.MuxDisposed);
                         _registry.CancelAllPendingAccepts();
-                        _disconnectedFired = true;
-                        RaiseEvent(Disconnected, new DisconnectedEventArgs(Enums.DisconnectReason.GoAwayReceived, null));
+                        TryRaiseDisconnected(Enums.DisconnectReason.GoAwayReceived, null);
                     }
                     break;
                 }
@@ -693,8 +729,7 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IChannelOwner
                 if (ct.IsCancellationRequested)
                     break;
 
-                _disconnectedFired = true;
-                RaiseEvent(Disconnected, new DisconnectedEventArgs(Enums.DisconnectReason.TransportError, transportEx));
+                TryRaiseDisconnected(Enums.DisconnectReason.TransportError, transportEx);
             }
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
@@ -783,12 +818,15 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IChannelOwner
         else if (readChannel is not null && readChannel.TryClaimCompletionAccounting())
         {
             // Read channels can be closed by inbound FIN, by local Dispose,
-            // or by mux-level abort — whichever runs first claims the accounting.
-            // Pre-fix this branch only fired on FIN, so a local-Dispose-before-FIN
-            // permanently inflated OpenChannels and skipped ChannelClosed.
+            // or by mux-level abort — whichever runs first claims the
+            // accounting. The stats decrement must run on every path so
+            // OpenChannels does not inflate when the local consumer disposes
+            // before FIN arrives. The mux-level ChannelClosed event is
+            // documented FIN-only (see IStreamMultiplexer.ChannelClosed) and
+            // is therefore fired only from the inbound-FIN handler. Per-
+            // channel close reasons are delivered via IChannel.Closed.
             Interlocked.Decrement(ref _stats._openChannels);
             Interlocked.Increment(ref _stats._totalChannelsClosed);
-            RaiseEvent(ChannelClosed, new ChannelClosedEventArgs(channelId, readChannel.CloseException));
         }
     }
 
@@ -799,6 +837,25 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IChannelOwner
         // resurrecting the disposed instance when the peer's INIT eventually
         // arrives. Idempotent — TryRemove is a no-op if already gone.
         _registry.RemovePendingAcceptChannel(channelId);
+    }
+
+    void IChannelOwner.CompletePendingAcceptCancel(string channelId, Action closeAction)
+    {
+        // Runs the channel's local-close (SetClosed) + pending-map removal
+        // under the same AcceptLock that HandleInitFrame holds while it reads
+        // the channel's State and decides whether to adopt it. Without this
+        // ordering, a Dispose on a pending-accept channel races the
+        // dispatcher: SetClosed could land after the dispatcher's lock-free
+        // State read but before the AcceptLock-protected RegisterReadChannel
+        // commits, publishing a Closed instance whose slab has already been
+        // returned to ArrayPool<byte>.Shared. With the closeAction running
+        // under AcceptLock, the dispatcher observes either "still pending,
+        // adopt" or "already Closed, evict" — never an intermediate state.
+        lock (_registry.AcceptLock)
+        {
+            closeAction();
+            _registry.RemovePendingAcceptChannel(channelId);
+        }
     }
 
     void IChannelOwner.NotifyEventHandlerException(Exception exception)
@@ -872,6 +929,13 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IChannelOwner
                     if (rentedBuf is not null)
                         System.Buffers.ArrayPool<byte>.Shared.Return(rentedBuf);
                 }
+
+                // Retry any INIT-ACK whose original send failed because the
+                // control slab was transiently full. Per the comment on
+                // MuxConnection.PendingInitAcks: "Drained on every reader-loop
+                // iteration." Without this call the queue grows monotonically
+                // and every peer open that hit back-pressure stalls forever.
+                DrainPendingInitAcks(conn);
             }
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
@@ -893,10 +957,7 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IChannelOwner
 
     private void HandleInitFrame(FrameHeader header, ReadOnlySpan<byte> payload)
     {
-        if (payload.Length > ChannelConstants.MaxChannelIdLength)
-            return; // channel name too long — drop frame
-
-        string channelId = Encoding.UTF8.GetString(payload);
+        string channelId = DecodeInboundChannelId(payload);
         ReadChannel readChannel;
         bool isNewlyAccepted;
 
@@ -908,8 +969,15 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IChannelOwner
             // After reconnect, Init frames are replayed from the slab.
             // If the channel already exists, skip re-registration.
             var existing = _registry.GetReadChannel(header.ChannelIndex);
-            if (existing is not null)
+            if (existing is not null && existing.ChannelId == channelId)
                 return;
+
+            if (existing is not null)
+            {
+                throw new MultiplexerException(
+                    ErrorCode.ProtocolError,
+                    $"INIT for channel index {header.ChannelIndex} conflicts with existing channel '{existing.ChannelId}'.");
+            }
 
             // Check if a pending accept channel was pre-created via AcceptChannel.
             // A pending entry whose state is already Closed was disposed by the
@@ -923,6 +991,20 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IChannelOwner
                 _registry.RemovePendingAcceptChannel(channelId);
                 pendingChannel = null;
             }
+
+            // Symmetric "no new channels after GoAwayAsync" guard with the
+            // local OpenChannel / AcceptChannel paths. A peer-sent INIT for a
+            // brand-new channel id that arrives after the local shutdown
+            // latch is dropped: the local side has declared no further
+            // channels will be created, so registering this one would (a)
+            // violate the public invariant, (b) extend GoAwayAsync's drain
+            // wait because ActiveChannelCount stays > 0 for a channel that
+            // can never carry user data, and (c) leak the slab rent until
+            // GoAwayTimeout abort. A pre-existing pending AcceptChannel for
+            // the same id IS honoured — that caller declared its intent
+            // before shutdown and the contract is to satisfy it.
+            if (IsShuttingDown && pendingChannel is null)
+                return;
 
             if (pendingChannel is not null)
             {
@@ -976,8 +1058,14 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IChannelOwner
         readChannel.MarkOpen();
         readChannel.MarkConnected();
 
-        // Send init-ack so the opener knows the channel is established
-        SendInitAck(header.ChannelIndex);
+        // Send init-ack so the opener knows the channel is established. Under
+        // transient control-slab pressure SendInitAck returns false; queue the
+        // index so DrainPendingInitAcks retries on a later reader-loop iteration
+        // once the slab compacts. Discarding the failure here would orphan the
+        // peer's WriteChannel in Opening state forever, since duplicate INIT
+        // frames replayed across reconnect are dropped by the dedup guard above.
+        if (!SendInitAck(header.ChannelIndex))
+            _conn.PendingInitAcks.Enqueue(header.ChannelIndex);
 
         Interlocked.Increment(ref _stats._openChannels);
         Interlocked.Increment(ref _stats._totalChannelsOpened);
@@ -988,17 +1076,47 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IChannelOwner
             _registry.EnqueueForAccept(readChannel);
     }
 
+    private static string DecodeInboundChannelId(ReadOnlySpan<byte> payload)
+    {
+        if (payload.Length == 0)
+        {
+            throw new MultiplexerException(ErrorCode.ProtocolError, "INIT payload must contain a channel ID.");
+        }
+
+        if (payload.Length > ChannelConstants.MaxChannelIdLength)
+        {
+            throw new MultiplexerException(
+                ErrorCode.ProtocolError,
+                $"INIT channel ID must be at most {ChannelConstants.MaxChannelIdLength} UTF-8 bytes.");
+        }
+
+        try
+        {
+            return StrictChannelIdDecoder.GetString(payload);
+        }
+        catch (DecoderFallbackException ex)
+        {
+            throw new MultiplexerException(ErrorCode.ProtocolError, "INIT channel ID must be valid UTF-8.", ex);
+        }
+    }
+
     private void DispatchExistingChannelFrame(FrameHeader header, ReadOnlySpan<byte> payload)
     {
         // Route data/ack/fin/err to existing channel
         var channel = _registry.GetReadChannel(header.ChannelIndex);
         if (channel is null)
         {
-            // Could be an ACK for our write channel
             var writeChannel = _registry.GetWriteChannel(header.ChannelIndex);
-            if (writeChannel is not null && header.Flags == FrameFlags.Ack && payload.Length >= 8)
+            if (writeChannel is not null)
             {
-                long ackPos = (long)BinaryPrimitives.ReadUInt64BigEndian(payload);
+                if (header.Flags != FrameFlags.Ack)
+                {
+                    throw new MultiplexerException(
+                        ErrorCode.ProtocolError,
+                        $"Frame type {header.Flags} is not valid for local write channel index {header.ChannelIndex}.");
+                }
+
+                long ackPos = DecodeWriteChannelAck(writeChannel, header.ChannelIndex, payload);
                 writeChannel.OnAck(ackPos);
                 return;
             }
@@ -1009,16 +1127,41 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IChannelOwner
 
         if (header.Flags == FrameFlags.Fin)
         {
-            // Single-decrement contract via CAS: whichever runs first
-            // (this FIN handler or NotifyChannelCompleted on local Dispose)
-            // claims the accounting; the other becomes a no-op.
+            // Stats accounting is shared across FIN / local Dispose / mux abort —
+            // whichever runs first decrements once via TryClaimCompletionAccounting.
             if (channel.TryClaimCompletionAccounting())
             {
                 Interlocked.Decrement(ref _stats._openChannels);
                 Interlocked.Increment(ref _stats._totalChannelsClosed);
+            }
+            // ChannelClosed is documented FIN-only and uses its own one-shot
+            // CAS so a local Dispose that wins TryClaimCompletionAccounting
+            // does not silently suppress the FIN event.
+            if (channel.TryClaimRemoteFinEvent())
+            {
                 RaiseEvent(ChannelClosed, new ChannelClosedEventArgs(channel.ChannelId, null));
             }
         }
+    }
+
+    private static long DecodeWriteChannelAck(WriteChannel writeChannel, ushort channelIndex, ReadOnlySpan<byte> payload)
+    {
+        if (payload.Length != sizeof(ulong))
+        {
+            throw new MultiplexerException(
+                ErrorCode.ProtocolError,
+                $"ACK frame for local write channel index {channelIndex} must contain exactly {sizeof(ulong)} bytes.");
+        }
+
+        long ackPos = (long)BinaryPrimitives.ReadUInt64BigEndian(payload);
+        if (!writeChannel.IsReady && ackPos != 0)
+        {
+            throw new MultiplexerException(
+                ErrorCode.ProtocolError,
+                $"Initial ACK for local write channel index {channelIndex} must acknowledge position 0.");
+        }
+
+        return ackPos;
     }
 
     private void ProcessControlFrame(MuxConnection conn, FrameHeader header, ReadOnlySpan<byte> payload)
@@ -1026,46 +1169,61 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IChannelOwner
         switch (header.Flags)
         {
             case FrameFlags.Ping:
-                // Respond with Pong on control channel (echo the payload)
+                if (payload.Length != sizeof(long))
+                    throw new MultiplexerException(ErrorCode.ProtocolError, $"Ping payload must be {sizeof(long)} bytes, got {payload.Length}.");
+
                 SendControlFrame(FrameFlags.Pong, payload);
                 break;
             case FrameFlags.Pong:
+                if (payload.Length != sizeof(long))
+                    throw new MultiplexerException(ErrorCode.ProtocolError, $"Pong payload must be {sizeof(long)} bytes, got {payload.Length}.");
+
                 // Correlate the echoed 8-byte token to the currently outstanding ping.
                 // A late pong from a previous (timed-out) ping must not satisfy the
                 // *next* ping's TCS — that would mask real liveness failures by
                 // resetting the missed-ping counter.
-                if (payload.Length >= 8)
+                long echoedToken = BinaryPrimitives.ReadInt64BigEndian(payload);
+                var pending = Volatile.Read(ref conn.PendingPong);
+                if (pending is not null
+                    && pending.ExpectedToken == echoedToken
+                    && Interlocked.CompareExchange(ref conn.PendingPong, null, pending) == pending)
                 {
-                    long echoedToken = BinaryPrimitives.ReadInt64BigEndian(payload);
-                    var pending = Volatile.Read(ref conn.PendingPong);
-                    if (pending is not null
-                        && pending.ExpectedToken == echoedToken
-                        && Interlocked.CompareExchange(ref conn.PendingPong, null, pending) == pending)
-                    {
-                        pending.Tcs.TrySetResult();
-                    }
-                    // else: stale or already-cleared — drop silently.
+                    pending.Tcs.TrySetResult();
                 }
+                // else: stale or already-cleared — drop silently.
                 break;
             case FrameFlags.Ctrl:
                 ProcessCtrlSubframe(payload);
                 break;
+            default:
+                throw new MultiplexerException(
+                    ErrorCode.ProtocolError,
+                    $"Frame type {header.Flags} is not valid on the control channel.");
         }
     }
 
     private void ProcessCtrlSubframe(ReadOnlySpan<byte> payload)
     {
-        if (payload.Length == 0) return;
+        if (payload.Length == 0)
+            throw new MultiplexerException(ErrorCode.ProtocolError, "Control subframe payload must include a subtype byte.");
 
         byte subtype = payload[0];
         switch (subtype)
         {
             case CtrlSubtype.GoAway:
+                if (payload.Length != 1)
+                    throw new MultiplexerException(ErrorCode.ProtocolError, $"GoAway control payload must be 1 byte, got {payload.Length}.");
+
                 HandleRemoteGoAway();
                 break;
             case CtrlSubtype.Reconnect:
-                // Reconnection handled separately
-                break;
+                throw new MultiplexerException(
+                    ErrorCode.ProtocolError,
+                    "Reconnect control frames are only valid during reconnect handshakes.");
+            case CtrlSubtype.ReconnectAck:
+                throw new MultiplexerException(ErrorCode.ProtocolError, "ReconnectAck control frames are reserved.");
+            default:
+                throw new MultiplexerException(ErrorCode.ProtocolError, $"Unknown control subtype: 0x{subtype:X2}.");
         }
     }
 
@@ -1073,8 +1231,7 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IChannelOwner
     {
         // If local already initiated shutdown (via GoAwayAsync or DisposeAsync),
         // the existing path owns teardown. Don't double-drive it.
-        if (_isShuttingDown) return;
-        _isShuttingDown = true;
+        if (Interlocked.CompareExchange(ref _isShuttingDown, 1, 0) != 0) return;
         _disconnectReason = Enums.DisconnectReason.GoAwayReceived;
 
         // Mirror GoAwayAsync's drain-then-cancel semantics on the remote-initiated
@@ -1125,6 +1282,17 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IChannelOwner
         }
         finally
         {
+            // Pre-mark every connected channel as Disconnected with the
+            // already-set _disconnectReason (GoAwayReceived) before _cts
+            // wakes MainLoopAsync's natural-fault path. Otherwise the
+            // unconditional MarkDisconnected(TransportError) loop inside
+            // MainLoopAsync wins via the one-shot _connectedFired CAS and
+            // the per-channel Disconnected event reports TransportError on
+            // every honest peer GoAway (symmetric to the local-GoAway fix
+            // #391/#399).
+            try { _registry.MarkAllChannelsDisconnected(Enums.DisconnectReason.GoAwayReceived); }
+            catch { /* best-effort — must not block _cts.Cancel below */ }
+
             try { _cts.Cancel(); }
             catch (ObjectDisposedException) { /* DisposeAsync already ran */ }
         }
@@ -1345,8 +1513,17 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IChannelOwner
         _flushSignal.Dispose();
         _cts.Dispose();
 
-        if (wasStarted && !_disconnectedFired && _disconnectReason.HasValue)
-            RaiseEvent(Disconnected, new DisconnectedEventArgs(_disconnectReason.Value, null));
+        if (wasStarted && _disconnectReason.HasValue)
+            TryRaiseDisconnected(_disconnectReason.Value, null);
+    }
+
+    private bool TryRaiseDisconnected(DisconnectReason reason, Exception? exception)
+    {
+        if (Interlocked.CompareExchange(ref _disconnectedFired, 1, 0) != 0)
+            return false;
+
+        RaiseEvent(Disconnected, new DisconnectedEventArgs(reason, exception));
+        return true;
     }
 
     // Multicast-safe event raise. A throwing handler must not prevent the remaining

@@ -47,6 +47,17 @@ internal sealed class WriteChannel : Stream, IWriteChannel
     private bool _routerReading; // true between TakeReady and MarkSent — blocks compaction
     private int _completionNotified; // CAS guard: ensures NotifyChannelCompleted fires exactly once
     private int _slabReturned; // CAS guard: ensures slab is returned to pool exactly once
+    // INIT frame bytes still pinned in the slab. The peer's HandleInitFrame
+    // consumes the INIT inline and never buffers those bytes in its read-slab,
+    // so they MUST NOT count against the peer-cap admission bound in
+    // WriteAsync — otherwise the very first data frame is mis-throttled and
+    // deadlocks when no consumer is reading. Set by WriteInitFrame; cleared
+    // by TryCompactLocked once the peer's cumulative ACK has covered them
+    // (at which point the INIT bytes are physically compacted out of the
+    // slab and no longer occupy any position).
+    private int _initFrameBytesInSlab;
+    private bool _finRequested;
+    private bool _finQueued;
 
     private volatile ChannelState _state = ChannelState.Opening;
     private volatile bool _isReady;
@@ -202,60 +213,54 @@ internal sealed class WriteChannel : Stream, IWriteChannel
     /// </summary>
     public override async ValueTask WriteAsync(ReadOnlyMemory<byte> data, CancellationToken ct = default)
     {
+        if (data.IsEmpty) return;
+
+        int offset = 0;
+        while (offset < data.Length)
+        {
+            int written = await WriteFrameAsync(data[offset..], ct).ConfigureAwait(false);
+            offset += written;
+        }
+    }
+
+    private async ValueTask<int> WriteFrameAsync(ReadOnlyMemory<byte> data, CancellationToken ct)
+    {
         if (_state is not (ChannelState.Open or ChannelState.Opening))
             throw new ChannelClosedException(ChannelId, _closeReason ?? ChannelCloseReason.LocalClose);
 
-        int payloadLength = data.Length;
-        if (payloadLength == 0) return;
+        var (effectiveSlab, maxPayload) = GetFrameBudget();
+        int payloadLength = Math.Min(data.Length, maxPayload);
 
         int frameSize = FrameHeader.Size + payloadLength;
 
-        // A single frame must fit in BOTH the local slab AND the remote peer's
-        // advertised max-recv-payload. Without the peer clamp, a peer
-        // with a smaller slab would receive a wire-legal but unbuffereable
-        // frame, throw MultiplexerException(ProtocolError) from BufferInSlab,
-        // and fault its reader loop on every reconnect — replaying the same
-        // oversize frame until MaxAutoReconnectAttempts is exhausted.
+        // Wait for space in the slab if needed.
         //
-        // Pre-handshake: _owner.PeerMaxRecvPayload defaults to
-        // FrameConstants.DefaultSlabSize (1 MiB) until the handshake completes
-        // and StreamMultiplexer.PerformHandshakeAsync assigns the negotiated
-        // value. A WriteAsync issued while the channel is still Opening — and
-        // therefore _isConnected == false — would pass the cap check using
-        // that 1 MiB default, buffer an oversize frame, and only fault later
-        // when the handshake lands a smaller peer cap and the drainer ships
-        // the frame. The peer then tears down the mux with ProtocolError on
-        // every reconnect attempt. Clamp pre-handshake to MinSlabSize: that
-        // is the smallest cap any peer is allowed to advertise (enforced by
-        // MuxHandshake.ReadPeerMaxRecvPayload validation), so it is always a
-        // safe lower bound. Callers that need full peer capacity should
-        // await IWriteChannel.WaitForReadyAsync() before writing large frames.
-        int peerMaxRecvPayload = _peerCapNegotiated
-            ? _owner.PeerMaxRecvPayload
-            : FrameConstants.MinSlabSize;
-        int effectiveSlab = Math.Min(_slabSize, peerMaxRecvPayload);
-        int maxPayload = effectiveSlab - FrameHeader.Size;
-        if (payloadLength > maxPayload)
-        {
-            string limitSource = !_peerCapNegotiated
-                ? $"pre-handshake conservative cap ({peerMaxRecvPayload} bytes); the peer's actual cap is unknown until the handshake completes"
-                : peerMaxRecvPayload < _slabSize
-                    ? $"remote peer's advertised receive slab ({peerMaxRecvPayload} bytes)"
-                    : $"local slab size ({_slabSize} bytes)";
-            throw new ArgumentOutOfRangeException(
-                nameof(data),
-                $"Payload of {payloadLength} bytes exceeds the per-frame budget of {maxPayload} bytes for channel '{ChannelId}' " +
-                $"(limited by {limitSource}). Await IWriteChannel.WaitForReadyAsync() before writing large frames, " +
-                $"configure a larger ChannelOptions.SlabSize on both peers, or split the payload before writing.");
-        }
-
-        // Wait for space in the slab if needed
+        // Two distinct bounds must both hold to admit a frame:
+        //
+        //   1. Local slab safety:   _slabSize - _writePos >= frameSize
+        //      The slab is a finite ArrayPool rental; staging beyond it
+        //      corrupts memory.
+        //
+        //   2. Peer slab flow control:
+        //          effectiveSlab - (_writePos - _initFrameBytesInSlab) >= frameSize
+        //      Outstanding bytes consumed in the peer's ReadChannel slab are
+        //      bounded by the peer's advertised receive-slab capacity. Using
+        //      _slabSize alone (the broken historical bound) admits cumulative
+        //      bursts of in-budget frames that overflow the peer's slab — the
+        //      peer faults its reader loop with ErrorCode.ProtocolError on
+        //      BufferInSlab, and every reconnect replays the same overflow
+        //      until MaxAutoReconnectAttempts is exhausted. The peer
+        //      processes INIT inline (HandleInitFrame) and never buffers
+        //      those bytes in its read-slab, so _initFrameBytesInSlab is
+        //      subtracted from the outstanding count.
         while (true)
         {
             lock (_posLock)
             {
                 TryCompactLocked();
-                if (_slabSize - _writePos >= frameSize) break;
+                int localFree = _slabSize - _writePos;
+                int peerFree = effectiveSlab - (_writePos - _initFrameBytesInSlab);
+                if (Math.Min(localFree, peerFree) >= frameSize) break;
             }
 
             // Re-check state before re-parking. SetClosed/Abort wake parked
@@ -303,7 +308,7 @@ internal sealed class WriteChannel : Stream, IWriteChannel
 
             int frameStart = _writePos;
             FrameHeader.WriteTo(_slab.AsSpan(frameStart, FrameHeader.Size), _channelIndex, FrameFlags.Data, payloadLength);
-            data.Span.CopyTo(_slab.AsSpan(frameStart + FrameHeader.Size, payloadLength));
+            data.Span[..payloadLength].CopyTo(_slab.AsSpan(frameStart + FrameHeader.Size, payloadLength));
             _writePos = frameStart + frameSize;
             _pendingPos = _writePos;
         }
@@ -312,6 +317,23 @@ internal sealed class WriteChannel : Stream, IWriteChannel
         Interlocked.Increment(ref Stats._framesSent);
 
         _owner.NotifyReady(this);
+        return payloadLength;
+    }
+
+    private (int EffectiveSlab, int MaxPayload) GetFrameBudget()
+    {
+        // Each emitted frame must fit in BOTH the local slab and the remote
+        // peer's advertised max-recv-payload. Pre-handshake writes use the
+        // smallest valid peer cap, because the negotiated value is not known
+        // until the handshake completes.
+        int peerMaxRecvPayload = _peerCapNegotiated
+            ? _owner.PeerMaxRecvPayload
+            : FrameConstants.MinSlabSize;
+        int effectiveSlab = Math.Min(_slabSize, peerMaxRecvPayload);
+        int maxPayload = Math.Min(effectiveSlab - FrameHeader.Size, FrameConstants.MaxFramePayloadSize);
+        if (maxPayload <= 0)
+            throw new InvalidOperationException($"Channel '{ChannelId}' has no usable per-frame payload budget.");
+        return (effectiveSlab, maxPayload);
     }
 
     internal void WriteInitFrame(ReadOnlySpan<byte> channelIdUtf8)
@@ -328,6 +350,9 @@ internal sealed class WriteChannel : Stream, IWriteChannel
             channelIdUtf8.CopyTo(_slab.AsSpan(frameStart + FrameHeader.Size, channelIdUtf8.Length));
             _writePos = frameStart + frameSize;
             _pendingPos = _writePos;
+            // The INIT frame is processed inline by the peer and never enters
+            // its read-slab; exclude these bytes from peer-cap admission.
+            _initFrameBytesInSlab = frameSize;
         }
         _owner.NotifyReady(this);
     }
@@ -445,6 +470,7 @@ internal sealed class WriteChannel : Stream, IWriteChannel
 
     internal void MarkSent(int bytes)
     {
+        bool finQueued;
         bool finDrained;
         lock (_posLock)
         {
@@ -460,10 +486,14 @@ internal sealed class WriteChannel : Stream, IWriteChannel
             // everything (including the FIN). Synchronously finalizing inside
             // CloseAsync would unregister the channel before queued data frames
             // reach the wire and the peer would never receive them.
-            finDrained = _state == ChannelState.Closing && _pendingPos <= _sentPos;
+            finQueued = TryQueuePendingFinLocked();
+            finDrained = _state == ChannelState.Closing && _finQueued && _pendingPos <= _sentPos;
         }
         // Wake any blocked writer waiting for space
         TryReleaseSpaceSignal();
+
+        if (finQueued)
+            _owner.NotifyReady(this);
 
         if (finDrained)
         {
@@ -477,6 +507,7 @@ internal sealed class WriteChannel : Stream, IWriteChannel
 
     internal void OnAck(long ackedPosition)
     {
+        bool finQueued;
         lock (_posLock)
         {
             // Clamp against the slab high-water mark to defend against a buggy
@@ -497,12 +528,17 @@ internal sealed class WriteChannel : Stream, IWriteChannel
             int slabRelative = (int)(ackedPosition - _compactionOffset);
             if (slabRelative > _ackedPos)
                 _ackedPos = slabRelative;
+
+            finQueued = TryQueuePendingFinLocked();
         }
         // First ACK from remote confirms channel is open
         if (!_isReady)
             MarkOpen();
         // Wake any blocked writer waiting for space
         TryReleaseSpaceSignal();
+
+        if (finQueued)
+            _owner.NotifyReady(this);
     }
 
     internal void PrepareReplay()
@@ -550,37 +586,45 @@ internal sealed class WriteChannel : Stream, IWriteChannel
     /// <summary>
     /// Gracefully close this channel by queueing a FIN frame.
     /// Transitions the channel through Closing to Closed once the writer
-    /// thread has drained the FIN (at which point the <see cref="Closed"/>
-    /// event fires and the channel ID is released). The FIN frame itself is
-    /// best-effort: if the slab cannot fit it, the channel finalizes locally
-    /// and the peer observes closure when the multiplexer tears down.
+    /// thread has drained the FIN, at which point the <see cref="Closed"/>
+    /// event fires and the channel ID is released.
     /// </summary>
     public ValueTask CloseAsync(CancellationToken ct = default)
     {
         // Atomically promote Opening/Open → Closing under _posLock so a concurrent
         // MarkOpen cannot resurrect the channel after we passed the state check
         // . Closing/Closed are no-ops.
-        bool transitioned;
+        bool finQueued;
         lock (_posLock)
         {
             if (_state is ChannelState.Closing or ChannelState.Closed)
                 return ValueTask.CompletedTask;
             _state = ChannelState.Closing;
-            transitioned = true;
+            _finRequested = true;
+            finQueued = TryQueuePendingFinLocked();
         }
 
-        if (!transitioned) return ValueTask.CompletedTask;
-
-        bool finQueued = TryWriteFinFrameSafe();
-        // If the FIN could not be queued (slab full, or the writer thread is
-        // not running) the caller must still observe a transition to Closed
-        // so the channel ID is released and Closed event fires. Finalize
-        // synchronously in that case.
-        if (!finQueued)
-        {
-            SetClosed(ChannelCloseReason.LocalClose);
-        }
+        if (finQueued)
+            _owner.NotifyReady(this);
         return ValueTask.CompletedTask;
+    }
+
+    // Must be called under _posLock.
+    private bool TryQueuePendingFinLocked()
+    {
+        if (!_finRequested || _finQueued || _state != ChannelState.Closing)
+            return false;
+
+        TryCompactLocked();
+        if (_slabSize - _writePos < FrameHeader.Size)
+            return false;
+
+        int frameStart = _writePos;
+        FrameHeader.WriteTo(_slab.AsSpan(frameStart, FrameHeader.Size), _channelIndex, FrameFlags.Fin, 0);
+        _writePos = frameStart + FrameHeader.Size;
+        _pendingPos = _writePos;
+        _finQueued = true;
+        return true;
     }
 
     // Best-effort FIN emit. The slab can be at capacity if the writer thread
@@ -713,6 +757,13 @@ internal sealed class WriteChannel : Stream, IWriteChannel
         {
             _slab.AsSpan(acked, unackedLength).CopyTo(_slab.AsSpan(0, unackedLength));
         }
+
+        // Once the peer's cumulative ACK reaches the INIT frame's tail, the
+        // INIT bytes have been physically compacted out of the slab and no
+        // longer occupy any position. Drop the peer-cap exclusion so future
+        // bound checks treat the slab as data-only.
+        if (_initFrameBytesInSlab > 0 && acked >= _initFrameBytesInSlab)
+            _initFrameBytesInSlab = 0;
 
         _compactionOffset += acked;
         _sentPos -= acked;

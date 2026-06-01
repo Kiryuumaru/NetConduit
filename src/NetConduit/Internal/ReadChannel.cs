@@ -1,5 +1,6 @@
 using System.Buffers;
 using System.Buffers.Binary;
+using System.Text;
 using System.Threading.Tasks.Sources;
 using NetConduit.Enums;
 using NetConduit.Events;
@@ -15,6 +16,10 @@ namespace NetConduit.Internal;
 /// </summary>
 internal sealed class ReadChannel : Stream, IReadChannel, IValueTaskSource<int>
 {
+    private const int AckPayloadSize = sizeof(ulong);
+    private const int ErrorCodePayloadSize = sizeof(ushort);
+    private static readonly UTF8Encoding StrictErrorMessageDecoder = new(false, true);
+
     private readonly byte[] _slab;
     private readonly Memory<byte> _slabMemory;
     private ushort _channelIndex;
@@ -76,19 +81,35 @@ internal sealed class ReadChannel : Stream, IReadChannel, IValueTaskSource<int>
     private int _connectedFired; // CAS guard: ensures Connected fires exactly once per connect transition
     private ChannelCloseReason? _closeReason;
     private Exception? _closeException;
-    // CAS guard: ensures the stats decrement and ChannelClosed event fire exactly once,
-    // regardless of whether the close path is the inbound FIN dispatcher or
-    // local DisposeAsync/Dispose. Issue.
+    // CAS guard: ensures the stats decrement (OpenChannels-- / TotalChannelsClosed++)
+    // runs exactly once across the inbound FIN dispatcher, local DisposeAsync/Dispose,
+    // and mux-level abort paths.
     private int _completionAccounted;
+    // CAS guard: ensures the mux-level ChannelClosed event fires exactly once for
+    // the inbound FIN path even when local DisposeAsync races and wins the
+    // _completionAccounted CAS. The mux ChannelClosed event is documented FIN-only,
+    // so it cannot share the all-paths accounting CAS — that would silently suppress
+    // the FIN event whenever local dispose claimed accounting first.
+    private int _remoteFinEventFired;
 
     /// <summary>
     /// Atomically claims the right to perform the one-shot close accounting
-    /// (stats decrement and <see cref="StreamMultiplexer.ChannelClosed"/>
-    /// event raise). Returns <c>true</c> exactly once across the lifetime of
-    /// the channel; subsequent callers receive <c>false</c>.
+    /// (stats decrement). Returns <c>true</c> exactly once across the
+    /// lifetime of the channel; subsequent callers receive <c>false</c>.
     /// </summary>
     internal bool TryClaimCompletionAccounting() =>
         Interlocked.CompareExchange(ref _completionAccounted, 1, 0) == 0;
+
+    /// <summary>
+    /// Atomically claims the right to fire the mux-level
+    /// <see cref="StreamMultiplexer.ChannelClosed"/> event for an inbound
+    /// FIN frame. Decoupled from <see cref="TryClaimCompletionAccounting"/>
+    /// so the FIN-only event contract is honoured even when local Dispose
+    /// claims accounting first (the two paths used to share one CAS, which
+    /// silently dropped the FIN event under that race).
+    /// </summary>
+    internal bool TryClaimRemoteFinEvent() =>
+        Interlocked.CompareExchange(ref _remoteFinEventFired, 1, 0) == 0;
 
     /// <summary>The string identifier for this channel.</summary>
     public string ChannelId { get; }
@@ -279,6 +300,10 @@ internal sealed class ReadChannel : Stream, IReadChannel, IValueTaskSource<int>
                 if (_state == ChannelState.Closed && _receivedPos <= _consumedPos)
                 {
                     returnSlabAfter = true;
+                    var exception = CreateReadClosedException();
+                    if (exception is not null)
+                        throw exception;
+
                     return new ValueTask<int>(0); // EOF
                 }
 
@@ -301,7 +326,7 @@ internal sealed class ReadChannel : Stream, IReadChannel, IValueTaskSource<int>
                         // Flush any pending ACK now that the gate-relevant
                         // counter advanced; otherwise an ACK could be stranded
                         // until the next inbound frame triggers MaybeSendAck.
-                        MaybeSendAck();
+                        MaybeSendAck(force: true);
                     }
                     // If the consumer just drained the last buffered bytes
                     // after the channel closed, release the slab now.
@@ -313,6 +338,10 @@ internal sealed class ReadChannel : Stream, IReadChannel, IValueTaskSource<int>
                 if (_state == ChannelState.Closed)
                 {
                     returnSlabAfter = true;
+                    var exception = CreateReadClosedException();
+                    if (exception is not null)
+                        throw exception;
+
                     return new ValueTask<int>(0); // EOF
                 }
 
@@ -320,7 +349,7 @@ internal sealed class ReadChannel : Stream, IReadChannel, IValueTaskSource<int>
             // moment to flush any sub-threshold ACK so the writer's slab can
             // compact while we park, instead of pinning unacked bytes until
             // the next burst trips the receive-side threshold.
-            MaybeSendAck();
+            MaybeSendAck(force: true);
 
             // Slow path: register for direct delivery
             _pendingUserBuffer = buffer;
@@ -362,6 +391,9 @@ internal sealed class ReadChannel : Stream, IReadChannel, IValueTaskSource<int>
         switch (flags)
         {
             case FrameFlags.Data:
+                if (payload.IsEmpty)
+                    throw new MultiplexerException(ErrorCode.ProtocolError, "DATA payload must not be empty.");
+
                 Interlocked.Increment(ref Stats._framesReceived);
                 lock (_lock)
                 {
@@ -392,21 +424,65 @@ internal sealed class ReadChannel : Stream, IReadChannel, IValueTaskSource<int>
                 break;
 
             case FrameFlags.Ack:
-                if (payload.Length >= 8)
-                {
-                    long ackPos = (long)BinaryPrimitives.ReadUInt64BigEndian(payload);
-                    _ackChannel?.OnAck(ackPos);
-                }
+                if (payload.Length != AckPayloadSize)
+                    throw new MultiplexerException(ErrorCode.ProtocolError, $"ACK payload must be {AckPayloadSize} bytes, got {payload.Length}.");
+
+                long ackPos = (long)BinaryPrimitives.ReadUInt64BigEndian(payload);
+                _ackChannel?.OnAck(ackPos);
                 break;
 
             case FrameFlags.Fin:
+                if (!payload.IsEmpty)
+                    throw new MultiplexerException(ErrorCode.ProtocolError, "FIN payload must be empty.");
+
                 SetClosed(ChannelCloseReason.RemoteFin);
                 break;
 
             case FrameFlags.Err:
-                SetClosed(ChannelCloseReason.RemoteError);
+                SetClosed(ChannelCloseReason.RemoteError, ParseRemoteError(payload));
                 break;
+
+            default:
+                throw new MultiplexerException(
+                    ErrorCode.ProtocolError,
+                    $"Frame type {flags} is not valid on a user channel.");
         }
+    }
+
+    private static MultiplexerException ParseRemoteError(ReadOnlySpan<byte> payload)
+    {
+        if (payload.Length < ErrorCodePayloadSize)
+        {
+            throw new MultiplexerException(
+                ErrorCode.ProtocolError,
+                $"ERR payload must contain at least a {ErrorCodePayloadSize}-byte error code.");
+        }
+
+        var errorCode = (ErrorCode)BinaryPrimitives.ReadUInt16BigEndian(payload[..ErrorCodePayloadSize]);
+        if (errorCode == ErrorCode.None)
+        {
+            throw new MultiplexerException(ErrorCode.ProtocolError, "ERR payload must not use reserved ErrorCode.None.");
+        }
+
+        if (!Enum.IsDefined(errorCode))
+        {
+            throw new MultiplexerException(ErrorCode.ProtocolError, $"ERR payload contains undefined error code 0x{(ushort)errorCode:X4}.");
+        }
+
+        string message;
+        try
+        {
+            message = StrictErrorMessageDecoder.GetString(payload[ErrorCodePayloadSize..]);
+        }
+        catch (DecoderFallbackException ex)
+        {
+            throw new MultiplexerException(ErrorCode.ProtocolError, "ERR message must be valid UTF-8.", ex);
+        }
+
+        if (message.Length == 0)
+            message = $"Remote channel error: {errorCode}.";
+
+        return new MultiplexerException(errorCode, message);
     }
 
     private bool TryDirectDeliver(ReadOnlySpan<byte> payload)
@@ -435,7 +511,7 @@ internal sealed class ReadChannel : Stream, IReadChannel, IValueTaskSource<int>
             if (_receivedPos == _consumedPos)
             {
                 _drainedFrameBytes = _frameBytesReceived;
-                MaybeSendAck();
+                MaybeSendAck(force: true);
             }
 
             // Detach the cancellation callback now that the read has
@@ -507,7 +583,7 @@ internal sealed class ReadChannel : Stream, IReadChannel, IValueTaskSource<int>
     // monotonic position without any unit conversion. Called from the
     // receive path on every Data frame and from ReadAsync's slow path when
     // the reader catches up: same gate, no duplicate policy.
-    private void MaybeSendAck()
+    private void MaybeSendAck(bool force = false)
     {
         if (_owner is null) return;
         // Report consumer-drained bytes, not wire-received bytes.
@@ -516,7 +592,7 @@ internal sealed class ReadChannel : Stream, IReadChannel, IValueTaskSource<int>
         // consumer lags the wire, _drainedFrameBytes stays behind and the
         // writer naturally throttles.
         long delta = _drainedFrameBytes - _ackSentFrameBytes;
-        if (delta >= _slabSize / 16)
+        if (delta > 0 && (force || delta >= _slabSize / 16))
         {
             // Only advance the high-water mark when the ACK was actually
             // staged. If the control-channel slab is currently full, retain
@@ -561,7 +637,11 @@ internal sealed class ReadChannel : Stream, IReadChannel, IValueTaskSource<int>
                 var reg = _readCancelReg;
                 _readCancelReg = default;
                 reg.Unregister();
-                _readCompletion.Core.SetResult(0);
+                var readException = CreateReadClosedException(reason, exception);
+                if (readException is not null)
+                    _readCompletion.Core.SetException(readException);
+                else
+                    _readCompletion.Core.SetResult(0);
             }
 
             // Slab return policy on close:
@@ -589,6 +669,14 @@ internal sealed class ReadChannel : Stream, IReadChannel, IValueTaskSource<int>
         if (returnSlabNow)
             TryReturnSlab();
     }
+
+    private ChannelClosedException? CreateReadClosedException() =>
+        _closeReason is { } reason ? CreateReadClosedException(reason, _closeException) : null;
+
+    private ChannelClosedException? CreateReadClosedException(ChannelCloseReason reason, Exception? exception) =>
+        reason is ChannelCloseReason.RemoteError
+            ? new ChannelClosedException(ChannelId, reason, exception)
+            : null;
 
     private void TryReturnSlab()
     {
@@ -622,17 +710,30 @@ internal sealed class ReadChannel : Stream, IReadChannel, IValueTaskSource<int>
     /// <inheritdoc />
     public override async ValueTask DisposeAsync()
     {
+        // A pending-accept channel disposed before the peer's INIT arrives
+        // (_channelIndex == 0, never wired) must perform SetClosed + pending-
+        // map removal atomically with respect to the dispatcher's adoption
+        // path. Otherwise the dispatcher can read _state == Open under
+        // AcceptLock, release the lock, and only then have SetClosed land —
+        // registering a Closed instance whose slab has been returned to
+        // ArrayPool. Routing through CompletePendingAcceptCancel runs both
+        // steps under the same AcceptLock that HandleInitFrame holds.
         if (_state is not ChannelState.Closed)
         {
-            SetClosed(ChannelCloseReason.LocalClose);
+            if (_channelIndex == 0 && _owner is not null)
+            {
+                _owner.CompletePendingAcceptCancel(ChannelId, () =>
+                {
+                    if (_state is not ChannelState.Closed)
+                        SetClosed(ChannelCloseReason.LocalClose);
+                });
+            }
+            else
+            {
+                SetClosed(ChannelCloseReason.LocalClose);
+            }
         }
         TryReturnSlab();
-        // A pending-accept channel disposed before the peer's INIT arrives
-        // (_channelIndex == 0, never wired) must remove itself from the
-        // pending-accept map so the dispatcher does not resurrect this
-        // disposed instance when INIT eventually arrives.
-        if (_channelIndex == 0)
-            _owner?.NotifyPendingAcceptCancelled(ChannelId);
         _owner?.NotifyChannelCompleted(_channelIndex, ChannelId);
         await base.DisposeAsync();
     }
@@ -644,11 +745,20 @@ internal sealed class ReadChannel : Stream, IReadChannel, IValueTaskSource<int>
         {
             if (_state is not ChannelState.Closed)
             {
-                SetClosed(ChannelCloseReason.LocalClose);
+                if (_channelIndex == 0 && _owner is not null)
+                {
+                    _owner.CompletePendingAcceptCancel(ChannelId, () =>
+                    {
+                        if (_state is not ChannelState.Closed)
+                            SetClosed(ChannelCloseReason.LocalClose);
+                    });
+                }
+                else
+                {
+                    SetClosed(ChannelCloseReason.LocalClose);
+                }
             }
             TryReturnSlab();
-            if (_channelIndex == 0)
-                _owner?.NotifyPendingAcceptCancelled(ChannelId);
             _owner?.NotifyChannelCompleted(_channelIndex, ChannelId);
         }
         base.Dispose(disposing);

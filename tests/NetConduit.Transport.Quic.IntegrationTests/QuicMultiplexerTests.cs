@@ -32,6 +32,67 @@ public class QuicMultiplexerTests
         return X509CertificateLoader.LoadPkcs12(cert.Export(X509ContentType.Pfx), null);
     }
 
+    [Fact]
+    public void CreateOptions_EmptyAlpn_ThrowsArgumentException()
+    {
+        if (!QuicListener.IsSupported)
+            return;
+
+        var exception = Assert.Throws<ArgumentException>(() =>
+            QuicMultiplexer.CreateOptions("localhost", 12345, alpn: string.Empty));
+
+        Assert.Equal("alpn", exception.ParamName);
+    }
+
+    [Fact(Timeout = 30000)]
+    public async Task ListenAsync_EmptyAlpn_ThrowsArgumentException()
+    {
+        if (!QuicListener.IsSupported)
+            return;
+
+        using var cert = CreateSelfSignedCert();
+        QuicListener? listener = null;
+
+        try
+        {
+            var exception = await Record.ExceptionAsync(async () =>
+                listener = await QuicMultiplexer.ListenAsync(new IPEndPoint(IPAddress.Loopback, 0), cert, alpn: string.Empty));
+
+            var argumentException = Assert.IsType<ArgumentException>(exception);
+            Assert.Equal("alpn", argumentException.ParamName);
+        }
+        finally
+        {
+            if (listener is not null)
+                await listener.DisposeAsync();
+        }
+    }
+
+    [Fact(Timeout = 30000)]
+    public async Task ListenAsync_CertificateWithoutPrivateKey_ThrowsArgumentException()
+    {
+        if (!QuicListener.IsSupported)
+            return;
+
+        using var withPrivateKey = CreateSelfSignedCert();
+        using var publicOnly = X509CertificateLoader.LoadCertificate(withPrivateKey.Export(X509ContentType.Cert));
+        QuicListener? listener = null;
+
+        try
+        {
+            var exception = await Record.ExceptionAsync(async () =>
+                listener = await QuicMultiplexer.ListenAsync(new IPEndPoint(IPAddress.Loopback, 0), publicOnly));
+
+            var argumentException = Assert.IsType<ArgumentException>(exception);
+            Assert.Equal("certificate", argumentException.ParamName);
+        }
+        finally
+        {
+            if (listener is not null)
+                await listener.DisposeAsync();
+        }
+    }
+
     [Fact(Timeout = 30000)]
     public async Task ConnectAndAccept_EstablishesConnection()
     {

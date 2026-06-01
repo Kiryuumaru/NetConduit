@@ -7,7 +7,9 @@ namespace NetConduit.UnitTests;
 /// decrement and <c>TotalChannelsClosed</c> must increment exactly once per
 /// channel close, regardless of whether the close was driven by an inbound
 /// <c>Fin</c> frame or by a local <c>DisposeAsync</c>/<c>Dispose</c>. The
-/// <c>ChannelClosed</c> event must fire on both paths and exactly once.
+/// mux-level <c>ChannelClosed</c> event is documented FIN-only and fires
+/// only on the inbound-FIN path; local dispose decrements stats without
+/// raising the event.
 /// </summary>
 public sealed class ReadChannelStatsAccountingTests
 {
@@ -65,8 +67,12 @@ public sealed class ReadChannelStatsAccountingTests
     }
 
     [Fact]
-    public async Task ReadChannel_DisposedLocally_RaisesChannelClosedExactlyOnce()
+    public async Task ReadChannel_DisposedLocally_DoesNotRaiseChannelClosed()
     {
+        // The mux-level ChannelClosed event is documented FIN-only
+        // (see IStreamMultiplexer.ChannelClosed). Local DisposeAsync must
+        // NOT fire it; the stats decrement (covered by
+        // ReadChannel_DisposedLocallyBeforeFin_DecrementsStats) still runs.
         var (client, server) = CreatePair();
         client.Start(); server.Start();
         await Task.WhenAll(client.WaitForReadyAsync(), server.WaitForReadyAsync());
@@ -88,10 +94,10 @@ public sealed class ReadChannelStatsAccountingTests
         await rc.DisposeAsync();
         await writeTask;
 
-        // Allow any straggling FIN handlers a moment, then assert single fire.
+        // Allow any straggling FIN handlers a moment, then assert no event.
         await Task.Delay(100, cts.Token);
 
-        Assert.Single(closedIds, "ephemeral");
+        Assert.DoesNotContain("ephemeral", closedIds);
 
         await client.DisposeAsync();
         await server.DisposeAsync();
