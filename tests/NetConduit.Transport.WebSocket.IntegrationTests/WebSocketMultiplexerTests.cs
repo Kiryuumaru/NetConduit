@@ -1,5 +1,6 @@
 using System.Net.WebSockets;
 using Microsoft.AspNetCore.Builder;
+using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Http;
 using NetConduit.Interfaces;
 using NetConduit.Transport.WebSocket;
@@ -33,8 +34,10 @@ public class WebSocketMultiplexerTests
         // been disposed"). That race was the cause of the
         // WebSocketMultiplexerTests.CreateOptions_ConnectsAndTransfersData flake.
         var serverShutdownTcs = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var serverReadTcs = new TaskCompletionSource<byte[]>(TaskCreationOptions.RunContinuationsAsynchronously);
 
         var builder = Microsoft.AspNetCore.Builder.WebApplication.CreateBuilder();
+        builder.WebHost.UseUrls("http://127.0.0.1:0");
         var app = builder.Build();
         app.UseWebSockets();
 
@@ -52,11 +55,20 @@ public class WebSocketMultiplexerTests
                 var readChannel = await serverMux.AcceptChannelAsync("test", cts.Token);
                 var buffer = new byte[1024];
                 int totalRead = 0;
-                while (totalRead < buffer.Length)
+                try
                 {
-                    int read = await readChannel.ReadAsync(buffer.AsMemory(totalRead), cts.Token);
-                    if (read == 0) break;
-                    totalRead += read;
+                    while (totalRead < buffer.Length)
+                    {
+                        int read = await readChannel.ReadAsync(buffer.AsMemory(totalRead), cts.Token);
+                        if (read == 0) break;
+                        totalRead += read;
+                    }
+                    serverReadTcs.TrySetResult(buffer[..totalRead]);
+                }
+                catch (Exception ex)
+                {
+                    serverReadTcs.TrySetException(ex);
+                    throw;
                 }
 
                 // Hold the HttpContext open until the test signals shutdown — the
@@ -80,7 +92,8 @@ public class WebSocketMultiplexerTests
         await writeChannel.WriteAsync(testData, cts.Token);
         await writeChannel.CloseAsync(cts.Token);
 
-        await Task.Delay(500, cts.Token);
+        var serverBytes = await serverReadTcs.Task.WaitAsync(cts.Token);
+        Assert.Equal(testData, serverBytes);
 
         Assert.True(client.IsConnected);
 
