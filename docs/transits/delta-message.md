@@ -18,7 +18,7 @@ public sealed class DeltaMessageTransit<T> : IAsyncDisposable
         JsonTypeInfo<T>? typeInfo,
         int maxMessageSize = 16 * 1024 * 1024);
 
-    // Dynamic JSON (T = JsonNode / JsonObject / JsonArray / JsonDocument)
+    // Dynamic JSON (T = JsonNode / JsonObject / JsonArray / JsonDocument / JsonElement)
     public DeltaMessageTransit(
         IWriteChannel? writeChannel,
         IReadChannel? readChannel,
@@ -51,21 +51,41 @@ public static class DeltaMessageTransitExtensions
         this IStreamMultiplexer mux, string channelId,
         JsonTypeInfo<T> typeInfo, int maxMessageSize = 16 * 1024 * 1024);
 
+    public static DeltaMessageTransit<T> OpenDeltaMessageTransit<T>(
+        this IStreamMultiplexer mux, string channelId,
+        int maxMessageSize = 16 * 1024 * 1024);
+
     public static Task<DeltaMessageTransit<T>> OpenDeltaMessageTransitAsync<T>(
         this IStreamMultiplexer mux, string channelId,
         JsonTypeInfo<T> typeInfo, int maxMessageSize = 16 * 1024 * 1024,
+        CancellationToken cancellationToken = default);
+
+    public static Task<DeltaMessageTransit<T>> OpenDeltaMessageTransitAsync<T>(
+        this IStreamMultiplexer mux, string channelId,
+        int maxMessageSize = 16 * 1024 * 1024,
         CancellationToken cancellationToken = default);
 
     public static DeltaMessageTransit<T> AcceptDeltaMessageTransit<T>(
         this IStreamMultiplexer mux, string channelId,
         JsonTypeInfo<T> typeInfo, int maxMessageSize = 16 * 1024 * 1024);
 
+    public static DeltaMessageTransit<T> AcceptDeltaMessageTransit<T>(
+        this IStreamMultiplexer mux, string channelId,
+        int maxMessageSize = 16 * 1024 * 1024);
+
     public static Task<DeltaMessageTransit<T>> AcceptDeltaMessageTransitAsync<T>(
         this IStreamMultiplexer mux, string channelId,
         JsonTypeInfo<T> typeInfo, int maxMessageSize = 16 * 1024 * 1024,
         CancellationToken cancellationToken = default);
+
+    public static Task<DeltaMessageTransit<T>> AcceptDeltaMessageTransitAsync<T>(
+        this IStreamMultiplexer mux, string channelId,
+        int maxMessageSize = 16 * 1024 * 1024,
+        CancellationToken cancellationToken = default);
 }
 ```
+
+Overloads that take `JsonTypeInfo<T>` are AOT-safe and intended for POCO state types. Overloads without `JsonTypeInfo<T>` use the dynamic JSON constructor and are intended for `JsonNode`, `JsonObject`, `JsonArray`, `JsonDocument`, and `JsonElement`.
 
 ## How deltas work
 

@@ -53,6 +53,22 @@ public static class DeltaMessageTransitExtensions
     /// <summary>
     /// Opens a delta message transit by opening a write channel and accepting a read channel.
     /// Uses "{channelId}&gt;&gt;" for writing and "{channelId}&lt;&lt;" for reading.
+    /// Uses dynamic JSON serialization for JsonNode, JsonObject, JsonArray, JsonDocument, and JsonElement.
+    /// Returns immediately in pending state.
+    /// </summary>
+    public static DeltaMessageTransit<T> OpenDeltaMessageTransit<T>(
+        this IStreamMultiplexer mux,
+        string channelId,
+        int maxMessageSize = 16 * 1024 * 1024)
+    {
+        ValidateBaseChannelId(channelId);
+        var (writeChannel, readChannel) = RegisterPair(mux, channelId + OutboundSuffix, channelId + InboundSuffix);
+        return new DeltaMessageTransit<T>(writeChannel, readChannel, maxMessageSize);
+    }
+
+    /// <summary>
+    /// Opens a delta message transit by opening a write channel and accepting a read channel.
+    /// Uses "{channelId}&gt;&gt;" for writing and "{channelId}&lt;&lt;" for reading.
     /// Uses AOT-safe JsonTypeInfo for serialization.
     /// Waits until both channels are ready before returning.
     /// </summary>
@@ -64,6 +80,31 @@ public static class DeltaMessageTransitExtensions
         CancellationToken cancellationToken = default)
     {
         var transit = mux.OpenDeltaMessageTransit(channelId, typeInfo, maxMessageSize);
+        try
+        {
+            await transit.WaitForReadyAsync(cancellationToken).ConfigureAwait(false);
+        }
+        catch
+        {
+            await transit.DisposeAsync().ConfigureAwait(false);
+            throw;
+        }
+        return transit;
+    }
+
+    /// <summary>
+    /// Opens a delta message transit by opening a write channel and accepting a read channel.
+    /// Uses "{channelId}&gt;&gt;" for writing and "{channelId}&lt;&lt;" for reading.
+    /// Uses dynamic JSON serialization for JsonNode, JsonObject, JsonArray, JsonDocument, and JsonElement.
+    /// Waits until both channels are ready before returning.
+    /// </summary>
+    public static async Task<DeltaMessageTransit<T>> OpenDeltaMessageTransitAsync<T>(
+        this IStreamMultiplexer mux,
+        string channelId,
+        int maxMessageSize = 16 * 1024 * 1024,
+        CancellationToken cancellationToken = default)
+    {
+        var transit = mux.OpenDeltaMessageTransit<T>(channelId, maxMessageSize);
         try
         {
             await transit.WaitForReadyAsync(cancellationToken).ConfigureAwait(false);
@@ -95,6 +136,22 @@ public static class DeltaMessageTransitExtensions
 
     /// <summary>
     /// Accepts a delta message transit by accepting a read channel and opening a write channel.
+    /// This is the counterpart to OpenDeltaMessageTransit.
+    /// Uses dynamic JSON serialization for JsonNode, JsonObject, JsonArray, JsonDocument, and JsonElement.
+    /// Returns immediately in pending state.
+    /// </summary>
+    public static DeltaMessageTransit<T> AcceptDeltaMessageTransit<T>(
+        this IStreamMultiplexer mux,
+        string channelId,
+        int maxMessageSize = 16 * 1024 * 1024)
+    {
+        ValidateBaseChannelId(channelId);
+        var (writeChannel, readChannel) = RegisterPair(mux, channelId + InboundSuffix, channelId + OutboundSuffix);
+        return new DeltaMessageTransit<T>(writeChannel, readChannel, maxMessageSize);
+    }
+
+    /// <summary>
+    /// Accepts a delta message transit by accepting a read channel and opening a write channel.
     /// This is the counterpart to OpenDeltaMessageTransitAsync.
     /// Uses AOT-safe JsonTypeInfo for serialization.
     /// Waits until both channels are ready before returning.
@@ -107,6 +164,31 @@ public static class DeltaMessageTransitExtensions
         CancellationToken cancellationToken = default)
     {
         var transit = mux.AcceptDeltaMessageTransit(channelId, typeInfo, maxMessageSize);
+        try
+        {
+            await transit.WaitForReadyAsync(cancellationToken).ConfigureAwait(false);
+        }
+        catch
+        {
+            await transit.DisposeAsync().ConfigureAwait(false);
+            throw;
+        }
+        return transit;
+    }
+
+    /// <summary>
+    /// Accepts a delta message transit by accepting a read channel and opening a write channel.
+    /// This is the counterpart to OpenDeltaMessageTransitAsync.
+    /// Uses dynamic JSON serialization for JsonNode, JsonObject, JsonArray, JsonDocument, and JsonElement.
+    /// Waits until both channels are ready before returning.
+    /// </summary>
+    public static async Task<DeltaMessageTransit<T>> AcceptDeltaMessageTransitAsync<T>(
+        this IStreamMultiplexer mux,
+        string channelId,
+        int maxMessageSize = 16 * 1024 * 1024,
+        CancellationToken cancellationToken = default)
+    {
+        var transit = mux.AcceptDeltaMessageTransit<T>(channelId, maxMessageSize);
         try
         {
             await transit.WaitForReadyAsync(cancellationToken).ConfigureAwait(false);
@@ -135,6 +217,20 @@ public static class DeltaMessageTransitExtensions
     }
 
     /// <summary>
+    /// Opens a send-only delta message transit for pushing state updates.
+    /// Uses dynamic JSON serialization for JsonNode, JsonObject, JsonArray, JsonDocument, and JsonElement.
+    /// Returns immediately in pending state.
+    /// </summary>
+    public static DeltaMessageTransit<T> OpenSendOnlyDeltaMessageTransit<T>(
+        this IStreamMultiplexer mux,
+        string channelId,
+        int maxMessageSize = 16 * 1024 * 1024)
+    {
+        var writeChannel = mux.OpenChannel(channelId);
+        return new DeltaMessageTransit<T>(writeChannel, null, maxMessageSize);
+    }
+
+    /// <summary>
     /// Accepts a receive-only delta message transit for receiving state updates.
     /// Uses AOT-safe JsonTypeInfo for serialization.
     /// Returns immediately in pending state.
@@ -151,6 +247,20 @@ public static class DeltaMessageTransitExtensions
 
     /// <summary>
     /// Accepts a receive-only delta message transit for receiving state updates.
+    /// Uses dynamic JSON serialization for JsonNode, JsonObject, JsonArray, JsonDocument, and JsonElement.
+    /// Returns immediately in pending state.
+    /// </summary>
+    public static DeltaMessageTransit<T> AcceptReceiveOnlyDeltaMessageTransit<T>(
+        this IStreamMultiplexer mux,
+        string channelId,
+        int maxMessageSize = 16 * 1024 * 1024)
+    {
+        var readChannel = mux.AcceptChannel(channelId);
+        return new DeltaMessageTransit<T>(null, readChannel, maxMessageSize);
+    }
+
+    /// <summary>
+    /// Accepts a receive-only delta message transit for receiving state updates.
     /// Uses AOT-safe JsonTypeInfo for serialization.
     /// Waits until the channel is ready before returning.
     /// </summary>
@@ -162,6 +272,30 @@ public static class DeltaMessageTransitExtensions
         CancellationToken cancellationToken = default)
     {
         var transit = mux.AcceptReceiveOnlyDeltaMessageTransit(channelId, typeInfo, maxMessageSize);
+        try
+        {
+            await transit.WaitForReadyAsync(cancellationToken).ConfigureAwait(false);
+        }
+        catch
+        {
+            await transit.DisposeAsync().ConfigureAwait(false);
+            throw;
+        }
+        return transit;
+    }
+
+    /// <summary>
+    /// Accepts a receive-only delta message transit for receiving state updates.
+    /// Uses dynamic JSON serialization for JsonNode, JsonObject, JsonArray, JsonDocument, and JsonElement.
+    /// Waits until the channel is ready before returning.
+    /// </summary>
+    public static async Task<DeltaMessageTransit<T>> AcceptReceiveOnlyDeltaMessageTransitAsync<T>(
+        this IStreamMultiplexer mux,
+        string channelId,
+        int maxMessageSize = 16 * 1024 * 1024,
+        CancellationToken cancellationToken = default)
+    {
+        var transit = mux.AcceptReceiveOnlyDeltaMessageTransit<T>(channelId, maxMessageSize);
         try
         {
             await transit.WaitForReadyAsync(cancellationToken).ConfigureAwait(false);
