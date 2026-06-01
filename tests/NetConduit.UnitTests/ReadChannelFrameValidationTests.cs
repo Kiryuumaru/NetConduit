@@ -8,6 +8,19 @@ using NetConduit.Internal;
 public sealed class ReadChannelFrameValidationTests
 {
     private const ushort UserChannelIndex = 1;
+    private const ushort UnknownUserChannelIndex = 123;
+
+    [Fact]
+    public async Task DataFrameForUnknownChannel_RaisesUnknownChannel()
+    {
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        await using var context = await RawMuxContext.CreateAsync(cts.Token);
+        var errorTask = context.CaptureNextError();
+
+        await context.SendUserFrameAsync(UnknownUserChannelIndex, FrameFlags.Data, Encoding.ASCII.GetBytes("abc"), cts.Token);
+
+        await AssertMuxErrorAsync(errorTask, ErrorCode.UnknownChannel, cts.Token);
+    }
 
     [Fact]
     public async Task UserChannelPingFrame_RaisesProtocolError()
@@ -100,6 +113,17 @@ public sealed class ReadChannelFrameValidationTests
         Assert.Contains("boom", remoteError.Message, StringComparison.Ordinal);
     }
 
+    private static async Task AssertMuxErrorAsync(Task<Exception> errorTask, ErrorCode errorCode, CancellationToken ct)
+    {
+        var timeoutTask = Task.Delay(TimeSpan.FromSeconds(3), ct);
+        var completed = await Task.WhenAny(errorTask, timeoutTask);
+
+        Assert.Same(errorTask, completed);
+        var exception = await errorTask;
+        var muxError = Assert.IsType<MultiplexerException>(exception);
+        Assert.Equal(errorCode, muxError.ErrorCode);
+    }
+
     private static byte[] BuildErrPayload(ErrorCode code, string message)
     {
         byte[] messageBytes = Encoding.UTF8.GetBytes(message);
@@ -111,13 +135,7 @@ public sealed class ReadChannelFrameValidationTests
 
     private static async Task AssertProtocolErrorAsync(Task<Exception> errorTask, CancellationToken ct)
     {
-        var timeoutTask = Task.Delay(TimeSpan.FromSeconds(3), ct);
-        var completed = await Task.WhenAny(errorTask, timeoutTask);
-
-        Assert.Same(errorTask, completed);
-        var exception = await errorTask;
-        var protocolError = Assert.IsType<MultiplexerException>(exception);
-        Assert.Equal(ErrorCode.ProtocolError, protocolError.ErrorCode);
+        await AssertMuxErrorAsync(errorTask, ErrorCode.ProtocolError, ct);
     }
 
     private sealed class RawMuxContext(StreamMultiplexer server, IStreamPair rawPeer, DuplexMemoryStream duplex) : IAsyncDisposable
