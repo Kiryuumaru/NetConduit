@@ -129,7 +129,14 @@ internal sealed class ChannelRegistry
     {
         int index = Interlocked.Add(ref _nextChannelIndex, _indexStep) - _indexStep;
         if (index > ChannelConstants.MaxDataChannel)
+        {
+            foreach (var kvp in _retiredChannelIndices)
+            {
+                if (_retiredChannelIndices.TryRemove(kvp.Key, out _))
+                    return kvp.Key;
+            }
             throw new MultiplexerException(ErrorCode.Internal, "Channel index space exhausted.");
+        }
         return (ushort)index;
     }
 
