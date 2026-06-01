@@ -1120,7 +1120,13 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IChannelOwner
                 writeChannel.OnAck(ackPos);
                 return;
             }
-            return; // Unknown channel — drop frame
+
+            if (header.Flags == FrameFlags.Ack || _registry.IsRetiredChannelIndex(header.ChannelIndex))
+                return;
+
+            throw new MultiplexerException(
+                ErrorCode.UnknownChannel,
+                $"Frame type {header.Flags} referenced unknown channel index {header.ChannelIndex}.");
         }
 
         channel.ReceivePayload(header.Flags, payload);

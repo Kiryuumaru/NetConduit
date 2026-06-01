@@ -13,6 +13,7 @@ internal sealed class ChannelRegistry
 {
     private readonly ConcurrentDictionary<ushort, WriteChannel> _writeChannels = new();
     private readonly ConcurrentDictionary<ushort, ReadChannel> _readChannels = new();
+    private readonly ConcurrentDictionary<ushort, byte> _retiredChannelIndices = new();
     private readonly ConcurrentDictionary<string, ushort> _idToIndex = new();
     private readonly ConcurrentDictionary<string, TaskCompletionSource<ReadChannel>> _pendingAccepts = new();
     private readonly ConcurrentDictionary<string, ReadChannel> _pendingAcceptChannels = new();
@@ -120,6 +121,7 @@ internal sealed class ChannelRegistry
                 ErrorCode.Internal,
                 $"Cannot rekey write channel '{channel.ChannelId}' to index {newIndex}: slot already occupied.");
         _writeChannels.TryRemove(new KeyValuePair<ushort, WriteChannel>(oldIndex, channel));
+        _retiredChannelIndices.TryRemove(newIndex, out _);
         _idToIndex[channel.ChannelId] = newIndex;
     }
 
@@ -145,6 +147,7 @@ internal sealed class ChannelRegistry
             _writeChannels.TryRemove(new KeyValuePair<ushort, WriteChannel>(index, channel));
             throw new MultiplexerException(ErrorCode.ChannelExists, $"A channel with ID '{channel.ChannelId}' already exists.");
         }
+        _retiredChannelIndices.TryRemove(index, out _);
     }
 
     internal void RegisterReadChannel(ushort index, ReadChannel channel)
@@ -157,6 +160,7 @@ internal sealed class ChannelRegistry
             _readChannels.TryRemove(new KeyValuePair<ushort, ReadChannel>(index, channel));
             throw new MultiplexerException(ErrorCode.ChannelExists, $"A channel with ID '{channel.ChannelId}' already exists.");
         }
+        _retiredChannelIndices.TryRemove(index, out _);
     }
 
     internal WriteChannel? GetWriteChannel(ushort index)
@@ -170,6 +174,8 @@ internal sealed class ChannelRegistry
         _readChannels.TryGetValue(index, out var channel);
         return channel;
     }
+
+    internal bool IsRetiredChannelIndex(ushort index) => _retiredChannelIndices.ContainsKey(index);
 
     internal WriteChannel? GetWriteChannelById(string channelId)
     {
@@ -188,6 +194,8 @@ internal sealed class ChannelRegistry
     internal bool UnregisterChannel(ushort index, string channelId)
     {
         bool removed = _writeChannels.TryRemove(index, out _) || _readChannels.TryRemove(index, out _);
+        if (removed)
+            _retiredChannelIndices.TryAdd(index, 0);
         // Scope the _idToIndex removal to the (channelId, index) pair so a mismatched
         // call — e.g. cleanup after a failed-to-commit registration where _idToIndex
         // still points at a *different* (legitimate) channel under the same ChannelId
@@ -523,6 +531,7 @@ internal sealed class ChannelRegistry
         _writeChannels.Clear();
         _readChannels.Clear();
         _pendingAcceptChannels.Clear();
+        _retiredChannelIndices.Clear();
         _idToIndex.Clear();
     }
 }

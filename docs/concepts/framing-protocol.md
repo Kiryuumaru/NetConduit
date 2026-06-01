@@ -57,7 +57,7 @@ Channel **indices** (u16) are an internal wire detail. Your code uses channel **
 | Value | Subtype | Purpose |
 | --- | --- | --- |
 | `0x01` | `GoAway` | Graceful shutdown signal. |
-| `0x02` | `Reconnect` | Resume an interrupted session (carries the 16-byte session ID). |
+| `0x02` | `Reconnect` | Resume an interrupted session with session ID, receive window, and replay positions. |
 | `0x03` | `ReconnectAck` | Reserved (unused in current protocol). |
 
 ## Handshake
@@ -68,7 +68,32 @@ On connect, both peers exchange a session identification frame on the control ch
 - `IsReady` becomes `true`.
 - The `Ready` event fires (once).
 
+Initial handshake payload (`20` bytes):
+
+| Offset | Field | Encoding |
+| --- | --- | --- |
+| `0..15` | `sessionId` | 16-byte GUID in the byte order written by `Guid.TryWriteBytes`. |
+| `16..19` | `maxRecvPayload` | `u32`, big-endian. Advertises the peer's maximum inbound user-frame payload. |
+
 On reconnect, the `Ctrl/Reconnect` exchange verifies session ID continuity. If the remote session ID matches, both sides replay their write channel buffers and the reader skips already-received bytes.
+
+Reconnect payload uses a `23`-byte header plus one `10`-byte replay entry per active inbound channel:
+
+| Offset | Field | Encoding |
+| --- | --- | --- |
+| `0` | `subtype` | `0x02` (`Ctrl/Reconnect`). |
+| `1..16` | `sessionId` | 16-byte GUID in the byte order written by `Guid.TryWriteBytes`. |
+| `17..20` | `maxRecvPayload` | `u32`, big-endian. Re-advertises the peer's receive payload limit because it can change across reconnects. |
+| `21..22` | `channelCount` | `u16`, big-endian. Number of replay entries that follow. |
+
+Each replay entry:
+
+| Offset within entry | Field | Encoding |
+| --- | --- | --- |
+| `0..1` | `channelIndex` | `u16`, big-endian. |
+| `2..9` | `frameBytesReceived` | `u64`, big-endian. The cumulative frame-byte position already delivered to that reader. |
+
+The receiver uses the replay vector to skip bytes it already delivered before the interruption. The writer uses the peer's `maxRecvPayload` to clamp later data frames to the peer's current receive slab.
 
 ## Flow control
 
