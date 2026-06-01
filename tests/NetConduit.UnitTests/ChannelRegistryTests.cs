@@ -222,6 +222,26 @@ public sealed class ChannelRegistryTests
         Assert.Null(registry.GetReadChannelById("own-id"));
     }
 
+    [Fact]
+    public void AllocateChannelIndex_AfterClosedEphemeralChannels_ContinuesAllocating()
+    {
+        var registry = new ChannelRegistry(useOddIndices: true);
+        var owner = new NoopOwner();
+
+        for (int i = 0; i < 32_768; i++)
+        {
+            string channelId = $"ephemeral-{i}";
+            ushort index = registry.AllocateChannelIndex();
+            var channel = new WriteChannel(channelId, index, ChannelPriority.Normal, 64 * 1024, TimeSpan.FromSeconds(30), owner);
+
+            registry.RegisterWriteChannel(index, channel);
+            Assert.True(registry.UnregisterChannel(index, channelId));
+            channel.Abort(ChannelCloseReason.MuxDisposed);
+        }
+
+        Assert.Empty(registry.GetAllWriteChannels());
+    }
+
     /// <summary>
     /// Regression for. EnqueueForAccept loses the cancellation race against
     /// AcceptChannelAsync's ct.Register callback when both run after the dictionary
