@@ -972,7 +972,11 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IChannelOwner
             if (existing is not null && existing.ChannelId == channelId)
                 return;
 
-            if (existing is not null)
+            if (existing is not null && existing.State == ChannelState.Closed)
+            {
+                _registry.UnregisterChannel(header.ChannelIndex, existing.ChannelId);
+            }
+            else if (existing is not null)
             {
                 throw new MultiplexerException(
                     ErrorCode.ProtocolError,
