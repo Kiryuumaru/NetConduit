@@ -58,17 +58,14 @@ public sealed class TryRegisterChannelsTests
     }
 
     [Fact]
-    public async Task TryRegisterChannels_DuplicateInBatch_ThrowsArgumentException()
+    public async Task TryRegisterChannels_DuplicateInBatch_ReturnsFalse()
     {
         var (client, server) = await StartedPairAsync();
 
         var dup = new ChannelRegistration("dup", ChannelDirection.Outbound);
         ChannelRegistration[] regs = [dup, dup];
 
-        bool threw = false;
-        try { _ = client.TryRegisterChannels(regs, out _); }
-        catch (ArgumentException) { threw = true; }
-        Assert.True(threw);
+        Assert.False(client.TryRegisterChannels(regs, out _));
 
         // Nothing was committed.
         Assert.Null(client.GetWriteChannel("dup"));
@@ -170,7 +167,7 @@ public sealed class TryRegisterChannelsTests
     }
 
     [Fact]
-    public async Task TryRegisterChannels_OptionsChannelIdMismatch_Throws()
+    public async Task TryRegisterChannels_OptionsChannelIdMismatch_ReturnsFalse()
     {
         var (client, server) = await StartedPairAsync();
 
@@ -179,10 +176,7 @@ public sealed class TryRegisterChannelsTests
             Options = new ChannelOptions { ChannelId = "wrong" },
         };
         ChannelRegistration[] regsArr = [bad];
-        bool threw = false;
-        try { _ = client.TryRegisterChannels(regsArr, out _); }
-        catch (ArgumentException) { threw = true; }
-        Assert.True(threw);
+        Assert.False(client.TryRegisterChannels(regsArr, out _));
 
         await client.DisposeAsync();
         await server.DisposeAsync();
@@ -206,6 +200,23 @@ public sealed class TryRegisterChannelsTests
         using var cts = new CancellationTokenSource(TimeSpan.FromMilliseconds(500));
         await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
             server.AcceptChannelAsync("first", cts.Token).AsTask());
+
+        await client.DisposeAsync();
+        await server.DisposeAsync();
+    }
+
+    [Fact]
+    public async Task DuplicateChannelIdsInBatch_ReturnsFalse()
+    {
+        var (client, server) = await StartedPairAsync();
+
+        var regs = new ChannelRegistration[] {
+            new() { ChannelId = "dup", Direction = ChannelDirection.Outbound },
+            new() { ChannelId = "dup", Direction = ChannelDirection.Outbound }
+        };
+
+        bool ok = client.TryRegisterChannels(regs, out _);
+        Assert.False(ok);
 
         await client.DisposeAsync();
         await server.DisposeAsync();

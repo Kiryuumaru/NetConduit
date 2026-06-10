@@ -404,7 +404,15 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IChannelOwner
         if (registrations.IsEmpty)
             throw new ArgumentException("At least one registration is required.", nameof(registrations));
 
-        return _channelRegistrar.TryRegisterChannels(registrations, out channels);
+        try
+        {
+            return _channelRegistrar.TryRegisterChannels(registrations, out channels);
+        }
+        catch (ArgumentException)
+        {
+            channels = new Dictionary<ChannelRegistration, IChannel>();
+            return false;
+        }
     }
 
     /// <inheritdoc />
