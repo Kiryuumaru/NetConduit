@@ -82,6 +82,54 @@ public class TcpMultiplexerTests
     }
 
     [Fact(Timeout = 30000)]
+    public async Task RapidSequentialOpenClose_NoTransportCrash()
+    {
+        int port = GetAvailablePort();
+        using var listener = new TcpListener(IPAddress.Loopback, port);
+        listener.Start();
+
+        var clientOptions = TcpMultiplexer.CreateOptions("127.0.0.1", port);
+        await using var client = StreamMultiplexer.Create(clientOptions);
+
+        var serverOptions = TcpMultiplexer.CreateServerOptions(listener);
+        await using var server = StreamMultiplexer.Create(serverOptions);
+
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+
+        int disconnects = 0;
+        client.Disconnected += (_, _) => disconnects++;
+        server.Disconnected += (_, _) => disconnects++;
+
+        client.Start();
+        server.Start();
+        await Task.WhenAll(client.WaitForReadyAsync(cts.Token), server.WaitForReadyAsync(cts.Token));
+
+        for (int i = 0; i < 200 && disconnects == 0; i++)
+        {
+            var channelId = $"ch-{i}";
+            var writeChannel = client.OpenChannel(channelId);
+            try
+            {
+                var readChannel = await server.AcceptChannelAsync(channelId, cts.Token);
+                await writeChannel.WriteAsync(new byte[] { (byte)(i % 256) }, cts.Token);
+                await writeChannel.CloseAsync(cts.Token);
+
+                var buf = new byte[1];
+                while (await readChannel.ReadAsync(buf, cts.Token) > 0) { }
+                await readChannel.DisposeAsync();
+            }
+            catch (Exception ex) when (ex is OperationCanceledException)
+            {
+                break;
+            }
+        }
+
+        Assert.Equal(0, disconnects);
+
+        listener.Stop();
+    }
+
+    [Fact(Timeout = 30000)]
     public async Task MultipleChannels_TransferDataConcurrently()
     {
         int port = GetAvailablePort();

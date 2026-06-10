@@ -23,19 +23,25 @@ public sealed class WriteChannelFrameValidationTests
         await AssertProtocolErrorAsync(errorTask, cts.Token);
     }
 
+    /// <summary>
+    /// A non-zero initial ACK no longer raises ProtocolError (see #521).
+    /// The INIT-ACK can be delayed by control-slab backpressure and a data
+    /// ACK can overtake it. WriteChannel.OnAck correctly handles any first
+    /// ACK by calling MarkOpen() regardless of position.
+    /// </summary>
     [Fact]
-    public async Task NonZeroInitialAck_RaisesProtocolError()
+    public async Task NonZeroInitialAck_MarksChannelReady()
     {
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
         await using var context = await RawMuxContext.CreateAsync(cts.Token);
-        var (_, channelIndex) = await context.OpenOutboundChannelAsync("ack-nonzero", cts.Token);
-        var errorTask = context.CaptureNextError();
+        var (writeChannel, channelIndex) = await context.OpenOutboundChannelAsync("ack-nonzero", cts.Token);
         byte[] payload = new byte[sizeof(ulong)];
         BinaryPrimitives.WriteUInt64BigEndian(payload, FrameHeader.Size + (ulong)Encoding.UTF8.GetByteCount("ack-nonzero"));
 
         await context.SendUserFrameAsync(channelIndex, FrameFlags.Ack, payload, cts.Token);
 
-        await AssertProtocolErrorAsync(errorTask, cts.Token);
+        await writeChannel.WaitForReadyAsync(cts.Token);
+        Assert.True(writeChannel.IsReady);
     }
 
     [Fact]
