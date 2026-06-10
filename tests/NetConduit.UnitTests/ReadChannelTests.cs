@@ -410,4 +410,23 @@ public sealed class ReadChannelTests
         int read2 = await channel.ReadAsync(buffer);
         Assert.Equal(0, read2);
     }
+
+    [Fact]
+    public async Task CanRead_ReturnsTrue_WhenBufferedDataRemainsAfterClose()
+    {
+        var channel = CreateChannel();
+        channel.ReceivePayload(FrameFlags.Data, [1, 2, 3]);
+        channel.SetClosed(ChannelCloseReason.RemoteFin);
+
+        // Buffered data remains — CanRead must be true per Stream contract
+        Assert.True(channel.CanRead);
+
+        // Drain the data
+        byte[] buf = new byte[10];
+        int read = await channel.ReadAsync(buf);
+        Assert.Equal(3, read);
+
+        // After draining, CanRead becomes false
+        Assert.False(channel.CanRead);
+    }
 }
