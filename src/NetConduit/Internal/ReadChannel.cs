@@ -153,7 +153,9 @@ internal sealed class ReadChannel : Stream, IReadChannel, IValueTaskSource<int>
     public Stream AsStream() => this;
 
     /// <inheritdoc />
-    public override bool CanRead => _state is ChannelState.Open or ChannelState.Opening;
+    public override bool CanRead =>
+        _state is ChannelState.Open or ChannelState.Opening
+        || (_state == ChannelState.Closed && Volatile.Read(ref _receivedPos) > Volatile.Read(ref _consumedPos));
     /// <inheritdoc />
     public override bool CanSeek => false;
     /// <inheritdoc />
