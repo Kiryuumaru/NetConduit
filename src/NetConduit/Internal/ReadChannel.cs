@@ -397,7 +397,19 @@ internal sealed class ReadChannel : Stream, IReadChannel, IValueTaskSource<int>
                 Interlocked.Increment(ref Stats._framesReceived);
                 lock (_lock)
                 {
-                    if (_state == ChannelState.Closed) break;
+                    // Allow DATA after RemoteFin: under concurrent channel
+                    // teardown the reader loop may dispatch FIN before the
+                    // peer's writer loop has drained in-flight DATA frames.
+                    // Buffering post-FIN DATA lets ReadAsync drain them before
+                    // returning EOF instead of silently losing the bytes.
+                    if (_state == ChannelState.Closed)
+                    {
+                        if (_closeReason != ChannelCloseReason.RemoteFin)
+                            break;
+
+                        BufferInSlab(payload);
+                        break;
+                    }
 
                     int frameBytes = FrameHeader.Size + payload.Length;
 
@@ -629,19 +641,43 @@ internal sealed class ReadChannel : Stream, IReadChannel, IValueTaskSource<int>
             // Wake anyone waiting for ready (channel will never open)
             _readyTcs.TrySetException(new ChannelClosedException(ChannelId, reason));
 
-            // Wake any pending reader with EOF (0 bytes)
+            // Wake any pending reader: deliver buffered slab data before
+            // returning EOF, so a reader that parked after DATA was buffered
+            // but before FIN arrived still receives the payload.
             if (_readCompletionActive)
             {
-                _pendingUserBuffer = null;
-                _readCompletionActive = false;
-                var reg = _readCancelReg;
-                _readCancelReg = default;
-                reg.Unregister();
-                var readException = CreateReadClosedException(reason, exception);
-                if (readException is not null)
-                    _readCompletion.Core.SetException(readException);
+                int buffered = _receivedPos - _consumedPos;
+                if (buffered > 0 && _pendingUserBuffer.HasValue)
+                {
+                    int toCopy = Math.Min(buffered, _pendingUserBuffer.Value.Length);
+                    _slabMemory.Span.Slice(_consumedPos, toCopy).CopyTo(_pendingUserBuffer.Value.Span);
+                    _consumedPos += toCopy;
+                    Interlocked.Add(ref Stats._bytesReceived, toCopy);
+                    if (_receivedPos == _consumedPos)
+                    {
+                        _drainedFrameBytes = _frameBytesReceived;
+                        MaybeSendAck(force: true);
+                    }
+                    _pendingUserBuffer = null;
+                    _readCompletionActive = false;
+                    var reg = _readCancelReg;
+                    _readCancelReg = default;
+                    reg.Unregister();
+                    _readCompletion.Core.SetResult(toCopy);
+                }
                 else
-                    _readCompletion.Core.SetResult(0);
+                {
+                    _pendingUserBuffer = null;
+                    _readCompletionActive = false;
+                    var reg = _readCancelReg;
+                    _readCancelReg = default;
+                    reg.Unregister();
+                    var readException = CreateReadClosedException(reason, exception);
+                    if (readException is not null)
+                        _readCompletion.Core.SetException(readException);
+                    else
+                        _readCompletion.Core.SetResult(0);
+                }
             }
 
             // Slab return policy on close:
