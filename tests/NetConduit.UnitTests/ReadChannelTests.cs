@@ -389,4 +389,25 @@ public sealed class ReadChannelTests
         int read = await channel.ReadAsync(buffer);
         Assert.Equal(0, read);
     }
+
+    [Fact]
+    public async Task DataAfterRemoteFin_IsBufferedAndDrainable()
+    {
+        var channel = CreateChannel();
+
+        // Close via RemoteFin
+        channel.ReceivePayload(FrameFlags.Fin, ReadOnlySpan<byte>.Empty);
+        Assert.Equal(ChannelState.Closed, channel.State);
+
+        // Data arrives after FIN — must be buffered, not dropped (fixes #518)
+        channel.ReceivePayload(FrameFlags.Data, [7, 8, 9]);
+
+        byte[] buffer = new byte[10];
+        int read1 = await channel.ReadAsync(buffer);
+        Assert.Equal(3, read1);
+        Assert.Equal((byte[])[7, 8, 9], buffer[..3]);
+
+        int read2 = await channel.ReadAsync(buffer);
+        Assert.Equal(0, read2);
+    }
 }
