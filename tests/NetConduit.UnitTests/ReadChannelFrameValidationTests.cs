@@ -10,16 +10,26 @@ public sealed class ReadChannelFrameValidationTests
     private const ushort UserChannelIndex = 1;
     private const ushort UnknownUserChannelIndex = 123;
 
+    /// <summary>
+    /// DATA/FIN/Err frames for valid data-channel-range indices are silently
+    /// dropped when the channel has been locally unregistered (see #520).
+    /// The frame was already in flight on the wire during disposal.
+    /// </summary>
     [Fact]
-    public async Task DataFrameForUnknownChannel_RaisesUnknownChannel()
+    public async Task DataFrameForSilentlyDroppedRange_RaisesNoError()
     {
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
         await using var context = await RawMuxContext.CreateAsync(cts.Token);
-        var errorTask = context.CaptureNextError();
 
+        // Send DATA to a valid data-channel index that was never registered.
+        // The frame should be silently dropped per #520.
+        var errorTask = context.CaptureNextError();
         await context.SendUserFrameAsync(UnknownUserChannelIndex, FrameFlags.Data, Encoding.ASCII.GetBytes("abc"), cts.Token);
 
-        await AssertMuxErrorAsync(errorTask, ErrorCode.UnknownChannel, cts.Token);
+        // No error should fire — silently dropped
+        var timeoutTask = Task.Delay(TimeSpan.FromSeconds(1), cts.Token);
+        var completed = await Task.WhenAny(errorTask, timeoutTask);
+        Assert.NotSame(errorTask, completed);
     }
 
     [Fact]

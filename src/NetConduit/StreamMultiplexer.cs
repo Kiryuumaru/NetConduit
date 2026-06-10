@@ -1128,6 +1128,15 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IChannelOwner
             if (header.Flags == FrameFlags.Ack || _registry.IsRetiredChannelIndex(header.ChannelIndex))
                 return;
 
+            // FIN, Err, and Data frames for known data-channel indices that
+            // arrive after local disposal are harmless end-of-life signals.
+            // The local side already unregistered the channel; the frame was
+            // already in flight on the wire. Silently drop instead of killing
+            // the transport with UnknownChannel.
+            if (header.ChannelIndex is >= ChannelConstants.MinDataChannel and <= ChannelConstants.MaxDataChannel
+                && header.Flags is FrameFlags.Fin or FrameFlags.Err or FrameFlags.Data)
+                return;
+
             throw new MultiplexerException(
                 ErrorCode.UnknownChannel,
                 $"Frame type {header.Flags} referenced unknown channel index {header.ChannelIndex}.");
@@ -1164,12 +1173,11 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IChannelOwner
         }
 
         long ackPos = (long)BinaryPrimitives.ReadUInt64BigEndian(payload);
-        if (!writeChannel.IsReady && ackPos != 0)
-        {
-            throw new MultiplexerException(
-                ErrorCode.ProtocolError,
-                $"Initial ACK for local write channel index {channelIndex} must acknowledge position 0.");
-        }
+        // Don't reject non-zero ACKs before the channel is Ready — the
+        // INIT-ACK can be delayed by control-slab backpressure and a data
+        // ACK can overtake it in the control slab queue. WriteChannel.OnAck
+        // correctly handles the first ACK by calling MarkOpen() regardless
+        // of the position.
 
         return ackPos;
     }
