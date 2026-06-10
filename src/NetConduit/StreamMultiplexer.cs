@@ -254,7 +254,9 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IChannelOwner
                 $"MaxAutoReconnectDelay ({options.MaxAutoReconnectDelay}) must be greater than or equal to AutoReconnectDelay ({options.AutoReconnectDelay}).");
         ValidateTaskDelayUpperBound(options.MaxAutoReconnectDelay, nameof(options.MaxAutoReconnectDelay));
 
-        if (double.IsNaN(options.AutoReconnectBackoffMultiplier) || options.AutoReconnectBackoffMultiplier < 1.0)
+        if (double.IsNaN(options.AutoReconnectBackoffMultiplier)
+            || double.IsInfinity(options.AutoReconnectBackoffMultiplier)
+            || options.AutoReconnectBackoffMultiplier < 1.0)
             throw new ArgumentOutOfRangeException(
                 nameof(options),
                 options.AutoReconnectBackoffMultiplier,
