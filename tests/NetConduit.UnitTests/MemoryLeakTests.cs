@@ -95,7 +95,7 @@ public sealed class MemoryLeakTests
             while (Environment.TickCount64 < endTime && !cts.IsCancellationRequested)
             {
                 await Task.Delay(MemorySampleIntervalMs, cts.Token);
-                long mem = GC.GetTotalMemory(forceFullCollection: true);
+                long mem = GC.GetTotalMemory(forceFullCollection: false);
                 lock (memorySamples)
                 {
                     memorySamples.Add(mem);
@@ -273,7 +273,7 @@ public sealed class MemoryLeakTests
             while (Environment.TickCount64 < endTime && !cts.IsCancellationRequested)
             {
                 await Task.Delay(MemorySampleIntervalMs, cts.Token);
-                long mem = GC.GetTotalMemory(forceFullCollection: true);
+                long mem = GC.GetTotalMemory(forceFullCollection: false);
                 lock (memorySamples)
                 {
                     memorySamples.Add(mem);
@@ -405,7 +405,7 @@ public sealed class MemoryLeakTests
             while (Environment.TickCount64 < endTime && !cts.IsCancellationRequested)
             {
                 await Task.Delay(MemorySampleIntervalMs, cts.Token);
-                long mem = GC.GetTotalMemory(forceFullCollection: true);
+                long mem = GC.GetTotalMemory(forceFullCollection: false);
                 lock (memorySamples)
                 {
                     memorySamples.Add(mem);
@@ -494,7 +494,7 @@ public sealed class MemoryLeakTests
             while (Environment.TickCount64 < endTime && !cts.IsCancellationRequested)
             {
                 await Task.Delay(MemorySampleIntervalMs, cts.Token);
-                long mem = GC.GetTotalMemory(forceFullCollection: true);
+                long mem = GC.GetTotalMemory(forceFullCollection: false);
                 lock (memorySamples)
                 {
                     memorySamples.Add(mem);
@@ -611,7 +611,7 @@ public sealed class MemoryLeakTests
             while (Environment.TickCount64 < endTime && !cts.IsCancellationRequested)
             {
                 await Task.Delay(MemorySampleIntervalMs, cts.Token);
-                long mem = GC.GetTotalMemory(forceFullCollection: true);
+                long mem = GC.GetTotalMemory(forceFullCollection: false);
                 lock (memorySamples)
                 {
                     memorySamples.Add(mem);
@@ -749,7 +749,7 @@ public sealed class MemoryLeakTests
             while (Environment.TickCount64 < endTime && !cts.IsCancellationRequested)
             {
                 await Task.Delay(MemorySampleIntervalMs, cts.Token);
-                long mem = GC.GetTotalMemory(forceFullCollection: true);
+                long mem = GC.GetTotalMemory(forceFullCollection: false);
                 lock (memorySamples)
                 {
                     memorySamples.Add(mem);
@@ -907,7 +907,7 @@ public sealed class MemoryLeakTests
             while (Environment.TickCount64 < endTime && !cts.IsCancellationRequested)
             {
                 await Task.Delay(MemorySampleIntervalMs, cts.Token);
-                long mem = GC.GetTotalMemory(forceFullCollection: true);
+                long mem = GC.GetTotalMemory(forceFullCollection: false);
                 lock (memorySamples)
                 {
                     memorySamples.Add(mem);
