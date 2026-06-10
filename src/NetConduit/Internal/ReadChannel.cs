@@ -642,12 +642,18 @@ internal sealed class ReadChannel : Stream, IReadChannel, IValueTaskSource<int>
             _readyTcs.TrySetException(new ChannelClosedException(ChannelId, reason));
 
             // Wake any pending reader: deliver buffered slab data before
-            // returning EOF, so a reader that parked after DATA was buffered
-            // but before FIN arrived still receives the payload.
+            // returning EOF when the channel was closed by the remote peer
+            // (RemoteFin), so a reader that parked after DATA was buffered
+            // but before FIN arrived still receives the payload. For
+            // terminal reasons (MuxDisposed, TransportFailed, LocalClose),
+            // the reader is woken with 0 — a teardown is in progress and the
+            // remaining buffered bytes are insignificant.
             if (_readCompletionActive)
             {
                 int buffered = _receivedPos - _consumedPos;
-                if (buffered > 0 && _pendingUserBuffer.HasValue)
+                if (buffered > 0
+                    && reason == ChannelCloseReason.RemoteFin
+                    && _pendingUserBuffer.HasValue)
                 {
                     int toCopy = Math.Min(buffered, _pendingUserBuffer.Value.Length);
                     _slabMemory.Span.Slice(_consumedPos, toCopy).CopyTo(_pendingUserBuffer.Value.Span);
