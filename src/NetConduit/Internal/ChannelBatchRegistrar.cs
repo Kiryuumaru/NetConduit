@@ -129,6 +129,12 @@ internal sealed class ChannelBatchRegistrar(
         {
         lock (registry.AcceptLock)
         {
+            // Re-check the shutdown latch inside the lock to close the TOCTOU
+            // window: a concurrent GoAwayAsync can set _isShuttingDown after
+            // the caller's outer check passes but before we acquire the lock.
+            if (((StreamMultiplexer)owner).IsShuttingDown)
+                throw new InvalidOperationException("Cannot register new channels after GoAwayAsync.");
+
             for (int i = 0; i < count; i++)
             {
                 var p = prepared[i];

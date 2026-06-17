@@ -274,6 +274,9 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IChannelOwner
     /// <inheritdoc />
     public void Start()
     {
+        if (_disposed)
+            throw new ObjectDisposedException(nameof(StreamMultiplexer));
+
         if (_isRunning)
             throw new InvalidOperationException("Multiplexer is already running.");
 
@@ -307,6 +310,9 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IChannelOwner
         // we observe the already-flipped parity and allocate correctly.
         lock (_registry.ChannelIndexLock)
         {
+            if (IsShuttingDown)
+                throw new InvalidOperationException("Cannot open new channels after GoAwayAsync.");
+
             ushort index = _registry.AllocateChannelIndex();
             channel = new WriteChannel(
                 options.ChannelId,
@@ -362,6 +368,9 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IChannelOwner
         // or commit a new pending channel that the reader will adopt when INIT arrives.
         lock (_registry.AcceptLock)
         {
+            if (IsShuttingDown)
+                throw new InvalidOperationException("Cannot accept new channels after GoAwayAsync.");
+
             // Check if channel already arrived from remote
             var existing = _registry.GetReadChannelById(channelId);
             if (existing is not null) return existing;
