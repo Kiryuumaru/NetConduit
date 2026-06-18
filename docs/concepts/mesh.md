@@ -1,11 +1,12 @@
 # Mesh multiplexer
 
 `NetConduit.Mesh` builds a routed overlay on top of `StreamMultiplexer`. Each
-node owns one `MeshMultiplexer` and supplies a fully connected
-`StreamMultiplexer` for each direct neighbor. The mesh layer replicates a small
-topology, runs BFS to pick the next hop, and opens a *sub-multiplexer* tunneled
-through that next hop. The user keeps the familiar `StreamMultiplexer` API on
-the resulting routed mux.
+node owns one `MeshMultiplexer` and registers its direct neighbor connections
+by passing `MultiplexerOptions` — the same options type that
+`StreamMultiplexer` uses to create transports via `StreamFactory`. The mesh
+replicates a small topology, runs BFS to pick the next hop, and opens a
+*sub-multiplexer* tunneled through that next hop. The result is a full
+`IStreamMultiplexer` API to any reachable node by ID.
 
 ```
 A ----- B ----- C
@@ -32,33 +33,31 @@ without coordination.
 
 ### Adding neighbors
 
-There are two ways to register a neighbor:
-
-**Convenience — mesh owns the mux.** Pass `MultiplexerOptions` and the mesh
-calls `StreamMultiplexer.Create()`, starts it, and owns its lifecycle. Same
-pattern as `StreamMultiplexer` itself — a factory in the options creates the
-transport. The mesh disposes the mux when `RemoveNeighbor` is called or the
-mesh is disposed. Ideal for dedicated per-neighbor connections.
+A neighbor is a `StreamMultiplexer` connected to another node:
 
 ```csharp
-mesh.AddNeighbor("B", TcpMultiplexer.CreateOptions("192.168.1.2", 9001));
-mesh.AddNeighbor("A", TcpMultiplexer.CreateServerOptions(someListener));
+// B dials A; A accepts the connection
+meshB.AddNeighbor("A", TcpMultiplexer.CreateOptions("192.168.1.1", 9001));
+meshA.AddNeighbor("B", TcpMultiplexer.CreateServerOptions(listener));
 ```
 
-**Power-user — you own the mux.** Pass a pre-built `IStreamMultiplexer`. The
-mesh never disposes it. Use this when you want to share the mux between mesh
-traffic and your own application channels on the same TCP connection, or when
-you need custom reconnect logic.
+The mesh calls `StreamMultiplexer.Create()` internally, starts it, and
+manages its lifecycle — same pattern as `StreamMultiplexer` itself, where
+`MultiplexerOptions` carries a `StreamFactory` that builds the transport.
+
+For cases where you want to share the mux between mesh traffic and your own
+application channels on the same TCP connection, pass a pre-built
+`IStreamMultiplexer` instead.  The mesh never disposes a mux you hand it.
 
 ```csharp
 var mux = StreamMultiplexer.Create(TcpMultiplexer.CreateOptions("host", 9001));
 mux.Start();
 await mux.WaitForReadyAsync(ct);
-mesh.AddNeighbor("B", mux);
+mesh.AddNeighbor("B", mux);   // mesh coexists with your app:foo channels on this mux
 ```
 
-Both overloads converge on the same `NeighborSession` internals — the only
-difference is who owns the mux lifetime.
+Both overloads converge on the same internals — the difference is who owns
+the mux lifetime.
 
 ## Topology
 
@@ -202,6 +201,5 @@ healthy again, re-adds the neighbor to the advertised adjacency, bumps
 version, broadcasts, and re-runs BFS. Routes that were previously
 diverted may shift back to the recovered link.
 
-The application still owns the lifetime of the `IStreamMultiplexer`
-passed to `AddNeighbor`. Health transitions do NOT dispose your mux; the
-mesh merely adjusts routing around it.
+When using the `IStreamMultiplexer` overload of `AddNeighbor`, the
+application owns the mux lifetime — health transitions never dispose it.
