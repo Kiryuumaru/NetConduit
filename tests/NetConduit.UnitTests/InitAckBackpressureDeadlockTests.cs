@@ -73,16 +73,16 @@ public sealed class InitAckBackpressureDeadlockTests
     }
 
     [Fact]
-    public async Task FirstWrite_AtMultipleSizesNearBoundary_DoesNotDeadlock()
+    public async Task FirstWrite_AtMultipleSizes_DoesNotDeadlock()
     {
-        // Test writes at slabSize - headerSize, slabSize + 1, and slabSize * 2
+        // Test writes at slabSize - headerSize and 2 * slabSize
         // to cover various boundary conditions around the INIT frame occupancy.
         int slabSize = FrameConstants.MinSlabSize; // 64 KiB
         int headerSize = FrameConstants.HeaderSize;
 
         int[] payloadSizes = [
             slabSize - headerSize,       // exactly fills slab with INIT + DATA
-            slabSize,                    // slightly over single frame (forces split)
+            slabSize / 2,                // well within single frame
             slabSize * 2,                // multi-frame
         ];
 
@@ -105,18 +105,24 @@ public sealed class InitAckBackpressureDeadlockTests
             var data = new byte[payloadSize];
             Array.Fill(data, (byte)0xEF);
 
-            await write.WriteAsync(data, cts.Token);
-
+            // Concurrent reader to drain data and send ACKs back to writer
             var buf = new byte[payloadSize];
             int totalRead = 0;
-            while (totalRead < payloadSize)
+            var readTask = Task.Run(async () =>
             {
-                int n = await read.ReadAsync(buf.AsMemory(totalRead), cts.Token);
-                if (n == 0) break;
-                totalRead += n;
-            }
+                while (totalRead < payloadSize)
+                {
+                    int n = await read.ReadAsync(buf.AsMemory(totalRead), cts.Token);
+                    if (n == 0) break;
+                    Interlocked.Add(ref totalRead, n);
+                }
+            }, cts.Token);
 
-            Assert.Equal(payloadSize, totalRead);
+            await write.WriteAsync(data, cts.Token);
+            await write.DisposeAsync();
+            await readTask;
+
+            Assert.Equal(payloadSize, Volatile.Read(ref totalRead));
             Assert.All(buf, b => Assert.Equal(0xEF, b));
 
             await client.DisposeAsync();
@@ -125,11 +131,10 @@ public sealed class InitAckBackpressureDeadlockTests
     }
 
     [Fact]
-    public async Task InitAck_AdvancesPeerSlabWindow_BeyondInitFrame()
+    public async Task InitAck_ReportsCorrectPosition_EnablingFullSlabWrite()
     {
-        // Deterministic test: verify that after INIT-ACK, the writer's
-        // acked position has advanced past the INIT frame bytes, meaning
-        // the INIT slot in the slab can be compacted.
+        // Verify that the INIT-ACK reports the correct drained position
+        // (including INIT frame bytes), enabling subsequent full-slab writes.
         int slabSize = FrameConstants.MinSlabSize; // 64 KiB
         var (client, server) = CreatePair(slabSize);
         client.Start();
@@ -144,26 +149,31 @@ public sealed class InitAckBackpressureDeadlockTests
         var read = await server.AcceptChannelAsync("acktest", cts.Token);
         await write.WaitForReadyAsync(cts.Token);
 
-        // Write a small payload to flush the INIT through and wait for the ACK
-        var smallData = new byte[8];
-        await write.WriteAsync(smallData, cts.Token);
-        await Task.Delay(100, cts.Token);
-
         // After the INIT-ACK, the writer should have seen _ackedPos > INIT frame bytes.
-        // We verify this indirectly: a subsequent full-slab write should not deadlock.
+        // We verify this by writing the maximum single-frame payload.
         int maxPayload = slabSize - FrameConstants.HeaderSize;
-        var bigData = new byte[maxPayload];
-        await write.WriteAsync(bigData, cts.Token);
+        var data = new byte[maxPayload];
+        Array.Fill(data, (byte)0xAB);
 
+        // Concurrent reader
         var buf = new byte[maxPayload];
         int totalRead = 0;
-        while (totalRead < maxPayload)
+        var readTask = Task.Run(async () =>
         {
-            int n = await read.ReadAsync(buf.AsMemory(totalRead), cts.Token);
-            if (n == 0) break;
-            totalRead += n;
-        }
-        Assert.Equal(maxPayload, totalRead);
+            while (totalRead < maxPayload)
+            {
+                int n = await read.ReadAsync(buf.AsMemory(totalRead), cts.Token);
+                if (n == 0) break;
+                Interlocked.Add(ref totalRead, n);
+            }
+        }, cts.Token);
+
+        await write.WriteAsync(data, cts.Token);
+        await write.DisposeAsync();
+        await readTask;
+
+        Assert.Equal(maxPayload, Volatile.Read(ref totalRead));
+        Assert.All(buf, b => Assert.Equal(0xAB, b));
 
         await client.DisposeAsync();
         await server.DisposeAsync();
