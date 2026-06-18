@@ -280,6 +280,13 @@ internal sealed class ReadChannel : Stream, IReadChannel, IValueTaskSource<int>
         // its INIT slot.
         if (_receivedPos == _consumedPos)
             _drainedFrameBytes = _frameBytesReceived;
+
+        // Force an ACK so the writer's INIT slot is acknowledged before
+        // the first DATA frame arrives. Without this, SendInitAck always
+        // reports position 0 and the writer deadlocks when the first
+        // DATA frame doesn't fit in the slab alongside the still-pinned
+        // INIT frame bytes (issue #533).
+        MaybeSendAck(force: true);
     }
 
     internal void SetAckChannel(WriteChannel ackChannel) => _ackChannel = ackChannel;
