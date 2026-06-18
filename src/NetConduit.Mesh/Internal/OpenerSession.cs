@@ -30,7 +30,6 @@ internal sealed class OpenerSession : RoutedSessionBase
         {
             StreamFactory = CreateRouteStreamAsync,
             SessionId = sessionId,
-            DefaultSlabSize = opts.DefaultSlabSize,
             PingInterval = opts.PingInterval,
             PingTimeout = opts.PingTimeout,
             MaxMissedPings = opts.MaxMissedPings,

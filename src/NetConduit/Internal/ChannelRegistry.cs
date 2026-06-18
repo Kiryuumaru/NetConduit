@@ -436,36 +436,6 @@ internal sealed class ChannelRegistry
             _acceptQueue.Writer.TryWrite(leftover);
     }
 
-    /// <summary>
-    /// Register (or reuse) a prefix-routed subscription. Returns the
-    /// <see cref="IAsyncEnumerable{T}"/> that drains channels whose id starts
-    /// with <paramref name="prefix"/>. Channels in flight at registration time
-    /// that have already been enqueued to the default queue are not retroactively
-    /// re-routed; register the subscription before any channel of the prefix
-    /// is expected to arrive.
-    /// </summary>
-    internal IAsyncEnumerable<ReadChannel> AcceptChannelsAsync(string prefix, CancellationToken ct)
-    {
-        if (string.IsNullOrEmpty(prefix))
-        {
-            throw new ArgumentException("Prefix must be non-empty.", nameof(prefix));
-        }
-
-        PrefixSubscription sub;
-        lock (_prefixSubscriptionsLock)
-        {
-            // Reuse existing registration so repeated enumeration of the same
-            // prefix from the same multiplexer instance shares a single queue.
-            sub = _prefixSubscriptions.FirstOrDefault(s => s.Prefix == prefix)
-                ?? new PrefixSubscription(prefix);
-            if (!_prefixSubscriptions.Contains(sub))
-            {
-                _prefixSubscriptions.Add(sub);
-            }
-        }
-        return sub.Queue.Reader.ReadAllAsync(ct);
-    }
-
     internal void CancelAllPendingAccepts()
     {
         foreach (var kvp in _pendingAccepts)

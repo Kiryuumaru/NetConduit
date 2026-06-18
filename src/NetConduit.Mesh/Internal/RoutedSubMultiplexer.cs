@@ -67,8 +67,12 @@ internal sealed class RoutedSubMultiplexer : IStreamMultiplexer
     public Task WaitForReadyAsync(CancellationToken ct = default) => _inner.WaitForReadyAsync(ct);
     public IWriteChannel OpenChannel(ChannelOptions options) => _inner.OpenChannel(options);
     public IReadChannel AcceptChannel(string channelId) => _inner.AcceptChannel(channelId);
-    public IAsyncEnumerable<IReadChannel> AcceptChannelsAsync(CancellationToken ct = default) => _inner.AcceptChannelsAsync(ct);
-    public IAsyncEnumerable<IReadChannel> AcceptChannelsAsync(string channelIdPrefix, CancellationToken ct = default) => _inner.AcceptChannelsAsync(channelIdPrefix, ct);
+    public IAsyncEnumerable<IReadChannel> AcceptChannelsAsync(string? channelIdPrefix = null, CancellationToken ct = default)
+        => _inner.AcceptChannelsAsync(channelIdPrefix, ct);
+    public bool TryRegisterChannels(
+        ReadOnlySpan<ChannelRegistration> registrations,
+        out IReadOnlyDictionary<ChannelRegistration, IChannel> channels)
+        => _inner.TryRegisterChannels(registrations, out channels);
     public IWriteChannel? GetWriteChannel(string channelId) => _inner.GetWriteChannel(channelId);
     public IReadChannel? GetReadChannel(string channelId) => _inner.GetReadChannel(channelId);
     public ValueTask GoAwayAsync(CancellationToken ct = default) => _inner.GoAwayAsync(ct);

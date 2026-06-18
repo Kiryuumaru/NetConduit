@@ -38,7 +38,6 @@ internal sealed class AcceptorSession : RoutedSessionBase
         {
             StreamFactory = CreateRouteStreamAsync,
             SessionId = sessionId,
-            DefaultSlabSize = opts.DefaultSlabSize,
             PingInterval = opts.PingInterval,
             PingTimeout = opts.PingTimeout,
             MaxMissedPings = opts.MaxMissedPings,

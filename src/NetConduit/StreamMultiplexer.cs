@@ -427,12 +427,6 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IChannelOwner
     }
 
     /// <inheritdoc />
-    public IAsyncEnumerable<IReadChannel> AcceptChannelsAsync(string channelIdPrefix, CancellationToken ct = default)
-    {
-        return _registry.AcceptChannelsAsync(channelIdPrefix, ct);
-    }
-
-    /// <inheritdoc />
     public IWriteChannel? GetWriteChannel(string channelId) => _registry.GetWriteChannelById(channelId);
 
     /// <inheritdoc />
@@ -785,10 +779,9 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IChannelOwner
 
             // If we haven't already announced a terminal disconnect, fire one
             // now so consumers learn that no further reconnect will be attempted.
-            if (!ct.IsCancellationRequested && !_isShuttingDown)
+            if (!ct.IsCancellationRequested && Volatile.Read(ref _isShuttingDown) == 0)
             {
-                _disconnectedFired = true;
-                RaiseEvent(Disconnected, new DisconnectedEventArgs(Enums.DisconnectReason.TransportError, ex, willRetry: false));
+                TryRaiseDisconnected(Enums.DisconnectReason.TransportError, ex, willRetry: false);
             }
         }
     }

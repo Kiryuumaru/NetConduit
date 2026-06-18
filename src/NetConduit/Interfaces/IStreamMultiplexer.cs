@@ -192,17 +192,6 @@ public interface IStreamMultiplexer : IAsyncDisposable
         ReadOnlySpan<ChannelRegistration> registrations,
         out IReadOnlyDictionary<ChannelRegistration, IChannel> channels);
 
-    /// <summary>
-    /// Accept only inbound channels whose ID starts with <paramref name="channelIdPrefix"/>.
-    /// Channels matching the prefix are routed exclusively to this enumeration and
-    /// are NOT yielded by the unfiltered <see cref="AcceptChannelsAsync(CancellationToken)"/>
-    /// overload. Useful when an overlay protocol (e.g. mesh routing) shares the
-    /// multiplexer with the host application: the overlay subscribes to its
-    /// reserved prefix, and the host application iterates the unfiltered overload
-    /// to receive only its own channels.
-    /// </summary>
-    IAsyncEnumerable<IReadChannel> AcceptChannelsAsync(string channelIdPrefix, CancellationToken ct = default);
-
     /// <summary>Get an outbound channel by its ID, or null if not found.</summary>
     IWriteChannel? GetWriteChannel(string channelId);
 
