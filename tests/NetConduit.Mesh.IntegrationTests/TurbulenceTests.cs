@@ -163,12 +163,8 @@ public class TurbulenceTests
 
         Assert.Equal(0, Volatile.Read(ref terminalDisconnect));
 
-        // NOTE: Known sub-mux data cap (~256 in-flight messages).  The writer
-        // sent far more, but only what the slab delivered before transport drops
-        // truncated the stream arrives.  What matters: everything that arrived is
-        // correct, in order, and the sub-mux never terminally disconnected.
-        Assert.True(sorted.Count >= 200,
-            $"Got {sorted.Count} msgs, writer sent {totalWritten}.");
+        // All messages written must arrive — in order, no gaps, no corruption.
+        Assert.Equal(totalWritten, sorted.Count);
 
         for (int i = 0; i < sorted.Count; i++)
         {
