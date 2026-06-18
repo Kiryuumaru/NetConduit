@@ -313,6 +313,7 @@ internal sealed class ReadChannel : Stream, IReadChannel, IValueTaskSource<int>
                 int buffered = _receivedPos - _consumedPos;
                 if (buffered > 0)
                 {
+                    ct.ThrowIfCancellationRequested();
                     int toCopy = Math.Min(buffered, buffer.Length);
                     _slabMemory.Span.Slice(_consumedPos, toCopy).CopyTo(buffer.Span);
                     _consumedPos += toCopy;
