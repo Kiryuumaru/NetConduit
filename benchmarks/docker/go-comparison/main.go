@@ -518,6 +518,9 @@ func runGameTickYamux(channelCount, msgSize int, duration time.Duration) float64
 	}
 	serverSess := <-serverReady
 
+	defer clientSess.Close()
+	defer serverSess.Close()
+
 	var wg sync.WaitGroup
 
 	for i := 0; i < channelCount; i++ {
@@ -570,10 +573,6 @@ func runGameTickYamux(channelCount, msgSize int, duration time.Duration) float64
 
 	time.Sleep(duration)
 	close(done)
-	// Close sessions so any goroutine blocked inside stream.Read/Write
-	// returns with an error instead of parking forever.
-	clientSess.Close()
-	serverSess.Close()
 	wg.Wait()
 
 	return float64(totalMsgs) / duration.Seconds()
@@ -667,10 +666,6 @@ func runGameTickSmux(channelCount, msgSize int, duration time.Duration) float64 
 
 	time.Sleep(duration)
 	close(done)
-	// Close sessions so any goroutine blocked inside stream.Read/Write
-	// returns with an error instead of parking forever.
-	clientSess.Close()
-	serverSess.Close()
 	wg.Wait()
 
 	return float64(totalMsgs) / duration.Seconds()

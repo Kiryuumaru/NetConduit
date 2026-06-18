@@ -109,7 +109,7 @@ public class QuicMultiplexerTests
         var serverOptions = QuicMultiplexer.CreateServerOptions(listener);
         await using var server = StreamMultiplexer.Create(serverOptions);
 
-        var clientOptions = QuicMultiplexer.CreateOptions(IPAddress.Loopback.ToString(), actualPort, allowInsecure: true);
+        var clientOptions = QuicMultiplexer.CreateOptions("localhost", actualPort, allowInsecure: true);
         await using var client = StreamMultiplexer.Create(clientOptions);
 
         server.Start();
@@ -136,7 +136,7 @@ public class QuicMultiplexerTests
         var serverOptions = QuicMultiplexer.CreateServerOptions(listener);
         await using var server = StreamMultiplexer.Create(serverOptions);
 
-        var clientOptions = QuicMultiplexer.CreateOptions(IPAddress.Loopback.ToString(), actualPort, allowInsecure: true);
+        var clientOptions = QuicMultiplexer.CreateOptions("localhost", actualPort, allowInsecure: true);
         await using var client = StreamMultiplexer.Create(clientOptions);
 
         server.Start();
