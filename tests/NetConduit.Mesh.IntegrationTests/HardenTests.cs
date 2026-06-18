@@ -159,9 +159,9 @@ public class HardenTests
         };
 
         // Actually break the underlying neighbor link so the sub-mux must rely on
-        // reconnect/replay. Default MaxRouteRetries=3 with RouteTimeout=2s would
-        // exhaust within ~6-10s. With -1 (unbounded) the sub-mux must keep trying
-        // for the entire window.
+        // reconnect/replay. With MaxRouteRetries=-1 (unbounded, the default) the
+        // sub-mux must keep trying for the entire window rather than raising a
+        // terminal disconnect.
         await muxAB_A.DisposeAsync();
         await muxAB_B.DisposeAsync();
 

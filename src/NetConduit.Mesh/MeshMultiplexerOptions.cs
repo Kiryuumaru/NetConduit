@@ -18,14 +18,15 @@ public sealed record MeshMultiplexerOptions
     public int MaxHops { get; init; } = 10;
 
     /// <summary>How long the mesh waits for a route to land before failing an open.</summary>
-    public TimeSpan RouteTimeout { get; init; } = TimeSpan.FromSeconds(30);
+    public TimeSpan RouteTimeout { get; init; } = TimeSpan.FromSeconds(10);
 
     /// <summary>
     /// Maximum reroute attempts after a routed session loses its underlying path.
-    /// Use <c>-1</c> for unbounded retries — the routed sub-mux will keep attempting to
-    /// re-route forever until disposed by the application.
+    /// Use <c>-1</c> (the default) for unbounded retries — the routed sub-mux keeps
+    /// attempting to re-route through any available path until disposed. Use <c>0</c>
+    /// for no retries, or a positive value for a bounded budget.
     /// </summary>
-    public int MaxRouteRetries { get; init; } = 3;
+    public int MaxRouteRetries { get; init; } = -1;
 
     /// <summary>
     /// Debounce window for topology recomputation. Topology updates received within this
@@ -55,7 +56,7 @@ public sealed record MeshMultiplexerOptions
     public TimeSpan PingTimeout { get; init; } = TimeSpan.FromSeconds(10);
 
     /// <summary>Maximum missed pings before a routed sub-multiplexer considers its underlying path dead.</summary>
-    public int MaxMissedPings { get; init; } = 3;
+    public int MaxMissedPings { get; init; } = 2;
 
     /// <summary>GoAway timeout applied to routed sub-multiplexers.</summary>
     public TimeSpan GoAwayTimeout { get; init; } = TimeSpan.FromSeconds(30);

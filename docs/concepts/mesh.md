@@ -99,33 +99,28 @@ The integration tests under `tests/NetConduit.Mesh.IntegrationTests/` cover:
 
 ## Options reference
 
-`MeshMultiplexerOptions` is a record with these fields. Defaults preserve
-backward-compatible behavior — every advanced knob is opt-in.
+`MeshMultiplexerOptions` is a record with these fields.
 
 | Option | Default | Purpose |
 | --- | --- | --- |
 | `NodeId` | (required) | Stable identity for this node in the topology map. |
 | `PoolId` | `null` | Optional grouping tag advertised with this node's entry. |
 | `MaxHops` | `10` | Reject routes longer than this at the source. |
-| `RouteTimeout` | `30s` | How long a route open will wait for a path. |
-| `MaxRouteRetries` | `3` | Retry budget for the routed sub-mux when its transport dies. `-1` = unbounded. |
+| `RouteTimeout` | `10s` | How long a route open will wait for a path. |
+| `MaxRouteRetries` | `-1` (unbounded) | Reroute budget for the routed sub-mux. `-1` = keep trying forever through any available path. `0` = no retries. |
 | `MaxConcurrentRelays` | `100` | Cap on relay slots this node hosts as an intermediate. |
-| `RecomputeDebounce` | `Zero` | Coalesce N rapid topology updates into one BFS. `Zero` preserves the synchronous recompute path. Non-zero values can stale the route table during an active reroute — only enable if you actually have churn. |
-| `TopologyAntiEntropyInterval` | `Zero` | Periodic re-broadcast of local topology to recover from silently-dropped frames. `Zero` disables. Pairs cleanly with `RecomputeDebounce > 0` when running at scale. |
-| `DefaultSlabSize`, `PingInterval`, `PingTimeout`, `MaxMissedPings`, `GoAwayTimeout`, `DefaultChannelOptions` | (StreamMultiplexer defaults) | Forwarded to every routed sub-mux. |
+| `MaxMissedPings` | `2` | Missed pings before a routed sub-mux considers its path dead and triggers a reroute. |
+| `RecomputeDebounce` | `Zero` | Coalesce N rapid topology updates into one BFS. `Zero` preserves the synchronous recompute path. |
+| `TopologyAntiEntropyInterval` | `Zero` | Periodic re-broadcast of local topology to recover from silently-dropped frames. `Zero` disables. |
+| `DefaultSlabSize`, `PingInterval`, `PingTimeout`, `GoAwayTimeout`, `DefaultChannelOptions` | (StreamMultiplexer defaults) | Forwarded to every routed sub-mux. |
 | `MaxTopologyMessageSize` | `1 MiB` | Hard cap on a single inbound topology frame. |
 
-### `MaxRouteRetries = -1` — unbounded reroute
+### Unbounded reroute
 
-With the default `3`, the routed sub-mux raises terminal `Disconnected`
-once its underlying transport dies three times in a row. The user-visible
-mux dies and the application has to reopen.
-
-Setting `MaxRouteRetries = -1` flips the sub-mux into unbounded
-auto-reconnect. The route opener keeps consulting BFS forever; as long
-as ANY path exists between source and target, the sub-mux stays alive.
-Useful for long-lived RPC sessions where the application would rather
-hang a request than tear down state.
+`MaxRouteRetries = -1` is the default — the routed sub-mux keeps
+reconnecting through any available path until the application disposes
+it. As long as ANY path exists between source and target in the topology
+map, the sub-mux stays alive.
 
 Caveats:
 
@@ -154,8 +149,8 @@ convergence round.
 
 A freshly-recovered neighbor is re-advertised once its mux fires
 `Connected`. Routes may shift back to the shorter path at that point.
-Use `MaxRouteRetries = -1` on the routed sub-mux if you want opens to
-ride out the re-stabilization rather than fail.
+With the default unbounded retries, opens ride out the re-stabilization
+rather than failing.
 
 ### `RecomputeDebounce` — coalesced BFS
 
