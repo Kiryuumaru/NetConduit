@@ -481,6 +481,15 @@ internal sealed class WriteChannel : Stream, IWriteChannel
                 // Without reconnection replay, treat sent as acked to free slab space
                 _ackedPos = _sentPos;
             }
+            // When a graceful close is in-flight, force the FIN through even
+            // with replay enabled. Without this, _ackedPos stays at 0 (peer
+            // ACKs require consumer draining), TryCompactLocked no-ops, and
+            // TryQueuePendingFinLocked cannot fit the FIN header — the slab
+            // is full and DisposeAsync drops all pending data.
+            else if (_finRequested && _enableReplay)
+            {
+                _ackedPos = _sentPos;
+            }
             // If a graceful close queued a FIN, finalize the Closing -> Closed
             // transition only after the writer thread has actually drained
             // everything (including the FIN). Synchronously finalizing inside
