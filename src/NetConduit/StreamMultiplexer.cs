@@ -748,7 +748,7 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IChannelOwner
                 if (ct.IsCancellationRequested)
                     break;
 
-                TryRaiseDisconnected(Enums.DisconnectReason.TransportError, transportEx, willRetry: true);
+                TryRaiseDisconnected(Enums.DisconnectReason.TransportError, transportEx);
             }
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
@@ -776,13 +776,6 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IChannelOwner
             AbortChannelsForTerminalTransportFailure(ex);
 
             _readyTcs.TrySetException(ex);
-
-            // If we haven't already announced a terminal disconnect, fire one
-            // now so consumers learn that no further reconnect will be attempted.
-            if (!ct.IsCancellationRequested && Volatile.Read(ref _isShuttingDown) == 0)
-            {
-                TryRaiseDisconnected(Enums.DisconnectReason.TransportError, ex, willRetry: false);
-            }
         }
     }
 
@@ -1561,12 +1554,12 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IChannelOwner
             TryRaiseDisconnected(_disconnectReason.Value, null);
     }
 
-    private bool TryRaiseDisconnected(DisconnectReason reason, Exception? exception, bool willRetry = false)
+    private bool TryRaiseDisconnected(DisconnectReason reason, Exception? exception)
     {
         if (Interlocked.CompareExchange(ref _disconnectedFired, 1, 0) != 0)
             return false;
 
-        RaiseEvent(Disconnected, new DisconnectedEventArgs(reason, exception, willRetry));
+        RaiseEvent(Disconnected, new DisconnectedEventArgs(reason, exception));
         return true;
     }
 

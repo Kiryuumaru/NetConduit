@@ -271,22 +271,7 @@ internal sealed class ChannelRegistry
                 }
             }
         }
-
-        // Prefix-routed subscription wins over the default queue. Lookups are
-        // O(N) over registered prefixes; N is expected to be tiny (1-2 overlays).
-        lock (_prefixSubscriptionsLock)
-        {
-            foreach (var sub in _prefixSubscriptions)
-            {
-                if (channel.ChannelId.StartsWith(sub.Prefix, StringComparison.Ordinal))
-                {
-                    sub.Queue.Writer.TryWrite(channel);
-                    return;
-                }
-            }
-        }
-
-        // Default: queue for generic AcceptChannelsAsync
+        // Otherwise queue for generic AcceptChannelsAsync
         _acceptQueue.Writer.TryWrite(channel);
     }
 
