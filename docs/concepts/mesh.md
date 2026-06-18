@@ -30,6 +30,36 @@ else on the neighbor mux remains available to the application. You can run
 mesh traffic alongside your own channels on the same `StreamMultiplexer`
 without coordination.
 
+### Adding neighbors
+
+There are two ways to register a neighbor:
+
+**Convenience — mesh owns the mux.** Pass `MultiplexerOptions` and the mesh
+calls `StreamMultiplexer.Create()`, starts it, and owns its lifecycle. Same
+pattern as `StreamMultiplexer` itself — a factory in the options creates the
+transport. The mesh disposes the mux when `RemoveNeighbor` is called or the
+mesh is disposed. Ideal for dedicated per-neighbor connections.
+
+```csharp
+mesh.AddNeighbor("B", TcpMultiplexer.CreateOptions("192.168.1.2", 9001));
+mesh.AddNeighbor("A", TcpMultiplexer.CreateServerOptions(someListener));
+```
+
+**Power-user — you own the mux.** Pass a pre-built `IStreamMultiplexer`. The
+mesh never disposes it. Use this when you want to share the mux between mesh
+traffic and your own application channels on the same TCP connection, or when
+you need custom reconnect logic.
+
+```csharp
+var mux = StreamMultiplexer.Create(TcpMultiplexer.CreateOptions("host", 9001));
+mux.Start();
+await mux.WaitForReadyAsync(ct);
+mesh.AddNeighbor("B", mux);
+```
+
+Both overloads converge on the same `NeighborSession` internals — the only
+difference is who owns the mux lifetime.
+
 ## Topology
 
 Each node owns a `NodeEntry { NodeId, Sequence, Neighbors }`. Entries are

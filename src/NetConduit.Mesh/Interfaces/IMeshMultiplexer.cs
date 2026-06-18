@@ -1,5 +1,6 @@
 using NetConduit.Interfaces;
 using NetConduit.Mesh.Events;
+using NetConduit.Models;
 using CoreErrorEventArgs = NetConduit.Events.ErrorEventArgs;
 
 namespace NetConduit.Mesh.Interfaces;
@@ -63,8 +64,22 @@ public interface IMeshMultiplexer : IAsyncDisposable
     /// <summary>Raised when an unhandled exception occurs on a background loop.</summary>
     event EventHandler<CoreErrorEventArgs>? Error;
 
-    /// <summary>Register a neighbor multiplexer. The mesh will open <c>_mesh:</c>-prefixed channels on it.</summary>
+    /// <summary>
+    /// Register a neighbor multiplexer that the mesh will use but not own.
+    /// The caller retains ownership of the multiplexer — it is never disposed
+    /// by the mesh. Use this overload when sharing a multiplexer with other
+    /// application traffic on non-<c>_mesh:</c> channels.
+    /// </summary>
     void AddNeighbor(string remoteNodeId, IStreamMultiplexer mux, string? remotePoolId = null);
+
+    /// <summary>
+    /// Register a neighbor by options — the mesh creates, starts, and owns
+    /// the resulting <see cref="StreamMultiplexer"/>.  Ideal when a node
+    /// needs a dedicated per-neighbor connection with no shared application
+    /// channels.  The mesh disposes the mux when the neighbor is removed or
+    /// the mesh is disposed.
+    /// </summary>
+    void AddNeighbor(string remoteNodeId, MultiplexerOptions muxOptions, string? remotePoolId = null);
 
     /// <summary>Unregister a neighbor multiplexer. Closes mesh-opened channels but never disposes the neighbor mux.</summary>
     void RemoveNeighbor(string remoteNodeId);

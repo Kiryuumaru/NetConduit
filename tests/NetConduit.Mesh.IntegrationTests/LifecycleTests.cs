@@ -99,6 +99,6 @@ public class LifecycleTests
     {
         await using var meshA = MeshMultiplexer.Create(new MeshMultiplexerOptions { NodeId = "A" });
         Assert.Throws<InvalidOperationException>(
-            () => meshA.AddNeighbor("B", null!));
+            () => meshA.AddNeighbor("B", (IStreamMultiplexer)null!));
     }
 }

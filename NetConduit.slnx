@@ -29,6 +29,7 @@
   <Folder Name="/samples/">
     <Project Path="samples/FileTransferSample/FileTransferSample.csproj" />
     <Project Path="samples/GroupChatSample/GroupChatSample.csproj" />
+    <Project Path="samples/MeshHowTo/MeshHowTo.csproj" />
     <Project Path="samples/PongGame/PongGame.csproj" />
     <Project Path="samples/RemoteShellSample/RemoteShellSample.csproj" />
     <Project Path="samples/RpcFrameworkSample/RpcFrameworkSample.csproj" />

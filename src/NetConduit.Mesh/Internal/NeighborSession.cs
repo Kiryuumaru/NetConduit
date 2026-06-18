@@ -14,6 +14,7 @@ internal sealed class NeighborSession : IAsyncDisposable
     private readonly MeshMultiplexer _mesh;
     private readonly string _remoteNodeId;
     private readonly IStreamMultiplexer _mux;
+    private bool _ownsMux;
     private readonly object _sendLock = new();
     private readonly int _sessionVersion;
 
@@ -54,11 +55,18 @@ internal sealed class NeighborSession : IAsyncDisposable
 
     internal void SetHealthy(bool healthy) => _isHealthy = healthy;
 
-    internal NeighborSession(MeshMultiplexer mesh, string remoteNodeId, IStreamMultiplexer mux, string? remotePoolId, int sessionVersion)
+    /// <summary>
+    /// Mark this session as owning the underlying multiplexer. Called when the
+    /// mesh created the mux via <c>AddNeighbor(MultiplexerOptions)</c>.
+    /// </summary>
+    internal void SetOwnsMux() => _ownsMux = true;
+
+    internal NeighborSession(MeshMultiplexer mesh, string remoteNodeId, IStreamMultiplexer mux, string? remotePoolId, int sessionVersion, bool ownsMux = false)
     {
         _mesh = mesh;
         _remoteNodeId = remoteNodeId;
         _mux = mux;
+        _ownsMux = ownsMux;
         _sessionVersion = sessionVersion;
         _isHealthy = mux.IsConnected;
         RemotePoolId = remotePoolId;
@@ -378,5 +386,11 @@ internal sealed class NeighborSession : IAsyncDisposable
         }
 
         _cts?.Dispose();
+
+        // Dispose the mux when mesh owns it (AddNeighbor with MultiplexerOptions).
+        if (_ownsMux)
+        {
+            try { await _mux.DisposeAsync().ConfigureAwait(false); } catch { }
+        }
     }
 }

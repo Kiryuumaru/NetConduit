@@ -317,6 +317,52 @@ public sealed class MeshMultiplexer : IMeshMultiplexer
     }
 
     /// <inheritdoc />
+    public void AddNeighbor(string remoteNodeId, MultiplexerOptions muxOptions, string? remotePoolId = null)
+    {
+        if (_isDisposed)
+        {
+            throw new ObjectDisposedException(nameof(MeshMultiplexer));
+        }
+        if (!_isRunning)
+        {
+            throw new InvalidOperationException("Mesh must be started before adding neighbors.");
+        }
+        Identifiers.ValidateNodeId(remoteNodeId, nameof(remoteNodeId));
+        if (remotePoolId is not null)
+        {
+            Identifiers.ValidatePoolId(remotePoolId, nameof(remotePoolId));
+        }
+        if (string.Equals(remoteNodeId, _options.NodeId, StringComparison.Ordinal))
+        {
+            throw new ArgumentException("Neighbor node ID must differ from local node ID.", nameof(remoteNodeId));
+        }
+        ArgumentNullException.ThrowIfNull(muxOptions);
+
+        // Mesh creates and owns the mux — same pattern transports use:
+        // MultiplexerOptions carries a StreamFactory that creates the transport.
+        var mux = StreamMultiplexer.Create(muxOptions);
+        try
+        {
+            mux.Start();
+            AddNeighbor(remoteNodeId, mux, remotePoolId);
+            // Mark the session as mesh-owned so the mux gets disposed on remove/dispose.
+            lock (_stateLock)
+            {
+                if (_neighbors.TryGetValue(remoteNodeId, out var session))
+                {
+                    session.SetOwnsMux();
+                }
+            }
+        }
+        catch
+        {
+            // If AddNeighbor fails after mux creation, clean up the mux.
+            try { mux.DisposeAsync().AsTask().GetAwaiter().GetResult(); } catch { }
+            throw;
+        }
+    }
+
+    /// <inheritdoc />
     public void RemoveNeighbor(string remoteNodeId)
     {
         if (_isDisposed)
@@ -919,7 +965,7 @@ public sealed class MeshMultiplexer : IMeshMultiplexer
     /// when its underlying mux recovers. Explicit removal remains a user-only action via
     /// <see cref="RemoveNeighbor"/>.
     /// The <paramref name="sessionVersion"/> check rejects late events from a session that
-    /// has already been replaced by a fresh <see cref="AddNeighbor"/> for the same node ID.
+    /// has already been replaced by a fresh <c>AddNeighbor</c> for the same node ID.
     /// </summary>
     internal void OnNeighborHealthChanged(string remoteNodeId, int sessionVersion, bool healthy)
     {
