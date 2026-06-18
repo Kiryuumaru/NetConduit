@@ -485,7 +485,7 @@ internal sealed class WriteChannel : Stream, IWriteChannel
             // with replay enabled. Without this, _ackedPos stays at 0 (peer
             // ACKs require consumer draining), TryCompactLocked no-ops, and
             // TryQueuePendingFinLocked cannot fit the FIN header — the slab
-            // is full and DisposeAsync drops all pending data (fixes #543).
+            // is full and DisposeAsync drops all pending data.
             else if (_finRequested && _enableReplay)
             {
                 _ackedPos = _sentPos;
