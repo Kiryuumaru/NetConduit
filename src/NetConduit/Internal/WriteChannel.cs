@@ -793,12 +793,20 @@ internal sealed class WriteChannel : Stream, IWriteChannel
         if (_state is not ChannelState.Closed)
         {
             await CloseAsync();
-            SetClosed(ChannelCloseReason.LocalClose);
+            // Do NOT call SetClosed here — the writer thread drains
+            // pending frames and the FIN frame, then calls SetClosed
+            // itself via MarkSent → TryQueuePendingFinLocked.
+            // Calling SetClosed early drops the slab and truncates
+            // data that hasn't been sent yet (fixes #543).
         }
         // Wait until the writer thread has drained the FIN frame and the channel
         // has been removed from the owner's registry, so the channel ID is
         // immediately reusable after DisposeAsync completes.
         await _unregisteredTcs.Task.ConfigureAwait(false);
+        // Safety net: if the writer thread never drained (transport failure,
+        // channel never opened), force-close now.
+        if (_state is not ChannelState.Closed)
+            SetClosed(ChannelCloseReason.LocalClose);
         _spaceAvailable.Dispose();
         await base.DisposeAsync();
     }
