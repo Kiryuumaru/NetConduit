@@ -531,6 +531,53 @@ public sealed class MessageTransitTests
         await server.DisposeAsync();
     }
 
+    /// <summary>
+    /// Regression for: when the receiver rejects a message because its
+    /// length prefix exceeds the receiver's _maxMessageSize, the over-max
+    /// payload bytes are still queued on the channel. The receiver MUST drain
+    /// those bytes before the next ReceiveAsync so framing resumes on a clean
+    /// boundary. Without this, every subsequent ReceiveAsync reads garbage
+    /// length prefixes from the middle of the abandoned payload and the
+    /// receive stream is permanently desynchronized.
+    /// </summary>
+    [Fact]
+    public async Task MessageTransit_OversizedReceive_DrainsPayload_AndRecoversFraming()
+    {
+        var (client, server) = await CreateReadyPairAsync();
+
+        var w = client.OpenChannel("m3-drain");
+        var r = await server.AcceptChannelAsync("m3-drain");
+
+#pragma warning disable IL2026, IL3050
+        // Sender accepts up to 1 MiB; receiver rejects anything over 1 KiB.
+        var sender = new MessageTransit<TestMessage, TestMessage>(w, null, maxMessageSize: 1 * 1024 * 1024);
+        var receiver = new MessageTransit<TestMessage, TestMessage>(null, r, maxMessageSize: 1024);
+#pragma warning restore IL2026, IL3050
+
+        // Big message: legit for sender, over-max for receiver.
+        await sender.SendAsync(new TestMessage { Name = new string('x', 8 * 1024), Value = 1 });
+        // Normal follow-up that the receiver MUST be able to recover and read.
+        await sender.SendAsync(new TestMessage { Name = "after", Value = 2 });
+
+        // First receive: rejects the over-max message.
+        var ex = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            receiver.ReceiveAsync().AsTask());
+        Assert.Contains("exceeds maximum", ex.Message);
+
+        // Second receive: must yield the follow-up cleanly, proving the
+        // abandoned over-max payload was drained instead of being parsed
+        // as the next length prefix.
+        var recovered = await receiver.ReceiveAsync();
+        Assert.NotNull(recovered);
+        Assert.Equal("after", recovered.Name);
+        Assert.Equal(2, recovered.Value);
+
+        await sender.DisposeAsync();
+        await receiver.DisposeAsync();
+        await client.DisposeAsync();
+        await server.DisposeAsync();
+    }
+
     #endregion
 
     #region ReceiveAllAsync
@@ -559,6 +606,82 @@ public sealed class MessageTransitTests
 
         Assert.Single(messages);
         Assert.Equal("only", messages[0].Name);
+
+        await receiver.DisposeAsync();
+        await client.DisposeAsync();
+        await server.DisposeAsync();
+    }
+
+    [Fact]
+    public async Task MessageTransit_ReceiveAllAsync_StopsOnChannelClose_WhenReceiveTypeIsValueType()
+    {
+        // ReceiveAllAsync used `message is null` to detect EOF,
+        // which is always false for non-nullable value types. The loop would
+        // yield default(int)=0 forever after the channel closed.
+        var (client, server) = await CreateReadyPairAsync();
+
+        var w = client.OpenChannel("m4i");
+        var r = await server.AcceptChannelAsync("m4i");
+
+#pragma warning disable IL2026, IL3050
+        var sender = new MessageTransit<int, int>(w, null);
+        var receiver = new MessageTransit<int, int>(null, r);
+#pragma warning restore IL2026, IL3050
+
+        await sender.SendAsync(42);
+        await sender.DisposeAsync();
+
+        var messages = new List<int>();
+        // Hard cap on iteration count: if the bug is present, ReceiveAllAsync
+        // produces unlimited 0s. Stop early so the test fails loudly with a
+        // helpful message instead of timing out.
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+        await foreach (var msg in receiver.ReceiveAllAsync(cts.Token))
+        {
+            messages.Add(msg);
+            if (messages.Count > 10) break;
+        }
+
+        Assert.Single(messages);
+        Assert.Equal(42, messages[0]);
+
+        await receiver.DisposeAsync();
+        await client.DisposeAsync();
+        await server.DisposeAsync();
+    }
+
+    [Fact]
+    public async Task MessageTransit_ReceiveAllAsync_YieldsLegitimateJsonNullPayload_AndContinues()
+    {
+        // ReceiveAllAsync used `message is null` as a secondary EOF
+        // sentinel, conflating a peer-sent JSON `null` payload with end-of-stream.
+        // The first legit null message terminated the loop and every subsequent
+        // message was silently lost. Fix: rely solely on `_receiveEof`; yield
+        // the deserialized value verbatim (including null for nullable TReceive).
+        var (client, server) = await CreateReadyPairAsync();
+
+        var w = client.OpenChannel("m4-null");
+        var r = await server.AcceptChannelAsync("m4-null");
+
+#pragma warning disable IL2026, IL3050
+        var sender = new MessageTransit<string?, string?>(w, null);
+        var receiver = new MessageTransit<string?, string?>(null, r);
+#pragma warning restore IL2026, IL3050
+
+        await sender.SendAsync("hello");
+        await sender.SendAsync(null);
+        await sender.SendAsync("world");
+        await sender.DisposeAsync();
+
+        var messages = new List<string?>();
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+        await foreach (var msg in receiver.ReceiveAllAsync(cts.Token))
+        {
+            messages.Add(msg);
+            if (messages.Count > 10) break;
+        }
+
+        Assert.Equal(new[] { "hello", null, "world" }, messages);
 
         await receiver.DisposeAsync();
         await client.DisposeAsync();
@@ -718,6 +841,268 @@ public sealed class MessageTransitTests
         await transit.DisposeAsync();
         await serverTransit.DisposeAsync();
         await server.DisposeAsync();
+    }
+
+    #endregion
+
+    #region IsConnected Precedence
+
+    private sealed class FakeChannel(bool isConnected) : IWriteChannel, IReadChannel
+    {
+        public string ChannelId => "fake";
+        public ChannelState State => ChannelState.Open;
+        public bool IsReady => true;
+        public bool IsConnected { get; set; } = isConnected;
+        public ChannelPriority Priority => ChannelPriority.Normal;
+        public ChannelStats Stats { get; } = new();
+        public ChannelCloseReason? CloseReason => null;
+        public Exception? CloseException => null;
+
+        public event EventHandler? Ready { add { } remove { } }
+        public event EventHandler? Connected { add { } remove { } }
+        public event EventHandler<DisconnectedEventArgs>? Disconnected { add { } remove { } }
+        public event EventHandler<ChannelCloseEventArgs>? Closed { add { } remove { } }
+
+        public Task WaitForReadyAsync(CancellationToken ct = default) => Task.CompletedTask;
+        public ValueTask CloseAsync(CancellationToken ct = default) => ValueTask.CompletedTask;
+        public Stream AsStream() => Stream.Null;
+        public ValueTask WriteAsync(ReadOnlyMemory<byte> data, CancellationToken ct = default) => ValueTask.CompletedTask;
+        public ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken ct = default) => new(0);
+        public ValueTask DisposeAsync() => ValueTask.CompletedTask;
+        public void Dispose() { }
+    }
+
+    [Fact]
+    public async Task MessageTransit_IsConnected_ReturnsFalse_AfterDispose_EvenWhenReadChannelStillConnected()
+    {
+        // MessageTransit.IsConnected was missing parentheses around
+        // the `||` group, so the read-channel disjunct bypassed the !_disposed
+        // guard. With a read channel that still reports IsConnected == true
+        // (e.g. during the window between flipping _disposed and the read
+        // channel's IsConnected clearing), IsConnected wrongly returned true
+        // for a disposed transit.
+        var write = new FakeChannel(isConnected: false);
+        var read = new FakeChannel(isConnected: true);
+
+#pragma warning disable IL2026, IL3050
+        var transit = new MessageTransit<TestMessage, TestMessage>(write, read);
+#pragma warning restore IL2026, IL3050
+
+        await transit.DisposeAsync();
+
+        Assert.False(transit.IsConnected);
+    }
+
+    [Fact]
+    public async Task MessageTransit_IsConnected_ReturnsFalse_AfterDispose_EvenWhenWriteChannelStillConnected()
+    {
+        var write = new FakeChannel(isConnected: true);
+        var read = new FakeChannel(isConnected: false);
+
+#pragma warning disable IL2026, IL3050
+        var transit = new MessageTransit<TestMessage, TestMessage>(write, read);
+#pragma warning restore IL2026, IL3050
+
+        await transit.DisposeAsync();
+
+        Assert.False(transit.IsConnected);
+    }
+
+    [Fact]
+    public void MessageTransit_IsConnected_ReturnsTrue_WhenOnlyReadChannelConnected_BeforeDispose()
+    {
+        // Sanity check: the disjunction itself is preserved — a live transit
+        // with only the read side connected still reports IsConnected.
+        var write = new FakeChannel(isConnected: false);
+        var read = new FakeChannel(isConnected: true);
+
+#pragma warning disable IL2026, IL3050
+        var transit = new MessageTransit<TestMessage, TestMessage>(write, read);
+#pragma warning restore IL2026, IL3050
+
+        Assert.True(transit.IsConnected);
+    }
+
+    #endregion
+
+    #region Receive Cancellation Framing
+
+    // IReadChannel that delivers bytes from a queued backlog in caller-chosen
+    // chunk sizes, and observes the caller's CancellationToken. Lets us
+    // deterministically cancel a ReceiveAsync between the length prefix and
+    // the payload (or mid-payload) without relying on transport timing.
+    private sealed class ScriptedReadChannel : IReadChannel
+    {
+        private readonly System.Collections.Concurrent.ConcurrentQueue<byte[]> _chunks = new();
+        private readonly SemaphoreSlim _chunkAvailable = new(0, int.MaxValue);
+        private readonly TaskCompletionSource _readyTcs = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        private byte[]? _carry; // remainder of a partially-consumed chunk
+        private int _carryOffset;
+        private volatile bool _eof;
+
+        public string ChannelId => "scripted";
+        public ChannelState State => ChannelState.Open;
+        public bool IsReady => true;
+        public bool IsConnected => true;
+        public ChannelPriority Priority => ChannelPriority.Normal;
+        public ChannelStats Stats { get; } = new();
+        public ChannelCloseReason? CloseReason => null;
+        public Exception? CloseException => null;
+
+        public event EventHandler? Ready { add { } remove { } }
+        public event EventHandler? Connected { add { } remove { } }
+        public event EventHandler<DisconnectedEventArgs>? Disconnected { add { } remove { } }
+        public event EventHandler<ChannelCloseEventArgs>? Closed { add { } remove { } }
+
+        public Task WaitForReadyAsync(CancellationToken ct = default) => _readyTcs.Task;
+        public ValueTask CloseAsync(CancellationToken ct = default) => ValueTask.CompletedTask;
+        public Stream AsStream() => Stream.Null;
+        public ValueTask DisposeAsync() { _chunkAvailable.Dispose(); return ValueTask.CompletedTask; }
+        public void Dispose() => _chunkAvailable.Dispose();
+
+        public void Enqueue(byte[] chunk)
+        {
+            _chunks.Enqueue(chunk);
+            _chunkAvailable.Release();
+        }
+
+        public void SetEof()
+        {
+            _eof = true;
+            // Wake any pending waiter so it observes EOF.
+            _chunkAvailable.Release();
+        }
+
+        public async ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken ct = default)
+        {
+            // If we already have a carried chunk, drain from it first.
+            if (_carry is not null)
+            {
+                var remain = _carry.Length - _carryOffset;
+                var take = Math.Min(remain, buffer.Length);
+                _carry.AsSpan(_carryOffset, take).CopyTo(buffer.Span);
+                _carryOffset += take;
+                if (_carryOffset == _carry.Length)
+                {
+                    _carry = null;
+                    _carryOffset = 0;
+                }
+                return take;
+            }
+
+            // Wait (cancellably) for the next chunk to be enqueued.
+            await _chunkAvailable.WaitAsync(ct).ConfigureAwait(false);
+
+            if (_chunks.TryDequeue(out var chunk))
+            {
+                var take = Math.Min(chunk.Length, buffer.Length);
+                chunk.AsSpan(0, take).CopyTo(buffer.Span);
+                if (take < chunk.Length)
+                {
+                    _carry = chunk;
+                    _carryOffset = take;
+                }
+                return take;
+            }
+
+            // No chunk and EOF signaled.
+            if (_eof) return 0;
+            throw new InvalidOperationException("ScriptedReadChannel woken without chunk and without EOF.");
+        }
+    }
+
+    private static byte[] FrameMessage(string json)
+    {
+        var bytes = System.Text.Encoding.UTF8.GetBytes(json);
+        var framed = new byte[4 + bytes.Length];
+        System.Buffers.Binary.BinaryPrimitives.WriteUInt32BigEndian(framed, (uint)bytes.Length);
+        bytes.CopyTo(framed, 4);
+        return framed;
+    }
+
+    [Fact]
+    public async Task ReceiveAsync_CancelledMidPayload_NextCallResumesAndDeliversCorrectMessage()
+    {
+        // Two consecutive framed JSON messages. We feed chunks one at a time
+        // through the scripted channel; the first ReceiveAsync consumes the
+        // length prefix and part of the payload, then waits for more bytes.
+        // We cancel during that wait and assert the next call resumes mid-payload.
+        var msg1Json = "\"" + new string('a', 4000) + "\"";
+        var msg2Json = "\"hello\"";
+        var frame1 = FrameMessage(msg1Json);
+        var frame2 = FrameMessage(msg2Json);
+
+        var read = new ScriptedReadChannel();
+        // Chunk A: length prefix + first half of msg1's payload.
+        var halfPayload = (frame1.Length - 4) / 2;
+        var chunkA = new byte[4 + halfPayload];
+        frame1.AsSpan(0, chunkA.Length).CopyTo(chunkA);
+        read.Enqueue(chunkA);
+
+#pragma warning disable IL2026, IL3050
+        var transit = new MessageTransit<string, string>(writeChannel: null, readChannel: read);
+#pragma warning restore IL2026, IL3050
+
+        using var cts = new CancellationTokenSource();
+        var receiveTask = transit.ReceiveAsync(cts.Token).AsTask();
+
+        // Let the receive consume chunk A and park waiting for more bytes.
+        await Task.Delay(100);
+        Assert.False(receiveTask.IsCompleted);
+        cts.Cancel();
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(async () => await receiveTask);
+
+        // Now enqueue: remainder of msg1 + msg2.
+        var chunkB = new byte[(frame1.Length - chunkA.Length) + frame2.Length];
+        frame1.AsSpan(chunkA.Length).CopyTo(chunkB);
+        frame2.CopyTo(chunkB, frame1.Length - chunkA.Length);
+        read.Enqueue(chunkB);
+        read.SetEof();
+
+        using var ctsLong = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        var msg1 = await transit.ReceiveAsync(ctsLong.Token);
+        Assert.Equal(new string('a', 4000), msg1);
+
+        var msg2 = await transit.ReceiveAsync(ctsLong.Token);
+        Assert.Equal("hello", msg2);
+
+        await transit.DisposeAsync();
+    }
+
+    [Fact]
+    public async Task ReceiveAsync_CancelledMidLengthPrefix_NextCallResumesAtSameByteBoundary()
+    {
+        // Length prefix split across two chunks: cancel between them, then
+        // verify the next receive reassembles the prefix correctly.
+        var msgJson = "\"hi\"";
+        var frame = FrameMessage(msgJson);
+
+        var read = new ScriptedReadChannel();
+        read.Enqueue(frame.AsSpan(0, 2).ToArray());
+
+#pragma warning disable IL2026, IL3050
+        var transit = new MessageTransit<string, string>(writeChannel: null, readChannel: read);
+#pragma warning restore IL2026, IL3050
+
+        using var cts = new CancellationTokenSource();
+        var receiveTask = transit.ReceiveAsync(cts.Token).AsTask();
+
+        await Task.Delay(100);
+        Assert.False(receiveTask.IsCompleted);
+        cts.Cancel();
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(async () => await receiveTask);
+
+        // Enqueue the remaining length-prefix bytes + payload.
+        read.Enqueue(frame.AsSpan(2).ToArray());
+        read.SetEof();
+
+        using var ctsLong = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        var msg = await transit.ReceiveAsync(ctsLong.Token);
+        Assert.Equal("hi", msg);
+
+        await transit.DisposeAsync();
     }
 
     #endregion

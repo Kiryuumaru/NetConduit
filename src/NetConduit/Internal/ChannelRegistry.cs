@@ -13,31 +13,39 @@ internal sealed class ChannelRegistry
 {
     private readonly ConcurrentDictionary<ushort, WriteChannel> _writeChannels = new();
     private readonly ConcurrentDictionary<ushort, ReadChannel> _readChannels = new();
+    private readonly ConcurrentDictionary<ushort, byte> _retiredChannelIndices = new();
     private readonly ConcurrentDictionary<string, ushort> _idToIndex = new();
     private readonly ConcurrentDictionary<string, TaskCompletionSource<ReadChannel>> _pendingAccepts = new();
     private readonly ConcurrentDictionary<string, ReadChannel> _pendingAcceptChannels = new();
     private readonly Channel<ReadChannel> _acceptQueue = Channel.CreateUnbounded<ReadChannel>();
-
-    // Prefix-routed accept subscriptions. When EnqueueForAccept sees a channel
-    // whose id starts with a registered prefix, it routes the channel to that
-    // subscription's queue instead of the default _acceptQueue. This lets an
-    // overlay (e.g. mesh) cleanly multiplex on a host application's mux without
-    // stealing application channels. Subscriptions are checked in registration
-    // order; longest-prefix-first ordering is the caller's responsibility (the
-    // mesh registers exactly one prefix, "_mesh:", so ordering does not matter
-    // in practice today).
     private readonly object _prefixSubscriptionsLock = new();
     private readonly List<PrefixSubscription> _prefixSubscriptions = new();
 
-    private sealed class PrefixSubscription
+    private sealed class PrefixSubscription(string prefix)
     {
-        internal string Prefix { get; }
-        internal Channel<ReadChannel> Queue { get; }
+        public string Prefix { get; } = prefix;
+        public Channel<ReadChannel> Queue { get; } = Channel.CreateUnbounded<ReadChannel>();
+    }
 
-        internal PrefixSubscription(string prefix)
+    /// <summary>
+    /// Validates that <paramref name="candidate"/> does not collide with any
+    /// existing subscription. Two prefixes collide when one is a prefix of the
+    /// other (including equality): routing the inbound channel would otherwise
+    /// be ambiguous. Caller MUST hold <see cref="_prefixSubscriptionsLock"/>.
+    /// </summary>
+    private void ThrowIfPrefixConflictsLocked(string candidate)
+    {
+        foreach (var existing in _prefixSubscriptions)
         {
-            Prefix = prefix;
-            Queue = Channel.CreateUnbounded<ReadChannel>();
+            if (existing.Prefix.StartsWith(candidate, StringComparison.Ordinal) ||
+                candidate.StartsWith(existing.Prefix, StringComparison.Ordinal))
+            {
+                throw new MultiplexerException(
+                    ErrorCode.ChannelExists,
+                    $"Prefix subscription '{candidate}' conflicts with existing subscription '{existing.Prefix}'. " +
+                    "Each prefix namespace may have at most one active subscriber; " +
+                    "the previous subscription must be cancelled before re-registering an overlapping prefix.");
+            }
         }
     }
 
@@ -51,6 +59,23 @@ internal sealed class ChannelRegistry
     /// instances for the same channel id.
     /// </summary>
     internal readonly object AcceptLock = new();
+
+    /// <summary>
+    /// Serializes pre-handshake index allocation against the post-handshake
+    /// parity reassignment walk. Held by:
+    ///   1. OpenChannel / TryRegisterChannels around AllocateChannelIndex +
+    ///      RegisterWriteChannel + WriteInitFrame, so the channel is fully
+    ///      published (and its INIT frame stamped) before any concurrent
+    ///      reassign walk takes a snapshot.
+    ///   2. StreamMultiplexer.ReassignPreHandshakeWriteChannelIndices around
+    ///      its GetAllWriteChannels enumeration + rekey loop.
+    /// Without this lock there is a race: OpenChannel reads the pre-flip
+    /// _nextChannelIndex, the main loop runs SetIndexParity + the reassign
+    /// snapshot (missing the unregistered channel), then OpenChannel registers
+    /// + writes INIT with the wrong-parity index → INIT-ACK collision and
+    /// WriteChannel.WaitForReadyAsync hangs.
+    /// </summary>
+    internal readonly object ChannelIndexLock = new();
 
     private int _nextChannelIndex;
     private readonly int _indexStep = 2;
@@ -68,11 +93,50 @@ internal sealed class ChannelRegistry
         _nextChannelIndex = useOddIndices ? 1 : 2;
     }
 
+    /// <summary>
+    /// True when <paramref name="index"/> matches the current allocation parity
+    /// (odd vs even). Used after the handshake's <see cref="SetIndexParity"/>
+    /// to identify pre-handshake-allocated indices that landed on the wrong
+    /// parity space and must be reassigned before any frame is transmitted
+    /// </summary>
+    internal bool IsCurrentParity(ushort index)
+    {
+        bool useOdd = (Volatile.Read(ref _nextChannelIndex) & 1) == 1;
+        return ((index & 1) == 1) == useOdd;
+    }
+
+    /// <summary>
+    /// Atomically rekey a registered <see cref="WriteChannel"/> from
+    /// <paramref name="oldIndex"/> to <paramref name="newIndex"/>. Used by the
+    /// post-handshake reassignment for pre-handshake-allocated channels whose
+    /// indices need to move into the correct parity space.
+    /// </summary>
+    internal void RekeyWriteChannel(ushort oldIndex, ushort newIndex, WriteChannel channel)
+    {
+        if (oldIndex == newIndex) return;
+        // Reserve the new slot first so a parallel allocation cannot land on it
+        // between the remove and the add.
+        if (!_writeChannels.TryAdd(newIndex, channel))
+            throw new MultiplexerException(
+                ErrorCode.Internal,
+                $"Cannot rekey write channel '{channel.ChannelId}' to index {newIndex}: slot already occupied.");
+        _writeChannels.TryRemove(new KeyValuePair<ushort, WriteChannel>(oldIndex, channel));
+        _retiredChannelIndices.TryRemove(newIndex, out _);
+        _idToIndex[channel.ChannelId] = newIndex;
+    }
+
     internal ushort AllocateChannelIndex()
     {
         int index = Interlocked.Add(ref _nextChannelIndex, _indexStep) - _indexStep;
         if (index > ChannelConstants.MaxDataChannel)
+        {
+            foreach (var kvp in _retiredChannelIndices)
+            {
+                if (_retiredChannelIndices.TryRemove(kvp.Key, out _))
+                    return kvp.Key;
+            }
             throw new MultiplexerException(ErrorCode.Internal, "Channel index space exhausted.");
+        }
         return (ushort)index;
     }
 
@@ -81,7 +145,16 @@ internal sealed class ChannelRegistry
         if (!_writeChannels.TryAdd(index, channel))
             throw new MultiplexerException(ErrorCode.ChannelExists, $"Write channel with index {index} already exists.");
         if (!_idToIndex.TryAdd(channel.ChannelId, index))
+        {
+            // Roll back the per-index insert so we do not leave an orphan
+            // WriteChannel reachable via GetWriteChannel(index) /
+            // GetAllWriteChannels() after the throw. The caller has no
+            // way to undo this themselves: they never received a successful
+            // return and have no record of the allocated index.
+            _writeChannels.TryRemove(new KeyValuePair<ushort, WriteChannel>(index, channel));
             throw new MultiplexerException(ErrorCode.ChannelExists, $"A channel with ID '{channel.ChannelId}' already exists.");
+        }
+        _retiredChannelIndices.TryRemove(index, out _);
     }
 
     internal void RegisterReadChannel(ushort index, ReadChannel channel)
@@ -89,7 +162,12 @@ internal sealed class ChannelRegistry
         if (!_readChannels.TryAdd(index, channel))
             throw new MultiplexerException(ErrorCode.ChannelExists, $"Read channel with index {index} already exists.");
         if (!_idToIndex.TryAdd(channel.ChannelId, index))
+        {
+            // Roll back the per-index insert.
+            _readChannels.TryRemove(new KeyValuePair<ushort, ReadChannel>(index, channel));
             throw new MultiplexerException(ErrorCode.ChannelExists, $"A channel with ID '{channel.ChannelId}' already exists.");
+        }
+        _retiredChannelIndices.TryRemove(index, out _);
     }
 
     internal WriteChannel? GetWriteChannel(ushort index)
@@ -103,6 +181,8 @@ internal sealed class ChannelRegistry
         _readChannels.TryGetValue(index, out var channel);
         return channel;
     }
+
+    internal bool IsRetiredChannelIndex(ushort index) => _retiredChannelIndices.ContainsKey(index);
 
     internal WriteChannel? GetWriteChannelById(string channelId)
     {
@@ -121,7 +201,13 @@ internal sealed class ChannelRegistry
     internal bool UnregisterChannel(ushort index, string channelId)
     {
         bool removed = _writeChannels.TryRemove(index, out _) || _readChannels.TryRemove(index, out _);
-        _idToIndex.TryRemove(channelId, out _);
+        if (removed)
+            _retiredChannelIndices.TryAdd(index, 0);
+        // Scope the _idToIndex removal to the (channelId, index) pair so a mismatched
+        // call — e.g. cleanup after a failed-to-commit registration where _idToIndex
+        // still points at a *different* (legitimate) channel under the same ChannelId
+        // — cannot tear down the legitimate mapping.
+        _idToIndex.TryRemove(new KeyValuePair<string, ushort>(channelId, index));
         return removed;
     }
 
@@ -147,11 +233,43 @@ internal sealed class ChannelRegistry
 
     internal void EnqueueForAccept(ReadChannel channel)
     {
-        // Check if there's a specific async accept waiting for this channel ID
+        // Check if there's a specific async accept waiting for this channel ID.
+        // If we win TryRemove but TrySetResult fails, the awaiter raced us to
+        // cancellation between our TryRemove and our TrySetResult — its callback
+        // unconditionally TrySetCanceled'd the same TCS instance after losing
+        // its own TryRemove. The TCS is dead but the channel is still live and
+        // fully registered in _readChannels: we MUST route it to the catch-all
+        // _acceptQueue (or a matching prefix subscription) instead of dropping
+        // it on the floor, or the peer keeps the channel open and writes pile
+        // up unread in the orphan slab.
         if (_pendingAccepts.TryRemove(channel.ChannelId, out var tcs))
         {
-            tcs.TrySetResult(channel);
-            return;
+            if (tcs.TrySetResult(channel))
+                return;
+            // TrySetResult failed: TCS was already completed. If it was
+            // completed via AcceptChannelAsync's fast-path with THIS same
+            // channel reference, the named waiter has already received it —
+            // suppress to avoid double-delivery. Otherwise
+            // (cancelled, or completed with a stale channel from a prior
+            // close+reopen cycle of the same id), fall through so the new
+            // channel is still delivered somewhere.
+            if (tcs.Task.Status == TaskStatus.RanToCompletion &&
+                ReferenceEquals(tcs.Task.Result, channel))
+                return;
+        }
+        // Then check prefix subscriptions (overlay protocols claiming a namespace).
+        // Prefixes are guaranteed non-overlapping by ThrowIfPrefixConflictsLocked,
+        // so at most one subscription can match — iteration order does not matter.
+        lock (_prefixSubscriptionsLock)
+        {
+            foreach (var sub in _prefixSubscriptions)
+            {
+                if (channel.ChannelId.StartsWith(sub.Prefix, StringComparison.Ordinal))
+                {
+                    sub.Queue.Writer.TryWrite(channel);
+                    return;
+                }
+            }
         }
 
         // Prefix-routed subscription wins over the default queue. Lookups are
@@ -174,34 +292,148 @@ internal sealed class ChannelRegistry
 
     internal async ValueTask<ReadChannel> AcceptChannelAsync(string channelId, CancellationToken ct)
     {
-        // Check if channel already arrived
-        if (_idToIndex.TryGetValue(channelId, out var index))
-        {
-            var existing = GetReadChannel(index);
-            if (existing is not null) return existing;
-        }
-
+        // Register the TCS first. EnqueueForAccept treats a registered TCS as
+        // the sole hand-off token: once present, an inbound INIT delivers the
+        // channel via TrySetResult and never falls through to _acceptQueue.
+        //
+        // We must NOT return the channel from a fast-path _idToIndex lookup
+        // without going through the TCS. If we did, a concurrent HandleInitFrame
+        // could have just committed RegisterReadChannel (so _idToIndex hits)
+        // but not yet called EnqueueForAccept. Returning directly from the
+        // fast path would then let EnqueueForAccept fall through to
+        // _acceptQueue, delivering the same ReadChannel to this caller AND
+        // a generic AcceptChannelsAsync consumer.
         var tcs = new TaskCompletionSource<ReadChannel>(TaskCreationOptions.RunContinuationsAsynchronously);
         _pendingAccepts[channelId] = tcs;
 
-        // Re-check after registration — channel may have arrived between first check and registration
-        if (_idToIndex.TryGetValue(channelId, out index))
+        // If the channel had already arrived before this call, complete the
+        // TCS ourselves with the channel reference. A concurrent or subsequent
+        // EnqueueForAccept(channel) will then find the TCS still in the
+        // dictionary, TryRemove it, observe TrySetResult fails, and (because
+        // the TCS already holds *this same channel*) suppress its queue
+        // fall-through — preventing the double-delivery race.
+        if (_idToIndex.TryGetValue(channelId, out var index))
         {
             var existing = GetReadChannel(index);
             if (existing is not null)
+                tcs.TrySetResult(existing);
+        }
+
+        // On cancellation we must remove our entry from _pendingAccepts. Without
+        // this, a cancelled accept leaves a permanently-cancelled TCS in the
+        // dictionary; the next inbound INIT for the same channel ID gets routed
+        // to that dead TCS in EnqueueForAccept (TryRemove succeeds, TrySetResult
+        // is a no-op on a completed TCS) and the channel is silently dropped
+        // from the accept stream.
+        //
+        // Only TrySetCanceled when we actually won the TryRemove. If we lost the
+        // race to EnqueueForAccept, the TCS will be — or already is — completed
+        // by it, and EnqueueForAccept's TrySetResult-fallback path takes
+        // care of routing the channel to the catch-all queue when needed.
+        await using var registration = ct.Register(() =>
+        {
+            if (_pendingAccepts.TryRemove(channelId, out _))
+                tcs.TrySetCanceled(ct);
+        });
+        return await tcs.Task.ConfigureAwait(false);
+    }
+
+    internal IAsyncEnumerable<ReadChannel> AcceptChannelsAsync(string? channelIdPrefix, CancellationToken ct)
+    {
+        if (channelIdPrefix is null)
+            return _acceptQueue.Reader.ReadAllAsync(ct);
+
+        PrefixSubscription sub;
+        lock (_prefixSubscriptionsLock)
+        {
+            ThrowIfPrefixConflictsLocked(channelIdPrefix);
+            sub = new PrefixSubscription(channelIdPrefix);
+            _prefixSubscriptions.Add(sub);
+        }
+        // Wrap the iterator in an owner that releases the subscription on
+        // ct cancellation, enumerator disposal, OR finalization. This avoids
+        // the split-state lifecycle leak where the eager outer add was paired
+        // with a release that only ran if iteration actually started.
+        return new PrefixSubscriptionEnumerable(this, sub, ct);
+    }
+
+    /// <summary>
+    /// Owns a registered <see cref="PrefixSubscription"/> on behalf of an
+    /// <c>AcceptChannelsAsync(prefix, ct)</c> call. The subscription is
+    /// guaranteed to be released exactly once via the first of: outer ct
+    /// cancellation, enumerator <c>finally</c>, or finalizer (backstop when
+    /// the enumerable is discarded without iteration AND ct is uncancellable).
+    /// </summary>
+    private sealed class PrefixSubscriptionEnumerable : IAsyncEnumerable<ReadChannel>
+    {
+        private readonly ChannelRegistry _registry;
+        private readonly PrefixSubscription _sub;
+        private CancellationTokenRegistration _ctRegistration;
+        private int _released;
+
+        public PrefixSubscriptionEnumerable(ChannelRegistry registry, PrefixSubscription sub, CancellationToken outerCt)
+        {
+            _registry = registry;
+            _sub = sub;
+            if (outerCt.CanBeCanceled)
             {
-                _pendingAccepts.TryRemove(channelId, out _);
-                return existing;
+                _ctRegistration = outerCt.Register(
+                    static state => ((PrefixSubscriptionEnumerable)state!).Release(),
+                    this);
             }
         }
 
-        await using var registration = ct.Register(() => tcs.TrySetCanceled(ct));
-        return await tcs.Task;
+        ~PrefixSubscriptionEnumerable() => Release();
+
+        public IAsyncEnumerator<ReadChannel> GetAsyncEnumerator(CancellationToken cancellationToken = default)
+            => EnumerateAsync(cancellationToken).GetAsyncEnumerator(cancellationToken);
+
+        private async IAsyncEnumerable<ReadChannel> EnumerateAsync(
+            [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken ct)
+        {
+            try
+            {
+                await foreach (var channel in _sub.Queue.Reader.ReadAllAsync(ct).ConfigureAwait(false))
+                    yield return channel;
+            }
+            finally
+            {
+                Release();
+            }
+        }
+
+        private void Release()
+        {
+            if (Interlocked.Exchange(ref _released, 1) != 0) return;
+            _ctRegistration.Dispose();
+            _registry.RemovePrefixSubscription(_sub);
+            GC.SuppressFinalize(this);
+        }
     }
 
-    internal IAsyncEnumerable<ReadChannel> AcceptChannelsAsync(CancellationToken ct)
+    private void RemovePrefixSubscription(PrefixSubscription sub)
     {
-        return _acceptQueue.Reader.ReadAllAsync(ct);
+        bool removed;
+        lock (_prefixSubscriptionsLock)
+        {
+            removed = _prefixSubscriptions.Remove(sub);
+        }
+        if (!removed) return;
+
+        // Stop accepting new writes. Any concurrent EnqueueForAccept that already
+        // observed sub before this lock-release will not happen: that path holds
+        // _prefixSubscriptionsLock for its full foreach + TryWrite, so once
+        // Remove() returns under the same lock, no further EnqueueForAccept can
+        // pick this subscription.
+        sub.Queue.Writer.TryComplete();
+
+        // Re-route any channels that were buffered for this subscription but
+        // never enumerated (e.g. cancelled before the consumer awaited them)
+        // back into the default accept stream. Dropping them silently would
+        // leak channel state on this side while the peer still believes the
+        // channel is open.
+        while (sub.Queue.Reader.TryRead(out var leftover))
+            _acceptQueue.Writer.TryWrite(leftover);
     }
 
     /// <summary>
@@ -245,14 +477,102 @@ internal sealed class ChannelRegistry
         lock (_prefixSubscriptionsLock)
         {
             foreach (var sub in _prefixSubscriptions)
-            {
                 sub.Queue.Writer.TryComplete();
-            }
             _prefixSubscriptions.Clear();
         }
     }
 
     internal void AbortAllChannels(ChannelCloseReason reason, Exception? exception = null)
+    {
+        // Teardown discipline: every registered channel that was ever connected
+        // must fire Disconnected before Closed (fixes #391). The natural
+        // transport-drop path in MainLoopAsync already calls MarkDisconnected
+        // explicitly; the mux-dispose, local-GoAway, remote-GoAway, and
+        // terminal-failure paths all funnel through AbortAllChannels and used
+        // to skip it, violating IChannel.Disconnected's documented contract.
+        // MarkDisconnected is idempotent (no-op on never-connected channels and
+        // on channels already disconnected this cycle), so the natural-drop
+        // path's explicit pre-call still suppresses a duplicate fire here.
+        MarkAllChannelsDisconnected(reason, exception);
+        CloseAllChannels(reason, exception);
+    }
+
+    /// <summary>
+    /// Fires <see cref="IChannel.Disconnected"/> on every registered
+    /// write/read channel that was previously marked connected. Idempotent
+    /// (channels already disconnected this cycle are no-ops). Does NOT touch
+    /// channel state or return slab buffers - that is
+    /// <see cref="CloseAllChannels"/>'s responsibility, which the shutdown
+    /// paths must defer until after the writer task has exited to avoid a
+    /// use-after-free where the writer is still inside
+    /// <c>writeStream.Write(frames.Span)</c> when the slab is returned to
+    /// <see cref="System.Buffers.ArrayPool{T}"/> (fixes #368).
+    /// </summary>
+    internal void MarkAllChannelsDisconnected(ChannelCloseReason reason, Exception? exception = null)
+    {
+        DisconnectReason disconnectReason = reason switch
+        {
+            ChannelCloseReason.MuxDisposed => DisconnectReason.LocalDispose,
+            ChannelCloseReason.TransportFailed => DisconnectReason.TransportError,
+            _ => DisconnectReason.LocalDispose,
+        };
+        MarkAllChannelsDisconnected(disconnectReason, exception);
+    }
+
+    /// <summary>
+    /// Fires Disconnected on every registered write/read channel with the
+    /// exact DisconnectReason supplied. Use this overload when the channel-
+    /// level reason cannot be derived from a ChannelCloseReason, notably
+    /// GoAwayReceived on the peer-initiated shutdown path where the mux-
+    /// level Disconnected event reports GoAwayReceived and the per-channel
+    /// events must agree (otherwise applications subscribing to
+    /// IChannel.Disconnected see TransportError on every honest-peer GoAway
+    /// and take the wrong reconnect branch). Idempotent: channels already
+    /// disconnected this cycle are no-ops via their internal CAS guard.
+    /// </summary>
+    internal void MarkAllChannelsDisconnected(DisconnectReason reason, Exception? exception = null)
+    {
+        foreach (var channel in _writeChannels.Values)
+            channel.MarkDisconnected(reason, exception);
+        foreach (var channel in _readChannels.Values)
+            channel.MarkDisconnected(reason, exception);
+        // Pending accepts MAY have had MarkConnected called on them by
+        // AcceptChannel / ChannelBatchRegistrar when _isConnected was true at
+        // register time (fixes #427, #435). MarkDisconnected is CAS-guarded on
+        // _connectedFired so never-connected pending channels are no-ops; only
+        // promoted ones fire Disconnected, preserving the documented
+        // Connected/Disconnected alternation on IChannel.
+        foreach (var channel in _pendingAcceptChannels.Values)
+            channel.MarkDisconnected(reason, exception);
+    }
+
+    /// <summary>
+    /// Fires <see cref="IChannel.Connected"/> on every registered write/read
+    /// channel and every pending-accept channel. Idempotent
+    /// (<see cref="ReadChannel.MarkConnected"/> /
+    /// <see cref="WriteChannel.MarkConnected"/> are CAS-guarded on
+    /// <c>_connectedFired</c>), so channels already connected this cycle are
+    /// no-ops. Pending accepts are included so a pre-armed accept observes the
+    /// reconnect's up-edge after a transient transport drop (fixes #427).
+    /// </summary>
+    internal void MarkAllChannelsConnected()
+    {
+        foreach (var channel in _writeChannels.Values)
+            channel.MarkConnected();
+        foreach (var channel in _readChannels.Values)
+            channel.MarkConnected();
+        foreach (var channel in _pendingAcceptChannels.Values)
+            channel.MarkConnected();
+    }
+
+    /// <summary>
+    /// Transitions every registered channel to Closed and returns its slab to
+    /// <see cref="System.Buffers.ArrayPool{T}"/>. MUST only be called after
+    /// the writer task has exited; otherwise the writer can be mid
+    /// <c>writeStream.Write(frames.Span)</c> while the slab is rented by
+    /// another caller and overwritten (#368).
+    /// </summary>
+    internal void CloseAllChannels(ChannelCloseReason reason, Exception? exception = null)
     {
         foreach (var channel in _writeChannels.Values)
             channel.SetClosed(reason, exception);
@@ -263,6 +583,7 @@ internal sealed class ChannelRegistry
         _writeChannels.Clear();
         _readChannels.Clear();
         _pendingAcceptChannels.Clear();
+        _retiredChannelIndices.Clear();
         _idToIndex.Clear();
     }
 }

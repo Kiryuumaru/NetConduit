@@ -23,7 +23,6 @@
     <Project Path="tests/NetConduit.Transport.WebSocket.IntegrationTests/NetConduit.Transport.WebSocket.IntegrationTests.csproj" />
     <Project Path="tests/NetConduit.Transport.Udp.IntegrationTests/NetConduit.Transport.Udp.IntegrationTests.csproj" />
     <Project Path="tests/NetConduit.Transport.Ipc.IntegrationTests/NetConduit.Transport.Ipc.IntegrationTests.csproj" />
-    <Project Path="tests/NetConduit.Transport.Quic.IntegrationTests/NetConduit.Transport.Quic.IntegrationTests.csproj" />
     <Project Path="tests/NetConduit.Mesh.UnitTests/NetConduit.Mesh.UnitTests.csproj" />
     <Project Path="tests/NetConduit.Mesh.IntegrationTests/NetConduit.Mesh.IntegrationTests.csproj" />
   </Folder>

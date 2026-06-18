@@ -13,7 +13,10 @@ public sealed class DuplexStreamTransit : Stream, ITransit
     private readonly IReadChannel _readChannel;
     private volatile bool _disposed;
     private volatile bool _readyFired;
+    private volatile bool _connectedFired;
+    private volatile bool _disconnectedFired;
     private readonly object _readyLock = new();
+    private readonly object _stateLock = new();
 
     /// <summary>
     /// Creates a new DuplexStreamTransit from a write channel and read channel pair.
@@ -23,6 +26,11 @@ public sealed class DuplexStreamTransit : Stream, ITransit
         _writeChannel = writeChannel ?? throw new ArgumentNullException(nameof(writeChannel));
         _readChannel = readChannel ?? throw new ArgumentNullException(nameof(readChannel));
         SubscribeToChannelEvents();
+        // Channel.Ready is single-shot. If both underlying channels were already
+        // ready before we subscribed, the event we wired up will never fire.
+        // Synthesise the call so subscribers attached after construction still
+        // observe Ready exactly once.
+        OnChannelReady(this, EventArgs.Empty);
     }
 
     private void SubscribeToChannelEvents()
@@ -39,23 +47,58 @@ public sealed class DuplexStreamTransit : Stream, ITransit
     {
         // Fire Ready only when BOTH channels are ready
         if (!_writeChannel.IsReady || !_readChannel.IsReady) return;
+        EventHandler? handlers;
         lock (_readyLock)
         {
             if (_readyFired) return;
             _readyFired = true;
+            handlers = _readyHandlers;
         }
-        Ready?.Invoke(this, EventArgs.Empty);
+        handlers?.Invoke(this, EventArgs.Empty);
     }
 
-    private void OnChannelConnected(object? sender, EventArgs e) => Connected?.Invoke(this, EventArgs.Empty);
+    // Each underlying half (write + read) raises its own Connected and
+    // Disconnected events. Forwarding each one independently caused the
+    // transit to fire Connected twice and Disconnected twice. Connected fires
+    // once when BOTH halves are connected; Disconnected fires once on the
+    // first half going down.
+    //
+    // Each transition resets the opposite latch so the next
+    // reconnect cycle observes a fresh edge. Without the reset, the latches
+    // stick after the first cycle and reconnect-aware subscribers stop
+    // receiving events for the entire lifetime of the transit.
+    private void OnChannelConnected(object? sender, EventArgs e)
+    {
+        if (!_writeChannel.IsConnected || !_readChannel.IsConnected) return;
+        bool fire = false;
+        lock (_stateLock)
+        {
+            if (_connectedFired) return;
+            _connectedFired = true;
+            _disconnectedFired = false;
+            fire = true;
+        }
+        if (fire) Connected?.Invoke(this, EventArgs.Empty);
+    }
 
-    private void OnChannelDisconnected(object? sender, DisconnectedEventArgs e) => Disconnected?.Invoke(this, e);
+    private void OnChannelDisconnected(object? sender, DisconnectedEventArgs e)
+    {
+        bool fire = false;
+        lock (_stateLock)
+        {
+            if (_disconnectedFired) return;
+            _disconnectedFired = true;
+            _connectedFired = false;
+            fire = true;
+        }
+        if (fire) Disconnected?.Invoke(this, e);
+    }
 
     /// <inheritdoc/>
     public bool IsReady => !_disposed && _writeChannel.IsReady && _readChannel.IsReady;
 
     /// <inheritdoc/>
-    public bool IsConnected => !_disposed && (_writeChannel.IsConnected || _readChannel.IsConnected);
+    public bool IsConnected => !_disposed && _writeChannel.IsConnected && _readChannel.IsConnected;
 
     /// <inheritdoc/>
     public string? WriteChannelId => _writeChannel.ChannelId;
@@ -63,8 +106,32 @@ public sealed class DuplexStreamTransit : Stream, ITransit
     /// <inheritdoc/>
     public string? ReadChannelId => _readChannel.ChannelId;
 
+    private EventHandler? _readyHandlers;
+
     /// <inheritdoc/>
-    public event EventHandler? Ready;
+    /// <remarks>
+    /// Latching: subscribers attached after the transit has already become Ready are
+    /// invoked immediately on subscription, so callers that wait for channel readiness
+    /// before constructing the transit still observe the event exactly once.
+    /// </remarks>
+    public event EventHandler? Ready
+    {
+        add
+        {
+            if (value is null) return;
+            bool fireImmediately;
+            lock (_readyLock)
+            {
+                _readyHandlers += value;
+                fireImmediately = _readyFired;
+            }
+            if (fireImmediately) value(this, EventArgs.Empty);
+        }
+        remove
+        {
+            lock (_readyLock) { _readyHandlers -= value; }
+        }
+    }
 
     /// <inheritdoc/>
     public event EventHandler? Connected;
@@ -166,8 +233,20 @@ public sealed class DuplexStreamTransit : Stream, ITransit
         if (disposing)
         {
             UnsubscribeFromChannelEvents();
-            _writeChannel.Dispose();
-            _readChannel.Dispose();
+
+            // Aggregate inner-dispose failures so a throw from one half does not
+            // strand the other and leak its slab back to the pool.
+            List<Exception>? errors = null;
+            try { _writeChannel.Dispose(); }
+            catch (Exception ex) { (errors ??= []).Add(ex); }
+            try { _readChannel.Dispose(); }
+            catch (Exception ex) { (errors ??= []).Add(ex); }
+
+            base.Dispose(disposing);
+
+            if (errors is { Count: 1 }) throw errors[0];
+            if (errors is { Count: > 1 }) throw new AggregateException(errors);
+            return;
         }
 
         base.Dispose(disposing);
@@ -183,10 +262,18 @@ public sealed class DuplexStreamTransit : Stream, ITransit
 
         UnsubscribeFromChannelEvents();
 
-        await _writeChannel.DisposeAsync().ConfigureAwait(false);
-        await _readChannel.DisposeAsync().ConfigureAwait(false);
+        // Aggregate inner-dispose failures so a throw from one half does not
+        // strand the other and leak its slab back to the pool.
+        List<Exception>? errors = null;
+        try { await _writeChannel.DisposeAsync().ConfigureAwait(false); }
+        catch (Exception ex) { (errors ??= []).Add(ex); }
+        try { await _readChannel.DisposeAsync().ConfigureAwait(false); }
+        catch (Exception ex) { (errors ??= []).Add(ex); }
 
         await base.DisposeAsync().ConfigureAwait(false);
+
+        if (errors is { Count: 1 }) throw errors[0];
+        if (errors is { Count: > 1 }) throw new AggregateException(errors);
     }
 
     private void UnsubscribeFromChannelEvents()

@@ -284,7 +284,7 @@ public sealed class UnhappyPathTests
 
         await Assert.ThrowsAnyAsync<OperationCanceledException>(async () =>
         {
-            await foreach (var ch in server.AcceptChannelsAsync(cts.Token))
+            await foreach (var ch in server.AcceptChannelsAsync(ct: cts.Token))
             {
                 // should not get here — no channels opened
             }
@@ -977,10 +977,18 @@ public sealed class UnhappyPathTests
 
     private static byte[] BuildReconnectHandshakeFrame(Guid sessionId)
     {
-        byte[] frame = new byte[FrameHeader.Size + 17];
-        FrameHeader.WriteTo(frame, ChannelConstants.ControlChannel, FrameFlags.Ctrl, 17);
+        // Reconnect payload:
+        //   [subtype:1][sessionId:16][maxRecvPayload:4 BE][channelCount:uint16-BE=0]
+        // No per-channel position entries for a synthetic peer with no live channels.
+        const int payloadLength = 23;
+        byte[] frame = new byte[FrameHeader.Size + payloadLength];
+        FrameHeader.WriteTo(frame, ChannelConstants.ControlChannel, FrameFlags.Ctrl, payloadLength);
         frame[FrameHeader.Size] = CtrlSubtype.Reconnect;
         sessionId.TryWriteBytes(frame.AsSpan(FrameHeader.Size + 1, 16));
+        System.Buffers.Binary.BinaryPrimitives.WriteUInt32BigEndian(
+            frame.AsSpan(FrameHeader.Size + 17, 4),
+            (uint)FrameConstants.DefaultSlabSize);
+        // bytes [FrameHeader.Size + 21. + 23) = uint16 channel count = 0 (already zero-initialized)
         return frame;
     }
 }

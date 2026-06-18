@@ -585,7 +585,7 @@ public sealed class PublicApiTests
 
         client.OpenChannel("yield-test");
 
-        await foreach (var ch in server.AcceptChannelsAsync(cts.Token))
+        await foreach (var ch in server.AcceptChannelsAsync(ct: cts.Token))
         {
             Assert.IsAssignableFrom<IReadChannel>(ch);
             break;
@@ -900,5 +900,18 @@ public sealed class PublicApiTests
 
         await client.DisposeAsync();
         await server.DisposeAsync();
+    }
+
+    [Fact]
+    public void CreateOptions_AutoReconnectBackoffMultiplier_Infinity_Throws()
+    {
+        var opts = new MultiplexerOptions
+        {
+            StreamFactory = _ => Task.FromResult<IStreamPair>(new DuplexMemoryStream().SideA),
+            AutoReconnectBackoffMultiplier = double.PositiveInfinity,
+        };
+
+        var ex = Assert.Throws<ArgumentOutOfRangeException>(() => StreamMultiplexer.Create(opts));
+        Assert.Contains("AutoReconnectBackoffMultiplier", ex.Message);
     }
 }

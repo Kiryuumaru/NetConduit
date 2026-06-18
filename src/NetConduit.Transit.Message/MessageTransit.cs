@@ -16,7 +16,7 @@ namespace NetConduit.Transit.Message;
 /// </summary>
 /// <typeparam name="TSend">The type of messages to send.</typeparam>
 /// <typeparam name="TReceive">The type of messages to receive.</typeparam>
-public sealed class MessageTransit<TSend, TReceive> : IMessageTransit<TSend, TReceive>
+public sealed class MessageTransit<TSend, TReceive> : ITransit
 {
     private readonly IWriteChannel? _writeChannel;
     private readonly IReadChannel? _readChannel;
@@ -26,9 +26,49 @@ public sealed class MessageTransit<TSend, TReceive> : IMessageTransit<TSend, TRe
     private readonly int _maxMessageSize;
     private readonly SemaphoreSlim _sendLock = new(1, 1);
     private readonly SemaphoreSlim _receiveLock = new(1, 1);
+    // Cancelled by DisposeAsync/Dispose so any in-flight SendAsync/ReceiveAsync
+    // promptly unwinds out of the channel I/O and releases its semaphore before
+    // the dispose path attempts to dispose the semaphore itself. Without this,
+    // disposing the SemaphoreSlim while a caller is still inside the protected
+    // section would either race the caller's Release() (throws ObjectDisposed-
+    // Exception, masking the genuine channel exception) or leave the dispose
+    // path acquiring an already-disposed handle.
+    private readonly CancellationTokenSource _disposeCts = new();
     private volatile bool _disposed;
     private volatile bool _readyFired;
+    // Set once when the inbound channel reaches EOF. ReceiveAllAsync consults
+    // this instead of `message is null`, which is always false for non-nullable
+    // value-type TReceive and would otherwise yield default(TReceive) forever
+    // after the channel closes.
+    private volatile bool _receiveEof;
     private readonly object _readyLock = new();
+    // Connected/Disconnected edge latches for the AND-Connected / OR-Disconnected
+    // / latch-reset pattern. Each transition resets the opposite latch so a
+    // reconnect cycle (Disconnected → Connected → Disconnected →.) fires a
+    // fresh event each time, mirroring channel-level event semantics. Without
+    // the reset, the first cycle latches both flags and subscribers stop
+    // observing events for the rest of the transit's lifetime.
+    private readonly object _stateLock = new();
+    private bool _connectedFired;
+    private bool _disconnectedFired;
+
+    // Per-frame receive state. Survives a cancellation between the length-prefix
+    // read and the payload read so the underlying channel never sees a partial
+    // frame consume that would desync the next call's length prefix.
+    // All access is serialized through _receiveLock.
+    private readonly byte[] _pendingLengthBytes = new byte[4];
+    private int _pendingLengthOffset;
+    private byte[]? _pendingPayloadBuffer;
+    private int _pendingPayloadOffset;
+    private int _pendingPayloadLength;
+
+    // Number of bytes still owed to an over-max message body that we already
+    // committed to consuming from the channel (length prefix was read and
+    // validated as too large). These bytes MUST be drained from the channel
+    // before the next length prefix can be parsed, or the framing desyncs
+    // permanently. Survives cancellation: a cancelled drain resumes
+    // on the next ReceiveAsync call. uint covers the full 4-byte length range.
+    private uint _pendingDrainRemaining;
 
     /// <summary>
     /// Creates a new MessageTransit with both send and receive capabilities using AOT-safe JsonTypeInfo.
@@ -46,6 +86,7 @@ public sealed class MessageTransit<TSend, TReceive> : IMessageTransit<TSend, TRe
         _receiveTypeInfo = receiveTypeInfo;
         _maxMessageSize = maxMessageSize;
         SubscribeToChannelEvents();
+        ReplayReadyIfChannelsAlreadyReady();
     }
 
     /// <summary>
@@ -65,6 +106,20 @@ public sealed class MessageTransit<TSend, TReceive> : IMessageTransit<TSend, TRe
         _jsonOptions = jsonOptions;
         _maxMessageSize = maxMessageSize;
         SubscribeToChannelEvents();
+        ReplayReadyIfChannelsAlreadyReady();
+    }
+
+    // Channel.Ready is single-shot; if all configured channels were already
+    // ready before we subscribed, the event we wired up will never fire.
+    // Synthesise the call so subscribers attached after construction still
+    // observe Ready exactly once. OnChannelReady's _readyFired guard
+    // makes the synthesised call race-safe against a concurrent genuine event.
+    private void ReplayReadyIfChannelsAlreadyReady()
+    {
+        var writeReady = _writeChannel?.IsReady ?? true;
+        var readReady = _readChannel?.IsReady ?? true;
+        if (writeReady && readReady)
+            OnChannelReady(this, EventArgs.Empty);
     }
 
     private void SubscribeToChannelEvents()
@@ -89,17 +144,55 @@ public sealed class MessageTransit<TSend, TReceive> : IMessageTransit<TSend, TRe
         var writeReady = _writeChannel?.IsReady ?? true;
         var readReady = _readChannel?.IsReady ?? true;
         if (!writeReady || !readReady) return;
+        EventHandler? handlers;
         lock (_readyLock)
         {
             if (_readyFired) return;
             _readyFired = true;
+            handlers = _readyHandlers;
         }
-        Ready?.Invoke(this, EventArgs.Empty);
+        handlers?.Invoke(this, EventArgs.Empty);
     }
 
-    private void OnChannelConnected(object? sender, EventArgs e) => Connected?.Invoke(this, EventArgs.Empty);
+    // Each underlying half (write + read) raises its own Connected
+    // and Disconnected events. Forwarding each one independently fired the
+    // transit's events twice when both halves were configured for a
+    // bidirectional MessageTransit. Mirrors the DuplexStreamTransit fix.
+    //
+    // Connected fires once when ALL configured halves are connected.
+    // Disconnected fires once on the FIRST half going down.
+    //
+    // Each transition resets the opposite latch so the next
+    // reconnect cycle observes a fresh edge. Without the reset, the latches
+    // stick after the first cycle and reconnect-aware subscribers stop
+    // receiving events for the entire lifetime of the transit.
+    private void OnChannelConnected(object? sender, EventArgs e)
+    {
+        if ((_writeChannel?.IsConnected ?? true) == false) return;
+        if ((_readChannel?.IsConnected ?? true) == false) return;
+        bool fire = false;
+        lock (_stateLock)
+        {
+            if (_connectedFired) return;
+            _connectedFired = true;
+            _disconnectedFired = false;
+            fire = true;
+        }
+        if (fire) Connected?.Invoke(this, EventArgs.Empty);
+    }
 
-    private void OnChannelDisconnected(object? sender, DisconnectedEventArgs e) => Disconnected?.Invoke(this, e);
+    private void OnChannelDisconnected(object? sender, DisconnectedEventArgs e)
+    {
+        bool fire = false;
+        lock (_stateLock)
+        {
+            if (_disconnectedFired) return;
+            _disconnectedFired = true;
+            _connectedFired = false;
+            fire = true;
+        }
+        if (fire) Disconnected?.Invoke(this, e);
+    }
 
     /// <inheritdoc/>
     public bool IsReady
@@ -115,7 +208,7 @@ public sealed class MessageTransit<TSend, TReceive> : IMessageTransit<TSend, TRe
 
     /// <inheritdoc/>
     public bool IsConnected => !_disposed &&
-        (_writeChannel?.IsConnected ?? false) || (_readChannel?.IsConnected ?? false);
+        ((_writeChannel?.IsConnected ?? false) || (_readChannel?.IsConnected ?? false));
 
     /// <inheritdoc/>
     public string? WriteChannelId => _writeChannel?.ChannelId;
@@ -123,8 +216,32 @@ public sealed class MessageTransit<TSend, TReceive> : IMessageTransit<TSend, TRe
     /// <inheritdoc/>
     public string? ReadChannelId => _readChannel?.ChannelId;
 
+    private EventHandler? _readyHandlers;
+
     /// <inheritdoc/>
-    public event EventHandler? Ready;
+    /// <remarks>
+    /// Latching: subscribers attached after the transit has already become Ready are
+    /// invoked immediately on subscription, so callers that wait for channel readiness
+    /// before constructing the transit still observe the event exactly once.
+    /// </remarks>
+    public event EventHandler? Ready
+    {
+        add
+        {
+            if (value is null) return;
+            bool fireImmediately;
+            lock (_readyLock)
+            {
+                _readyHandlers += value;
+                fireImmediately = _readyFired;
+            }
+            if (fireImmediately) value(this, EventArgs.Empty);
+        }
+        remove
+        {
+            lock (_readyLock) { _readyHandlers -= value; }
+        }
+    }
 
     /// <inheritdoc/>
     public event EventHandler? Connected;
@@ -154,7 +271,10 @@ public sealed class MessageTransit<TSend, TReceive> : IMessageTransit<TSend, TRe
         if (_writeChannel is null)
             throw new InvalidOperationException("This transit does not have a write channel configured.");
 
-        await _sendLock.WaitAsync(cancellationToken).ConfigureAwait(false);
+        using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, _disposeCts.Token);
+        var ct = linkedCts.Token;
+
+        await _sendLock.WaitAsync(ct).ConfigureAwait(false);
         try
         {
             byte[] jsonBytes;
@@ -176,7 +296,7 @@ public sealed class MessageTransit<TSend, TReceive> : IMessageTransit<TSend, TRe
             {
                 BinaryPrimitives.WriteUInt32BigEndian(combinedBuffer, (uint)jsonBytes.Length);
                 jsonBytes.CopyTo(combinedBuffer, 4);
-                await _writeChannel.WriteAsync(combinedBuffer.AsMemory(0, totalLength), cancellationToken).ConfigureAwait(false);
+                await _writeChannel.WriteAsync(combinedBuffer.AsMemory(0, totalLength), ct).ConfigureAwait(false);
             }
             finally
             {
@@ -185,7 +305,7 @@ public sealed class MessageTransit<TSend, TReceive> : IMessageTransit<TSend, TRe
         }
         finally
         {
-            _sendLock.Release();
+            ReleaseSendLockSafe();
         }
     }
 
@@ -199,55 +319,154 @@ public sealed class MessageTransit<TSend, TReceive> : IMessageTransit<TSend, TRe
         if (_readChannel is null)
             throw new InvalidOperationException("This transit does not have a read channel configured.");
 
-        await _receiveLock.WaitAsync(cancellationToken).ConfigureAwait(false);
+        using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, _disposeCts.Token);
+        var ct = linkedCts.Token;
+
+        await _receiveLock.WaitAsync(ct).ConfigureAwait(false);
         try
         {
-            var lengthBuffer = ArrayPool<byte>.Shared.Rent(4);
-            try
+            // Drain any payload bytes still owed to a previously-rejected
+            // over-max message so the next length prefix lands on a clean
+            // frame boundary. If cancelled mid-drain, _pendingDrainRemaining
+            // preserves progress for the next call.
+            if (_pendingDrainRemaining > 0)
             {
-                var bytesRead = await ReadExactAsync(_readChannel, lengthBuffer.AsMemory(0, 4), cancellationToken).ConfigureAwait(false);
-                if (bytesRead == 0)
-                    return default;
+                await DrainPendingAsync(ct).ConfigureAwait(false);
+            }
 
-                var messageLength = BinaryPrimitives.ReadUInt32BigEndian(lengthBuffer);
+            // Read the 4-byte length prefix into the persistent buffer. If a
+            // prior ReceiveAsync was cancelled mid-prefix, _pendingLengthOffset
+            // preserves how many bytes were already consumed so this call
+            // resumes at the exact same byte boundary — preserving framing
+            // invariants across cancellation events.
+            while (_pendingPayloadBuffer is null && _pendingLengthOffset < 4)
+            {
+                var n = await _readChannel.ReadAsync(
+                    _pendingLengthBytes.AsMemory(_pendingLengthOffset, 4 - _pendingLengthOffset),
+                    ct).ConfigureAwait(false);
+                if (n == 0)
+                {
+                    if (_pendingLengthOffset == 0)
+                    {
+                        _receiveEof = true;
+                        return default;
+                    }
+                    _pendingLengthOffset = 0;
+                    throw new EndOfStreamException("Unexpected end of stream while reading message length prefix.");
+                }
+                _pendingLengthOffset += n;
+            }
+
+            // Length prefix complete: allocate (or reuse) the payload buffer.
+            if (_pendingPayloadBuffer is null)
+            {
+                var messageLength = BinaryPrimitives.ReadUInt32BigEndian(_pendingLengthBytes);
 
                 if (messageLength > (uint)_maxMessageSize)
-                    throw new InvalidOperationException($"Received message size ({messageLength} bytes) exceeds maximum allowed ({_maxMessageSize} bytes).");
+                {
+                    // Mark the over-max payload bytes for drain on the next
+                    // ReceiveAsync so framing resumes on a clean boundary
+                    // instead of parsing payload bytes as the next length
+                    // prefix. Clear the length-prefix progress; this
+                    // length has been fully consumed.
+                    _pendingLengthOffset = 0;
+                    _pendingDrainRemaining = messageLength;
+                    throw new InvalidOperationException(
+                        $"Received message size ({messageLength} bytes) exceeds maximum allowed ({_maxMessageSize} bytes); the oversized payload will be discarded and the next ReceiveAsync call will return the following message.");
+                }
 
                 if (messageLength == 0)
                 {
+                    _pendingLengthOffset = 0;
                     throw new InvalidOperationException("Received a message with zero-length payload.");
                 }
 
-                var messageBuffer = ArrayPool<byte>.Shared.Rent((int)messageLength);
-                try
-                {
-                    bytesRead = await ReadExactAsync(_readChannel, messageBuffer.AsMemory(0, (int)messageLength), cancellationToken).ConfigureAwait(false);
-                    if (bytesRead == 0)
-                        return default;
+                _pendingPayloadLength = (int)messageLength;
+                _pendingPayloadBuffer = ArrayPool<byte>.Shared.Rent(_pendingPayloadLength);
+                _pendingPayloadOffset = 0;
+            }
 
-                    if (_receiveTypeInfo is not null)
-                    {
-                        return JsonSerializer.Deserialize(messageBuffer.AsSpan(0, (int)messageLength), _receiveTypeInfo);
-                    }
-                    else
-                    {
-                        return JsonSerializer.Deserialize<TReceive>(messageBuffer.AsSpan(0, (int)messageLength), _jsonOptions);
-                    }
-                }
-                finally
+            // Read the payload. If cancelled mid-payload, _pendingPayloadOffset
+            // preserves the progress so the next call resumes exactly here.
+            while (_pendingPayloadOffset < _pendingPayloadLength)
+            {
+                var n = await _readChannel.ReadAsync(
+                    _pendingPayloadBuffer.AsMemory(_pendingPayloadOffset, _pendingPayloadLength - _pendingPayloadOffset),
+                    ct).ConfigureAwait(false);
+                if (n == 0)
                 {
-                    ArrayPool<byte>.Shared.Return(messageBuffer);
+                    var torn = _pendingPayloadBuffer;
+                    _pendingPayloadBuffer = null;
+                    _pendingPayloadOffset = 0;
+                    _pendingPayloadLength = 0;
+                    _pendingLengthOffset = 0;
+                    ArrayPool<byte>.Shared.Return(torn);
+                    throw new EndOfStreamException("Unexpected end of stream while reading message payload.");
+                }
+                _pendingPayloadOffset += n;
+            }
+
+            // Frame complete — capture, clear state, then deserialize.
+            var payload = _pendingPayloadBuffer;
+            var payloadLength = _pendingPayloadLength;
+            _pendingPayloadBuffer = null;
+            _pendingPayloadOffset = 0;
+            _pendingPayloadLength = 0;
+            _pendingLengthOffset = 0;
+
+            try
+            {
+                if (_receiveTypeInfo is not null)
+                {
+                    return JsonSerializer.Deserialize(payload.AsSpan(0, payloadLength), _receiveTypeInfo);
+                }
+                else
+                {
+                    return JsonSerializer.Deserialize<TReceive>(payload.AsSpan(0, payloadLength), _jsonOptions);
                 }
             }
             finally
             {
-                ArrayPool<byte>.Shared.Return(lengthBuffer);
+                ArrayPool<byte>.Shared.Return(payload);
             }
         }
         finally
         {
-            _receiveLock.Release();
+            ReleaseReceiveLockSafe();
+        }
+    }
+
+    /// <summary>
+    /// Reads and discards <see cref="_pendingDrainRemaining"/> bytes from the
+    /// inbound channel. Caller MUST hold <see cref="_receiveLock"/>. On
+    /// cancellation the remaining count is preserved so the next call resumes
+    /// the drain. On premature EOF an <see cref="EndOfStreamException"/> is
+    /// raised — there is no clean recovery once the channel closes mid-drain.
+    /// </summary>
+    private async ValueTask DrainPendingAsync(CancellationToken cancellationToken)
+    {
+        const int DrainChunk = 8192;
+        var buf = ArrayPool<byte>.Shared.Rent(DrainChunk);
+        try
+        {
+            while (_pendingDrainRemaining > 0)
+            {
+                var toRead = (int)Math.Min((uint)buf.Length, _pendingDrainRemaining);
+                var n = await _readChannel!.ReadAsync(buf.AsMemory(0, toRead), cancellationToken).ConfigureAwait(false);
+                if (n == 0)
+                {
+                    // Channel closed before the over-max payload finished
+                    // draining. The framing is unrecoverable; signal EOF.
+                    _pendingDrainRemaining = 0;
+                    _receiveEof = true;
+                    throw new EndOfStreamException("Unexpected end of stream while discarding oversized message payload.");
+                }
+                _pendingDrainRemaining -= (uint)n;
+            }
+        }
+        finally
+        {
+            ArrayPool<byte>.Shared.Return(buf);
         }
     }
 
@@ -270,25 +489,17 @@ public sealed class MessageTransit<TSend, TReceive> : IMessageTransit<TSend, TRe
                 yield break;
             }
 
-            if (message is null)
+            // EOF is signalled exclusively via `_receiveEof`. Using
+            // `message is null` as a secondary terminator would conflate
+            // genuine end-of-stream with a peer that legitimately sends a
+            // JSON `null` payload — losing that message and
+            // every subsequent one. The flag is set inside ReceiveAsync
+            // when the length-prefix or payload read returns 0 bytes.
+            if (_receiveEof)
                 yield break;
 
-            yield return message;
+            yield return message!;
         }
-    }
-
-    private static async ValueTask<int> ReadExactAsync(IReadChannel channel, Memory<byte> buffer, CancellationToken cancellationToken)
-    {
-        var totalRead = 0;
-        while (totalRead < buffer.Length)
-        {
-            var bytesRead = await channel.ReadAsync(buffer[totalRead..], cancellationToken).ConfigureAwait(false);
-            if (bytesRead == 0)
-                return totalRead == 0 ? 0 : throw new EndOfStreamException("Unexpected end of stream while reading message.");
-
-            totalRead += bytesRead;
-        }
-        return totalRead;
     }
 
     /// <inheritdoc/>
@@ -301,29 +512,124 @@ public sealed class MessageTransit<TSend, TReceive> : IMessageTransit<TSend, TRe
 
         UnsubscribeFromChannelEvents();
 
+        // Cancel any in-flight Send/Receive so they release the semaphores and
+        // unwind out of the channel I/O. Without this, disposing _sendLock /
+        // _receiveLock while an operation is still in the protected section
+        // races the caller's Release() and surfaces a misleading ObjectDisposed-
+        // Exception about the semaphore instead of the real channel exception.
+        try { _disposeCts.Cancel(); } catch (ObjectDisposedException) { }
+
+        // Drain in-flight operations by acquiring both locks. A misbehaving
+        // channel that ignores cancellation cannot indefinitely block dispose
+        // — the bounded timeout caps the wait, after which the safe-release
+        // helpers in SendAsync/ReceiveAsync swallow the post-dispose ODE.
+        using (var drainCts = new CancellationTokenSource(DisposeDrainTimeout))
+        {
+            try { await _sendLock.WaitAsync(drainCts.Token).ConfigureAwait(false); }
+            catch (OperationCanceledException) { }
+            catch (ObjectDisposedException) { }
+
+            try { await _receiveLock.WaitAsync(drainCts.Token).ConfigureAwait(false); }
+            catch (OperationCanceledException) { }
+            catch (ObjectDisposedException) { }
+        }
+
+        List<Exception>? errors = null;
+
         if (_writeChannel is not null)
-            await _writeChannel.DisposeAsync().ConfigureAwait(false);
+        {
+            try { await _writeChannel.DisposeAsync().ConfigureAwait(false); }
+            catch (Exception ex) { (errors ??= []).Add(ex); }
+        }
 
         if (_readChannel is not null)
-            await _readChannel.DisposeAsync().ConfigureAwait(false);
+        {
+            try { await _readChannel.DisposeAsync().ConfigureAwait(false); }
+            catch (Exception ex) { (errors ??= []).Add(ex); }
+        }
 
-        _sendLock.Dispose();
-        _receiveLock.Dispose();
+        try { ReturnPendingPayloadBuffer(); }
+        catch (Exception ex) { (errors ??= []).Add(ex); }
+
+        try { _sendLock.Dispose(); }    catch (Exception ex) { (errors ??= []).Add(ex); }
+        try { _receiveLock.Dispose(); } catch (Exception ex) { (errors ??= []).Add(ex); }
+        try { _disposeCts.Dispose(); }  catch (Exception ex) { (errors ??= []).Add(ex); }
+
+        if (errors is { Count: 1 }) throw errors[0];
+        if (errors is { Count: > 1 }) throw new AggregateException(errors);
     }
 
     /// <inheritdoc/>
     public void Dispose()
     {
-        if (_disposed)
-            return;
-
+        if (_disposed) return;
         _disposed = true;
 
         UnsubscribeFromChannelEvents();
-        _writeChannel?.Dispose();
-        _readChannel?.Dispose();
-        _sendLock.Dispose();
-        _receiveLock.Dispose();
+
+        // Same cancel+drain ordering as DisposeAsync so a synchronous caller
+        // also unwinds in-flight Send/Receive before the semaphores go away.
+        try { _disposeCts.Cancel(); } catch (ObjectDisposedException) { }
+        using (var drainCts = new CancellationTokenSource(DisposeDrainTimeout))
+        {
+            try { _sendLock.Wait(drainCts.Token); }
+            catch (OperationCanceledException) { }
+            catch (ObjectDisposedException) { }
+            try { _receiveLock.Wait(drainCts.Token); }
+            catch (OperationCanceledException) { }
+            catch (ObjectDisposedException) { }
+        }
+
+        // Aggregate per-step failures using each channel's synchronous Dispose.
+        List<Exception>? errors = null;
+        try { _writeChannel?.Dispose(); }
+        catch (Exception ex) { (errors ??= []).Add(ex); }
+        try { _readChannel?.Dispose(); }
+        catch (Exception ex) { (errors ??= []).Add(ex); }
+        try { ReturnPendingPayloadBuffer(); }
+        catch (Exception ex) { (errors ??= []).Add(ex); }
+        try { _sendLock.Dispose(); }    catch (Exception ex) { (errors ??= []).Add(ex); }
+        try { _receiveLock.Dispose(); } catch (Exception ex) { (errors ??= []).Add(ex); }
+        try { _disposeCts.Dispose(); }  catch (Exception ex) { (errors ??= []).Add(ex); }
+
+        if (errors is { Count: 1 }) throw errors[0];
+        if (errors is { Count: > 1 }) throw new AggregateException(errors);
+    }
+
+    // Cap for how long DisposeAsync waits for an in-flight Send/Receive to
+    // observe the cancel and release its semaphore. Sized to be visibly longer
+    // than any reasonable channel write/read while still bounding a wedged
+    // dispose to a few seconds.
+    private static readonly TimeSpan DisposeDrainTimeout = TimeSpan.FromSeconds(5);
+
+    // Releases _sendLock while tolerating the race where the dispose path
+    // drained and disposed the semaphore while this operation was still
+    // unwinding. Suppressing ODE here is what prevents the misleading
+    // "semaphore has been disposed" exception from masking the real
+    // channel exception that triggered the unwind.
+    private void ReleaseSendLockSafe()
+    {
+        try { _sendLock.Release(); }
+        catch (ObjectDisposedException) { }
+    }
+
+    private void ReleaseReceiveLockSafe()
+    {
+        try { _receiveLock.Release(); }
+        catch (ObjectDisposedException) { }
+    }
+
+    // Returns any payload buffer held across a cancelled mid-frame ReceiveAsync
+    // back to the array pool so dispose does not leak it.
+    private void ReturnPendingPayloadBuffer()
+    {
+        var buf = _pendingPayloadBuffer;
+        if (buf is null) return;
+        _pendingPayloadBuffer = null;
+        _pendingPayloadOffset = 0;
+        _pendingPayloadLength = 0;
+        _pendingLengthOffset = 0;
+        ArrayPool<byte>.Shared.Return(buf);
     }
 
     private void UnsubscribeFromChannelEvents()

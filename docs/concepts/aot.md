@@ -45,7 +45,7 @@ The trim analyzer will flag callers. Prefer the `JsonTypeInfo<T>` overloads for 
 
 ## Dynamic JSON (`JsonNode`, `JsonObject`)
 
-`DeltaMessageTransit<T>` has a constructor that takes no `JsonTypeInfo` and works on dynamic JSON types (`JsonNode`, `JsonObject`, `JsonArray`, `JsonDocument`). This path uses `System.Text.Json`'s dynamic JSON APIs, which are AOT-safe — no source generator needed.
+`DeltaMessageTransit<T>` has overloads that take no `JsonTypeInfo` and work on dynamic JSON types (`JsonNode`, `JsonObject`, `JsonArray`, `JsonDocument`, `JsonElement`). This path uses `System.Text.Json`'s dynamic JSON APIs, which are AOT-safe — no source generator needed.
 
 ```csharp
 await using var t = await mux.OpenDeltaMessageTransitAsync<JsonObject>("state");

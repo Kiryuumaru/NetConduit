@@ -9,7 +9,6 @@ public sealed record MultiplexerOptions
 {
     public required StreamFactoryDelegate StreamFactory { get; init; }
     public Guid?     SessionId                       { get; init; }
-    public int       DefaultSlabSize                 { get; init; } = 1 * 1024 * 1024;        // 1 MiB
     public TimeSpan  PingInterval                    { get; init; } = TimeSpan.FromSeconds(30);
     public TimeSpan  PingTimeout                     { get; init; } = TimeSpan.FromSeconds(10);
     public int       MaxMissedPings                  { get; init; } = 3;
@@ -29,7 +28,6 @@ public sealed record MultiplexerOptions
 | --- | --- | --- |
 | `StreamFactory` | (required) | Builds a fresh `IStreamPair` on connect and reconnect. |
 | `SessionId` | new GUID | Local session identity. Sticky across reconnects. |
-| `DefaultSlabSize` | 1 MiB | Bytes pre-allocated per channel for outbound frames. See [Backpressure](../concepts/backpressure.md). |
 | `PingInterval` | 30 s | Time between keepalive pings. |
 | `PingTimeout` | 10 s | Time to wait for a `Pong` before counting a missed ping. |
 | `MaxMissedPings` | 3 | After this many missed pings, the connection is declared dead. |
@@ -64,5 +62,16 @@ Applied by `OpenChannel(string)` extension (no per-channel `ChannelOptions`).
 
 ## Validation
 
-- `DefaultSlabSize` must be between 64 KiB and 64 MiB (`FrameConstants.MinSlabSize` / `MaxSlabSize`).
+All validation is enforced in `StreamMultiplexer.Create`; invalid values throw `ArgumentOutOfRangeException` at the boundary.
+
 - `StreamFactory` is `required` — omitting it is a compile error.
+- `DefaultChannelOptions.SlabSize` must be between 64 KiB and 64 MiB (`FrameConstants.MinSlabSize` / `MaxSlabSize`). Enforced in `StreamMultiplexer.Create` and again per-channel in `OpenChannel`.
+- `MaxAutoReconnectAttempts` must be `-1` (unlimited), `0` (no reconnect), or a positive bound.
+- `PingInterval` must be non-negative. `TimeSpan.Zero` disables keepalive entirely (no ping/pong traffic, no missed-ping disconnect).
+- `PingTimeout` must be positive **when keepalive is enabled** (`PingInterval > TimeSpan.Zero`). Ignored when keepalive is disabled.
+- `MaxMissedPings` must be at least `1` **when keepalive is enabled**. Ignored when keepalive is disabled.
+- `GoAwayTimeout` must be non-negative. `TimeSpan.Zero` means no drain wait.
+- `AutoReconnectDelay` must be non-negative.
+- `MaxAutoReconnectDelay` must be greater than or equal to `AutoReconnectDelay` (the cap cannot be below the base).
+- `AutoReconnectBackoffMultiplier` must be greater than or equal to `1.0` (the term "backoff" implies non-shrinking delay). `NaN` is rejected.
+- `ConnectionTimeout` must be `Timeout.InfiniteTimeSpan`, `TimeSpan.Zero`, or positive. `InfiniteTimeSpan` and `TimeSpan.Zero` both disable per-attempt timeout enforcement.

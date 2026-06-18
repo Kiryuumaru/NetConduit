@@ -16,8 +16,11 @@ public sealed class WriteChannelTests
         }
 
         public void NotifyChannelCompleted(ushort channelIndex, string channelId) { }
+        public void NotifyPendingAcceptCancelled(string channelId) { }
         public void NotifyChannelOpened(string channelId) { }
-        public void SendAck(ushort channelIndex, ulong consumedPosition) { }
+        public bool SendAck(ushort channelIndex, ulong consumedPosition) => true;
+        public void NotifyEventHandlerException(Exception exception) { }
+        public int PeerMaxRecvPayload => FrameConstants.MaxSlabSize;
     }
 
     private static WriteChannel CreateChannel(TestRouter? router = null, int slabSize = 64 * 1024)
@@ -244,10 +247,17 @@ public sealed class WriteChannelTests
 
         await channel.CloseAsync();
 
+        // CloseAsync queues a FIN frame and moves the channel to Closing.
+        // The writer thread drains the FIN and triggers Closing -> Closed
+        // via MarkSent (simulated here) per docs/concepts/channels.md.
         Assert.Equal(ChannelState.Closing, channel.State);
         var ready = channel.TakeReady();
         var header = FrameHeader.Parse(ready.Span);
         Assert.Equal(FrameFlags.Fin, header.Flags);
+
+        channel.MarkSent(ready.Length);
+
+        Assert.Equal(ChannelState.Closed, channel.State);
     }
 
     [Fact]
@@ -273,5 +283,163 @@ public sealed class WriteChannelTests
 
         Assert.Equal(ChannelState.Closed, channel.State);
         Assert.Equal(ChannelCloseReason.MuxDisposed, channel.CloseReason);
+    }
+
+    [Fact]
+    public void SetClosed_MuxDisposed_WithPendingData_ReturnsSlab()
+    {
+        // Reproduces issue: under MuxDisposed the writer loop is
+        // cancelled and will never call MarkSent again. If HasPendingData()
+        // gates slab return, the slab is leaked because no other path runs.
+        var channel = CreateChannel();
+        channel.WriteRawFrame(new byte[FrameHeader.Size + 32]);
+        Assert.True(channel.HasPendingData());
+
+        channel.SetClosed(ChannelCloseReason.MuxDisposed);
+
+        Assert.True(SlabWasReturned(channel),
+            "Expected slab to be returned to the pool under MuxDisposed even when pending data exists.");
+    }
+
+    [Fact]
+    public void SetClosed_TransportFailed_WithPendingData_ReturnsSlab()
+    {
+        // Same structural bug via TryNotifyCompleted: if the writer thread is
+        // dead under a terminal transport failure, deferring slab return on
+        // HasPendingData leaks the slab.
+        var channel = CreateChannel();
+        channel.WriteRawFrame(new byte[FrameHeader.Size + 32]);
+        Assert.True(channel.HasPendingData());
+
+        channel.SetClosed(ChannelCloseReason.TransportFailed);
+
+        Assert.True(SlabWasReturned(channel),
+            "Expected slab to be returned to the pool under TransportFailed even when pending data exists.");
+    }
+
+    private static bool SlabWasReturned(WriteChannel channel)
+    {
+        var field = typeof(WriteChannel).GetField(
+            "_slabReturned",
+            System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic);
+        Assert.NotNull(field);
+        return (int)field!.GetValue(channel)! == 1;
+    }
+
+    private static WriteChannel CreateChannelWithShortTimeout(int slabSize, TimeSpan sendTimeout)
+    {
+        var router = new TestRouter();
+        var channel = new WriteChannel(
+            channelId: "test",
+            channelIndex: 1,
+            priority: ChannelPriority.Normal,
+            slabSize: slabSize,
+            sendTimeout: sendTimeout,
+            owner: router);
+        channel.MarkOpen();
+        return channel;
+    }
+
+    [Fact]
+    public async Task WriteAsync_ChannelClosedWhileParked_ThrowsChannelClosedException_PromptlyNotTimeout()
+    {
+        // Regression for: a writer parked in _spaceAvailable.WaitAsync
+        // must unwind with ChannelClosedException promptly when the channel
+        // closes, instead of stalling for the full SendTimeout and throwing
+        // TimeoutException.
+        var sendTimeout = TimeSpan.FromSeconds(10);
+        var channel = CreateChannelWithShortTimeout(slabSize: 256, sendTimeout: sendTimeout);
+
+        // Fill the slab so the next write parks.
+        int maxPayload = 256 - FrameHeader.Size;
+        await channel.WriteAsync(new byte[maxPayload]);
+
+        // Park a second writer.
+        var sw = System.Diagnostics.Stopwatch.StartNew();
+        var blocked = channel.WriteAsync(new byte[1]).AsTask();
+
+        // Give it a moment to actually park in WaitAsync.
+        await Task.Delay(50);
+        Assert.False(blocked.IsCompleted);
+
+        // Close concurrently.
+        channel.SetClosed(ChannelCloseReason.RemoteFin);
+
+        var ex = await Assert.ThrowsAsync<ChannelClosedException>(() => blocked);
+        sw.Stop();
+
+        Assert.True(sw.ElapsedMilliseconds < 2000,
+            $"Expected ChannelClosedException within ~2s, but write unwound after {sw.ElapsedMilliseconds} ms (SendTimeout was {sendTimeout.TotalSeconds}s).");
+        Assert.Equal(ChannelCloseReason.RemoteFin, ex.CloseReason);
+    }
+
+    [Fact]
+    public async Task WriteAsync_AbortDisposesSemaphore_ConvertedToChannelClosedException()
+    {
+        // Abort disposes the semaphore. A parked writer whose WaitAsync then
+        // throws ObjectDisposedException must surface as ChannelClosedException,
+        // not ObjectDisposedException.
+        var channel = CreateChannelWithShortTimeout(slabSize: 256, sendTimeout: TimeSpan.FromSeconds(10));
+
+        int maxPayload = 256 - FrameHeader.Size;
+        await channel.WriteAsync(new byte[maxPayload]);
+
+        var blocked = channel.WriteAsync(new byte[1]).AsTask();
+        await Task.Delay(50);
+        Assert.False(blocked.IsCompleted);
+
+        channel.Abort(ChannelCloseReason.TransportFailed);
+
+        var ex = await Assert.ThrowsAsync<ChannelClosedException>(() => blocked);
+        Assert.Equal(ChannelCloseReason.TransportFailed, ex.CloseReason);
+    }
+
+    [Fact]
+    public async Task WriteAsync_AfterClose_StateCheckThrowsChannelClosedException()
+    {
+        // Sanity: pre-existing top-of-method state check still fires for
+        // writes issued after the channel is already Closed.
+        var channel = CreateChannelWithShortTimeout(slabSize: 256, sendTimeout: TimeSpan.FromSeconds(60));
+        channel.SetClosed(ChannelCloseReason.LocalClose);
+
+        var ex = await Assert.ThrowsAsync<ChannelClosedException>(() => channel.WriteAsync(new byte[1]).AsTask());
+        Assert.Equal(ChannelCloseReason.LocalClose, ex.CloseReason);
+    }
+
+    [Fact]
+    public async Task WriteAsync_ParkedWriter_StateClosedWhileSpaceFreed_ThrowsChannelClosedException()
+    {
+        // When a parked writer wakes because SetClosed/Abort released the
+        // _spaceAvailable semaphore AND the slab has become compactable (e.g.,
+        // because the writer task drained and acked the buffer just before
+        // close), the writer would otherwise break out of the wait loop into
+        // the commit lock with no state recheck. Without the in-commit-lock
+        // state guard, the writer silently succeeds and writes a frame into
+        // a slab that the close path is about to return to the ArrayPool —
+        // corrupting any unrelated component that rents the same buffer.
+        var channel = CreateChannelWithShortTimeout(slabSize: 256, sendTimeout: TimeSpan.FromSeconds(10));
+
+        int maxPayload = 256 - FrameHeader.Size;
+        await channel.WriteAsync(new byte[maxPayload]);
+
+        var blocked = channel.WriteAsync(new byte[1]).AsTask();
+        await Task.Delay(50);
+        Assert.False(blocked.IsCompleted);
+
+        // Manually mark all bytes acked WITHOUT releasing the semaphore, so the
+        // writer stays parked but the slab is now compactable. When SetClosed
+        // releases the semaphore below, the writer wakes, the first-lock
+        // TryCompactLocked frees the entire slab, and the writer breaks out
+        // of the wait loop straight into the commit lock.
+        var ackedField = typeof(WriteChannel).GetField(
+            "_ackedPos",
+            System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic);
+        Assert.NotNull(ackedField);
+        ackedField!.SetValue(channel, maxPayload + FrameHeader.Size);
+
+        channel.SetClosed(ChannelCloseReason.LocalClose);
+
+        var ex = await Assert.ThrowsAsync<ChannelClosedException>(() => blocked);
+        Assert.Equal(ChannelCloseReason.LocalClose, ex.CloseReason);
     }
 }

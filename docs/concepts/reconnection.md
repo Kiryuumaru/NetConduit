@@ -42,14 +42,18 @@ With the defaults (1 s → ×2 → cap 30 s), the sequence is **1, 2, 4, 8, 16, 
 ```
 Disconnected (DisconnectReason.TransportError)
    |
-   | wait AutoReconnectDelay
    v
 Reconnecting (Attempt = 1)
+   |
+   | wait (AutoReconnectDelay * AutoReconnectBackoffMultiplier^(attempt-1),
+   |       capped at MaxAutoReconnectDelay)
    |
    | factory call (within ConnectionTimeout)
    v
 Connected     (transport up; handshake done)
 ```
+
+`Reconnecting` fires *before* the back-off wait — it announces that an attempt is being planned, then the wait runs, then the transport-factory call. This means `Disconnected → Reconnecting` is effectively immediate, while `Reconnecting → Connected` covers `wait + factory + handshake`.
 
 `Reconnecting` fires with a 1-based attempt number. `Connected` (the event) fires on every successful reconnect; `Ready` does **not** fire again (it's once-per-multiplexer).
 
@@ -77,7 +81,11 @@ Channels that were not yet `Open` at the moment of disconnect are reopened on th
 
 ## Server-side reconnection
 
-The provided `*Multiplexer.CreateServerOptions(...)` factories accept **one** connection and refuse subsequent calls. For a server that survives client churn, build your own factory that re-accepts from the listener:
+The provided `*Multiplexer.CreateServerOptions(...)` factories accept **one** connection and refuse subsequent calls. For a server that survives client churn, build your own factory that re-accepts from the listener. The pattern is the same for every listener-style transport: keep the listener alive outside the factory, accept one connection per `StreamFactory` invocation, and wrap the resulting transport object as a `StreamPair`.
+
+> Reconnect semantics are inherently per-peer. A re-accepting server factory replaces the previous client with the next one to connect, then drives the multiplexer's reconnect handshake (replay buffers, channel adoption). If the next caller is a *different* peer, the handshake returns `SessionMismatch` and reconnect fails — see [When reconnect won't succeed](#when-reconnect-wont-succeed). The factory itself does not enforce peer identity; application-level authentication is up to you.
+
+### TCP
 
 ```csharp
 var listener = new TcpListener(IPAddress.Any, 5000);
@@ -96,3 +104,80 @@ var opts = new MultiplexerOptions
 ```
 
 The [Scoreboard sample](../../samples/ScoreboardSample/README.md) does this and persists state across player reconnects.
+
+### QUIC
+
+`QuicListener` plays the same role as `TcpListener`. Build the listener with `QuicMultiplexer.ListenAsync`, then re-accept on each factory call:
+
+```csharp
+var cert = new X509Certificate2("server.pfx", "password");
+var listener = await QuicMultiplexer.ListenAsync(
+    new IPEndPoint(IPAddress.Any, 5000),
+    cert,
+    alpn: "myapp");
+
+var opts = new MultiplexerOptions
+{
+    StreamFactory = async ct =>
+    {
+        var connection = await listener.AcceptConnectionAsync(ct);
+        var stream = await connection.AcceptInboundStreamAsync(ct);
+
+        // Read the 0x01 handshake marker that the client writes as its first byte.
+        var preface = new byte[1];
+        _ = await stream.ReadAsync(preface, ct);
+
+        return new StreamPair(stream, stream, owner: connection);
+    },
+    MaxAutoReconnectAttempts = int.MaxValue,
+};
+```
+
+The `0x01` handshake marker matches what `QuicMultiplexer.CreateOptions` writes on the client side; keep them in sync.
+
+### WebSocket (`HttpListener`)
+
+`HttpListener` exposes a request stream; the WebSocket itself is produced by `AcceptWebSocketAsync`. Re-accepting means waiting for the next HTTP request and upgrading it on each factory call:
+
+```csharp
+var listener = new HttpListener();
+listener.Prefixes.Add("http://localhost:5000/chat/");
+listener.Start();
+
+var opts = new MultiplexerOptions
+{
+    StreamFactory = async ct =>
+    {
+        // GetContextAsync does not take a CancellationToken; if you need cancellation,
+        // wrap the call or close the listener from another task to unblock it.
+        var ctx = await listener.GetContextAsync().WaitAsync(ct);
+        if (!ctx.Request.IsWebSocketRequest)
+        {
+            ctx.Response.StatusCode = 400;
+            ctx.Response.Close();
+            throw new InvalidOperationException("Non-WebSocket request rejected.");
+        }
+
+        var wsCtx = await ctx.AcceptWebSocketAsync(subProtocol: null);
+
+        // Delegate to the single-shot helper to wrap the accepted WebSocket
+        // as an IStreamPair. A new options instance per call gives a fresh
+        // single-use factory.
+        var innerFactory = WebSocketMultiplexer
+            .CreateServerOptions(wsCtx.WebSocket)
+            .StreamFactory!;
+        return await innerFactory(ct);
+    },
+    MaxAutoReconnectAttempts = int.MaxValue,
+};
+```
+
+For ASP.NET Core hosts the accept loop runs inside an endpoint handler, so each request is naturally a new `StreamMultiplexer` instance — the reconnect-factory pattern does not apply. Spawn a fresh multiplexer per WebSocket upgrade instead.
+
+### UDP
+
+`UdpMultiplexer.CreateServerOptions(...)` binds a single UDP socket to one remote peer via the `NC_HELLO` / `NC_HELLO_ACK` handshake. The reliable shim retransmits within a single peer session; surviving a peer change requires tearing down and re-binding the socket, which the provided helper does not expose. If you need server-side reconnect for UDP, dispose the multiplexer on `Disconnected` and create a new one rather than driving it from a custom `StreamFactory`.
+
+### IPC
+
+`IpcMultiplexer.CreateServerOptions(...)` chooses between TCP loopback (Windows) and a Unix domain socket (Linux/macOS) internally, and binds a fresh listener per call. The platform-specific bind/cleanup logic is not exposed publicly, so a hand-written reconnectable IPC factory would have to re-implement it per platform. The simpler pattern is the same as UDP: dispose and recreate the multiplexer on disconnect.

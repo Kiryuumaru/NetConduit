@@ -15,6 +15,14 @@ public sealed class StreamTransit : System.IO.Stream, ITransit
     private volatile bool _disposed;
     private volatile bool _readyFired;
     private readonly object _readyLock = new();
+    // Connected/Disconnected edge latches for the AND-Connected / OR-Disconnected
+    // / latch-reset pattern. Mirrors the DuplexStreamTransit fix
+    // and MessageTransit fix. Required when both write+read channels
+    // are configured so the transit doesn't fire Connected/Disconnected twice
+    // per cycle and so reconnect cycles re-fire events.
+    private readonly object _stateLock = new();
+    private bool _connectedFired;
+    private bool _disconnectedFired;
 
     /// <summary>
     /// Creates a write-only StreamTransit from a WriteChannel.
@@ -23,6 +31,7 @@ public sealed class StreamTransit : System.IO.Stream, ITransit
     {
         _writeChannel = writeChannel ?? throw new ArgumentNullException(nameof(writeChannel));
         SubscribeToChannelEvents();
+        ReplayReadyIfChannelAlreadyReady();
     }
 
     /// <summary>
@@ -32,6 +41,18 @@ public sealed class StreamTransit : System.IO.Stream, ITransit
     {
         _readChannel = readChannel ?? throw new ArgumentNullException(nameof(readChannel));
         SubscribeToChannelEvents();
+        ReplayReadyIfChannelAlreadyReady();
+    }
+
+    // Channel.Ready is single-shot; if the channel was already ready before we
+    // subscribed, the event we wired up will never fire. Synthesise the call so
+    // subscribers attached after construction still observe Ready exactly once
+    // . OnChannelReady's _readyFired guard makes the synthesised call
+    // race-safe against a concurrent genuine event.
+    private void ReplayReadyIfChannelAlreadyReady()
+    {
+        if ((_writeChannel?.IsReady ?? false) || (_readChannel?.IsReady ?? false))
+            OnChannelReady(this, EventArgs.Empty);
     }
 
     private void SubscribeToChannelEvents()
@@ -52,23 +73,80 @@ public sealed class StreamTransit : System.IO.Stream, ITransit
 
     private void OnChannelReady(object? sender, EventArgs e)
     {
+        EventHandler? handlers;
         lock (_readyLock)
         {
             if (_readyFired) return;
             _readyFired = true;
+            handlers = _readyHandlers;
         }
-        Ready?.Invoke(this, EventArgs.Empty);
+        handlers?.Invoke(this, EventArgs.Empty);
     }
 
-    private void OnChannelConnected(object? sender, EventArgs e) => Connected?.Invoke(this, EventArgs.Empty);
+    // When both write+read channels are configured each half raises
+    // its own Connected/Disconnected events; forwarding each independently
+    // double-fired the transit's events. AND-coalesce Connected (all halves
+    // up), OR-coalesce Disconnected (first half down). Reset opposite latch
+    // on each edge so reconnect cycles fire.
+    private void OnChannelConnected(object? sender, EventArgs e)
+    {
+        if ((_writeChannel?.IsConnected ?? true) == false) return;
+        if ((_readChannel?.IsConnected ?? true) == false) return;
+        bool fire = false;
+        lock (_stateLock)
+        {
+            if (_connectedFired) return;
+            _connectedFired = true;
+            _disconnectedFired = false;
+            fire = true;
+        }
+        if (fire) Connected?.Invoke(this, EventArgs.Empty);
+    }
 
-    private void OnChannelDisconnected(object? sender, DisconnectedEventArgs e) => Disconnected?.Invoke(this, e);
+    private void OnChannelDisconnected(object? sender, DisconnectedEventArgs e)
+    {
+        bool fire = false;
+        lock (_stateLock)
+        {
+            if (_disconnectedFired) return;
+            _disconnectedFired = true;
+            _connectedFired = false;
+            fire = true;
+        }
+        if (fire) Disconnected?.Invoke(this, e);
+    }
 
     /// <inheritdoc/>
-    public bool IsReady => !_disposed && (_writeChannel?.IsReady ?? _readChannel?.IsReady ?? false);
+    // When both write+read channels are configured, IsReady must be the
+    // AND of both halves, not the first non-null half. The old expression
+    // `(_writeChannel?.IsReady ?? _readChannel?.IsReady ?? false)` reported
+    // ready as soon as the write half was up, ignoring the read half
+    // entirely.
+    public bool IsReady
+    {
+        get
+        {
+            if (_disposed) return false;
+            var writeReady = _writeChannel?.IsReady ?? true;
+            var readReady = _readChannel?.IsReady ?? true;
+            // At least one half must be configured for IsReady to be true.
+            if (_writeChannel is null && _readChannel is null) return false;
+            return writeReady && readReady;
+        }
+    }
 
     /// <inheritdoc/>
-    public bool IsConnected => !_disposed && (_writeChannel?.IsConnected ?? _readChannel?.IsConnected ?? false);
+    public bool IsConnected
+    {
+        get
+        {
+            if (_disposed) return false;
+            var writeConnected = _writeChannel?.IsConnected ?? true;
+            var readConnected = _readChannel?.IsConnected ?? true;
+            if (_writeChannel is null && _readChannel is null) return false;
+            return writeConnected && readConnected;
+        }
+    }
 
     /// <inheritdoc/>
     public string? WriteChannelId => _writeChannel?.ChannelId;
@@ -76,8 +154,32 @@ public sealed class StreamTransit : System.IO.Stream, ITransit
     /// <inheritdoc/>
     public string? ReadChannelId => _readChannel?.ChannelId;
 
+    private EventHandler? _readyHandlers;
+
     /// <inheritdoc/>
-    public event EventHandler? Ready;
+    /// <remarks>
+    /// Latching: subscribers attached after the transit has already become Ready are
+    /// invoked immediately on subscription, so callers that wait for channel readiness
+    /// before constructing the transit still observe the event exactly once.
+    /// </remarks>
+    public event EventHandler? Ready
+    {
+        add
+        {
+            if (value is null) return;
+            bool fireImmediately;
+            lock (_readyLock)
+            {
+                _readyHandlers += value;
+                fireImmediately = _readyFired;
+            }
+            if (fireImmediately) value(this, EventArgs.Empty);
+        }
+        remove
+        {
+            lock (_readyLock) { _readyHandlers -= value; }
+        }
+    }
 
     /// <inheritdoc/>
     public event EventHandler? Connected;
@@ -86,13 +188,15 @@ public sealed class StreamTransit : System.IO.Stream, ITransit
     public event EventHandler<DisconnectedEventArgs>? Disconnected;
 
     /// <inheritdoc/>
-    public Task WaitForReadyAsync(CancellationToken ct = default)
+    // When both halves are configured, callers must wait for BOTH to
+    // become ready, not just the first non-null one.
+    public async Task WaitForReadyAsync(CancellationToken ct = default)
     {
-        if (_writeChannel is not null)
-            return _writeChannel.WaitForReadyAsync(ct);
-        if (_readChannel is not null)
-            return _readChannel.WaitForReadyAsync(ct);
-        return Task.CompletedTask;
+        var tasks = new List<Task>(2);
+        if (_writeChannel is not null) tasks.Add(_writeChannel.WaitForReadyAsync(ct));
+        if (_readChannel is not null) tasks.Add(_readChannel.WaitForReadyAsync(ct));
+        if (tasks.Count > 0)
+            await Task.WhenAll(tasks).ConfigureAwait(false);
     }
 
     /// <inheritdoc/>
@@ -189,8 +293,28 @@ public sealed class StreamTransit : System.IO.Stream, ITransit
         if (disposing)
         {
             UnsubscribeFromChannelEvents();
-            _writeChannel?.Dispose();
-            _readChannel?.Dispose();
+
+            // Aggregate inner-dispose failures so a throw from one half
+            // doesn't strand the other half (leak its slab back to the pool)
+            // and doesn't skip base.Dispose. Mirrors the DuplexStreamTransit
+            // pattern.
+            List<Exception>? errors = null;
+            if (_writeChannel is not null)
+            {
+                try { _writeChannel.Dispose(); }
+                catch (Exception ex) { (errors ??= []).Add(ex); }
+            }
+            if (_readChannel is not null)
+            {
+                try { _readChannel.Dispose(); }
+                catch (Exception ex) { (errors ??= []).Add(ex); }
+            }
+
+            base.Dispose(disposing);
+
+            if (errors is { Count: 1 }) throw errors[0];
+            if (errors is { Count: > 1 }) throw new AggregateException(errors);
+            return;
         }
 
         base.Dispose(disposing);
@@ -206,13 +330,26 @@ public sealed class StreamTransit : System.IO.Stream, ITransit
 
         UnsubscribeFromChannelEvents();
 
+        // Aggregate inner-dispose failures so a throw from one half
+        // doesn't strand the other half (leak its slab back to the pool)
+        // and doesn't skip base.DisposeAsync. Mirrors the DuplexStreamTransit
+        // pattern.
+        List<Exception>? errors = null;
         if (_writeChannel is not null)
-            await _writeChannel.DisposeAsync().ConfigureAwait(false);
-
+        {
+            try { await _writeChannel.DisposeAsync().ConfigureAwait(false); }
+            catch (Exception ex) { (errors ??= []).Add(ex); }
+        }
         if (_readChannel is not null)
-            await _readChannel.DisposeAsync().ConfigureAwait(false);
+        {
+            try { await _readChannel.DisposeAsync().ConfigureAwait(false); }
+            catch (Exception ex) { (errors ??= []).Add(ex); }
+        }
 
         await base.DisposeAsync().ConfigureAwait(false);
+
+        if (errors is { Count: 1 }) throw errors[0];
+        if (errors is { Count: > 1 }) throw new AggregateException(errors);
     }
 
     private void UnsubscribeFromChannelEvents()

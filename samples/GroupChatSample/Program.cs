@@ -213,7 +213,7 @@ async Task HandleNewTcpClientAsync(TcpClient tcpClient, ChatServer server, Cance
         using var acceptCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
         acceptCts.CancelAfter(TimeSpan.FromSeconds(10));
 
-        await foreach (var ch in mux.AcceptChannelsAsync(acceptCts.Token))
+        await foreach (var ch in mux.AcceptChannelsAsync(ct: acceptCts.Token))
         {
             if (ch.ChannelId == "chat")
             {
@@ -329,7 +329,7 @@ async Task HandleNewWebSocketClientAsync(System.Net.WebSockets.WebSocket webSock
         using var acceptCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
         acceptCts.CancelAfter(TimeSpan.FromSeconds(10));
 
-        await foreach (var ch in mux.AcceptChannelsAsync(acceptCts.Token))
+        await foreach (var ch in mux.AcceptChannelsAsync(ct: acceptCts.Token))
         {
             if (ch.ChannelId == "chat")
             {
@@ -529,7 +529,7 @@ async Task RunClientChatAsync(IStreamMultiplexer mux, string username, Cancellat
     using var acceptCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
     acceptCts.CancelAfter(TimeSpan.FromSeconds(10));
 
-    await foreach (var ch in mux.AcceptChannelsAsync(acceptCts.Token))
+    await foreach (var ch in mux.AcceptChannelsAsync(ct: acceptCts.Token))
     {
         if (ch.ChannelId == "broadcast")
         {

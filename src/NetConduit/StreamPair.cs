@@ -55,17 +55,37 @@ public sealed class StreamPair : IStreamPair
     /// <inheritdoc />
     public async ValueTask DisposeAsync()
     {
+        // Every cleanup step must run unconditionally — an exception from the
+        // read-stream dispose (e.g. RST'd socket, aborted QuicStream) must not
+        // leak the write stream or the owning transport handle.
+        List<Exception>? errors = null;
+
         if (ReadStream != WriteStream)
         {
-            await ReadStream.DisposeAsync();
+            try { await ReadStream.DisposeAsync(); }
+            catch (Exception ex) { (errors ??= []).Add(ex); }
         }
-        await WriteStream.DisposeAsync();
+
+        try { await WriteStream.DisposeAsync(); }
+        catch (Exception ex) { (errors ??= []).Add(ex); }
 
         if (_asyncOwner is not null)
         {
-            await _asyncOwner.DisposeAsync();
+            try { await _asyncOwner.DisposeAsync(); }
+            catch (Exception ex) { (errors ??= []).Add(ex); }
         }
 
-        _syncOwner?.Dispose();
+        if (_syncOwner is not null)
+        {
+            try { _syncOwner.Dispose(); }
+            catch (Exception ex) { (errors ??= []).Add(ex); }
+        }
+
+        if (errors is not null)
+        {
+            if (errors.Count == 1)
+                throw errors[0];
+            throw new AggregateException(errors);
+        }
     }
 }

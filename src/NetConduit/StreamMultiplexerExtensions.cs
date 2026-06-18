@@ -35,8 +35,20 @@ public static class StreamMultiplexerExtensions
         this IStreamMultiplexer mux, string channelId, CancellationToken ct = default)
     {
         var channel = mux.OpenChannel(channelId);
-        await channel.WaitForReadyAsync(ct);
-        return channel;
+        try
+        {
+            await channel.WaitForReadyAsync(ct).ConfigureAwait(false);
+            return channel;
+        }
+        catch
+        {
+            // WaitForReadyAsync can throw on cancellation, peer rejection,
+            // mux disposal, or transport failure. Without this dispose, the channel
+            // remains registered in ChannelRegistry — its slab, wire-index, and
+            // channelId stay permanently allocated until the mux is disposed.
+            await channel.DisposeAsync().ConfigureAwait(false);
+            throw;
+        }
     }
 
     /// <summary>
@@ -47,8 +59,16 @@ public static class StreamMultiplexerExtensions
         this IStreamMultiplexer mux, ChannelOptions options, CancellationToken ct = default)
     {
         var channel = mux.OpenChannel(options);
-        await channel.WaitForReadyAsync(ct);
-        return channel;
+        try
+        {
+            await channel.WaitForReadyAsync(ct).ConfigureAwait(false);
+            return channel;
+        }
+        catch
+        {
+            await channel.DisposeAsync().ConfigureAwait(false);
+            throw;
+        }
     }
 
     /// <summary>
@@ -59,7 +79,15 @@ public static class StreamMultiplexerExtensions
         this IStreamMultiplexer mux, string channelId, CancellationToken ct = default)
     {
         var channel = mux.AcceptChannel(channelId);
-        await channel.WaitForReadyAsync(ct);
-        return channel;
+        try
+        {
+            await channel.WaitForReadyAsync(ct).ConfigureAwait(false);
+            return channel;
+        }
+        catch
+        {
+            await channel.DisposeAsync().ConfigureAwait(false);
+            throw;
+        }
     }
 }

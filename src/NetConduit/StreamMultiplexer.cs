@@ -11,14 +11,18 @@ using NetConduit.Models;
 namespace NetConduit;
 
 /// <summary>
-/// The multiplexer — a pure router. Channels do all heavy lifting.
-/// The mux just picks up ready frames from channels and sends them, and routes
-/// incoming frames to the correct channel by reading the 8-byte header.
+/// The multiplexer. Owns the connection lifecycle (initial connect, retry/backoff,
+/// reconnect with replay), the wire-level handshake and reconnect handshake, the
+/// writer/flusher/reader/keepalive loops, control-frame processing (GoAway, ping/pong),
+/// channel-id validation, GoAway drain orchestration, and inbound-channel accept
+/// dispatch. Per-channel send/receive slabs, frame construction, flow control,
+/// and replay state live on the channels themselves (<see cref="IWriteChannel"/>,
+/// <see cref="IReadChannel"/>); this class routes frames between the transport
+/// and those channels and arbitrates session-level state.
 /// </summary>
 public sealed class StreamMultiplexer : IStreamMultiplexer, IChannelOwner
 {
-    private const int InitialHandshakePayloadLength = 16;
-    private const int ReconnectHandshakePayloadLength = 17;
+    private static readonly UTF8Encoding StrictChannelIdDecoder = new(false, true);
 
     private readonly MultiplexerOptions _options;
     private readonly ChannelRegistry _registry;
@@ -29,26 +33,19 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IChannelOwner
     private readonly CancellationTokenSource _cts = new();
     private readonly object _readyLock = new();
     private readonly List<WriteChannel> _readyChannels = [];
+    private readonly MuxConnection _conn = new();
+    private readonly MuxConnectRetry _connectRetry;
+    private readonly ChannelBatchRegistrar _channelRegistrar;
 
-    private IStreamPair? _transport;
-    private Task? _mainLoopTask;
-    private Task? _writerTask;
-    private Task? _readerTask;
-    private Task? _flusherTask;
-    private Task? _keepaliveTask;
-    private CancellationTokenSource? _loopCts;
-    private WriteChannel? _controlChannel;
     private volatile bool _isRunning;
     private volatile bool _isConnected;
     private volatile bool _isReady;
-    private volatile bool _isShuttingDown;
-    private volatile bool _disconnectedFired;
+    private int _isShuttingDown;
+    private int _disconnectedFired;
+    private volatile bool _disposed;
     private DisconnectReason? _disconnectReason;
-    private Guid _sessionId;
-    private Guid _remoteSessionId;
-    private TaskCompletionSource? _pendingPong;
 
-    private static byte[] EncodeValidatedChannelId(string channelId, string paramName)
+    internal static byte[] EncodeValidatedChannelId(string channelId, string paramName)
     {
         ArgumentNullException.ThrowIfNull(channelId, paramName);
 
@@ -82,13 +79,13 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IChannelOwner
     public bool IsRunning => _isRunning;
 
     /// <inheritdoc />
-    public bool IsShuttingDown => _isShuttingDown;
+    public bool IsShuttingDown => Volatile.Read(ref _isShuttingDown) != 0;
 
     /// <inheritdoc />
-    public Guid SessionId => _sessionId;
+    public Guid SessionId => _conn.SessionId;
 
     /// <inheritdoc />
-    public Guid RemoteSessionId => _remoteSessionId;
+    public Guid RemoteSessionId => _conn.RemoteSessionId;
 
     /// <inheritdoc />
     public IReadOnlyCollection<string> ActiveChannelIds =>
@@ -124,8 +121,13 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IChannelOwner
     private StreamMultiplexer(MultiplexerOptions options, bool useOddIndices)
     {
         _options = options;
-        _sessionId = options.SessionId ?? Guid.NewGuid();
+        _conn.SessionId = options.SessionId ?? Guid.NewGuid();
         _registry = new ChannelRegistry(useOddIndices);
+        _connectRetry = new MuxConnectRetry(
+            options,
+            args => RaiseEvent(Reconnecting, args),
+            RaiseError);
+        _channelRegistrar = new ChannelBatchRegistrar(_registry, _options, _stats, this);
     }
 
     /// <summary>
@@ -140,18 +142,147 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IChannelOwner
                 nameof(options),
                 "MaxAutoReconnectAttempts must be -1 (unlimited), 0 (no reconnect), or a positive bound.");
         }
+        ValidateSlabSize(options.DefaultChannelOptions.SlabSize, $"{nameof(options)}.{nameof(MultiplexerOptions.DefaultChannelOptions)}.{nameof(DefaultChannelOptions.SlabSize)}");
+        ValidateSendTimeout(options.DefaultChannelOptions.SendTimeout, $"{nameof(options)}.{nameof(MultiplexerOptions.DefaultChannelOptions)}.{nameof(DefaultChannelOptions.SendTimeout)}");
+        ValidateTimingOptions(options);
         return new StreamMultiplexer(options, useOddIndices: true);
+    }
+
+    internal static void ValidateSlabSize(int slabSize, string paramName)
+    {
+        if (slabSize < FrameConstants.MinSlabSize || slabSize > FrameConstants.MaxSlabSize)
+        {
+            throw new ArgumentOutOfRangeException(
+                paramName,
+                slabSize,
+                $"SlabSize must be between {FrameConstants.MinSlabSize} ({FrameConstants.MinSlabSize / 1024} KiB) and {FrameConstants.MaxSlabSize} ({FrameConstants.MaxSlabSize / (1024 * 1024)} MiB) inclusive.");
+        }
+    }
+
+    /// <summary>
+    /// Validates that <paramref name="sendTimeout"/> is a value
+    /// <see cref="SemaphoreSlim.WaitAsync(TimeSpan, CancellationToken)"/> will
+    /// accept. The accepted shape mirrors SemaphoreSlim's own contract:
+    /// <see cref="Timeout.InfiniteTimeSpan"/> (the documented "wait forever"
+    /// sentinel) is allowed; every other negative value is rejected; and
+    /// values greater than <see cref="int.MaxValue"/> milliseconds are
+    /// rejected because SemaphoreSlim cannot represent them. Without this
+    /// boundary check, a misconfigured SendTimeout surfaces as a confusing
+    /// ArgumentOutOfRangeException from SemaphoreSlim.WaitAsync deep inside
+    /// WriteChannel.WriteAsync only after the channel is open and the first
+    /// write parks on backpressure (fixes #387).
+    /// </summary>
+    internal static void ValidateSendTimeout(TimeSpan sendTimeout, string paramName)
+    {
+        if (sendTimeout == Timeout.InfiniteTimeSpan) return;
+        if (sendTimeout < TimeSpan.Zero)
+            throw new ArgumentOutOfRangeException(
+                paramName,
+                sendTimeout,
+                "SendTimeout must be non-negative, or Timeout.InfiniteTimeSpan to disable the timeout.");
+        if (sendTimeout.TotalMilliseconds > int.MaxValue)
+            throw new ArgumentOutOfRangeException(
+                paramName,
+                sendTimeout,
+                $"SendTimeout must not exceed {int.MaxValue} milliseconds (approximately 24.86 days).");
+    }
+
+    /// <summary>
+    /// Rejects <paramref name="value"/> when it exceeds
+    /// <see cref="int.MaxValue"/> milliseconds (approximately 24.86 days).
+    /// <see cref="Task.Delay(TimeSpan, CancellationToken)"/> and
+    /// <see cref="CancellationTokenSource(TimeSpan)"/> both throw
+    /// <see cref="ArgumentOutOfRangeException"/> at that boundary; without a
+    /// matching fail-fast at construction, an oversized timing option passed
+    /// validation and faulted the first keepalive tick / drain wait / connect
+    /// retry, surfacing as a confusing internal exception with no link back
+    /// to the misconfigured field (parallel of #387 for Task.Delay sinks).
+    /// Mirrors <see cref="ValidateSendTimeout"/>'s SemaphoreSlim boundary check.
+    /// </summary>
+    private static void ValidateTaskDelayUpperBound(TimeSpan value, string fieldName)
+    {
+        if (value.TotalMilliseconds > int.MaxValue)
+            throw new ArgumentOutOfRangeException(
+                nameof(MultiplexerOptions),
+                value,
+                $"{fieldName} must not exceed {int.MaxValue} milliseconds (approximately 24.86 days).");
+    }
+
+    private static void ValidateTimingOptions(MultiplexerOptions options)
+    {
+        if (options.PingInterval < TimeSpan.Zero)
+            throw new ArgumentOutOfRangeException(
+                nameof(options),
+                options.PingInterval,
+                "PingInterval must be non-negative. Use TimeSpan.Zero to disable keepalive.");
+        ValidateTaskDelayUpperBound(options.PingInterval, nameof(options.PingInterval));
+
+        if (options.PingInterval > TimeSpan.Zero)
+        {
+            if (options.PingTimeout <= TimeSpan.Zero)
+                throw new ArgumentOutOfRangeException(
+                    nameof(options),
+                    options.PingTimeout,
+                    "PingTimeout must be positive when keepalive is enabled (PingInterval > TimeSpan.Zero).");
+            ValidateTaskDelayUpperBound(options.PingTimeout, nameof(options.PingTimeout));
+
+            if (options.MaxMissedPings < 1)
+                throw new ArgumentOutOfRangeException(
+                    nameof(options),
+                    options.MaxMissedPings,
+                    "MaxMissedPings must be at least 1 when keepalive is enabled (PingInterval > TimeSpan.Zero).");
+        }
+
+        if (options.GoAwayTimeout < TimeSpan.Zero)
+            throw new ArgumentOutOfRangeException(
+                nameof(options),
+                options.GoAwayTimeout,
+                "GoAwayTimeout must be non-negative.");
+        ValidateTaskDelayUpperBound(options.GoAwayTimeout, nameof(options.GoAwayTimeout));
+
+        if (options.AutoReconnectDelay < TimeSpan.Zero)
+            throw new ArgumentOutOfRangeException(
+                nameof(options),
+                options.AutoReconnectDelay,
+                "AutoReconnectDelay must be non-negative.");
+        ValidateTaskDelayUpperBound(options.AutoReconnectDelay, nameof(options.AutoReconnectDelay));
+
+        if (options.MaxAutoReconnectDelay < options.AutoReconnectDelay)
+            throw new ArgumentOutOfRangeException(
+                nameof(options),
+                options.MaxAutoReconnectDelay,
+                $"MaxAutoReconnectDelay ({options.MaxAutoReconnectDelay}) must be greater than or equal to AutoReconnectDelay ({options.AutoReconnectDelay}).");
+        ValidateTaskDelayUpperBound(options.MaxAutoReconnectDelay, nameof(options.MaxAutoReconnectDelay));
+
+        if (double.IsNaN(options.AutoReconnectBackoffMultiplier)
+            || double.IsInfinity(options.AutoReconnectBackoffMultiplier)
+            || options.AutoReconnectBackoffMultiplier < 1.0)
+            throw new ArgumentOutOfRangeException(
+                nameof(options),
+                options.AutoReconnectBackoffMultiplier,
+                "AutoReconnectBackoffMultiplier must be greater than or equal to 1.0.");
+
+        if (options.ConnectionTimeout != Timeout.InfiniteTimeSpan && options.ConnectionTimeout < TimeSpan.Zero)
+            throw new ArgumentOutOfRangeException(
+                nameof(options),
+                options.ConnectionTimeout,
+                "ConnectionTimeout must be non-negative, or Timeout.InfiniteTimeSpan to disable per-attempt timeout.");
+        if (options.ConnectionTimeout != Timeout.InfiniteTimeSpan)
+            ValidateTaskDelayUpperBound(options.ConnectionTimeout, nameof(options.ConnectionTimeout));
     }
 
     /// <inheritdoc />
     public void Start()
     {
+        if (_disposed)
+            throw new ObjectDisposedException(nameof(StreamMultiplexer));
+
         if (_isRunning)
             throw new InvalidOperationException("Multiplexer is already running.");
 
         _isRunning = true;
         _stats._startTicks = Environment.TickCount64;
-        _mainLoopTask = Task.Run(() => MainLoopAsync(_cts.Token));
+        _conn.MainLoopTask = Task.Run(() => MainLoopAsync(_cts.Token));
     }
 
     /// <inheritdoc />
@@ -162,26 +293,56 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IChannelOwner
     {
         ArgumentNullException.ThrowIfNull(options);
         byte[] channelIdBytes = EncodeValidatedChannelId(options.ChannelId, nameof(options));
+        ValidateSlabSize(options.SlabSize, $"{nameof(options)}.{nameof(ChannelOptions.SlabSize)}");
+        ValidateSendTimeout(options.SendTimeout, $"{nameof(options)}.{nameof(ChannelOptions.SendTimeout)}");
 
         if (!_isRunning)
             throw new InvalidOperationException("Multiplexer has not been started.");
 
+        if (IsShuttingDown)
+            throw new InvalidOperationException("Cannot open new channels after GoAwayAsync.");
+
         bool enableReplay = _options.MaxAutoReconnectAttempts != 0;
-        ushort index = _registry.AllocateChannelIndex();
-        var channel = new WriteChannel(
-            options.ChannelId,
-            index,
-            options.Priority,
-            options.SlabSize,
-            options.SendTimeout,
-            this,
-            enableReplay);
+        WriteChannel channel;
+        // Lock against ReassignPreHandshakeWriteChannelIndices: allocate +
+        // register + stamp the INIT frame as one atomic unit so a concurrent
+        // post-handshake reassign either sees this channel and rekeys it, or
+        // we observe the already-flipped parity and allocate correctly.
+        lock (_registry.ChannelIndexLock)
+        {
+            if (IsShuttingDown)
+                throw new InvalidOperationException("Cannot open new channels after GoAwayAsync.");
 
-        _registry.RegisterWriteChannel(index, channel);
+            ushort index = _registry.AllocateChannelIndex();
+            channel = new WriteChannel(
+                options.ChannelId,
+                index,
+                options.Priority,
+                options.SlabSize,
+                options.SendTimeout,
+                this,
+                enableReplay);
 
-        // Send INIT frame (channel does it itself — builds the frame in its slab)
-        channel.WriteInitFrame(channelIdBytes);
-        // Channel stays in Opening/Pending state until remote ACKs the INIT
+            try
+            {
+                _registry.RegisterWriteChannel(index, channel);
+
+                // Send INIT frame (channel does it itself — builds the frame in its slab)
+                channel.WriteInitFrame(channelIdBytes);
+                // Channel stays in Opening/Pending state until remote ACKs the INIT
+            }
+            catch
+            {
+                // RegisterWriteChannel throws ChannelExists on duplicate id; the
+                // WriteChannel constructor already rented its slab from
+                // ArrayPool<byte>.Shared and the caller never receives a handle
+                // to dispose. Abort returns the slab to the pool and disposes
+                // the space-available semaphore (fixes #390). Index allocation
+                // is intentionally monotonic and not reclaimed.
+                channel.Abort(ChannelCloseReason.LocalClose);
+                throw;
+            }
+        }
 
         if (_isConnected)
             channel.MarkConnected();
@@ -200,10 +361,16 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IChannelOwner
         if (!_isRunning)
             throw new InvalidOperationException("Multiplexer has not been started.");
 
+        if (IsShuttingDown)
+            throw new InvalidOperationException("Cannot accept new channels after GoAwayAsync.");
+
         // Atomically observe registry state and either return an existing channel
         // or commit a new pending channel that the reader will adopt when INIT arrives.
         lock (_registry.AcceptLock)
         {
+            if (IsShuttingDown)
+                throw new InvalidOperationException("Cannot accept new channels after GoAwayAsync.");
+
             // Check if channel already arrived from remote
             var existing = _registry.GetReadChannelById(channelId);
             if (existing is not null) return existing;
@@ -231,9 +398,32 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IChannelOwner
     }
 
     /// <inheritdoc />
-    public IAsyncEnumerable<IReadChannel> AcceptChannelsAsync(CancellationToken ct = default)
+    public IAsyncEnumerable<IReadChannel> AcceptChannelsAsync(string? channelIdPrefix = null, CancellationToken ct = default)
     {
-        return _registry.AcceptChannelsAsync(ct);
+        return _registry.AcceptChannelsAsync(channelIdPrefix, ct);
+    }
+
+    /// <inheritdoc />
+    public bool TryRegisterChannels(
+        ReadOnlySpan<ChannelRegistration> registrations,
+        out IReadOnlyDictionary<ChannelRegistration, IChannel> channels)
+    {
+        if (!_isRunning)
+            throw new InvalidOperationException("Multiplexer has not been started.");
+        if (IsShuttingDown)
+            throw new InvalidOperationException("Cannot register new channels after GoAwayAsync.");
+        if (registrations.IsEmpty)
+            throw new ArgumentException("At least one registration is required.", nameof(registrations));
+
+        try
+        {
+            return _channelRegistrar.TryRegisterChannels(registrations, out channels);
+        }
+        catch (ArgumentException)
+        {
+            channels = new Dictionary<ChannelRegistration, IChannel>();
+            return false;
+        }
     }
 
     /// <inheritdoc />
@@ -251,25 +441,70 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IChannelOwner
     /// <inheritdoc />
     public async ValueTask GoAwayAsync(CancellationToken ct = default)
     {
-        if (_isShuttingDown) return;
-        _isShuttingDown = true;
+        if (Interlocked.CompareExchange(ref _isShuttingDown, 1, 0) != 0) return;
 
-        // Send GoAway control frame to remote before shutting down
-        ReadOnlySpan<byte> goAwayPayload = [CtrlSubtype.GoAway];
-        SendControlFrame(FrameFlags.Ctrl, goAwayPayload);
+        // The compare-exchange above is the single entry gate for GoAwayAsync.
+        // We still attempt best-effort GoAway frame staging before cancellation,
+        // but concurrent callers now exit immediately without duplicating teardown.
+        byte[] goAwayPayload = [CtrlSubtype.GoAway];
+        const int MaxGoAwayAttempts = 5;
+        for (int attempt = 0; attempt < MaxGoAwayAttempts; attempt++)
+        {
+            if (SendControlFrame(FrameFlags.Ctrl, goAwayPayload)) break;
+            await Task.Yield();
+        }
 
-        // Allow the GoAway frame to be sent by the writer thread
+        // Wait up to GoAwayTimeout for already-open channels to drain. The caller token cancels the wait;
+        // GoAwayTimeout bounds it. Either path falls through to forced abort below.
+        using var drainCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        drainCts.CancelAfter(_options.GoAwayTimeout);
         try
         {
-            using var delayCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
-            delayCts.CancelAfter(_options.GoAwayTimeout);
-            // Wait briefly for the writer to flush the GoAway
-            await Task.Delay(100, delayCts.Token);
+            while (ActiveChannelCount > 0)
+            {
+                await Task.Delay(20, drainCts.Token).ConfigureAwait(false);
+            }
         }
-        catch (OperationCanceledException) { /* timeout or caller cancel is fine */ }
+        catch (OperationCanceledException) { /* timeout or caller cancel — proceed to terminal cleanup */ }
+
+        // Phase 1 (signal): fire channel Disconnected with LocalDispose
+        // before the natural-fault path inside MainLoopAsync would otherwise
+        // fire it with TransportError (fixes #391-style reason inversion).
+        // MarkAllChannelsDisconnected does not touch slabs - the writer may
+        // still be inside writeStream.Write at this point.
+        _registry.MarkAllChannelsDisconnected(ChannelCloseReason.MuxDisposed);
+        _registry.CancelAllPendingAccepts();
 
         _disconnectReason = Enums.DisconnectReason.LocalDispose;
+        _isConnected = false;
+
+        // Local GoAway tears down the transport identically to a remote
+        // GoAway, so the mux-level Disconnected event must fire here too.
+        // _disconnectedFired is the single arbiter for terminal Disconnected
+        // emission across GoAwayAsync, the remote-GoAway branch in
+        // MainLoopAsync, and DisposeAsync, guaranteeing exactly-once
+        // delivery regardless of which teardown trigger fires first.
+        TryRaiseDisconnected(Enums.DisconnectReason.LocalDispose, null);
+
         _cts.Cancel();
+
+        // Phase 2 (drain): await MainLoopAsync exit so the writer can no
+        // longer be inside writeStream.Write(frames.Span) when we return slabs
+        // to ArrayPool (fixes #368). The natural-fault path inside
+        // MainLoopAsync already awaits the writer via WaitForLoopsAsync,
+        // so when MainLoopTask completes the writer is guaranteed exited.
+        if (_conn.MainLoopTask is not null)
+        {
+            try { await _conn.MainLoopTask.WaitAsync(ct); }
+            catch (OperationCanceledException) { }
+            catch { /* swallow during teardown */ }
+        }
+
+        // Phase 3 (release): now safe to SetClosed every channel, which
+        // returns its slab to ArrayPool. Before this restructure, the
+        // AbortAllChannels call ran synchronously before _cts.Cancel and
+        // raced the writer.
+        _registry.CloseAllChannels(ChannelCloseReason.MuxDisposed);
     }
 
     /// <inheritdoc />
@@ -293,7 +528,7 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IChannelOwner
             while (!ct.IsCancellationRequested)
             {
                 // Connect with retry (no delay on first attempt)
-                var transport = await ConnectWithRetryAsync(hasConnectedBefore, ct);
+                var transport = await _connectRetry.ConnectWithRetryAsync(hasConnectedBefore, ct);
 
                 // Handshake: reconnect if we've connected before, initial otherwise.
                 // Only transport I/O failures raised by the handshake path are retryable.
@@ -310,127 +545,207 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IChannelOwner
                     }
                     else
                     {
-                        _transport = transport;
-                        await PerformHandshakeAsync(ct);
+                        _conn.Transport = transport;
+                        _conn.UseOddIndices = await PerformHandshakeAsync(ct);
                     }
                 }
                 catch (OperationCanceledException) when (ct.IsCancellationRequested)
                 {
+                    // On the reconnect path _conn.Transport was never assigned,
+                    // so the outer DisposeAsync safety net cannot reach the
+                    // freshly-connected transport here. Mirror the other two
+                    // handshake catch arms below and dispose it explicitly
+                    // before rethrowing, otherwise an honest mux.DisposeAsync
+                    // racing a reconnect handshake leaks one socket/pipe/QUIC
+                    // connection per cancelled reconnect cycle.
+                    //
+                    // On the initial-connect path _conn.Transport = transport
+                    // ran before PerformHandshakeAsync, so the outer
+                    // DisposeAsync already owns it — disposing here would
+                    // double-dispose. Guard on hasConnectedBefore.
+                    if (hasConnectedBefore)
+                    {
+                        try { await transport.DisposeAsync(); } catch { }
+                    }
                     throw;
                 }
                 catch (HandshakeTransportException handshakeEx)
                 {
                     handshakeAttempt++;
-                    _transport = null;
+                    _conn.Transport = null;
                     try { await transport.DisposeAsync(); } catch { }
 
-                    RaiseEvent(Error, new Events.ErrorEventArgs(handshakeEx));
+                    RaiseError(handshakeEx);
 
-                    if (!HasHandshakeRetryBudget(handshakeAttempt))
+                    if (!_connectRetry.HasHandshakeRetryBudget(handshakeAttempt))
                         throw;
 
-                    try
-                    {
-                        await Task.Delay(_options.AutoReconnectDelay, ct);
-                    }
-                    catch (OperationCanceledException) when (ct.IsCancellationRequested)
-                    {
-                        throw;
-                    }
+                    // Route the inter-attempt delay through the shared retry
+                    // helper so handshake retries honor the same backoff curve
+                    // (AutoReconnectBackoffMultiplier, MaxAutoReconnectDelay)
+                    // and emit the same Reconnecting telemetry as the
+                    // connect-retry path. A flat Task.Delay here would diverge
+                    // from the connect-retry path's behavior on the very same
+                    // MultiplexerOptions, leaving observers blind to handshake
+                    // retries and pinning the inter-attempt delay at the base
+                    // regardless of multiplier or cap.
+                    await _connectRetry.AwaitHandshakeRetryDelayAsync(handshakeAttempt, ct);
 
                     continue;
+                }
+                catch
+                {
+                    // Non-transport handshake failures (MultiplexerException for
+                    // SessionMismatch / ProtocolError / Internal, applyRemotePositions
+                    // throws, etc.) propagate to terminate the mux. The freshly
+                    // connected transport is still owned by this loop and must be
+                    // disposed before leaving the scope. On the reconnect path
+                    // _conn.Transport was never assigned, so the outer DisposeAsync
+                    // safety net cannot reach it.
+                    _conn.Transport = null;
+                    try { await transport.DisposeAsync(); } catch { }
+                    throw;
                 }
 
                 handshakeAttempt = 0;
 
-                _transport = transport;
+                _conn.Transport = transport;
                 _isConnected = true;
                 _disconnectReason = null;
 
-                // Create control channel on first connect
-                if (_controlChannel is null)
+                // Commit the handshake-negotiated index parity and reassign any
+                // pre-handshake-allocated WriteChannel that landed on the wrong
+                // parity space as ONE atomic block under ChannelIndexLock.
+                // SetIndexParity resets _nextChannelIndex; any concurrent
+                // OpenChannel / TryRegisterChannels allocator holding the same
+                // lock around its allocate+register sequence must not observe
+                // the reset mid-batch, otherwise a later AllocateChannelIndex
+                // call can return an index already issued in the same batch
+                // and RegisterWriteChannel collides on the slot. First connect
+                // only; reconnects re-use the same session-GUID-derived parity
+                // and AllocateChannelIndex already returns indices in the
+                // correct space.
+                if (!hasConnectedBefore)
                 {
-                    _controlChannel = new WriteChannel(
+                    lock (_registry.ChannelIndexLock)
+                    {
+                        _registry.SetIndexParity(_conn.UseOddIndices);
+                        ReassignPreHandshakeWriteChannelIndices();
+                    }
+                }
+
+                // Create control channel on first connect
+                if (_conn.ControlChannel is null)
+                {
+                    _conn.ControlChannel = new WriteChannel(
                         "__control__",
                         ChannelConstants.ControlChannel,
                         ChannelPriority.Highest,
                         FrameConstants.MinSlabSize,
                         TimeSpan.FromSeconds(5),
                         this);
-                    _controlChannel.MarkOpen();
+                    _conn.ControlChannel.MarkOpen();
                 }
 
                 // Start loops with a per-session CTS
-                _loopCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
-                var loopCt = _loopCts.Token;
+                _conn.LoopCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+                var loopCt = _conn.LoopCts.Token;
+                var conn = _conn;
 
-                _writerTask = Task.Factory.StartNew(
-                    () => RunWriterLoop(loopCt),
+                var transportWriter = new MuxTransportWriter(
+                    conn, _readySignal, _flushSignal, _readyChannels, _readyLock, _stats);
+
+                _conn.WriterTask = Task.Factory.StartNew(
+                    () => transportWriter.RunWriterLoop(loopCt),
                     loopCt,
                     TaskCreationOptions.LongRunning,
                     TaskScheduler.Default);
-                _flusherTask = Task.Factory.StartNew(
-                    () => RunFlusherLoop(loopCt),
+                _conn.FlusherTask = Task.Factory.StartNew(
+                    () => transportWriter.RunFlusherLoop(loopCt),
                     loopCt,
                     TaskCreationOptions.LongRunning,
                     TaskScheduler.Default);
-                _readerTask = Task.Run(() => RunReaderLoopAsync(loopCt), loopCt);
+                _conn.ReaderTask = Task.Run(() => RunReaderLoopAsync(conn, loopCt), loopCt);
 
                 if (_options.PingInterval > TimeSpan.Zero)
-                    _keepaliveTask = Task.Run(() => RunKeepaliveLoopAsync(loopCt), loopCt);
+                {
+                    var keepalive = new MuxKeepalive(
+                        conn,
+                        _options.PingInterval,
+                        _options.PingTimeout,
+                        _options.MaxMissedPings);
+                    _conn.KeepaliveTask = Task.Run(() => keepalive.RunAsync(loopCt), loopCt);
+                }
 
                 RaiseEvent(Connected);
+
+                // Reset the Disconnected latch on every (re)connect edge so the
+                // next down-edge — whether transient transport failure or terminal
+                // DisposeAsync — fires its own Disconnected event (fixes #383, #400).
+                // Without this reset, _disconnectedFired is a lifetime latch and
+                // any mux that ever experienced ≥1 transient drop silently
+                // suppresses its terminal Disconnected(LocalDispose) on dispose.
+                Volatile.Write(ref _disconnectedFired, 0);
 
                 if (!hasConnectedBefore)
                 {
                     _isReady = true;
-                    _readyTcs.TrySetResult();
+                    // Raise Ready synchronously first so handlers observe a ready multiplexer,
+                    // then complete the TCS so async awaiters resume only after handlers ran.
                     RaiseEvent(Ready);
+                    _readyTcs.TrySetResult();
                 }
                 hasConnectedBefore = true;
 
-                // Notify all channels that transport is connected
-                foreach (var ch in _registry.GetAllWriteChannels())
-                    ch.MarkConnected();
-                foreach (var ch in _registry.GetAllReadChannels())
-                    ch.MarkConnected();
+                // Notify all channels that transport is connected. Includes
+                // pending accepts so a pre-armed AcceptChannel reflects the
+                // reconnect up-edge (fixes #427).
+                _registry.MarkAllChannelsConnected();
 
                 // Block until any loop faults (transport died)
                 var faulted = await Task.WhenAny(
-                    _writerTask,
-                    _readerTask,
-                    _flusherTask,
-                    _keepaliveTask ?? Task.Delay(Timeout.Infinite, ct));
+                    _conn.WriterTask!,
+                    _conn.ReaderTask!,
+                    _conn.FlusherTask!,
+                    _conn.KeepaliveTask ?? Task.Delay(Timeout.Infinite, ct));
 
                 // Transport is dead — cancel all loops and clean up
                 _isConnected = false;
-                _loopCts.Cancel();
+                _conn.LoopCts.Cancel();
 
-                // Notify all channels that transport is disconnected
-                foreach (var ch in _registry.GetAllWriteChannels())
-                    ch.MarkDisconnected(Enums.DisconnectReason.TransportError, null);
-                foreach (var ch in _registry.GetAllReadChannels())
-                    ch.MarkDisconnected(Enums.DisconnectReason.TransportError, null);
+                // Notify all channels that transport is disconnected. Includes
+                // pending accepts so a pre-armed AcceptChannel that observed
+                // Connected at register time also observes the down-edge
+                // (fixes #427, #435). MarkAllChannelsDisconnected centralizes
+                // the iteration over writes + reads + pending accepts.
+                _registry.MarkAllChannelsDisconnected(ChannelCloseReason.TransportFailed);
 
                 await WaitForLoopsAsync();
-                _loopCts.Dispose();
-                _loopCts = null;
+                _conn.LoopCts.Dispose();
+                _conn.LoopCts = null;
 
                 // Capture the exception if any
                 Exception? transportEx = faulted.Exception?.InnerException;
                 if (transportEx is not null)
-                    RaiseEvent(Error, new Events.ErrorEventArgs(transportEx));
+                    RaiseError(transportEx);
 
                 // Dispose old transport
                 await transport.DisposeAsync();
-                _transport = null;
+                _conn.Transport = null;
 
-                if (_isShuttingDown)
+                if (IsShuttingDown)
                 {
                     if (_disconnectReason == Enums.DisconnectReason.GoAwayReceived)
                     {
-                        _disconnectedFired = true;
-                        RaiseEvent(Disconnected, new DisconnectedEventArgs(Enums.DisconnectReason.GoAwayReceived, null));
+                        // Remote-initiated GoAway: the local GoAwayAsync path drains
+                        // then aborts channels, but the remote path skips both. Without
+                        // this, local channels remain in Open state forever after the
+                        // peer disappears — ReadAsync hangs and WriteAsync stalls until
+                        // SendTimeout. Mirror GoAwayAsync's terminal abort so awaiting
+                        // reads see EOF and writers see ChannelClosedException promptly.
+                        _registry.AbortAllChannels(ChannelCloseReason.MuxDisposed);
+                        _registry.CancelAllPendingAccepts();
+                        TryRaiseDisconnected(Enums.DisconnectReason.GoAwayReceived, null);
                     }
                     break;
                 }
@@ -439,23 +754,32 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IChannelOwner
                 if (ct.IsCancellationRequested)
                     break;
 
-                _disconnectedFired = true;
-                // Mark transient if the loop will attempt to reconnect; consumers
-                // that hide reconnect cycles use WillRetry to suppress this event
-                // and wait for the terminal one fired from the catch block below.
-                bool willRetry = _options.MaxAutoReconnectAttempts != 0;
-                RaiseEvent(Disconnected, new DisconnectedEventArgs(Enums.DisconnectReason.TransportError, transportEx, willRetry));
+                TryRaiseDisconnected(Enums.DisconnectReason.TransportError, transportEx, willRetry: true);
             }
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
-            // Normal shutdown via Dispose/GoAway
+            // Normal shutdown via Dispose/GoAway. Complete _readyTcs so any
+            // WaitForReadyAsync caller without a CancellationToken observes a
+            // deterministic TaskCanceledException instead of hanging forever
+            // (fixes #395, #401). TrySetCanceled is a no-op once _readyTcs has
+            // already been completed via TrySetResult on a prior successful
+            // handshake, so reconnect-after-Ready dispose semantics are
+            // unchanged.
+            _readyTcs.TrySetCanceled(ct);
         }
         catch (Exception ex)
         {
-            // Fatal error (protocol error, exhausted retries) — notify waiters
-            if (hasConnectedBefore)
-                AbortChannelsForTerminalTransportFailure(ex);
+            // Fatal error (protocol error, exhausted retries) — notify waiters.
+            // Always abort registered channels, regardless of hasConnectedBefore:
+            // pre-handshake channels rented their slab and parked their _readyTcs
+            // in the constructor, so a terminal first-connect failure that skips
+            // AbortAllChannels leaves channel.WaitForReadyAsync hanging forever
+            // and leaks the slab until the channel object becomes unreachable
+            // (fixes #385). AbortAllChannels is safe to call when no channels
+            // were ever connected — MarkDisconnected and SetClosed are both
+            // idempotent and tolerate Opening-state entries.
+            AbortChannelsForTerminalTransportFailure(ex);
 
             _readyTcs.TrySetException(ex);
 
@@ -475,80 +799,11 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IChannelOwner
         _registry.CancelAllPendingAccepts();
     }
 
-    private bool HasHandshakeRetryBudget(int failedAttempts)
-    {
-        int maxAttempts = _options.MaxAutoReconnectAttempts;
-        return maxAttempts < 0 || failedAttempts < maxAttempts;
-    }
-
-    private async Task<IStreamPair> ConnectWithRetryAsync(bool isReconnect, CancellationToken ct)
-    {
-        int maxAttempts = _options.MaxAutoReconnectAttempts;
-        double delay = _options.AutoReconnectDelay.TotalMilliseconds;
-        double maxDelay = _options.MaxAutoReconnectDelay.TotalMilliseconds;
-
-        if (isReconnect && maxAttempts == 0)
-            throw new MultiplexerException(ErrorCode.Internal, "Reconnect is disabled.");
-
-        for (int attempt = 1; ; attempt++)
-        {
-            ct.ThrowIfCancellationRequested();
-
-            // Enforce max attempts. -1 = unlimited, 0 = single attempt (no retry),
-            // >0 = at most N total attempts.
-            if (maxAttempts > 0 && attempt > maxAttempts)
-                throw new MultiplexerException(ErrorCode.Internal,
-                    $"Connection failed after {maxAttempts} attempts.");
-
-            // Delay before retry (skip on first attempt of first connect)
-            if (attempt > 1 || isReconnect)
-            {
-                RaiseEvent(Reconnecting, new ReconnectingEventArgs(attempt));
-                await Task.Delay(TimeSpan.FromMilliseconds(delay), ct);
-                delay = Math.Min(delay * _options.AutoReconnectBackoffMultiplier, maxDelay);
-            }
-
-            try
-            {
-                if (_options.ConnectionTimeout > TimeSpan.Zero
-                    && _options.ConnectionTimeout != Timeout.InfiniteTimeSpan)
-                {
-                    using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
-                    timeoutCts.CancelAfter(_options.ConnectionTimeout);
-                    try
-                    {
-                        return await _options.StreamFactory(timeoutCts.Token);
-                    }
-                    catch (OperationCanceledException) when (!ct.IsCancellationRequested)
-                    {
-                        throw new TimeoutException(
-                            $"Connection timed out after {_options.ConnectionTimeout}");
-                    }
-                }
-
-                return await _options.StreamFactory(ct);
-            }
-            catch (OperationCanceledException) when (ct.IsCancellationRequested)
-            {
-                throw;
-            }
-            catch (Exception ex)
-            {
-                RaiseEvent(Error, new Events.ErrorEventArgs(ex));
-
-                // maxAttempts == 0 means no retry: propagate the first failure immediately
-                // whether this is the initial connect or a reconnect after the link died.
-                if (maxAttempts == 0)
-                    throw;
-            }
-        }
-    }
-
     private async Task WaitForLoopsAsync()
     {
-        Task[] loops = [_writerTask!, _readerTask!, _flusherTask!];
-        if (_keepaliveTask is not null)
-            loops = [.. loops, _keepaliveTask];
+        Task[] loops = [_conn.WriterTask!, _conn.ReaderTask!, _conn.FlusherTask!];
+        if (_conn.KeepaliveTask is not null)
+            loops = [.. loops, _conn.KeepaliveTask];
 
         foreach (var loop in loops)
         {
@@ -579,101 +834,82 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IChannelOwner
 
     void IChannelOwner.NotifyChannelCompleted(ushort channelIndex, string channelId)
     {
-        // Write channels: stats decrement here (after FIN sent + no pending data).
-        // Read channels: stats already decremented at FIN receipt in DispatchToChannel.
-        bool isWriteChannel = _registry.GetWriteChannel(channelIndex) is not null;
+        // Capture role BEFORE unregistering, since GetWriteChannel/GetReadChannel
+        // return null after the registry mutation.
+        var writeChannel = _registry.GetWriteChannel(channelIndex);
+        var readChannel = writeChannel is null ? _registry.GetReadChannel(channelIndex) : null;
 
         _registry.UnregisterChannel(channelIndex, channelId);
 
-        if (isWriteChannel)
+        if (writeChannel is not null)
         {
+            // Write channels are always closed locally (FIN-out then drain),
+            // so this is the single accounting site. No CAS needed.
+            Interlocked.Decrement(ref _stats._openChannels);
+            Interlocked.Increment(ref _stats._totalChannelsClosed);
+        }
+        else if (readChannel is not null && readChannel.TryClaimCompletionAccounting())
+        {
+            // Read channels can be closed by inbound FIN, by local Dispose,
+            // or by mux-level abort — whichever runs first claims the
+            // accounting. The stats decrement must run on every path so
+            // OpenChannels does not inflate when the local consumer disposes
+            // before FIN arrives. The mux-level ChannelClosed event is
+            // documented FIN-only (see IStreamMultiplexer.ChannelClosed) and
+            // is therefore fired only from the inbound-FIN handler. Per-
+            // channel close reasons are delivered via IChannel.Closed.
             Interlocked.Decrement(ref _stats._openChannels);
             Interlocked.Increment(ref _stats._totalChannelsClosed);
         }
     }
 
-    // =====================================================================
-    // Writer Thread — THE DUMB ROUTER (send side)
-    // Picks ready channels, writes their pre-built frames to the stream.
-    // Flush is handled by the separate flusher thread.
-    // Runs on a dedicated LongRunning thread; uses synchronous I/O so the
-    // hot path does not allocate Task continuations or hop ThreadPool threads.
-    // =====================================================================
-    private void RunWriterLoop(CancellationToken ct)
+    void IChannelOwner.NotifyPendingAcceptCancelled(string channelId)
     {
-        var transport = _transport ?? throw new InvalidOperationException("Transport not initialized.");
-        var writeStream = transport.WriteStream;
+        // Disposing a pending-accept channel cancels the accept. Removing the
+        // entry from the pending-accept map prevents DispatchToChannel from
+        // resurrecting the disposed instance when the peer's INIT eventually
+        // arrives. Idempotent — TryRemove is a no-op if already gone.
+        _registry.RemovePendingAcceptChannel(channelId);
+    }
 
-        try
+    void IChannelOwner.CompletePendingAcceptCancel(string channelId, Action closeAction)
+    {
+        // Runs the channel's local-close (SetClosed) + pending-map removal
+        // under the same AcceptLock that HandleInitFrame holds while it reads
+        // the channel's State and decides whether to adopt it. Without this
+        // ordering, a Dispose on a pending-accept channel races the
+        // dispatcher: SetClosed could land after the dispatcher's lock-free
+        // State read but before the AcceptLock-protected RegisterReadChannel
+        // commits, publishing a Closed instance whose slab has already been
+        // returned to ArrayPool<byte>.Shared. With the closeAction running
+        // under AcceptLock, the dispatcher observes either "still pending,
+        // adopt" or "already Closed, evict" — never an intermediate state.
+        lock (_registry.AcceptLock)
         {
-            while (!ct.IsCancellationRequested)
-            {
-                _readySignal.Wait(ct);
-
-                // Snapshot and sort ready channels by priority (highest first)
-                WriteChannel[] snapshot;
-                lock (_readyLock)
-                {
-                    if (_readyChannels.Count == 0) continue;
-                    _readyChannels.Sort(static (a, b) => b.Priority.CompareTo(a.Priority));
-                    snapshot = _readyChannels.ToArray();
-                    _readyChannels.Clear();
-                }
-
-                bool anyWritten = false;
-                foreach (var channel in snapshot)
-                {
-                    Memory<byte> frames = channel.TakeReady();
-                    if (frames.IsEmpty) continue;
-
-                    writeStream.Write(frames.Span);
-                    channel.MarkSent(frames.Length);
-                    Interlocked.Add(ref _stats._bytesSent, frames.Length);
-                    anyWritten = true;
-                }
-
-                if (anyWritten)
-                    _flushSignal.Signal();
-            }
-        }
-        catch (OperationCanceledException) when (ct.IsCancellationRequested)
-        {
-            // Normal shutdown
+            closeAction();
+            _registry.RemovePendingAcceptChannel(channelId);
         }
     }
 
-    // =====================================================================
-    // Flusher Thread — dedicated thread that flushes the transport stream.
-    // Decouples write batching from kernel flush syscall.
-    // =====================================================================
-    private void RunFlusherLoop(CancellationToken ct)
+    void IChannelOwner.NotifyEventHandlerException(Exception exception)
     {
-        var transport = _transport ?? throw new InvalidOperationException("Transport not initialized.");
-        var writeStream = transport.WriteStream;
-
-        try
-        {
-            while (!ct.IsCancellationRequested)
-            {
-                _flushSignal.Wait(ct);
-                writeStream.Flush();
-            }
-        }
-        catch (OperationCanceledException) when (ct.IsCancellationRequested)
-        {
-            // Normal shutdown — do one final flush to push any remaining data
-            try { writeStream.Flush(); }
-            catch { /* transport may already be closed */ }
-        }
+        // Forward channel-level event handler failures to the mux's Error
+        // event surface so they are observable without crashing the producer
+        // thread that raised the channel event.
+        RaiseError(exception);
     }
+
+    int IChannelOwner.PeerMaxRecvPayload => _conn.PeerMaxRecvPayload;
+
+    bool IChannelOwner.IsTransportConnected => _isConnected;
 
     // =====================================================================
     // Reader Thread — THE DISPATCHER (receive side)
     // Reads 8-byte header, routes payload to the correct channel.
     // =====================================================================
-    private async Task RunReaderLoopAsync(CancellationToken ct)
+    private async Task RunReaderLoopAsync(MuxConnection conn, CancellationToken ct)
     {
-        var transport = _transport ?? throw new InvalidOperationException("Transport not initialized.");
+        var transport = conn.Transport ?? throw new InvalidOperationException("Transport not initialized.");
         var readStream = transport.ReadStream;
         byte[] headerBuf = new byte[FrameHeader.Size];
 
@@ -714,7 +950,7 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IChannelOwner
                 // 3. Route to channel
                 if (header.ChannelIndex == ChannelConstants.ControlChannel)
                 {
-                    ProcessControlFrame(header, payload);
+                    ProcessControlFrame(conn, header, payload);
                 }
                 else
                 {
@@ -726,6 +962,13 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IChannelOwner
                     if (rentedBuf is not null)
                         System.Buffers.ArrayPool<byte>.Shared.Return(rentedBuf);
                 }
+
+                // Retry any INIT-ACK whose original send failed because the
+                // control slab was transiently full. Per the comment on
+                // MuxConnection.PendingInitAcks: "Drained on every reader-loop
+                // iteration." Without this call the queue grows monotonically
+                // and every peer open that hit back-pressure stalls forever.
+                DrainPendingInitAcks(conn);
             }
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
@@ -738,348 +981,507 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IChannelOwner
     {
         if (header.Flags == FrameFlags.Init)
         {
-            if (payload.Length > ChannelConstants.MaxChannelIdLength)
-                return; // channel name too long — drop frame
-
-            string channelId = Encoding.UTF8.GetString(payload);
-            ReadChannel readChannel;
-            bool isNewlyAccepted;
-
-            // Atomic registration: serialized with AcceptChannel so we cannot
-            // race between adopting a pending channel and the test grabbing
-            // a transient _readChannels entry.
-            lock (_registry.AcceptLock)
-            {
-                // After reconnect, Init frames are replayed from the slab.
-                // If the channel already exists, skip re-registration.
-                var existing = _registry.GetReadChannel(header.ChannelIndex);
-                if (existing is not null)
-                    return;
-
-                // Check if a pending accept channel was pre-created via AcceptChannel
-                var pendingChannel = _registry.GetPendingAcceptChannel(channelId);
-
-                if (pendingChannel is not null)
-                {
-                    readChannel = pendingChannel;
-                    readChannel.SetChannelIndex(header.ChannelIndex);
-                    _registry.RemovePendingAcceptChannel(channelId);
-                    isNewlyAccepted = true;
-                }
-                else
-                {
-                    readChannel = new ReadChannel(
-                        channelId,
-                        header.ChannelIndex,
-                        _options.DefaultChannelOptions.Priority,
-                        _options.DefaultChannelOptions.SlabSize,
-                        this);
-                    isNewlyAccepted = false;
-                }
-
-                _registry.RegisterReadChannel(header.ChannelIndex, readChannel);
-            }
-
-            readChannel.MarkOpen();
-            readChannel.MarkConnected();
-
-            // Send init-ack so the opener knows the channel is established
-            SendInitAck(header.ChannelIndex);
-
-            Interlocked.Increment(ref _stats._openChannels);
-            Interlocked.Increment(ref _stats._totalChannelsOpened);
-            RaiseEvent(ChannelAccepted, new ChannelEventArgs(channelId));
-
-            // Only enqueue for generic AcceptChannelsAsync if no specific accept claimed it.
-            if (!isNewlyAccepted)
-                _registry.EnqueueForAccept(readChannel);
+            HandleInitFrame(header, payload);
             return;
         }
 
+        DispatchExistingChannelFrame(header, payload);
+    }
+
+    private void HandleInitFrame(FrameHeader header, ReadOnlySpan<byte> payload)
+    {
+        string channelId = DecodeInboundChannelId(payload);
+        ReadChannel readChannel;
+        bool isNewlyAccepted;
+
+        // Atomic registration: serialized with AcceptChannel so we cannot
+        // race between adopting a pending channel and the test grabbing
+        // a transient _readChannels entry.
+        lock (_registry.AcceptLock)
+        {
+            // After reconnect, Init frames are replayed from the slab.
+            // If the channel already exists, skip re-registration.
+            var existing = _registry.GetReadChannel(header.ChannelIndex);
+            if (existing is not null && existing.ChannelId == channelId)
+                return;
+
+            if (existing is not null && existing.State == ChannelState.Closed)
+            {
+                _registry.UnregisterChannel(header.ChannelIndex, existing.ChannelId);
+            }
+            else if (existing is not null)
+            {
+                throw new MultiplexerException(
+                    ErrorCode.ProtocolError,
+                    $"INIT for channel index {header.ChannelIndex} conflicts with existing channel '{existing.ChannelId}'.");
+            }
+
+            // Check if a pending accept channel was pre-created via AcceptChannel.
+            // A pending entry whose state is already Closed was disposed by the
+            // caller before INIT arrived; treat it as if no pending exists and
+            // fall through to creating a fresh channel. Adopting the disposed
+            // instance would resurrect a channel whose slab has been returned
+            // to ArrayPool<byte>.Shared.
+            var pendingChannel = _registry.GetPendingAcceptChannel(channelId);
+            if (pendingChannel is not null && pendingChannel.State == ChannelState.Closed)
+            {
+                _registry.RemovePendingAcceptChannel(channelId);
+                pendingChannel = null;
+            }
+
+            // Symmetric "no new channels after GoAwayAsync" guard with the
+            // local OpenChannel / AcceptChannel paths. A peer-sent INIT for a
+            // brand-new channel id that arrives after the local shutdown
+            // latch is dropped: the local side has declared no further
+            // channels will be created, so registering this one would (a)
+            // violate the public invariant, (b) extend GoAwayAsync's drain
+            // wait because ActiveChannelCount stays > 0 for a channel that
+            // can never carry user data, and (c) leak the slab rent until
+            // GoAwayTimeout abort. A pre-existing pending AcceptChannel for
+            // the same id IS honoured — that caller declared its intent
+            // before shutdown and the contract is to satisfy it.
+            if (IsShuttingDown && pendingChannel is null)
+                return;
+
+            if (pendingChannel is not null)
+            {
+                readChannel = pendingChannel;
+                readChannel.SetChannelIndex(header.ChannelIndex);
+                _registry.RemovePendingAcceptChannel(channelId);
+                isNewlyAccepted = true;
+            }
+            else
+            {
+                readChannel = new ReadChannel(
+                    channelId,
+                    header.ChannelIndex,
+                    _options.DefaultChannelOptions.Priority,
+                    _options.DefaultChannelOptions.SlabSize,
+                    this);
+                isNewlyAccepted = false;
+            }
+
+            // Peer-reopen reconciliation (fixes #367). The peer's WriteChannel
+            // auto-unregisters its ChannelId when it closes, so the peer is
+            // free to immediately open a fresh channel under the same id at
+            // a brand-new index. On this side, the prior ReadChannel for that
+            // id stays in the registry until the local consumer disposes it,
+            // by design, so the consumer can still drain buffered post-FIN
+            // bytes through its existing reference and inspect the close
+            // reason. The two invariants collide when the peer's reopen INIT
+            // arrives before the consumer disposes: RegisterReadChannel
+            // would throw ChannelExists, fault the reader, and trigger an
+            // infinite reconnect-and-refault loop on every replay of the
+            // INIT frame. The structural resolution is to honour the
+            // peer's reopen atomically with the new registration under the
+            // same AcceptLock: if the existing ChannelId slot is held by a
+            // Closed channel, evict it. The consumer's reference to the
+            // closed channel remains valid; only the registry slot is
+            // yielded.
+            var stale = _registry.GetReadChannelById(channelId);
+            if (stale is not null && stale.State == ChannelState.Closed)
+            {
+                _registry.UnregisterChannel(stale.ChannelIndex, channelId);
+            }
+
+            _registry.RegisterReadChannel(header.ChannelIndex, readChannel);
+        }
+
+        // Account for the INIT frame bytes that just arrived; the writer-side slab
+        // includes them in its _sentPos counter so the reader's FrameBytesReceived
+        // must match (otherwise reconnect replay-base lands mid-frame).
+        readChannel.AccountInboundFrame(FrameHeader.Size + payload.Length);
+
+        readChannel.MarkOpen();
+        readChannel.MarkConnected();
+
+        // Send init-ack so the opener knows the channel is established. Under
+        // transient control-slab pressure SendInitAck returns false; queue the
+        // index so DrainPendingInitAcks retries on a later reader-loop iteration
+        // once the slab compacts. Discarding the failure here would orphan the
+        // peer's WriteChannel in Opening state forever, since duplicate INIT
+        // frames replayed across reconnect are dropped by the dedup guard above.
+        if (!SendInitAck(header.ChannelIndex))
+            _conn.PendingInitAcks.Enqueue(header.ChannelIndex);
+
+        Interlocked.Increment(ref _stats._openChannels);
+        Interlocked.Increment(ref _stats._totalChannelsOpened);
+        RaiseEvent(ChannelAccepted, new ChannelEventArgs(channelId));
+
+        // Only enqueue for generic AcceptChannelsAsync if no specific accept claimed it.
+        if (!isNewlyAccepted)
+            _registry.EnqueueForAccept(readChannel);
+    }
+
+    private static string DecodeInboundChannelId(ReadOnlySpan<byte> payload)
+    {
+        if (payload.Length == 0)
+        {
+            throw new MultiplexerException(ErrorCode.ProtocolError, "INIT payload must contain a channel ID.");
+        }
+
+        if (payload.Length > ChannelConstants.MaxChannelIdLength)
+        {
+            throw new MultiplexerException(
+                ErrorCode.ProtocolError,
+                $"INIT channel ID must be at most {ChannelConstants.MaxChannelIdLength} UTF-8 bytes.");
+        }
+
+        try
+        {
+            return StrictChannelIdDecoder.GetString(payload);
+        }
+        catch (DecoderFallbackException ex)
+        {
+            throw new MultiplexerException(ErrorCode.ProtocolError, "INIT channel ID must be valid UTF-8.", ex);
+        }
+    }
+
+    private void DispatchExistingChannelFrame(FrameHeader header, ReadOnlySpan<byte> payload)
+    {
         // Route data/ack/fin/err to existing channel
         var channel = _registry.GetReadChannel(header.ChannelIndex);
         if (channel is null)
         {
-            // Could be an ACK for our write channel
             var writeChannel = _registry.GetWriteChannel(header.ChannelIndex);
-            if (writeChannel is not null && header.Flags == FrameFlags.Ack && payload.Length >= 8)
+            if (writeChannel is not null)
             {
-                long ackPos = (long)BinaryPrimitives.ReadUInt64BigEndian(payload);
+                if (header.Flags != FrameFlags.Ack)
+                {
+                    throw new MultiplexerException(
+                        ErrorCode.ProtocolError,
+                        $"Frame type {header.Flags} is not valid for local write channel index {header.ChannelIndex}.");
+                }
+
+                long ackPos = DecodeWriteChannelAck(writeChannel, header.ChannelIndex, payload);
                 writeChannel.OnAck(ackPos);
                 return;
             }
-            return; // Unknown channel — drop frame
+
+            if (header.Flags == FrameFlags.Ack || _registry.IsRetiredChannelIndex(header.ChannelIndex))
+                return;
+
+            // FIN, Err, and Data frames for known data-channel indices that
+            // arrive after local disposal are harmless end-of-life signals.
+            // The local side already unregistered the channel; the frame was
+            // already in flight on the wire. Silently drop instead of killing
+            // the transport with UnknownChannel.
+            if (header.ChannelIndex is >= ChannelConstants.MinDataChannel and <= ChannelConstants.MaxDataChannel
+                && header.Flags is FrameFlags.Fin or FrameFlags.Err or FrameFlags.Data)
+                return;
+
+            throw new MultiplexerException(
+                ErrorCode.UnknownChannel,
+                $"Frame type {header.Flags} referenced unknown channel index {header.ChannelIndex}.");
         }
 
         channel.ReceivePayload(header.Flags, payload);
 
         if (header.Flags == FrameFlags.Fin)
         {
-            Interlocked.Decrement(ref _stats._openChannels);
-            Interlocked.Increment(ref _stats._totalChannelsClosed);
-            RaiseEvent(ChannelClosed, new ChannelClosedEventArgs(channel.ChannelId, null));
+            // Stats accounting is shared across FIN / local Dispose / mux abort —
+            // whichever runs first decrements once via TryClaimCompletionAccounting.
+            if (channel.TryClaimCompletionAccounting())
+            {
+                Interlocked.Decrement(ref _stats._openChannels);
+                Interlocked.Increment(ref _stats._totalChannelsClosed);
+            }
+            // ChannelClosed is documented FIN-only and uses its own one-shot
+            // CAS so a local Dispose that wins TryClaimCompletionAccounting
+            // does not silently suppress the FIN event.
+            if (channel.TryClaimRemoteFinEvent())
+            {
+                RaiseEvent(ChannelClosed, new ChannelClosedEventArgs(channel.ChannelId, null));
+            }
         }
     }
 
-    private void ProcessControlFrame(FrameHeader header, ReadOnlySpan<byte> payload)
+    private static long DecodeWriteChannelAck(WriteChannel writeChannel, ushort channelIndex, ReadOnlySpan<byte> payload)
+    {
+        if (payload.Length != sizeof(ulong))
+        {
+            throw new MultiplexerException(
+                ErrorCode.ProtocolError,
+                $"ACK frame for local write channel index {channelIndex} must contain exactly {sizeof(ulong)} bytes.");
+        }
+
+        long ackPos = (long)BinaryPrimitives.ReadUInt64BigEndian(payload);
+        // Don't reject non-zero ACKs before the channel is Ready — the
+        // INIT-ACK can be delayed by control-slab backpressure and a data
+        // ACK can overtake it in the control slab queue. WriteChannel.OnAck
+        // correctly handles the first ACK by calling MarkOpen() regardless
+        // of the position.
+
+        return ackPos;
+    }
+
+    private void ProcessControlFrame(MuxConnection conn, FrameHeader header, ReadOnlySpan<byte> payload)
     {
         switch (header.Flags)
         {
             case FrameFlags.Ping:
-                // Respond with Pong on control channel (echo the payload)
+                if (payload.Length != sizeof(long))
+                    throw new MultiplexerException(ErrorCode.ProtocolError, $"Ping payload must be {sizeof(long)} bytes, got {payload.Length}.");
+
                 SendControlFrame(FrameFlags.Pong, payload);
                 break;
             case FrameFlags.Pong:
-                Interlocked.Exchange(ref _pendingPong, null)?.TrySetResult();
+                if (payload.Length != sizeof(long))
+                    throw new MultiplexerException(ErrorCode.ProtocolError, $"Pong payload must be {sizeof(long)} bytes, got {payload.Length}.");
+
+                // Correlate the echoed 8-byte token to the currently outstanding ping.
+                // A late pong from a previous (timed-out) ping must not satisfy the
+                // *next* ping's TCS — that would mask real liveness failures by
+                // resetting the missed-ping counter.
+                long echoedToken = BinaryPrimitives.ReadInt64BigEndian(payload);
+                var pending = Volatile.Read(ref conn.PendingPong);
+                if (pending is not null
+                    && pending.ExpectedToken == echoedToken
+                    && Interlocked.CompareExchange(ref conn.PendingPong, null, pending) == pending)
+                {
+                    pending.Tcs.TrySetResult();
+                }
+                // else: stale or already-cleared — drop silently.
                 break;
             case FrameFlags.Ctrl:
                 ProcessCtrlSubframe(payload);
                 break;
+            default:
+                throw new MultiplexerException(
+                    ErrorCode.ProtocolError,
+                    $"Frame type {header.Flags} is not valid on the control channel.");
         }
     }
 
     private void ProcessCtrlSubframe(ReadOnlySpan<byte> payload)
     {
-        if (payload.Length == 0) return;
+        if (payload.Length == 0)
+            throw new MultiplexerException(ErrorCode.ProtocolError, "Control subframe payload must include a subtype byte.");
 
         byte subtype = payload[0];
         switch (subtype)
         {
             case CtrlSubtype.GoAway:
+                if (payload.Length != 1)
+                    throw new MultiplexerException(ErrorCode.ProtocolError, $"GoAway control payload must be 1 byte, got {payload.Length}.");
+
                 HandleRemoteGoAway();
                 break;
             case CtrlSubtype.Reconnect:
-                // Reconnection handled separately
-                break;
+                throw new MultiplexerException(
+                    ErrorCode.ProtocolError,
+                    "Reconnect control frames are only valid during reconnect handshakes.");
+            case CtrlSubtype.ReconnectAck:
+                throw new MultiplexerException(ErrorCode.ProtocolError, "ReconnectAck control frames are reserved.");
+            default:
+                throw new MultiplexerException(ErrorCode.ProtocolError, $"Unknown control subtype: 0x{subtype:X2}.");
         }
     }
 
     private void HandleRemoteGoAway()
     {
-        _isShuttingDown = true;
+        // If local already initiated shutdown (via GoAwayAsync or DisposeAsync),
+        // the existing path owns teardown. Don't double-drive it.
+        if (Interlocked.CompareExchange(ref _isShuttingDown, 1, 0) != 0) return;
         _disconnectReason = Enums.DisconnectReason.GoAwayReceived;
-        _cts.Cancel();
+
+        // Mirror GoAwayAsync's drain-then-cancel semantics on the remote-initiated
+        // path. Cancelling _cts immediately would wake the main loop, which then
+        // cancels _loopCts and aborts the writer mid-flush — frames already stamped
+        // into channel slabs by WriteAsync (which returned successfully to the caller)
+        // would be silently dropped on the wire.
+        //
+        // Run the drain off-thread because this handler executes on the reader loop;
+        // the writer needs the reader to keep pumping inbound ACKs to release slab
+        // capacity while it finishes flushing.
+        _ = Task.Run(DrainAndCancelOnRemoteGoAwayAsync);
     }
 
-    // =====================================================================
-    // Keepalive Loop — sends periodic PING frames, monitors PONG responses
-    // =====================================================================
-    private async Task RunKeepaliveLoopAsync(CancellationToken ct)
+    private async Task DrainAndCancelOnRemoteGoAwayAsync()
     {
-        int missedPings = 0;
-        byte[] pingPayload = new byte[8];
-
         try
         {
-            while (!ct.IsCancellationRequested)
+            using var drainCts = new CancellationTokenSource(_options.GoAwayTimeout);
+            while (!drainCts.IsCancellationRequested)
             {
-                await Task.Delay(_options.PingInterval, ct);
-
-                var pendingPong = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-                Interlocked.Exchange(ref _pendingPong, pendingPong);
-
-                BinaryPrimitives.WriteInt64BigEndian(pingPayload, Environment.TickCount64);
-                SendControlFrame(FrameFlags.Ping, pingPayload);
-
-                if (await WaitForPongAsync(pendingPong, ct))
+                bool anyPending = false;
+                foreach (var ch in _registry.GetAllWriteChannels())
                 {
-                    missedPings = 0;
-                    continue;
+                    if (ch.HasPendingData())
+                    {
+                        anyPending = true;
+                        break;
+                    }
                 }
+                if (!anyPending) break;
 
-                missedPings++;
-                if (missedPings >= _options.MaxMissedPings)
+                try
                 {
-                    throw new IOException(
-                        $"Keepalive timeout: {missedPings} missed pings (timeout: {_options.PingTimeout})");
+                    await Task.Delay(20, drainCts.Token).ConfigureAwait(false);
+                }
+                catch (OperationCanceledException)
+                {
+                    break;
                 }
             }
         }
-        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        catch
         {
-            // Normal shutdown
+            // Best-effort drain — fall through to cancel regardless. Any error here
+            // (e.g. registry mutation race during teardown) must not leave _cts
+            // un-cancelled or the main loop never observes the GoAway.
+        }
+        finally
+        {
+            // Pre-mark every connected channel as Disconnected with the
+            // already-set _disconnectReason (GoAwayReceived) before _cts
+            // wakes MainLoopAsync's natural-fault path. Otherwise the
+            // unconditional MarkDisconnected(TransportError) loop inside
+            // MainLoopAsync wins via the one-shot _connectedFired CAS and
+            // the per-channel Disconnected event reports TransportError on
+            // every honest peer GoAway (symmetric to the local-GoAway fix
+            // #391/#399).
+            try { _registry.MarkAllChannelsDisconnected(Enums.DisconnectReason.GoAwayReceived); }
+            catch { /* best-effort — must not block _cts.Cancel below */ }
+
+            try { _cts.Cancel(); }
+            catch (ObjectDisposedException) { /* DisposeAsync already ran */ }
         }
     }
 
-    private async Task<bool> WaitForPongAsync(TaskCompletionSource pendingPong, CancellationToken ct)
+    // Non-throwing control-frame senders. Returning false (rather than throwing
+    // InvalidOperationException as the old WriteRawFrame did) preserves the
+    // invariant that control-slab pressure must never fault the reader thread,
+    // keepalive loop, or graceful-shutdown path. Callers decide the recovery
+    // policy per frame kind (drop, retry, escalate).
+    private bool SendControlFrame(FrameFlags flags, ReadOnlySpan<byte> payload)
     {
-        Task timeout = _options.PingTimeout > TimeSpan.Zero
-            ? Task.Delay(_options.PingTimeout, ct)
-            : Task.CompletedTask;
-
-        Task completed = await Task.WhenAny(pendingPong.Task, timeout);
-        if (completed == pendingPong.Task)
-            return true;
-
-        ct.ThrowIfCancellationRequested();
-        Interlocked.CompareExchange(ref _pendingPong, null, pendingPong);
-        return false;
+        if (_conn.ControlChannel is null) return false;
+        return _conn.ControlChannel.TryWriteRawFrame(ControlFrameBuilder.BuildControlFrame(flags, payload));
     }
 
-    private void SendControlFrame(FrameFlags flags, ReadOnlySpan<byte> payload)
+    private bool SendInitAck(ushort channelIndex)
     {
-        if (_controlChannel is null) return;
-
-        // Build the control frame in the control channel's slab — writer thread sends it
-        int frameSize = FrameHeader.Size + payload.Length;
-        byte[] temp = new byte[frameSize];
-        FrameHeader.WriteTo(temp, ChannelConstants.ControlChannel, flags, payload.Length);
-        if (!payload.IsEmpty)
-            payload.CopyTo(temp.AsSpan(FrameHeader.Size));
-
-        // Write through the control channel's slab so the writer thread picks it up
-        // The control channel uses ChannelIndex 0, so frames are stamped with channel 0
-        _controlChannel.WriteRawFrame(temp);
+        if (_conn.ControlChannel is null) return false;
+        return _conn.ControlChannel.TryWriteRawFrame(ControlFrameBuilder.BuildAckFrame(channelIndex, 0));
     }
 
-    private void SendInitAck(ushort channelIndex)
+    // Re-attempt every queued INIT-ACK whose original SendInitAck failed because
+    // the control slab was transiently full. Bounded by the peer's outstanding
+    // open budget. Any ACK that still cannot be staged is re-queued for the next
+    // drain pass.
+    private void DrainPendingInitAcks(MuxConnection conn)
     {
-        if (_controlChannel is null) return;
-
-        // ACK frame on the opener's channel index with position 0 — signals channel established
-        byte[] frame = new byte[FrameHeader.Size + 8];
-        FrameHeader.WriteTo(frame, channelIndex, FrameFlags.Ack, 8);
-        BinaryPrimitives.WriteUInt64BigEndian(frame.AsSpan(FrameHeader.Size, 8), 0);
-        _controlChannel.WriteRawFrame(frame);
+        if (conn.PendingInitAcks.IsEmpty) return;
+        int initialCount = conn.PendingInitAcks.Count;
+        int requeue = 0;
+        while (requeue < initialCount && conn.PendingInitAcks.TryDequeue(out ushort idx))
+        {
+            if (!SendInitAck(idx))
+            {
+                conn.PendingInitAcks.Enqueue(idx);
+                requeue++;
+            }
+        }
     }
 
-    void IChannelOwner.SendAck(ushort channelIndex, ulong consumedPosition)
+    bool IChannelOwner.SendAck(ushort channelIndex, ulong consumedPosition)
     {
-        if (_controlChannel is null) return;
+        // Return false (without throwing) when the control channel is gone or
+        // its slab is currently full. The caller (ReadChannel.MaybeSendAck) is
+        // expected to retain its unacked accumulator and retry on the next
+        // gate crossing
+        if (_conn.ControlChannel is null) return false;
 
-        byte[] frame = new byte[FrameHeader.Size + 8];
-        FrameHeader.WriteTo(frame, channelIndex, FrameFlags.Ack, 8);
-        BinaryPrimitives.WriteUInt64BigEndian(frame.AsSpan(FrameHeader.Size, 8), consumedPosition);
-        _controlChannel.WriteRawFrame(frame);
+        return _conn.ControlChannel.TryWriteRawFrame(
+            ControlFrameBuilder.BuildAckFrame(channelIndex, consumedPosition));
     }
 
-    private async Task PerformHandshakeAsync(CancellationToken ct)
+    // Performs the initial mux handshake and returns the negotiated index
+    // parity. The caller MUST commit the parity to the registry and reassign
+    // any pre-handshake-allocated channels as one atomic unit under
+    // ChannelIndexLock so concurrent channel allocations cannot interleave
+    // between the parity reset and the reassign-walk.
+    private async Task<bool> PerformHandshakeAsync(CancellationToken ct)
     {
-        var transport = _transport ?? throw new InvalidOperationException("Transport not initialized.");
-
-        byte[] handshake = new byte[FrameHeader.Size + InitialHandshakePayloadLength];
-        FrameHeader.WriteTo(handshake, ChannelConstants.ControlChannel, FrameFlags.Ctrl, InitialHandshakePayloadLength);
-        _sessionId.TryWriteBytes(handshake.AsSpan(FrameHeader.Size));
-
-        FrameHeader remoteHeader;
-        byte[] remotePayload;
-        try
-        {
-            await transport.WriteStream.WriteAsync(handshake, ct);
-            await transport.WriteStream.FlushAsync(ct);
-            (remoteHeader, remotePayload) = await ReadHandshakeFrameAsync(transport.ReadStream, ct);
-        }
-        catch (HandshakeTransportException)
-        {
-            throw;
-        }
-        catch (IOException ex)
-        {
-            throw new HandshakeTransportException("Transport failed during initial handshake.", ex);
-        }
-
-        if (IsInitialHandshakeFrame(remoteHeader))
-        {
-            _remoteSessionId = new Guid(remotePayload.AsSpan(0, InitialHandshakePayloadLength));
-        }
-        else if (IsReconnectHandshakeFrame(remoteHeader, remotePayload))
-        {
-            // A peer can complete the first handshake and lose the route before this side
-            // receives its response. The next route is reconnect for that peer and initial
-            // for this peer, so both handshake forms must converge on the same session.
-            _remoteSessionId = new Guid(remotePayload.AsSpan(1, InitialHandshakePayloadLength));
-        }
-        else
-        {
-            throw new MultiplexerException(ErrorCode.ProtocolError, "Invalid handshake from remote.");
-        }
-
-        // Determine odd/even index allocation based on session ID comparison
-        // Higher session ID gets odd indices
-        bool useOdd = _sessionId.CompareTo(_remoteSessionId) > 0;
-        _registry.SetIndexParity(useOdd);
+        var transport = _conn.Transport ?? throw new InvalidOperationException("Transport not initialized.");
+        var result = await MuxHandshake.PerformInitialAsync(
+            transport,
+            _conn.SessionId,
+            _options.DefaultChannelOptions.SlabSize,
+            ct);
+        _conn.RemoteSessionId = result.RemoteSessionId;
+        _conn.PeerMaxRecvPayload = result.PeerMaxRecvPayload;
+        return result.UseOddIndices;
     }
 
     private async Task PerformReconnectHandshakeAsync(IStreamPair transport, CancellationToken ct)
     {
-        // Symmetric reconnect: both sides send Reconnect, both read Reconnect.
-        // Same pattern as initial handshake (send session ID, read session ID).
-
-        // Send reconnect frame: [CtrlSubtype.Reconnect][sessionId:16B]
-        byte[] reconnectPayload = new byte[ReconnectHandshakePayloadLength];
-        reconnectPayload[0] = CtrlSubtype.Reconnect;
-        _sessionId.TryWriteBytes(reconnectPayload.AsSpan(1));
-
-        byte[] frame = new byte[FrameHeader.Size + reconnectPayload.Length];
-        FrameHeader.WriteTo(frame, ChannelConstants.ControlChannel, FrameFlags.Ctrl, reconnectPayload.Length);
-        reconnectPayload.CopyTo(frame.AsSpan(FrameHeader.Size));
-
-        FrameHeader remoteHeader;
-        byte[] remotePayload;
-        try
-        {
-            await transport.WriteStream.WriteAsync(frame, ct);
-            await transport.WriteStream.FlushAsync(ct);
-            (remoteHeader, remotePayload) = await ReadHandshakeFrameAsync(transport.ReadStream, ct);
-        }
-        catch (HandshakeTransportException)
-        {
-            throw;
-        }
-        catch (IOException ex)
-        {
-            throw new HandshakeTransportException("Transport failed during reconnect handshake.", ex);
-        }
-
-        Guid remoteSession;
-        if (IsReconnectHandshakeFrame(remoteHeader, remotePayload))
-        {
-            remoteSession = new Guid(remotePayload.AsSpan(1, InitialHandshakePayloadLength));
-        }
-        else if (IsInitialHandshakeFrame(remoteHeader))
-        {
-            // The remote peer may not have observed the first handshake completion before
-            // the route failed, while this side did. Treat the duplicate initial handshake
-            // as reconnect only when the session matches the established peer.
-            remoteSession = new Guid(remotePayload.AsSpan(0, InitialHandshakePayloadLength));
-        }
-        else
-        {
-            throw new MultiplexerException(ErrorCode.ProtocolError, "Invalid reconnect frame.");
-        }
-
-        if (remoteSession != _remoteSessionId)
-            throw new MultiplexerException(ErrorCode.SessionMismatch, "Remote session ID mismatch on reconnect.");
+        var result = await MuxHandshake.PerformReconnectAsync(
+            transport,
+            _conn.SessionId,
+            _conn.RemoteSessionId,
+            _options.DefaultChannelOptions.SlabSize,
+            BuildLocalReplayPositions(),
+            ApplyRemoteReplayPositions,
+            ct);
+        _conn.PeerMaxRecvPayload = result.PeerMaxRecvPayload;
     }
 
-    private static bool IsInitialHandshakeFrame(FrameHeader header)
+    private IReadOnlyList<ChannelReplayPosition> BuildLocalReplayPositions()
     {
-        return header.ChannelIndex == ChannelConstants.ControlChannel
-            && header.Flags == FrameFlags.Ctrl
-            && header.PayloadLength == InitialHandshakePayloadLength;
+        var readChannels = _registry.GetAllReadChannels();
+        if (readChannels.Count == 0)
+            return Array.Empty<ChannelReplayPosition>();
+
+        var result = new ChannelReplayPosition[readChannels.Count];
+        int i = 0;
+        foreach (var ch in readChannels)
+        {
+            result[i++] = new ChannelReplayPosition(ch.ChannelIndex, ch.FrameBytesReceived);
+        }
+        return result;
     }
 
-    private static bool IsReconnectHandshakeFrame(FrameHeader header, ReadOnlySpan<byte> payload)
+    private void ApplyRemoteReplayPositions(IReadOnlyList<ChannelReplayPosition> positions)
     {
-        return header.ChannelIndex == ChannelConstants.ControlChannel
-            && header.Flags == FrameFlags.Ctrl
-            && header.PayloadLength == ReconnectHandshakePayloadLength
-            && payload.Length == ReconnectHandshakePayloadLength
-            && payload[0] == CtrlSubtype.Reconnect;
+        for (int i = 0; i < positions.Count; i++)
+        {
+            var pos = positions[i];
+            var writeChannel = _registry.GetWriteChannel(pos.ChannelIndex);
+            writeChannel?.SetReplayBase(pos.FrameBytesReceived);
+        }
     }
 
-    private static async Task<(FrameHeader Header, byte[] Payload)> ReadHandshakeFrameAsync(Stream stream, CancellationToken ct)
+    // Walks the registry's WriteChannels after the initial handshake set the
+    // real index parity. Any pre-handshake OpenChannel / TryRegisterChannels
+    // call allocated indices from the default odd seed (Create(.) hardcodes
+    // useOddIndices: true on both peers); on the side whose session GUID lost
+    // the handshake comparison those indices are now in the wrong parity
+    // space and must move before the writer thread transmits any frame from
+    // them. Both peers always allocate index 1 first pre-handshake, so without
+    // this both sides would transmit INIT for the same wire index and the
+    // peer's INIT-ACK would route to the wrong local channel.
+    //
+    // Called only on the first connect (after PerformHandshakeAsync, before
+    // the writer/flusher/reader tasks start) so no concurrent slab reader can
+    // observe an in-flight rewrite. Reconnects re-use the same parity (it is
+    // a deterministic function of the unchanging session GUIDs) and never
+    // re-enter this path.
+    private void ReassignPreHandshakeWriteChannelIndices()
     {
-        byte[] headerBuffer = new byte[FrameHeader.Size];
-        await ReadExactAsync(stream, headerBuffer, ct);
-        var header = FrameHeader.Parse(headerBuffer);
-        if (header.PayloadLength is not (InitialHandshakePayloadLength or ReconnectHandshakePayloadLength))
-            return (header, []);
+        foreach (var channel in _registry.GetAllWriteChannels())
+        {
+            if (_registry.IsCurrentParity(channel.ChannelIndex))
+                continue;
 
-        byte[] payload = new byte[header.PayloadLength];
-        await ReadExactAsync(stream, payload, ct);
-        return (header, payload);
+            ushort oldIndex = channel.ChannelIndex;
+            ushort newIndex = _registry.AllocateChannelIndex();
+            channel.RestampChannelIndex(newIndex);
+            _registry.RekeyWriteChannel(oldIndex, newIndex, channel);
+        }
     }
+
 
     private static async Task ReadExactAsync(Stream stream, Memory<byte> buffer, CancellationToken ct)
     {
@@ -1098,54 +1500,96 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IChannelOwner
     /// <inheritdoc />
     public async ValueTask DisposeAsync()
     {
-        if (!_isRunning && _transport is null) return;
+        if (_disposed) return;
+        _disposed = true;
+
+        // Snapshot before reset: a never-started mux must not emit Disconnected.
+        bool wasStarted = _isRunning;
 
         _isRunning = false;
         _isConnected = false;
         _disconnectReason ??= Enums.DisconnectReason.LocalDispose;
 
-        _cts.Cancel();
+        // Complete _readyTcs before signalling shutdown so a never-started mux
+        // (MainLoopAsync never ran, OCE catch never fires) still surfaces a
+        // TaskCanceledException to any pending WaitForReadyAsync caller
+        // instead of hanging forever (fixes #395, #401). Idempotent vs. a
+        // prior TrySetResult on the happy path.
+        _readyTcs.TrySetCanceled();
 
-        _registry.AbortAllChannels(ChannelCloseReason.MuxDisposed);
+        // Two-phase teardown to fix #368 (use-after-free of channel slabs).
+        //
+        // Phase 1 (signal): fire Disconnected on every connected channel with
+        // LocalDispose semantics so subscribers observe the documented
+        // shutdown reason before the natural-fault path inside MainLoopAsync
+        // runs MarkDisconnected(TransportError) on the same channels (which
+        // would otherwise win the race and report a misleading reason).
+        // MarkAllChannelsDisconnected does NOT change channel state and does
+        // NOT return slabs - the writer may still be inside
+        // writeStream.Write(frames.Span) at this point.
+        _registry.MarkAllChannelsDisconnected(ChannelCloseReason.MuxDisposed);
         _registry.CancelAllPendingAccepts();
 
-        if (_mainLoopTask is not null)
+        _cts.Cancel();
+
+        // Phase 2 (drain): wait for MainLoopAsync (and through it the writer
+        // task via WaitForLoopsAsync) to actually exit. Only after this is the
+        // writer guaranteed to no longer be touching any channel slab.
+        if (_conn.MainLoopTask is not null)
         {
-            try { await _mainLoopTask; }
+            try { await _conn.MainLoopTask; }
             catch (OperationCanceledException) { }
             catch { /* swallow during dispose */ }
         }
 
-        if (_transport is not null)
+        // Phase 3 (release): now safe to SetClosed every channel, which
+        // returns its slab to ArrayPool. Before this restructure, this loop
+        // ran synchronously before the await above and raced the writer.
+        _registry.CloseAllChannels(ChannelCloseReason.MuxDisposed);
+
+        if (_conn.Transport is not null)
         {
-            await _transport.DisposeAsync();
-            _transport = null;
+            await _conn.Transport.DisposeAsync();
+            _conn.Transport = null;
         }
 
-        if (_controlChannel is not null)
+        if (_conn.ControlChannel is not null)
         {
-            _controlChannel.Abort(ChannelCloseReason.MuxDisposed);
-            _controlChannel = null;
+            _conn.ControlChannel.Abort(ChannelCloseReason.MuxDisposed);
+            _conn.ControlChannel = null;
         }
 
-        _loopCts?.Dispose();
+        _conn.LoopCts?.Dispose();
         _readySignal.Dispose();
         _flushSignal.Dispose();
         _cts.Dispose();
 
-        if (!_disconnectedFired && _disconnectReason.HasValue)
-            RaiseEvent(Disconnected, new DisconnectedEventArgs(_disconnectReason.Value, null));
+        if (wasStarted && _disconnectReason.HasValue)
+            TryRaiseDisconnected(_disconnectReason.Value, null);
     }
 
-    private void RaiseEvent<T>(EventHandler<T>? handler, T args) where T : EventArgs
+    private bool TryRaiseDisconnected(DisconnectReason reason, Exception? exception, bool willRetry = false)
     {
-        try { handler?.Invoke(this, args); }
-        catch { }
+        if (Interlocked.CompareExchange(ref _disconnectedFired, 1, 0) != 0)
+            return false;
+
+        RaiseEvent(Disconnected, new DisconnectedEventArgs(reason, exception, willRetry));
+        return true;
     }
+
+    // Multicast-safe event raise. A throwing handler must not prevent the remaining
+    // handlers in the invocation list from running, nor crash the producer thread.
+    // Non-fatal exceptions from a handler are routed to the Error event so they are
+    // observable from outside the process. Fatal exceptions (OOM, AV) propagate.
+    private void RaiseEvent<T>(EventHandler<T>? handler, T args) where T : EventArgs
+        => SafeEventRaiser.Raise(this, handler, args, RaiseError);
 
     private void RaiseEvent(EventHandler? handler)
-    {
-        try { handler?.Invoke(this, EventArgs.Empty); }
-        catch { }
-    }
+        => SafeEventRaiser.Raise(this, handler, RaiseError);
+
+    // Direct path for raising the Error event. Passes a null exception route to
+    // SafeEventRaiser so a throwing Error handler cannot recurse back into Error;
+    // its exception is dropped as the absolute last resort.
+    private void RaiseError(Exception exception)
+        => SafeEventRaiser.Raise(this, Error, new Events.ErrorEventArgs(exception), onHandlerException: null);
 }

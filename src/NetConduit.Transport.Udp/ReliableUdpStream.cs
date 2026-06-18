@@ -155,11 +155,23 @@ internal sealed class ReliableUdpStream : Stream
                 var flags = span[0];
                 var seq = BinaryPrimitives.ReadUInt32BigEndian(span[1..5]);
                 var len = BinaryPrimitives.ReadUInt16BigEndian(span[5..7]);
-                var payload = span.Slice(7, Math.Min(len, span.Length - 7)).ToArray();
+
+                // Wire-declared length must match the actual datagram payload size.
+                // Mismatches are dropped without ACK so the sender retransmits — silently
+                // clamping with Math.Min would deliver a truncated payload while still
+                // ACKing, desynchronising the multiplexer byte stream.
+                if (len != span.Length - 7)
+                    continue;
 
                 if ((flags & FlagAck) == FlagAck)
                 {
-                    _pendingAck?.TrySetResult(seq);
+                    // Only complete the pending ACK when its sequence matches the seq the sender
+                    // is currently waiting for. UDP can deliver duplicate or delayed ACKs (peers
+                    // re-ACK every duplicate DATA, NIC offload may double-deliver, middleboxes
+                    // reorder); accepting any seq would complete the TCS with a stale value and
+                    // spin SendWithAckAsync into an infinite tight resend loop.
+                    if (seq == Volatile.Read(ref _sendSeq))
+                        _pendingAck?.TrySetResult(seq);
                     continue;
                 }
 
@@ -168,7 +180,7 @@ internal sealed class ReliableUdpStream : Stream
                     if (seq == _expectedSeq)
                     {
                         _expectedSeq++;
-                        _receiveChannel.Writer.TryWrite(payload);
+                        _receiveChannel.Writer.TryWrite(span.Slice(7, len).ToArray());
                     }
                     await SendAckAsync(seq, cancellationToken).ConfigureAwait(false);
                     continue;
@@ -214,14 +226,22 @@ internal sealed class ReliableUdpStream : Stream
                 using var ackCts = new CancellationTokenSource(_options.RetransmitTimeout);
                 using var combined = CancellationTokenSource.CreateLinkedTokenSource(ackCts.Token, linkedCts.Token);
                 var acked = await (_pendingAck?.Task ?? Task.FromResult<uint>(0)).WaitAsync(combined.Token).ConfigureAwait(false);
+                // Receive-loop filter guarantees acked == _sendSeq for any completion that
+                // reaches us here, so the matching seq is the only success path.
                 if (acked == _sendSeq)
                 {
-                    _sendSeq++;
+                    Volatile.Write(ref _sendSeq, _sendSeq + 1);
                     break;
                 }
             }
             catch (OperationCanceledException)
             {
+                // Distinguish caller cancellation (propagate OCE) from honest
+                // retransmit-budget exhaustion (TimeoutException). Conflating
+                // the two hides genuine timeouts inside ambient cancellation
+                // handlers and reports cancelled sends as timeouts.
+                if (cancellationToken.IsCancellationRequested)
+                    throw new OperationCanceledException(cancellationToken);
                 if (attempts > _options.MaxRetransmits)
                     throw new TimeoutException($"UDP send timed out after {attempts} attempts");
             }

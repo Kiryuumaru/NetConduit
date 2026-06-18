@@ -1,3 +1,5 @@
+using NetConduit.Internal;
+
 namespace NetConduit.UnitTests;
 
 public sealed class BackpressureTests
@@ -201,24 +203,190 @@ public sealed class BackpressureTests
     }
 
     [Fact]
+    public async Task LargeWrite_AboveDefaultSlab_SplitsAndPreservesBytes()
+    {
+        var (client, server) = CreatePair();
+        client.Start();
+        server.Start();
+        await Task.WhenAll(client.WaitForReadyAsync(), server.WaitForReadyAsync());
+
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+
+        var writeCh = client.OpenChannel("large-write-split");
+        var readCh = await server.AcceptChannelAsync("large-write-split", cts.Token);
+        await writeCh.WaitForReadyAsync(cts.Token);
+
+        var data = new byte[2 * 1024 * 1024];
+        for (int i = 0; i < data.Length; i++)
+            data[i] = (byte)(i % 251);
+
+        var writeTask = writeCh.WriteAsync(data, cts.Token).AsTask();
+        var received = new byte[data.Length];
+        int totalRead = 0;
+
+        while (totalRead < received.Length)
+        {
+            var readTask = readCh.ReadAsync(received.AsMemory(totalRead), cts.Token).AsTask();
+            var completed = await Task.WhenAny(readTask, writeTask);
+            if (completed == writeTask && writeTask.IsFaulted)
+                await writeTask;
+
+            int read = await readTask;
+            Assert.NotEqual(0, read);
+            totalRead += read;
+        }
+
+        await writeTask;
+
+        Assert.Equal(data.Length, totalRead);
+        Assert.Equal(data, received);
+
+        await client.DisposeAsync();
+        await server.DisposeAsync();
+    }
+
+    [Fact]
+    public async Task ReadAsync_DrainsSubThresholdFrame_ReleasesWriterSlabCredit()
+    {
+        var duplex = new DuplexMemoryStream();
+
+        const int SmallSlab = 64 * 1024;
+        var client = StreamMultiplexer.Create(new MultiplexerOptions
+        {
+            StreamFactory = _ => Task.FromResult<IStreamPair>(duplex.SideA),
+        });
+        var server = StreamMultiplexer.Create(new MultiplexerOptions
+        {
+            StreamFactory = _ => Task.FromResult<IStreamPair>(duplex.SideB),
+            DefaultChannelOptions = new DefaultChannelOptions { SlabSize = SmallSlab },
+        });
+
+        client.Start();
+        server.Start();
+        await Task.WhenAll(client.WaitForReadyAsync(), server.WaitForReadyAsync());
+
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+
+        var writeCh = client.OpenChannel(new ChannelOptions
+        {
+            ChannelId = "sub-threshold-ack",
+            SlabSize = SmallSlab,
+            SendTimeout = TimeSpan.FromMilliseconds(500),
+        });
+        var readCh = await server.AcceptChannelAsync("sub-threshold-ack", cts.Token);
+        await writeCh.WaitForReadyAsync(cts.Token);
+
+        await writeCh.WriteAsync(new byte[] { 0x42 }, cts.Token);
+        var oneByteBuffer = new byte[1];
+        int firstRead = await readCh.ReadAsync(oneByteBuffer, cts.Token);
+        Assert.Equal(1, firstRead);
+        Assert.Equal(0x42, oneByteBuffer[0]);
+
+        var maxFittingPayload = new byte[SmallSlab - FrameHeader.Size];
+        await writeCh.WriteAsync(maxFittingPayload, cts.Token);
+
+        var received = new byte[maxFittingPayload.Length];
+        int totalRead = 0;
+        while (totalRead < received.Length)
+        {
+            int read = await readCh.ReadAsync(received.AsMemory(totalRead), cts.Token);
+            Assert.NotEqual(0, read);
+            totalRead += read;
+        }
+
+        Assert.Equal(maxFittingPayload.Length, totalRead);
+
+        await client.DisposeAsync();
+        await server.DisposeAsync();
+    }
+
+    [Fact]
+    public async Task CloseAsync_FullSlab_DeliversFinAfterPayloadDrains()
+    {
+        var duplex = new DuplexMemoryStream();
+
+        const int SmallSlab = 64 * 1024;
+        var client = StreamMultiplexer.Create(new MultiplexerOptions
+        {
+            StreamFactory = _ => Task.FromResult<IStreamPair>(duplex.SideA),
+            DefaultChannelOptions = new DefaultChannelOptions { SlabSize = SmallSlab },
+        });
+        var server = StreamMultiplexer.Create(new MultiplexerOptions
+        {
+            StreamFactory = _ => Task.FromResult<IStreamPair>(duplex.SideB),
+            DefaultChannelOptions = new DefaultChannelOptions { SlabSize = SmallSlab },
+        });
+
+        client.Start();
+        server.Start();
+        await Task.WhenAll(client.WaitForReadyAsync(), server.WaitForReadyAsync());
+
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+
+        var writeCh = client.OpenChannel(new ChannelOptions
+        {
+            ChannelId = "full-slab-close",
+            SlabSize = SmallSlab,
+            SendTimeout = TimeSpan.FromSeconds(5),
+        });
+        var readCh = await server.AcceptChannelAsync("full-slab-close", cts.Token);
+        await writeCh.WaitForReadyAsync(cts.Token);
+
+        var ackPrimer = new byte[4096];
+        await writeCh.WriteAsync(ackPrimer, cts.Token);
+        var primerRead = await readCh.ReadAsync(new byte[ackPrimer.Length], cts.Token);
+        Assert.Equal(ackPrimer.Length, primerRead);
+
+        var payload = new byte[SmallSlab - FrameHeader.Size];
+        payload[0] = 0x7A;
+        payload[^1] = 0x5E;
+
+        await writeCh.WriteAsync(payload, cts.Token);
+        var closeTask = writeCh.CloseAsync(cts.Token).AsTask();
+
+        var received = new byte[payload.Length];
+        int totalRead = 0;
+        while (totalRead < received.Length)
+        {
+            int read = await readCh.ReadAsync(received.AsMemory(totalRead), cts.Token);
+            Assert.NotEqual(0, read);
+            totalRead += read;
+        }
+
+        using var eofCts = new CancellationTokenSource(TimeSpan.FromSeconds(2));
+        int eof = await readCh.ReadAsync(new byte[1], eofCts.Token);
+
+        await closeTask;
+
+        Assert.Equal(payload.Length, totalRead);
+        Assert.Equal(0x7A, received[0]);
+        Assert.Equal(0x5E, received[^1]);
+        Assert.Equal(0, eof);
+
+        await client.DisposeAsync();
+        await server.DisposeAsync();
+    }
+
+    [Fact]
     public async Task SendTimeout_Respected()
     {
         var duplex = new DuplexMemoryStream();
 
-        // Very small slab to force backpressure quickly
+        // Small slab (the minimum documented value) to force backpressure quickly.
+        const int SmallSlab = 64 * 1024;
         var client = StreamMultiplexer.Create(new MultiplexerOptions
         {
             StreamFactory = _ => Task.FromResult<IStreamPair>(duplex.SideA),
             DefaultChannelOptions = new DefaultChannelOptions
             {
-                SlabSize = 1024,
+                SlabSize = SmallSlab,
                 SendTimeout = TimeSpan.FromMilliseconds(500),
             },
         });
         var server = StreamMultiplexer.Create(new MultiplexerOptions
         {
             StreamFactory = _ => Task.FromResult<IStreamPair>(duplex.SideB),
-            DefaultChannelOptions = new DefaultChannelOptions { SlabSize = 1024 },
+            DefaultChannelOptions = new DefaultChannelOptions { SlabSize = SmallSlab },
         });
 
         client.Start();
@@ -230,12 +398,19 @@ public sealed class BackpressureTests
         var writeCh = client.OpenChannel("send-timeout");
         await server.AcceptChannelAsync("send-timeout", cts.Token);
 
-        // Don't read from server side - build up backpressure
-        // At some point write should time out or block
+        // Build up backpressure by writing fitting payloads in a tight loop
+        // while the receiver never reads. Each payload fits the per-frame
+        // budget; the slab fills and a subsequent write blocks waiting for
+        // ACK from the receiver (which is not reading), so SendTimeout
+        // eventually fires.
         try
         {
-            var largeData = new byte[1024 * 1024]; // 1MB with 1KB slab
-            await writeCh.WriteAsync(largeData, cts.Token);
+            // Maximum payload per frame = SlabSize - FrameHeader.Size.
+            var fittingData = new byte[SmallSlab - 8];
+            for (int i = 0; i < 1024; i++)
+            {
+                await writeCh.WriteAsync(fittingData, cts.Token);
+            }
         }
         catch (TimeoutException)
         {

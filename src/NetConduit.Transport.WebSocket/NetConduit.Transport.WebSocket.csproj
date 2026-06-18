@@ -30,6 +30,11 @@
 	<ItemGroup>
 		<None Include="..\..\README.md" Pack="true" PackagePath="\" />
 		<None Include="..\..\LICENSE" Pack="true" PackagePath="\" />
+		<InternalsVisibleTo Include="NetConduit.Transport.WebSocket.IntegrationTests" />
+	</ItemGroup>
+
+	<ItemGroup>
+		<InternalsVisibleTo Include="NetConduit.Transport.WebSocket.IntegrationTests" />
 	</ItemGroup>
 
 	<ItemGroup Condition="'$(UseLocalNetConduit)' == 'true'">
@@ -37,7 +42,7 @@
 	</ItemGroup>
 
 	<ItemGroup Condition="'$(UseLocalNetConduit)' != 'true'">
-		<PackageReference Include="NetConduit" Version="3.0.1" />
+		<PackageReference Include="NetConduit" Version="$(NetConduitPackageVersion)" />
 	</ItemGroup>
 
 </Project>

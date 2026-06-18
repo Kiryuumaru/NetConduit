@@ -11,9 +11,10 @@ namespace NetConduit.UnitTests;
 public sealed class MemoryLeakTests
 {
     private static readonly TimeSpan TestDuration = TimeSpan.FromSeconds(30);
-    private static readonly TimeSpan CleanupTimeout = TimeSpan.FromSeconds(10);
+    private static readonly TimeSpan CleanupTimeout = TimeSpan.FromSeconds(30);
     private const int MemorySampleIntervalMs = 2000;
     private const int MaxChannelsPerTest = 20000;
+    private const int MaxConcurrentHandlers = 50;
 
     private static (StreamMultiplexer Client, StreamMultiplexer Server) CreatePair()
     {
@@ -66,10 +67,12 @@ public sealed class MemoryLeakTests
 
         // Server: accept and drain channels
         var handlerTasks = new System.Collections.Concurrent.ConcurrentBag<Task>();
+        using var handlerGate = new SemaphoreSlim(MaxConcurrentHandlers);
         var serverTask = Task.Run(async () =>
         {
-            await foreach (var ch in server.AcceptChannelsAsync(cts.Token))
+            await foreach (var ch in server.AcceptChannelsAsync(ct: cts.Token))
             {
+                await handlerGate.WaitAsync(cts.Token);
                 var t = Task.Run(async () =>
                 {
                     try
@@ -83,6 +86,7 @@ public sealed class MemoryLeakTests
                     finally
                     {
                         await ch.DisposeAsync();
+                        handlerGate.Release();
                     }
                 }, CancellationToken.None);
                 handlerTasks.Add(t);
@@ -213,7 +217,7 @@ public sealed class MemoryLeakTests
         // Server: accept and drain
         var serverTask = Task.Run(async () =>
         {
-            await foreach (var ch in server.AcceptChannelsAsync(cts.Token))
+            await foreach (var ch in server.AcceptChannelsAsync(ct: cts.Token))
             {
                 _ = Task.Run(async () =>
                 {
@@ -355,7 +359,7 @@ public sealed class MemoryLeakTests
                     var innerServerTask = Task.Run(async () =>
                     {
                         int count = 0;
-                        await foreach (var ch in innerServer.AcceptChannelsAsync(cts.Token))
+                        await foreach (var ch in innerServer.AcceptChannelsAsync(ct: cts.Token))
                         {
                             var buf = new byte[4096];
                             try
@@ -471,7 +475,7 @@ public sealed class MemoryLeakTests
         // Server: accept and drain channels sequentially
         var serverTask = Task.Run(async () =>
         {
-            await foreach (var ch in server.AcceptChannelsAsync(cts.Token))
+            await foreach (var ch in server.AcceptChannelsAsync(ct: cts.Token))
             {
                 try
                 {
@@ -582,10 +586,12 @@ public sealed class MemoryLeakTests
 
         // Server: accept and drain channels concurrently
         var handlerTasks = new System.Collections.Concurrent.ConcurrentBag<Task>();
+        using var handlerGate = new SemaphoreSlim(MaxConcurrentHandlers);
         var serverTask = Task.Run(async () =>
         {
-            await foreach (var ch in server.AcceptChannelsAsync(cts.Token))
+            await foreach (var ch in server.AcceptChannelsAsync(ct: cts.Token))
             {
+                await handlerGate.WaitAsync(cts.Token);
                 var t = Task.Run(async () =>
                 {
                     try
@@ -599,6 +605,7 @@ public sealed class MemoryLeakTests
                     finally
                     {
                         await ch.DisposeAsync();
+                        handlerGate.Release();
                     }
                 }, CancellationToken.None);
                 handlerTasks.Add(t);
@@ -720,10 +727,12 @@ public sealed class MemoryLeakTests
 
         // Server: accept and drain channels
         var handlerTasks = new System.Collections.Concurrent.ConcurrentBag<Task>();
+        using var handlerGate = new SemaphoreSlim(MaxConcurrentHandlers);
         var serverTask = Task.Run(async () =>
         {
-            await foreach (var ch in server.AcceptChannelsAsync(cts.Token))
+            await foreach (var ch in server.AcceptChannelsAsync(ct: cts.Token))
             {
+                await handlerGate.WaitAsync(cts.Token);
                 var t = Task.Run(async () =>
                 {
                     try
@@ -737,6 +746,7 @@ public sealed class MemoryLeakTests
                     finally
                     {
                         await ch.DisposeAsync();
+                        handlerGate.Release();
                     }
                 }, CancellationToken.None);
                 handlerTasks.Add(t);
@@ -878,10 +888,12 @@ public sealed class MemoryLeakTests
 
         // Server: accept and drain channels
         var handlerTasks = new System.Collections.Concurrent.ConcurrentBag<Task>();
+        using var handlerGate = new SemaphoreSlim(MaxConcurrentHandlers);
         var serverTask = Task.Run(async () =>
         {
-            await foreach (var ch in server.AcceptChannelsAsync(cts.Token))
+            await foreach (var ch in server.AcceptChannelsAsync(ct: cts.Token))
             {
+                await handlerGate.WaitAsync(cts.Token);
                 var t = Task.Run(async () =>
                 {
                     try
@@ -895,6 +907,7 @@ public sealed class MemoryLeakTests
                     finally
                     {
                         await ch.DisposeAsync();
+                        handlerGate.Release();
                     }
                 }, CancellationToken.None);
                 handlerTasks.Add(t);

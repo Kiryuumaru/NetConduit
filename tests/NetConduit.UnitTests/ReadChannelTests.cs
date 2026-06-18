@@ -1,3 +1,4 @@
+using System.Buffers.Binary;
 using NetConduit.Internal;
 
 namespace NetConduit.UnitTests;
@@ -130,7 +131,10 @@ public sealed class ReadChannelTests
     public void ReceivePayload_Err_ClosesChannel()
     {
         var channel = CreateChannel();
-        channel.ReceivePayload(FrameFlags.Err, ReadOnlySpan<byte>.Empty);
+        Span<byte> payload = stackalloc byte[sizeof(ushort)];
+        BinaryPrimitives.WriteUInt16BigEndian(payload, (ushort)ErrorCode.ProtocolError);
+
+        channel.ReceivePayload(FrameFlags.Err, payload);
 
         Assert.Equal(ChannelState.Closed, channel.State);
         Assert.Equal(ChannelCloseReason.RemoteError, channel.CloseReason);
@@ -204,5 +208,225 @@ public sealed class ReadChannelTests
         cts.Cancel();
 
         await Assert.ThrowsAsync<OperationCanceledException>(() => readTask);
+    }
+
+    [Fact]
+    public async Task ReadAsync_UnregistersCancellationCallback_OnSuccess()
+    {
+        var channel = CreateChannel();
+        using var cts = new CancellationTokenSource();
+
+        byte[] buffer = new byte[10];
+        var readTask = channel.ReadAsync(buffer, cts.Token).AsTask();
+        channel.ReceivePayload(FrameFlags.Data, [1, 2, 3]);
+        await readTask;
+
+        var field = typeof(ReadChannel).GetField(
+            "_readCancelReg",
+            System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic);
+        Assert.NotNull(field);
+        var reg = (CancellationTokenRegistration)field!.GetValue(channel)!;
+        Assert.Equal(default, reg);
+    }
+
+    [Fact]
+    public async Task ReadAsync_UnregistersCancellationCallback_OnClose()
+    {
+        var channel = CreateChannel();
+        using var cts = new CancellationTokenSource();
+
+        byte[] buffer = new byte[10];
+        var readTask = channel.ReadAsync(buffer, cts.Token).AsTask();
+        channel.SetClosed(ChannelCloseReason.LocalClose);
+        await readTask;
+
+        var field = typeof(ReadChannel).GetField(
+            "_readCancelReg",
+            System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic);
+        Assert.NotNull(field);
+        var reg = (CancellationTokenRegistration)field!.GetValue(channel)!;
+        Assert.Equal(default, reg);
+    }
+
+    [Fact]
+    public async Task ReadAsync_DoesNotLeakRegistrations_OnSharedLongLivedToken()
+    {
+        // Leaked registrations keep ReadChannels alive on the CTS. With the
+        // fix, completed reads remove their callback so the channel is
+        // collectable even while the CTS is still alive.
+        using var cts = new CancellationTokenSource();
+        var refs = new List<WeakReference>();
+
+        await Populate(refs, cts);
+
+        GC.Collect();
+        GC.WaitForPendingFinalizers();
+        GC.Collect();
+
+        int alive = refs.Count(r => r.IsAlive);
+        Assert.True(alive == 0, $"Expected all ReadChannels to be collectable; {alive}/{refs.Count} still alive (registration leak).");
+
+        [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
+        static async Task Populate(List<WeakReference> refs, CancellationTokenSource cts)
+        {
+            for (int i = 0; i < 200; i++)
+            {
+                var channel = CreateChannel();
+                byte[] buffer = new byte[4];
+                var task = channel.ReadAsync(buffer, cts.Token).AsTask();
+                channel.ReceivePayload(FrameFlags.Data, [(byte)i]);
+                await task;
+                refs.Add(new WeakReference(channel));
+            }
+        }
+    }
+
+    // Reads the private _slabReturned CAS flag set by TryReturnSlab.
+    private static bool IsSlabReturned(ReadChannel channel)
+    {
+        var field = typeof(ReadChannel).GetField(
+            "_slabReturned",
+            System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic);
+        Assert.NotNull(field);
+        return (int)field!.GetValue(channel)! != 0;
+    }
+
+    [Fact]
+    public void SetClosed_MuxDisposed_ReturnsSlabImmediately()
+    {
+        var channel = CreateChannel();
+        Assert.False(IsSlabReturned(channel));
+
+        channel.SetClosed(ChannelCloseReason.MuxDisposed);
+
+        Assert.True(IsSlabReturned(channel),
+            "MuxDisposed must release the slab to the pool without requiring DisposeAsync.");
+    }
+
+    [Fact]
+    public void SetClosed_MuxDisposed_WithBufferedData_StillReturnsSlab()
+    {
+        var channel = CreateChannel();
+        channel.ReceivePayload(FrameFlags.Data, [1, 2, 3, 4, 5]);
+        Assert.False(IsSlabReturned(channel));
+
+        channel.SetClosed(ChannelCloseReason.MuxDisposed);
+
+        Assert.True(IsSlabReturned(channel));
+    }
+
+    [Fact]
+    public async Task SetClosed_MuxDisposed_SubsequentReadReturnsEofWithoutTouchingSlab()
+    {
+        // Buffered data is discarded under MuxDisposed (mux is gone, drain is meaningless)
+        // so subsequent ReadAsync must return EOF rather than copy from the released slab.
+        var channel = CreateChannel();
+        channel.ReceivePayload(FrameFlags.Data, [1, 2, 3]);
+        channel.SetClosed(ChannelCloseReason.MuxDisposed);
+
+        byte[] buffer = new byte[10];
+        int read = await channel.ReadAsync(buffer);
+        Assert.Equal(0, read);
+    }
+
+    [Fact]
+    public void SetClosed_RemoteFin_NoBufferedData_ReturnsSlab()
+    {
+        var channel = CreateChannel();
+        Assert.False(IsSlabReturned(channel));
+
+        channel.SetClosed(ChannelCloseReason.RemoteFin);
+
+        Assert.True(IsSlabReturned(channel),
+            "Graceful close with no buffered data must release the slab immediately.");
+    }
+
+    [Fact]
+    public void SetClosed_LocalClose_NoBufferedData_ReturnsSlab()
+    {
+        var channel = CreateChannel();
+        channel.SetClosed(ChannelCloseReason.LocalClose);
+        Assert.True(IsSlabReturned(channel));
+    }
+
+    [Fact]
+    public void SetClosed_RemoteError_NoBufferedData_ReturnsSlab()
+    {
+        var channel = CreateChannel();
+        channel.SetClosed(ChannelCloseReason.RemoteError);
+        Assert.True(IsSlabReturned(channel));
+    }
+
+    [Fact]
+    public async Task SetClosed_RemoteFin_WithBufferedData_DefersSlabUntilDrainedToEof()
+    {
+        // Graceful close preserves buffered data so the consumer can drain to
+        // EOF; the slab is released by ReadAsync's EOF branch.
+        var channel = CreateChannel();
+        channel.ReceivePayload(FrameFlags.Data, [1, 2, 3]);
+        channel.SetClosed(ChannelCloseReason.RemoteFin);
+
+        Assert.False(IsSlabReturned(channel));
+
+        byte[] buffer = new byte[10];
+        int read1 = await channel.ReadAsync(buffer);
+        Assert.Equal(3, read1);
+        Assert.True(IsSlabReturned(channel),
+            "Draining the last buffered byte after close must release the slab.");
+
+        int read2 = await channel.ReadAsync(buffer);
+        Assert.Equal(0, read2);
+    }
+
+    [Fact]
+    public async Task ReceivePayload_Fin_ReleasesSlab_WhenNoBufferedData()
+    {
+        var channel = CreateChannel();
+        channel.ReceivePayload(FrameFlags.Fin, ReadOnlySpan<byte>.Empty);
+        Assert.True(IsSlabReturned(channel));
+
+        byte[] buffer = new byte[10];
+        int read = await channel.ReadAsync(buffer);
+        Assert.Equal(0, read);
+    }
+
+    [Fact]
+    public async Task DataAfterRemoteFin_IsBufferedAndDrainable()
+    {
+        var channel = CreateChannel();
+
+        // Close via RemoteFin
+        channel.ReceivePayload(FrameFlags.Fin, ReadOnlySpan<byte>.Empty);
+        Assert.Equal(ChannelState.Closed, channel.State);
+
+        // Data arrives after FIN — must be buffered, not dropped (fixes #518)
+        channel.ReceivePayload(FrameFlags.Data, [7, 8, 9]);
+
+        byte[] buffer = new byte[10];
+        int read1 = await channel.ReadAsync(buffer);
+        Assert.Equal(3, read1);
+        Assert.Equal((byte[])[7, 8, 9], buffer[..3]);
+
+        int read2 = await channel.ReadAsync(buffer);
+        Assert.Equal(0, read2);
+    }
+
+    [Fact]
+    public async Task CanRead_ReturnsTrue_WhenBufferedDataRemainsAfterClose()
+    {
+        var channel = CreateChannel();
+        channel.ReceivePayload(FrameFlags.Data, [1, 2, 3]);
+        channel.SetClosed(ChannelCloseReason.RemoteFin);
+
+        // Buffered data remains — CanRead must be true per Stream contract
+        Assert.True(channel.CanRead);
+
+        // Drain the data
+        byte[] buf = new byte[10];
+        int read = await channel.ReadAsync(buf);
+        Assert.Equal(3, read);
+
+        // After draining, CanRead becomes false
+        Assert.False(channel.CanRead);
     }
 }

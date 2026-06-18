@@ -153,7 +153,7 @@ async Task RunServer(int port)
                         using var acceptCts = CancellationTokenSource.CreateLinkedTokenSource(cts.Token);
                         acceptCts.CancelAfter(TimeSpan.FromSeconds(10));
 
-                        await foreach (var ch in mux.AcceptChannelsAsync(acceptCts.Token))
+                        await foreach (var ch in mux.AcceptChannelsAsync(ct: acceptCts.Token))
                         {
                             if (ch.ChannelId == "control")
                             {
@@ -321,7 +321,7 @@ async Task RunClient(string host, int port)
         using var acceptCts = CancellationTokenSource.CreateLinkedTokenSource(cts.Token);
         acceptCts.CancelAfter(TimeSpan.FromSeconds(10));
 
-        await foreach (var ch in mux.AcceptChannelsAsync(acceptCts.Token))
+        await foreach (var ch in mux.AcceptChannelsAsync(ct: acceptCts.Token))
         {
             if (ch.ChannelId == "state")
             {

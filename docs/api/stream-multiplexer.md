@@ -46,6 +46,10 @@ public interface IStreamMultiplexer : IAsyncDisposable
     IReadChannel   AcceptChannel(string channelId);
     IAsyncEnumerable<IReadChannel> AcceptChannelsAsync(CancellationToken ct = default);
 
+    bool TryRegisterChannels(
+        ReadOnlySpan<ChannelRegistration> registrations,
+        out IReadOnlyDictionary<ChannelRegistration, IChannel> channels);
+
     IWriteChannel? GetWriteChannel(string channelId);
     IReadChannel?  GetReadChannel (string channelId);
 }
@@ -96,6 +100,32 @@ await foreach (var ch in mux.AcceptChannelsAsync(ct))
 `OpenChannel` allocates a channel index immediately and sends `INIT`. `AcceptChannel` returns a pending channel; it becomes ready when the remote `INIT` arrives (or the multiplexer is already aware of a matching unclaimed inbound channel).
 
 `GetWriteChannel` and `GetReadChannel` return `null` if no channel with that ID currently exists; they don't open new ones.
+
+### Atomic multi-channel registration
+
+`TryRegisterChannels` registers a group of channels as a single all-or-nothing transaction. Either every entry in the batch is committed and no `INIT` frame is buffered for any rolled-back outbound, or the registry is restored to its pre-call state and the method returns `false`.
+
+```csharp
+var writeReg = new ChannelRegistration("data>>", ChannelDirection.Outbound);
+var readReg  = new ChannelRegistration("data<<", ChannelDirection.Inbound);
+ReadOnlySpan<ChannelRegistration> regs = [writeReg, readReg];
+
+if (!mux.TryRegisterChannels(regs, out var channels))
+    throw new InvalidOperationException("Channel id already in use.");
+
+var write = (IWriteChannel)channels[writeReg];
+var read  = (IReadChannel)channels[readReg];
+```
+
+Semantics:
+
+- **Outbound** entries require a vacant id. Any pre-existing write channel, read channel, or pending accept on the same id causes the full batch to roll back and the method returns `false`.
+- **Inbound** entries are idempotent, like `AcceptChannel(string)`. An existing read channel or pending accept on the same id is reused and returned in the result dictionary. A pre-existing outbound binding on the same id is still a collision.
+- The same `(ChannelId, Direction)` pair may not appear twice in a single batch — that throws `ArgumentException`.
+- Invalid input (empty batch, null/oversized channel id, mismatched `Options.ChannelId`, out-of-range `SlabSize`) throws before any commit occurs.
+- The multiplexer must be started and not shutting down, otherwise `InvalidOperationException` is thrown.
+
+This primitive is what the composite transit packages (`NetConduit.Transit.DuplexStream`, `NetConduit.Transit.Message`, `NetConduit.Transit.DeltaMessage`) use to allocate their write + read channel pair without leaking a half-committed channel id when the second registration would have failed.
 
 See also: [`StreamMultiplexerExtensions`](extensions.md) for `OpenChannel(string)`, `OpenChannelAsync`, `AcceptChannelAsync`.
 

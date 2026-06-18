@@ -1,5 +1,6 @@
 using System.Net.WebSockets;
 using Microsoft.AspNetCore.Builder;
+using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Http;
 using NetConduit.Interfaces;
 using NetConduit.Transport.WebSocket;
@@ -8,12 +9,35 @@ namespace NetConduit.Transport.WebSocket.IntegrationTests;
 
 public class WebSocketMultiplexerTests
 {
+    [Fact]
+    public void CreateOptions_NonWebSocketUri_ThrowsArgumentException()
+    {
+        var exception = Assert.Throws<ArgumentException>(() =>
+            WebSocketMultiplexer.CreateOptions("http://localhost:5000/chat"));
+
+        Assert.Equal("url", exception.ParamName);
+    }
+
     [Fact(Timeout = 30000)]
     public async Task CreateOptions_ConnectsAndTransfersData()
     {
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
 
+        // Gate the request handler on an explicit signal — never on `cts` — so the
+        // test can deterministically dispose `serverMux` *while the HttpContext is
+        // still alive*, then release the handler. If the handler instead unwound
+        // on `cts` cancellation, ASP.NET Core would dispose the HttpContext (and
+        // its IFeatureCollection) before `serverMux.DisposeAsync()` ran, and the
+        // CTS-registered ManagedWebSocket dispose callback fired by the mux's
+        // internal Cancel would then call DefaultHttpContext.Abort() on a dead
+        // context, surfacing as ObjectDisposedException("IFeatureCollection has
+        // been disposed"). That race was the cause of the
+        // WebSocketMultiplexerTests.CreateOptions_ConnectsAndTransfersData flake.
+        var serverShutdownTcs = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var serverReadTcs = new TaskCompletionSource<byte[]>(TaskCreationOptions.RunContinuationsAsynchronously);
+
         var builder = Microsoft.AspNetCore.Builder.WebApplication.CreateBuilder();
+        builder.WebHost.UseUrls("http://127.0.0.1:0");
         var app = builder.Build();
         app.UseWebSockets();
 
@@ -31,16 +55,26 @@ public class WebSocketMultiplexerTests
                 var readChannel = await serverMux.AcceptChannelAsync("test", cts.Token);
                 var buffer = new byte[1024];
                 int totalRead = 0;
-                while (totalRead < buffer.Length)
+                try
                 {
-                    int read = await readChannel.ReadAsync(buffer.AsMemory(totalRead), cts.Token);
-                    if (read == 0) break;
-                    totalRead += read;
+                    while (totalRead < buffer.Length)
+                    {
+                        int read = await readChannel.ReadAsync(buffer.AsMemory(totalRead), cts.Token);
+                        if (read == 0) break;
+                        totalRead += read;
+                    }
+                    serverReadTcs.TrySetResult(buffer[..totalRead]);
+                }
+                catch (Exception ex)
+                {
+                    serverReadTcs.TrySetException(ex);
+                    throw;
                 }
 
-                // Keep connection alive until cancelled
-                try { await Task.Delay(Timeout.Infinite, cts.Token); }
-                catch (OperationCanceledException) { }
+                // Hold the HttpContext open until the test signals shutdown — the
+                // test must dispose serverMux *before* signaling, so the mux's
+                // teardown observes a live context.
+                await serverShutdownTcs.Task;
             }
         });
 
@@ -58,13 +92,18 @@ public class WebSocketMultiplexerTests
         await writeChannel.WriteAsync(testData, cts.Token);
         await writeChannel.CloseAsync(cts.Token);
 
-        await Task.Delay(500, cts.Token);
+        var serverBytes = await serverReadTcs.Task.WaitAsync(cts.Token);
+        Assert.Equal(testData, serverBytes);
 
         Assert.True(client.IsConnected);
 
-        await cts.CancelAsync();
-        await app.StopAsync();
+        // Strict shutdown ordering:
+        //   1. Dispose serverMux while the HttpContext is still alive.
+        //   2. Release the handler so ASP.NET Core can tear down the context.
+        //   3. Stop the host.
         if (serverMux is not null)
             await serverMux.DisposeAsync();
+        serverShutdownTcs.TrySetResult();
+        await app.StopAsync();
     }
 }

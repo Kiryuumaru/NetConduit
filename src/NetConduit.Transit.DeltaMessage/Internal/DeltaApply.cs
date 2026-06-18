@@ -60,6 +60,11 @@ internal static class DeltaApply
                 var array = Navigate(root, op.Path);
                 if (array is JsonArray arr && op.Index is int idx)
                 {
+                    if ((uint)idx > (uint)arr.Count)
+                    {
+                        throw new InvalidOperationException(
+                            $"ArrayInsert index {idx} is out of range for array of length {arr.Count}.");
+                    }
                     arr.Insert(idx, op.Value?.DeepClone());
                 }
                 else
@@ -74,6 +79,11 @@ internal static class DeltaApply
                 var array = Navigate(root, op.Path);
                 if (array is JsonArray arr && op.Index is int idx)
                 {
+                    if ((uint)idx >= (uint)arr.Count)
+                    {
+                        throw new InvalidOperationException(
+                            $"ArrayRemove index {idx} is out of range for array of length {arr.Count}.");
+                    }
                     arr.RemoveAt(idx);
                 }
                 else
@@ -104,6 +114,11 @@ internal static class DeltaApply
             {
                 if (root is JsonArray arr && op.Index is int idx)
                 {
+                    if ((uint)idx > (uint)arr.Count)
+                    {
+                        throw new InvalidOperationException(
+                            $"Root ArrayInsert index {idx} is out of range for array of length {arr.Count}.");
+                    }
                     arr.Insert(idx, op.Value?.DeepClone());
                     break;
                 }
@@ -115,6 +130,11 @@ internal static class DeltaApply
             {
                 if (root is JsonArray arr && op.Index is int idx)
                 {
+                    if ((uint)idx >= (uint)arr.Count)
+                    {
+                        throw new InvalidOperationException(
+                            $"Root ArrayRemove index {idx} is out of range for array of length {arr.Count}.");
+                    }
                     arr.RemoveAt(idx);
                     break;
                 }

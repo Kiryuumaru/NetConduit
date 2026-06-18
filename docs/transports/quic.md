@@ -45,7 +45,7 @@ public static class QuicMultiplexer
 
 ### ALPN
 
-`alpn` is the Application-Layer Protocol Negotiation identifier. Default: `"netconduit"`. Both peers must agree.
+`alpn` is the Application-Layer Protocol Negotiation identifier. Default: `"netconduit"`. Both peers must agree. Pass `null` to use the default; an explicit empty string is rejected.
 
 ### `allowInsecure`
 
@@ -88,7 +88,11 @@ mux.Start();
 await mux.WaitForReadyAsync();
 ```
 
-The certificate must have a private key. For dev, a self-signed cert works (clients then need `allowInsecure: true`).
+The certificate must have a private key. `ListenAsync` rejects certificates without private keys before creating a listener. For dev, a self-signed cert works (clients then need `allowInsecure: true`).
+
+## Reconnectable server
+
+`CreateServerOptions(listener)` accepts one connection. For a server that survives client churn, write a custom factory that re-accepts from the `QuicListener` on every call. See [Reconnection → QUIC](../concepts/reconnection.md#quic) for a copy-paste snippet.
 
 ## Behavior notes
 

@@ -1,4 +1,7 @@
+using NetConduit.Enums;
+using NetConduit.Exceptions;
 using NetConduit.Interfaces;
+using NetConduit.Models;
 
 namespace NetConduit.Transit.DuplexStream;
 
@@ -40,8 +43,8 @@ public static class DuplexStreamTransitExtensions
         this IStreamMultiplexer mux,
         string channelId)
     {
-        var writeChannel = mux.OpenChannel(channelId + OutboundSuffix);
-        var readChannel = mux.AcceptChannel(channelId + InboundSuffix);
+        ValidateBaseChannelId(channelId);
+        var (writeChannel, readChannel) = RegisterPair(mux, channelId + OutboundSuffix, channelId + InboundSuffix);
         return new DuplexStreamTransit(writeChannel, readChannel);
     }
 
@@ -56,7 +59,15 @@ public static class DuplexStreamTransitExtensions
         CancellationToken cancellationToken = default)
     {
         var transit = mux.OpenDuplexStream(channelId);
-        await transit.WaitForReadyAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            await transit.WaitForReadyAsync(cancellationToken).ConfigureAwait(false);
+        }
+        catch
+        {
+            await transit.DisposeAsync().ConfigureAwait(false);
+            throw;
+        }
         return transit;
     }
 
@@ -69,8 +80,8 @@ public static class DuplexStreamTransitExtensions
         this IStreamMultiplexer mux,
         string channelId)
     {
-        var readChannel = mux.AcceptChannel(channelId + OutboundSuffix);
-        var writeChannel = mux.OpenChannel(channelId + InboundSuffix);
+        ValidateBaseChannelId(channelId);
+        var (writeChannel, readChannel) = RegisterPair(mux, channelId + InboundSuffix, channelId + OutboundSuffix);
         return new DuplexStreamTransit(writeChannel, readChannel);
     }
 
@@ -85,7 +96,15 @@ public static class DuplexStreamTransitExtensions
         CancellationToken cancellationToken = default)
     {
         var transit = mux.AcceptDuplexStream(channelId);
-        await transit.WaitForReadyAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            await transit.WaitForReadyAsync(cancellationToken).ConfigureAwait(false);
+        }
+        catch
+        {
+            await transit.DisposeAsync().ConfigureAwait(false);
+            throw;
+        }
         return transit;
     }
 
@@ -99,8 +118,7 @@ public static class DuplexStreamTransitExtensions
         string writeChannelId,
         string readChannelId)
     {
-        var writeChannel = mux.OpenChannel(writeChannelId);
-        var readChannel = mux.AcceptChannel(readChannelId);
+        var (writeChannel, readChannel) = RegisterPair(mux, writeChannelId, readChannelId);
         return new DuplexStreamTransit(writeChannel, readChannel);
     }
 
@@ -116,7 +134,47 @@ public static class DuplexStreamTransitExtensions
         CancellationToken cancellationToken = default)
     {
         var transit = mux.OpenDuplexStream(writeChannelId, readChannelId);
-        await transit.WaitForReadyAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            await transit.WaitForReadyAsync(cancellationToken).ConfigureAwait(false);
+        }
+        catch
+        {
+            await transit.DisposeAsync().ConfigureAwait(false);
+            throw;
+        }
         return transit;
+    }
+
+    private static void ValidateBaseChannelId(string channelId)
+    {
+        ArgumentNullException.ThrowIfNull(channelId);
+        if (channelId.Contains(OutboundSuffix, StringComparison.Ordinal) ||
+            channelId.Contains(InboundSuffix, StringComparison.Ordinal))
+        {
+            throw new ArgumentException(
+                $"Base channel ID must not contain reserved suffix sequences \"{OutboundSuffix}\" or \"{InboundSuffix}\".",
+                nameof(channelId));
+        }
+    }
+
+    // Atomic registration of the write+read channel pair via the multiplexer's
+    // TryRegisterChannels primitive. Either both channels are registered or
+    // neither is — no leaked channel id, no phantom INIT frame on the wire.
+    private static (IWriteChannel Write, IReadChannel Read) RegisterPair(
+        IStreamMultiplexer mux,
+        string writeChannelId,
+        string readChannelId)
+    {
+        var writeReg = new ChannelRegistration(writeChannelId, ChannelDirection.Outbound);
+        var readReg = new ChannelRegistration(readChannelId, ChannelDirection.Inbound);
+        ReadOnlySpan<ChannelRegistration> regs = [writeReg, readReg];
+        if (!mux.TryRegisterChannels(regs, out var channels))
+        {
+            throw new MultiplexerException(
+                ErrorCode.ChannelExists,
+                $"Channel id '{writeChannelId}' or '{readChannelId}' is already in use.");
+        }
+        return ((IWriteChannel)channels[writeReg], (IReadChannel)channels[readReg]);
     }
 }

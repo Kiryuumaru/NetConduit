@@ -47,7 +47,7 @@ public sealed class ExtremeStressTests
         var acceptTask = Task.Run(async () =>
         {
             int count = 0;
-            await foreach (var ch in server.AcceptChannelsAsync(cts.Token))
+            await foreach (var ch in server.AcceptChannelsAsync(ct: cts.Token))
             {
                 var buf = new byte[16];
                 var read = await ch.ReadAsync(buf, cts.Token);
@@ -87,7 +87,7 @@ public sealed class ExtremeStressTests
         var acceptTask = Task.Run(async () =>
         {
             int count = 0;
-            await foreach (var ch in server.AcceptChannelsAsync(cts.Token))
+            await foreach (var ch in server.AcceptChannelsAsync(ct: cts.Token))
             {
                 count++;
                 if (count >= channelCount) break;

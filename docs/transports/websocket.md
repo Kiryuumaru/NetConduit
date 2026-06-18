@@ -23,7 +23,7 @@ public static class WebSocketMultiplexer
 
 | Helper | Behavior |
 | --- | --- |
-| `CreateOptions(uri[, clientOptions])` | Each factory call opens a fresh `ClientWebSocket` to `uri`. `clientOptions` lets you set headers, sub-protocols, credentials. Reconnect-friendly. |
+| `CreateOptions(uri[, clientOptions])` | Each factory call opens a fresh `ClientWebSocket` to an absolute `ws://` or `wss://` URI. `clientOptions` lets you set headers, sub-protocols, credentials. Reconnect-friendly. |
 | `CreateServerOptions(webSocket)` | Wraps an already-accepted server-side `WebSocket`. Use after `HttpListener.AcceptWebSocketAsync` or ASP.NET's `HttpContext.WebSockets.AcceptWebSocketAsync`. Single accept only. |
 
 ## Client
@@ -87,6 +87,10 @@ var wsCtx = await ctx.AcceptWebSocketAsync(subProtocol: null);
 await using var mux = StreamMultiplexer.Create(WebSocketMultiplexer.CreateServerOptions(wsCtx.WebSocket));
 mux.Start();
 ```
+
+## Reconnectable server
+
+`CreateServerOptions(webSocket)` wraps one already-accepted WebSocket. For a server that survives client churn from an `HttpListener`-based host, write a custom factory that re-accepts on every call. See [Reconnection → WebSocket (`HttpListener`)](../concepts/reconnection.md#websocket-httplistener) for a copy-paste snippet. ASP.NET Core hosts naturally spawn a fresh multiplexer per WebSocket upgrade, so the reconnect pattern is not used there.
 
 ## When WebSocket is the right pick
 

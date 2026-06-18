@@ -37,11 +37,11 @@ public sealed class HandshakeTests
         await Task.WhenAll(client.WaitForReadyAsync(), server.WaitForReadyAsync());
 
         // Higher session ID gets odd indices
-        // Client (highId) opens channel → should get odd index (1, 3, 5, ...)
+        // Client (highId) opens channel → should get odd index (1, 3, 5.)
         var ch1 = client.OpenChannel("test1");
         var ch2 = client.OpenChannel("test2");
 
-        // Server (lowId) opens channel → should get even index (2, 4, 6, ...)
+        // Server (lowId) opens channel → should get even index (2, 4, 6.)
         var sCh1 = server.OpenChannel("server1");
 
         // Verify they can communicate (proves indices don't collide)

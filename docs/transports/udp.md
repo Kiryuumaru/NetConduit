@@ -33,8 +33,8 @@ public sealed class ReliableUdpOptions
 
 | Property | Default | Meaning |
 | --- | --- | --- |
-| `Mtu` | 1200 | Maximum datagram size including the 7-byte header. Valid range: 8 to 65542. |
-| `RetransmitTimeout` | 1 s | Time to wait for an ACK before retransmitting a datagram. |
+| `Mtu` | 1200 | Maximum datagram size including the 7-byte header. Valid range: 8 to 65,507. |
+| `RetransmitTimeout` | 1 s | Time to wait for an ACK before retransmitting a datagram. Must be non-negative and no greater than 2,147,483,647 milliseconds. |
 | `MaxRetransmits` | 5 | Retransmit attempts before considering the link dead. |
 
 ## Client
@@ -59,6 +59,10 @@ await mux.WaitForReadyAsync();
 ## Handshake
 
 The first exchange is a small `NC_HELLO` / `NC_HELLO_ACK` to bind the server to the remote endpoint and verify the protocol version. After that, the multiplexer's normal handshake runs.
+
+## Reconnectable server
+
+UDP's reliable shim is bound to one remote peer per session. Surviving a peer change requires disposing the multiplexer and creating a new one — there is no copy-paste re-accepting factory equivalent to TCP. See [Reconnection → UDP](../concepts/reconnection.md#udp) for the recommended pattern.
 
 ## Tuning
 

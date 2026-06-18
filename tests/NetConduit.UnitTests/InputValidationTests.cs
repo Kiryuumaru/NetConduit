@@ -357,4 +357,395 @@ public sealed class InputValidationTests
         await client.DisposeAsync();
         await server.DisposeAsync();
     }
+
+    // ---- SlabSize bound validation (arch-010) ----
+    //
+    // docs/api/channel-options.md states: "SlabSize must be between 64 KiB and 64 MiB."
+    // These tests pin that contract: the public constructor / factory rejects out-of-range
+    // values at the boundary instead of producing confusing downstream failures.
+
+    private const int MinSlabSize = 64 * 1024;
+    private const int MaxSlabSize = 64 * 1024 * 1024;
+
+    [Fact]
+    public void Create_DefaultChannelOptionsSlabSize_BelowMin_Throws()
+    {
+        var duplex = new DuplexMemoryStream();
+        Assert.Throws<ArgumentOutOfRangeException>(() =>
+            StreamMultiplexer.Create(new MultiplexerOptions
+            {
+                StreamFactory = _ => Task.FromResult<IStreamPair>(duplex.SideA),
+                DefaultChannelOptions = new DefaultChannelOptions { SlabSize = MinSlabSize - 1 },
+            }));
+    }
+
+    [Fact]
+    public void Create_DefaultChannelOptionsSlabSize_AboveMax_Throws()
+    {
+        var duplex = new DuplexMemoryStream();
+        Assert.Throws<ArgumentOutOfRangeException>(() =>
+            StreamMultiplexer.Create(new MultiplexerOptions
+            {
+                StreamFactory = _ => Task.FromResult<IStreamPair>(duplex.SideA),
+                DefaultChannelOptions = new DefaultChannelOptions { SlabSize = MaxSlabSize + 1 },
+            }));
+    }
+
+    [Fact]
+    public void Create_DefaultChannelOptionsSlabSize_Zero_Throws()
+    {
+        var duplex = new DuplexMemoryStream();
+        Assert.Throws<ArgumentOutOfRangeException>(() =>
+            StreamMultiplexer.Create(new MultiplexerOptions
+            {
+                StreamFactory = _ => Task.FromResult<IStreamPair>(duplex.SideA),
+                DefaultChannelOptions = new DefaultChannelOptions { SlabSize = 0 },
+            }));
+    }
+
+    [Fact]
+    public void Create_DefaultChannelOptionsSlabSize_Negative_Throws()
+    {
+        var duplex = new DuplexMemoryStream();
+        Assert.Throws<ArgumentOutOfRangeException>(() =>
+            StreamMultiplexer.Create(new MultiplexerOptions
+            {
+                StreamFactory = _ => Task.FromResult<IStreamPair>(duplex.SideA),
+                DefaultChannelOptions = new DefaultChannelOptions { SlabSize = -1 },
+            }));
+    }
+
+    [Fact]
+    public void Create_DefaultChannelOptionsSlabSize_ExactlyMin_Succeeds()
+    {
+        var duplex = new DuplexMemoryStream();
+        var mux = StreamMultiplexer.Create(new MultiplexerOptions
+        {
+            StreamFactory = _ => Task.FromResult<IStreamPair>(duplex.SideA),
+            DefaultChannelOptions = new DefaultChannelOptions { SlabSize = MinSlabSize },
+        });
+        Assert.NotNull(mux);
+    }
+
+    [Fact]
+    public void Create_DefaultChannelOptionsSlabSize_ExactlyMax_Succeeds()
+    {
+        var duplex = new DuplexMemoryStream();
+        var mux = StreamMultiplexer.Create(new MultiplexerOptions
+        {
+            StreamFactory = _ => Task.FromResult<IStreamPair>(duplex.SideA),
+            DefaultChannelOptions = new DefaultChannelOptions { SlabSize = MaxSlabSize },
+        });
+        Assert.NotNull(mux);
+    }
+
+    [Fact]
+    public async Task OpenChannel_SlabSize_BelowMin_Throws()
+    {
+        var (client, server) = CreatePair();
+        client.Start();
+        server.Start();
+        await Task.WhenAll(client.WaitForReadyAsync(), server.WaitForReadyAsync());
+
+        Assert.Throws<ArgumentOutOfRangeException>(() =>
+            client.OpenChannel(new ChannelOptions { ChannelId = "x", SlabSize = MinSlabSize - 1 }));
+
+        await client.DisposeAsync();
+        await server.DisposeAsync();
+    }
+
+    [Fact]
+    public async Task OpenChannel_SlabSize_AboveMax_Throws()
+    {
+        var (client, server) = CreatePair();
+        client.Start();
+        server.Start();
+        await Task.WhenAll(client.WaitForReadyAsync(), server.WaitForReadyAsync());
+
+        Assert.Throws<ArgumentOutOfRangeException>(() =>
+            client.OpenChannel(new ChannelOptions { ChannelId = "x", SlabSize = MaxSlabSize + 1 }));
+
+        await client.DisposeAsync();
+        await server.DisposeAsync();
+    }
+
+    [Fact]
+    public async Task OpenChannel_SlabSize_Zero_Throws()
+    {
+        var (client, server) = CreatePair();
+        client.Start();
+        server.Start();
+        await Task.WhenAll(client.WaitForReadyAsync(), server.WaitForReadyAsync());
+
+        Assert.Throws<ArgumentOutOfRangeException>(() =>
+            client.OpenChannel(new ChannelOptions { ChannelId = "x", SlabSize = 0 }));
+
+        await client.DisposeAsync();
+        await server.DisposeAsync();
+    }
+
+    [Fact]
+    public async Task OpenChannel_SlabSize_Negative_Throws()
+    {
+        var (client, server) = CreatePair();
+        client.Start();
+        server.Start();
+        await Task.WhenAll(client.WaitForReadyAsync(), server.WaitForReadyAsync());
+
+        Assert.Throws<ArgumentOutOfRangeException>(() =>
+            client.OpenChannel(new ChannelOptions { ChannelId = "x", SlabSize = -1 }));
+
+        await client.DisposeAsync();
+        await server.DisposeAsync();
+    }
+
+    [Fact]
+    public async Task OpenChannel_SlabSize_ExactlyMin_Succeeds()
+    {
+        var (client, server) = CreatePair();
+        client.Start();
+        server.Start();
+        await Task.WhenAll(client.WaitForReadyAsync(), server.WaitForReadyAsync());
+
+        var channel = client.OpenChannel(new ChannelOptions { ChannelId = "x", SlabSize = MinSlabSize });
+        Assert.NotNull(channel);
+
+        await client.DisposeAsync();
+        await server.DisposeAsync();
+    }
+
+    [Fact]
+    public async Task OpenChannel_SlabSize_ExactlyMax_Succeeds()
+    {
+        var (client, server) = CreatePair();
+        client.Start();
+        server.Start();
+        await Task.WhenAll(client.WaitForReadyAsync(), server.WaitForReadyAsync());
+
+        var channel = client.OpenChannel(new ChannelOptions { ChannelId = "x", SlabSize = MaxSlabSize });
+        Assert.NotNull(channel);
+
+        await client.DisposeAsync();
+        await server.DisposeAsync();
+    }
+
+    // ---- Timing / multiplier option validation (arch-012) ----
+    //
+    // docs/api/multiplexer-options.md Validation section: see "Timing options".
+    // Escape hatches preserved: PingInterval = Zero disables keepalive;
+    // ConnectionTimeout = InfiniteTimeSpan disables per-attempt timeout.
+
+    private static StreamFactoryDelegate AnyFactory() =>
+        _ => Task.FromResult<IStreamPair>(new DuplexMemoryStream().SideA);
+
+    [Fact]
+    public void Create_NegativePingInterval_Throws()
+    {
+        Assert.Throws<ArgumentOutOfRangeException>(() =>
+            StreamMultiplexer.Create(new MultiplexerOptions
+            {
+                StreamFactory = AnyFactory(),
+                PingInterval = TimeSpan.FromSeconds(-1),
+            }));
+    }
+
+    [Fact]
+    public void Create_ZeroPingInterval_DisablesKeepalive_Succeeds()
+    {
+        // Escape hatch: PingInterval = TimeSpan.Zero disables keepalive entirely.
+        // PingTimeout / MaxMissedPings are not validated in this mode.
+        var mux = StreamMultiplexer.Create(new MultiplexerOptions
+        {
+            StreamFactory = AnyFactory(),
+            PingInterval = TimeSpan.Zero,
+            PingTimeout = TimeSpan.Zero,
+            MaxMissedPings = 0,
+        });
+        Assert.NotNull(mux);
+    }
+
+    [Fact]
+    public void Create_ZeroPingTimeoutWithKeepaliveEnabled_Throws()
+    {
+        Assert.Throws<ArgumentOutOfRangeException>(() =>
+            StreamMultiplexer.Create(new MultiplexerOptions
+            {
+                StreamFactory = AnyFactory(),
+                PingInterval = TimeSpan.FromSeconds(30),
+                PingTimeout = TimeSpan.Zero,
+            }));
+    }
+
+    [Fact]
+    public void Create_NegativePingTimeoutWithKeepaliveEnabled_Throws()
+    {
+        Assert.Throws<ArgumentOutOfRangeException>(() =>
+            StreamMultiplexer.Create(new MultiplexerOptions
+            {
+                StreamFactory = AnyFactory(),
+                PingInterval = TimeSpan.FromSeconds(30),
+                PingTimeout = TimeSpan.FromSeconds(-1),
+            }));
+    }
+
+    [Fact]
+    public void Create_ZeroMaxMissedPingsWithKeepaliveEnabled_Throws()
+    {
+        Assert.Throws<ArgumentOutOfRangeException>(() =>
+            StreamMultiplexer.Create(new MultiplexerOptions
+            {
+                StreamFactory = AnyFactory(),
+                PingInterval = TimeSpan.FromSeconds(30),
+                MaxMissedPings = 0,
+            }));
+    }
+
+    [Fact]
+    public void Create_NegativeMaxMissedPingsWithKeepaliveEnabled_Throws()
+    {
+        Assert.Throws<ArgumentOutOfRangeException>(() =>
+            StreamMultiplexer.Create(new MultiplexerOptions
+            {
+                StreamFactory = AnyFactory(),
+                PingInterval = TimeSpan.FromSeconds(30),
+                MaxMissedPings = -1,
+            }));
+    }
+
+    [Fact]
+    public void Create_NegativeGoAwayTimeout_Throws()
+    {
+        Assert.Throws<ArgumentOutOfRangeException>(() =>
+            StreamMultiplexer.Create(new MultiplexerOptions
+            {
+                StreamFactory = AnyFactory(),
+                GoAwayTimeout = TimeSpan.FromSeconds(-1),
+            }));
+    }
+
+    [Fact]
+    public void Create_ZeroGoAwayTimeout_Succeeds()
+    {
+        var mux = StreamMultiplexer.Create(new MultiplexerOptions
+        {
+            StreamFactory = AnyFactory(),
+            GoAwayTimeout = TimeSpan.Zero,
+        });
+        Assert.NotNull(mux);
+    }
+
+    [Fact]
+    public void Create_NegativeAutoReconnectDelay_Throws()
+    {
+        Assert.Throws<ArgumentOutOfRangeException>(() =>
+            StreamMultiplexer.Create(new MultiplexerOptions
+            {
+                StreamFactory = AnyFactory(),
+                AutoReconnectDelay = TimeSpan.FromMilliseconds(-1),
+            }));
+    }
+
+    [Fact]
+    public void Create_MaxAutoReconnectDelayBelowBase_Throws()
+    {
+        Assert.Throws<ArgumentOutOfRangeException>(() =>
+            StreamMultiplexer.Create(new MultiplexerOptions
+            {
+                StreamFactory = AnyFactory(),
+                AutoReconnectDelay = TimeSpan.FromSeconds(30),
+                MaxAutoReconnectDelay = TimeSpan.FromSeconds(5),
+            }));
+    }
+
+    [Fact]
+    public void Create_BackoffMultiplierBelowOne_Throws()
+    {
+        Assert.Throws<ArgumentOutOfRangeException>(() =>
+            StreamMultiplexer.Create(new MultiplexerOptions
+            {
+                StreamFactory = AnyFactory(),
+                AutoReconnectBackoffMultiplier = 0.5,
+            }));
+    }
+
+    [Fact]
+    public void Create_ZeroBackoffMultiplier_Throws()
+    {
+        Assert.Throws<ArgumentOutOfRangeException>(() =>
+            StreamMultiplexer.Create(new MultiplexerOptions
+            {
+                StreamFactory = AnyFactory(),
+                AutoReconnectBackoffMultiplier = 0.0,
+            }));
+    }
+
+    [Fact]
+    public void Create_NegativeBackoffMultiplier_Throws()
+    {
+        Assert.Throws<ArgumentOutOfRangeException>(() =>
+            StreamMultiplexer.Create(new MultiplexerOptions
+            {
+                StreamFactory = AnyFactory(),
+                AutoReconnectBackoffMultiplier = -2.0,
+            }));
+    }
+
+    [Fact]
+    public void Create_NaNBackoffMultiplier_Throws()
+    {
+        Assert.Throws<ArgumentOutOfRangeException>(() =>
+            StreamMultiplexer.Create(new MultiplexerOptions
+            {
+                StreamFactory = AnyFactory(),
+                AutoReconnectBackoffMultiplier = double.NaN,
+            }));
+    }
+
+    [Fact]
+    public void Create_BackoffMultiplierExactlyOne_Succeeds()
+    {
+        // 1.0 means "no growth" - fixed-interval retry. Permitted.
+        var mux = StreamMultiplexer.Create(new MultiplexerOptions
+        {
+            StreamFactory = AnyFactory(),
+            AutoReconnectBackoffMultiplier = 1.0,
+        });
+        Assert.NotNull(mux);
+    }
+
+    [Fact]
+    public void Create_NegativeConnectionTimeoutThatIsNotInfinite_Throws()
+    {
+        Assert.Throws<ArgumentOutOfRangeException>(() =>
+            StreamMultiplexer.Create(new MultiplexerOptions
+            {
+                StreamFactory = AnyFactory(),
+                ConnectionTimeout = TimeSpan.FromMilliseconds(-100),
+            }));
+    }
+
+    [Fact]
+    public void Create_InfiniteConnectionTimeout_Succeeds()
+    {
+        // Escape hatch: Timeout.InfiniteTimeSpan disables per-attempt timeout.
+        var mux = StreamMultiplexer.Create(new MultiplexerOptions
+        {
+            StreamFactory = AnyFactory(),
+            ConnectionTimeout = Timeout.InfiniteTimeSpan,
+        });
+        Assert.NotNull(mux);
+    }
+
+    [Fact]
+    public void Create_ZeroConnectionTimeout_Succeeds()
+    {
+        // Zero also disables per-attempt timeout enforcement (matches the existing
+        // "> Zero && != Infinite" runtime gate).
+        var mux = StreamMultiplexer.Create(new MultiplexerOptions
+        {
+            StreamFactory = AnyFactory(),
+            ConnectionTimeout = TimeSpan.Zero,
+        });
+        Assert.NotNull(mux);
+    }
 }

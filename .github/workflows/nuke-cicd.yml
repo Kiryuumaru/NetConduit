@@ -800,11 +800,74 @@ jobs:
     - id: NUKE_RUN
       name: Run Nuke benchmark_test
       run: ${{ needs.PRE_SETUP.outputs.NUKE_PRE_SETUP_BENCHMARK_TEST_RUN_SCRIPT }} Run --args "benchmark_test"
-    - name: Upload benchmark pre_test artifacts
+    - name: Upload net_conduit pre_test artifacts
       uses: actions/upload-artifact@v7
       with:
-        name: pre_test___benchmark___BENCHMARK_TEST
-        path: ./.nuke/temp/artifacts-upload/benchmark/*
+        name: pre_test___net_conduit___BENCHMARK_TEST
+        path: ./.nuke/temp/artifacts-upload/net_conduit/*
+        if-no-files-found: error
+        retention-days: 1
+    - name: Upload net_conduit_transit_stream pre_test artifacts
+      uses: actions/upload-artifact@v7
+      with:
+        name: pre_test___net_conduit_transit_stream___BENCHMARK_TEST
+        path: ./.nuke/temp/artifacts-upload/net_conduit_transit_stream/*
+        if-no-files-found: error
+        retention-days: 1
+    - name: Upload net_conduit_transit_duplex_stream pre_test artifacts
+      uses: actions/upload-artifact@v7
+      with:
+        name: pre_test___net_conduit_transit_duplex_stream___BENCHMARK_TEST
+        path: ./.nuke/temp/artifacts-upload/net_conduit_transit_duplex_stream/*
+        if-no-files-found: error
+        retention-days: 1
+    - name: Upload net_conduit_transit_message pre_test artifacts
+      uses: actions/upload-artifact@v7
+      with:
+        name: pre_test___net_conduit_transit_message___BENCHMARK_TEST
+        path: ./.nuke/temp/artifacts-upload/net_conduit_transit_message/*
+        if-no-files-found: error
+        retention-days: 1
+    - name: Upload net_conduit_transit_delta_message pre_test artifacts
+      uses: actions/upload-artifact@v7
+      with:
+        name: pre_test___net_conduit_transit_delta_message___BENCHMARK_TEST
+        path: ./.nuke/temp/artifacts-upload/net_conduit_transit_delta_message/*
+        if-no-files-found: error
+        retention-days: 1
+    - name: Upload net_conduit_transport_tcp pre_test artifacts
+      uses: actions/upload-artifact@v7
+      with:
+        name: pre_test___net_conduit_transport_tcp___BENCHMARK_TEST
+        path: ./.nuke/temp/artifacts-upload/net_conduit_transport_tcp/*
+        if-no-files-found: error
+        retention-days: 1
+    - name: Upload net_conduit_transport_websocket pre_test artifacts
+      uses: actions/upload-artifact@v7
+      with:
+        name: pre_test___net_conduit_transport_websocket___BENCHMARK_TEST
+        path: ./.nuke/temp/artifacts-upload/net_conduit_transport_websocket/*
+        if-no-files-found: error
+        retention-days: 1
+    - name: Upload net_conduit_transport_udp pre_test artifacts
+      uses: actions/upload-artifact@v7
+      with:
+        name: pre_test___net_conduit_transport_udp___BENCHMARK_TEST
+        path: ./.nuke/temp/artifacts-upload/net_conduit_transport_udp/*
+        if-no-files-found: error
+        retention-days: 1
+    - name: Upload net_conduit_transport_ipc pre_test artifacts
+      uses: actions/upload-artifact@v7
+      with:
+        name: pre_test___net_conduit_transport_ipc___BENCHMARK_TEST
+        path: ./.nuke/temp/artifacts-upload/net_conduit_transport_ipc/*
+        if-no-files-found: error
+        retention-days: 1
+    - name: Upload net_conduit_transport_quic pre_test artifacts
+      uses: actions/upload-artifact@v7
+      with:
+        name: pre_test___net_conduit_transport_quic___BENCHMARK_TEST
+        path: ./.nuke/temp/artifacts-upload/net_conduit_transport_quic/*
         if-no-files-found: error
         retention-days: 1
     - name: Upload common pre_test artifacts
@@ -862,7 +925,8 @@ jobs:
     needs:
     - PRE_SETUP
     - NET_CONDUIT_TEST
-    if: "! failure() && ! cancelled() && needs.PRE_SETUP.outputs.NUKE_PRE_SETUP_NET_CONDUIT_BUILD_CONDITION == 'true' && needs.NET_CONDUIT_TEST.result == 'success'"
+    - BENCHMARK_TEST
+    if: "! failure() && ! cancelled() && needs.PRE_SETUP.outputs.NUKE_PRE_SETUP_NET_CONDUIT_BUILD_CONDITION == 'true' && needs.NET_CONDUIT_TEST.result == 'success' && needs.BENCHMARK_TEST.result == 'success'"
     env:
       NUKE_PRE_SETUP: ${{ needs.PRE_SETUP.outputs.NUKE_PRE_SETUP }}
   NET_CONDUIT_TRANSIT_STREAM_BUILD:
@@ -908,7 +972,8 @@ jobs:
     needs:
     - PRE_SETUP
     - NET_CONDUIT_TRANSIT_STREAM_TEST
-    if: "! failure() && ! cancelled() && needs.PRE_SETUP.outputs.NUKE_PRE_SETUP_NET_CONDUIT_TRANSIT_STREAM_BUILD_CONDITION == 'true' && needs.NET_CONDUIT_TRANSIT_STREAM_TEST.result == 'success'"
+    - BENCHMARK_TEST
+    if: "! failure() && ! cancelled() && needs.PRE_SETUP.outputs.NUKE_PRE_SETUP_NET_CONDUIT_TRANSIT_STREAM_BUILD_CONDITION == 'true' && needs.NET_CONDUIT_TRANSIT_STREAM_TEST.result == 'success' && needs.BENCHMARK_TEST.result == 'success'"
     env:
       NUKE_PRE_SETUP: ${{ needs.PRE_SETUP.outputs.NUKE_PRE_SETUP }}
   NET_CONDUIT_TRANSIT_DUPLEX_STREAM_BUILD:
@@ -954,7 +1019,8 @@ jobs:
     needs:
     - PRE_SETUP
     - NET_CONDUIT_TRANSIT_DUPLEX_STREAM_TEST
-    if: "! failure() && ! cancelled() && needs.PRE_SETUP.outputs.NUKE_PRE_SETUP_NET_CONDUIT_TRANSIT_DUPLEX_STREAM_BUILD_CONDITION == 'true' && needs.NET_CONDUIT_TRANSIT_DUPLEX_STREAM_TEST.result == 'success'"
+    - BENCHMARK_TEST
+    if: "! failure() && ! cancelled() && needs.PRE_SETUP.outputs.NUKE_PRE_SETUP_NET_CONDUIT_TRANSIT_DUPLEX_STREAM_BUILD_CONDITION == 'true' && needs.NET_CONDUIT_TRANSIT_DUPLEX_STREAM_TEST.result == 'success' && needs.BENCHMARK_TEST.result == 'success'"
     env:
       NUKE_PRE_SETUP: ${{ needs.PRE_SETUP.outputs.NUKE_PRE_SETUP }}
   NET_CONDUIT_TRANSIT_MESSAGE_BUILD:
@@ -1000,7 +1066,8 @@ jobs:
     needs:
     - PRE_SETUP
     - NET_CONDUIT_TRANSIT_MESSAGE_TEST
-    if: "! failure() && ! cancelled() && needs.PRE_SETUP.outputs.NUKE_PRE_SETUP_NET_CONDUIT_TRANSIT_MESSAGE_BUILD_CONDITION == 'true' && needs.NET_CONDUIT_TRANSIT_MESSAGE_TEST.result == 'success'"
+    - BENCHMARK_TEST
+    if: "! failure() && ! cancelled() && needs.PRE_SETUP.outputs.NUKE_PRE_SETUP_NET_CONDUIT_TRANSIT_MESSAGE_BUILD_CONDITION == 'true' && needs.NET_CONDUIT_TRANSIT_MESSAGE_TEST.result == 'success' && needs.BENCHMARK_TEST.result == 'success'"
     env:
       NUKE_PRE_SETUP: ${{ needs.PRE_SETUP.outputs.NUKE_PRE_SETUP }}
   NET_CONDUIT_TRANSIT_DELTA_MESSAGE_BUILD:
@@ -1046,7 +1113,8 @@ jobs:
     needs:
     - PRE_SETUP
     - NET_CONDUIT_TRANSIT_DELTA_MESSAGE_TEST
-    if: "! failure() && ! cancelled() && needs.PRE_SETUP.outputs.NUKE_PRE_SETUP_NET_CONDUIT_TRANSIT_DELTA_MESSAGE_BUILD_CONDITION == 'true' && needs.NET_CONDUIT_TRANSIT_DELTA_MESSAGE_TEST.result == 'success'"
+    - BENCHMARK_TEST
+    if: "! failure() && ! cancelled() && needs.PRE_SETUP.outputs.NUKE_PRE_SETUP_NET_CONDUIT_TRANSIT_DELTA_MESSAGE_BUILD_CONDITION == 'true' && needs.NET_CONDUIT_TRANSIT_DELTA_MESSAGE_TEST.result == 'success' && needs.BENCHMARK_TEST.result == 'success'"
     env:
       NUKE_PRE_SETUP: ${{ needs.PRE_SETUP.outputs.NUKE_PRE_SETUP }}
   NET_CONDUIT_TRANSPORT_TCP_BUILD:
@@ -1092,7 +1160,8 @@ jobs:
     needs:
     - PRE_SETUP
     - NET_CONDUIT_TRANSPORT_TCP_TEST
-    if: "! failure() && ! cancelled() && needs.PRE_SETUP.outputs.NUKE_PRE_SETUP_NET_CONDUIT_TRANSPORT_TCP_BUILD_CONDITION == 'true' && needs.NET_CONDUIT_TRANSPORT_TCP_TEST.result == 'success'"
+    - BENCHMARK_TEST
+    if: "! failure() && ! cancelled() && needs.PRE_SETUP.outputs.NUKE_PRE_SETUP_NET_CONDUIT_TRANSPORT_TCP_BUILD_CONDITION == 'true' && needs.NET_CONDUIT_TRANSPORT_TCP_TEST.result == 'success' && needs.BENCHMARK_TEST.result == 'success'"
     env:
       NUKE_PRE_SETUP: ${{ needs.PRE_SETUP.outputs.NUKE_PRE_SETUP }}
   NET_CONDUIT_TRANSPORT_WEBSOCKET_BUILD:
@@ -1138,7 +1207,8 @@ jobs:
     needs:
     - PRE_SETUP
     - NET_CONDUIT_TRANSPORT_WEBSOCKET_TEST
-    if: "! failure() && ! cancelled() && needs.PRE_SETUP.outputs.NUKE_PRE_SETUP_NET_CONDUIT_TRANSPORT_WEBSOCKET_BUILD_CONDITION == 'true' && needs.NET_CONDUIT_TRANSPORT_WEBSOCKET_TEST.result == 'success'"
+    - BENCHMARK_TEST
+    if: "! failure() && ! cancelled() && needs.PRE_SETUP.outputs.NUKE_PRE_SETUP_NET_CONDUIT_TRANSPORT_WEBSOCKET_BUILD_CONDITION == 'true' && needs.NET_CONDUIT_TRANSPORT_WEBSOCKET_TEST.result == 'success' && needs.BENCHMARK_TEST.result == 'success'"
     env:
       NUKE_PRE_SETUP: ${{ needs.PRE_SETUP.outputs.NUKE_PRE_SETUP }}
   NET_CONDUIT_TRANSPORT_UDP_BUILD:
@@ -1184,7 +1254,8 @@ jobs:
     needs:
     - PRE_SETUP
     - NET_CONDUIT_TRANSPORT_UDP_TEST
-    if: "! failure() && ! cancelled() && needs.PRE_SETUP.outputs.NUKE_PRE_SETUP_NET_CONDUIT_TRANSPORT_UDP_BUILD_CONDITION == 'true' && needs.NET_CONDUIT_TRANSPORT_UDP_TEST.result == 'success'"
+    - BENCHMARK_TEST
+    if: "! failure() && ! cancelled() && needs.PRE_SETUP.outputs.NUKE_PRE_SETUP_NET_CONDUIT_TRANSPORT_UDP_BUILD_CONDITION == 'true' && needs.NET_CONDUIT_TRANSPORT_UDP_TEST.result == 'success' && needs.BENCHMARK_TEST.result == 'success'"
     env:
       NUKE_PRE_SETUP: ${{ needs.PRE_SETUP.outputs.NUKE_PRE_SETUP }}
   NET_CONDUIT_TRANSPORT_IPC_BUILD:
@@ -1230,7 +1301,8 @@ jobs:
     needs:
     - PRE_SETUP
     - NET_CONDUIT_TRANSPORT_IPC_TEST
-    if: "! failure() && ! cancelled() && needs.PRE_SETUP.outputs.NUKE_PRE_SETUP_NET_CONDUIT_TRANSPORT_IPC_BUILD_CONDITION == 'true' && needs.NET_CONDUIT_TRANSPORT_IPC_TEST.result == 'success'"
+    - BENCHMARK_TEST
+    if: "! failure() && ! cancelled() && needs.PRE_SETUP.outputs.NUKE_PRE_SETUP_NET_CONDUIT_TRANSPORT_IPC_BUILD_CONDITION == 'true' && needs.NET_CONDUIT_TRANSPORT_IPC_TEST.result == 'success' && needs.BENCHMARK_TEST.result == 'success'"
     env:
       NUKE_PRE_SETUP: ${{ needs.PRE_SETUP.outputs.NUKE_PRE_SETUP }}
   NET_CONDUIT_TRANSPORT_QUIC_BUILD:
@@ -1276,7 +1348,8 @@ jobs:
     needs:
     - PRE_SETUP
     - NET_CONDUIT_TRANSPORT_QUIC_TEST
-    if: "! failure() && ! cancelled() && needs.PRE_SETUP.outputs.NUKE_PRE_SETUP_NET_CONDUIT_TRANSPORT_QUIC_BUILD_CONDITION == 'true' && needs.NET_CONDUIT_TRANSPORT_QUIC_TEST.result == 'success'"
+    - BENCHMARK_TEST
+    if: "! failure() && ! cancelled() && needs.PRE_SETUP.outputs.NUKE_PRE_SETUP_NET_CONDUIT_TRANSPORT_QUIC_BUILD_CONDITION == 'true' && needs.NET_CONDUIT_TRANSPORT_QUIC_TEST.result == 'success' && needs.BENCHMARK_TEST.result == 'success'"
     env:
       NUKE_PRE_SETUP: ${{ needs.PRE_SETUP.outputs.NUKE_PRE_SETUP }}
   NET_CONDUIT_MESH_BUILD:
@@ -1371,8 +1444,9 @@ jobs:
     needs:
     - PRE_SETUP
     - NET_CONDUIT_TEST
+    - BENCHMARK_TEST
     - NET_CONDUIT_BUILD
-    if: "! failure() && ! cancelled() && needs.PRE_SETUP.outputs.NUKE_PRE_SETUP_NET_CONDUIT_PUBLISH_CONDITION == 'true' && needs.NET_CONDUIT_TEST.result == 'success' && needs.NET_CONDUIT_BUILD.result == 'success'"
+    if: "! failure() && ! cancelled() && needs.PRE_SETUP.outputs.NUKE_PRE_SETUP_NET_CONDUIT_PUBLISH_CONDITION == 'true' && needs.NET_CONDUIT_TEST.result == 'success' && needs.BENCHMARK_TEST.result == 'success' && needs.NET_CONDUIT_BUILD.result == 'success'"
     env:
       NUKE_PRE_SETUP: ${{ needs.PRE_SETUP.outputs.NUKE_PRE_SETUP }}
   NET_CONDUIT_TRANSIT_STREAM_PUBLISH:
@@ -1421,8 +1495,9 @@ jobs:
     needs:
     - PRE_SETUP
     - NET_CONDUIT_TRANSIT_STREAM_TEST
+    - BENCHMARK_TEST
     - NET_CONDUIT_TRANSIT_STREAM_BUILD
-    if: "! failure() && ! cancelled() && needs.PRE_SETUP.outputs.NUKE_PRE_SETUP_NET_CONDUIT_TRANSIT_STREAM_PUBLISH_CONDITION == 'true' && needs.NET_CONDUIT_TRANSIT_STREAM_TEST.result == 'success' && needs.NET_CONDUIT_TRANSIT_STREAM_BUILD.result == 'success'"
+    if: "! failure() && ! cancelled() && needs.PRE_SETUP.outputs.NUKE_PRE_SETUP_NET_CONDUIT_TRANSIT_STREAM_PUBLISH_CONDITION == 'true' && needs.NET_CONDUIT_TRANSIT_STREAM_TEST.result == 'success' && needs.BENCHMARK_TEST.result == 'success' && needs.NET_CONDUIT_TRANSIT_STREAM_BUILD.result == 'success'"
     env:
       NUKE_PRE_SETUP: ${{ needs.PRE_SETUP.outputs.NUKE_PRE_SETUP }}
   NET_CONDUIT_TRANSIT_DUPLEX_STREAM_PUBLISH:
@@ -1471,8 +1546,9 @@ jobs:
     needs:
     - PRE_SETUP
     - NET_CONDUIT_TRANSIT_DUPLEX_STREAM_TEST
+    - BENCHMARK_TEST
     - NET_CONDUIT_TRANSIT_DUPLEX_STREAM_BUILD
-    if: "! failure() && ! cancelled() && needs.PRE_SETUP.outputs.NUKE_PRE_SETUP_NET_CONDUIT_TRANSIT_DUPLEX_STREAM_PUBLISH_CONDITION == 'true' && needs.NET_CONDUIT_TRANSIT_DUPLEX_STREAM_TEST.result == 'success' && needs.NET_CONDUIT_TRANSIT_DUPLEX_STREAM_BUILD.result == 'success'"
+    if: "! failure() && ! cancelled() && needs.PRE_SETUP.outputs.NUKE_PRE_SETUP_NET_CONDUIT_TRANSIT_DUPLEX_STREAM_PUBLISH_CONDITION == 'true' && needs.NET_CONDUIT_TRANSIT_DUPLEX_STREAM_TEST.result == 'success' && needs.BENCHMARK_TEST.result == 'success' && needs.NET_CONDUIT_TRANSIT_DUPLEX_STREAM_BUILD.result == 'success'"
     env:
       NUKE_PRE_SETUP: ${{ needs.PRE_SETUP.outputs.NUKE_PRE_SETUP }}
   NET_CONDUIT_TRANSIT_MESSAGE_PUBLISH:
@@ -1521,8 +1597,9 @@ jobs:
     needs:
     - PRE_SETUP
     - NET_CONDUIT_TRANSIT_MESSAGE_TEST
+    - BENCHMARK_TEST
     - NET_CONDUIT_TRANSIT_MESSAGE_BUILD
-    if: "! failure() && ! cancelled() && needs.PRE_SETUP.outputs.NUKE_PRE_SETUP_NET_CONDUIT_TRANSIT_MESSAGE_PUBLISH_CONDITION == 'true' && needs.NET_CONDUIT_TRANSIT_MESSAGE_TEST.result == 'success' && needs.NET_CONDUIT_TRANSIT_MESSAGE_BUILD.result == 'success'"
+    if: "! failure() && ! cancelled() && needs.PRE_SETUP.outputs.NUKE_PRE_SETUP_NET_CONDUIT_TRANSIT_MESSAGE_PUBLISH_CONDITION == 'true' && needs.NET_CONDUIT_TRANSIT_MESSAGE_TEST.result == 'success' && needs.BENCHMARK_TEST.result == 'success' && needs.NET_CONDUIT_TRANSIT_MESSAGE_BUILD.result == 'success'"
     env:
       NUKE_PRE_SETUP: ${{ needs.PRE_SETUP.outputs.NUKE_PRE_SETUP }}
   NET_CONDUIT_TRANSIT_DELTA_MESSAGE_PUBLISH:
@@ -1571,8 +1648,9 @@ jobs:
     needs:
     - PRE_SETUP
     - NET_CONDUIT_TRANSIT_DELTA_MESSAGE_TEST
+    - BENCHMARK_TEST
     - NET_CONDUIT_TRANSIT_DELTA_MESSAGE_BUILD
-    if: "! failure() && ! cancelled() && needs.PRE_SETUP.outputs.NUKE_PRE_SETUP_NET_CONDUIT_TRANSIT_DELTA_MESSAGE_PUBLISH_CONDITION == 'true' && needs.NET_CONDUIT_TRANSIT_DELTA_MESSAGE_TEST.result == 'success' && needs.NET_CONDUIT_TRANSIT_DELTA_MESSAGE_BUILD.result == 'success'"
+    if: "! failure() && ! cancelled() && needs.PRE_SETUP.outputs.NUKE_PRE_SETUP_NET_CONDUIT_TRANSIT_DELTA_MESSAGE_PUBLISH_CONDITION == 'true' && needs.NET_CONDUIT_TRANSIT_DELTA_MESSAGE_TEST.result == 'success' && needs.BENCHMARK_TEST.result == 'success' && needs.NET_CONDUIT_TRANSIT_DELTA_MESSAGE_BUILD.result == 'success'"
     env:
       NUKE_PRE_SETUP: ${{ needs.PRE_SETUP.outputs.NUKE_PRE_SETUP }}
   NET_CONDUIT_TRANSPORT_TCP_PUBLISH:
@@ -1621,8 +1699,9 @@ jobs:
     needs:
     - PRE_SETUP
     - NET_CONDUIT_TRANSPORT_TCP_TEST
+    - BENCHMARK_TEST
     - NET_CONDUIT_TRANSPORT_TCP_BUILD
-    if: "! failure() && ! cancelled() && needs.PRE_SETUP.outputs.NUKE_PRE_SETUP_NET_CONDUIT_TRANSPORT_TCP_PUBLISH_CONDITION == 'true' && needs.NET_CONDUIT_TRANSPORT_TCP_TEST.result == 'success' && needs.NET_CONDUIT_TRANSPORT_TCP_BUILD.result == 'success'"
+    if: "! failure() && ! cancelled() && needs.PRE_SETUP.outputs.NUKE_PRE_SETUP_NET_CONDUIT_TRANSPORT_TCP_PUBLISH_CONDITION == 'true' && needs.NET_CONDUIT_TRANSPORT_TCP_TEST.result == 'success' && needs.BENCHMARK_TEST.result == 'success' && needs.NET_CONDUIT_TRANSPORT_TCP_BUILD.result == 'success'"
     env:
       NUKE_PRE_SETUP: ${{ needs.PRE_SETUP.outputs.NUKE_PRE_SETUP }}
   NET_CONDUIT_TRANSPORT_WEBSOCKET_PUBLISH:
@@ -1671,8 +1750,9 @@ jobs:
     needs:
     - PRE_SETUP
     - NET_CONDUIT_TRANSPORT_WEBSOCKET_TEST
+    - BENCHMARK_TEST
     - NET_CONDUIT_TRANSPORT_WEBSOCKET_BUILD
-    if: "! failure() && ! cancelled() && needs.PRE_SETUP.outputs.NUKE_PRE_SETUP_NET_CONDUIT_TRANSPORT_WEBSOCKET_PUBLISH_CONDITION == 'true' && needs.NET_CONDUIT_TRANSPORT_WEBSOCKET_TEST.result == 'success' && needs.NET_CONDUIT_TRANSPORT_WEBSOCKET_BUILD.result == 'success'"
+    if: "! failure() && ! cancelled() && needs.PRE_SETUP.outputs.NUKE_PRE_SETUP_NET_CONDUIT_TRANSPORT_WEBSOCKET_PUBLISH_CONDITION == 'true' && needs.NET_CONDUIT_TRANSPORT_WEBSOCKET_TEST.result == 'success' && needs.BENCHMARK_TEST.result == 'success' && needs.NET_CONDUIT_TRANSPORT_WEBSOCKET_BUILD.result == 'success'"
     env:
       NUKE_PRE_SETUP: ${{ needs.PRE_SETUP.outputs.NUKE_PRE_SETUP }}
   NET_CONDUIT_TRANSPORT_UDP_PUBLISH:
@@ -1721,8 +1801,9 @@ jobs:
     needs:
     - PRE_SETUP
     - NET_CONDUIT_TRANSPORT_UDP_TEST
+    - BENCHMARK_TEST
     - NET_CONDUIT_TRANSPORT_UDP_BUILD
-    if: "! failure() && ! cancelled() && needs.PRE_SETUP.outputs.NUKE_PRE_SETUP_NET_CONDUIT_TRANSPORT_UDP_PUBLISH_CONDITION == 'true' && needs.NET_CONDUIT_TRANSPORT_UDP_TEST.result == 'success' && needs.NET_CONDUIT_TRANSPORT_UDP_BUILD.result == 'success'"
+    if: "! failure() && ! cancelled() && needs.PRE_SETUP.outputs.NUKE_PRE_SETUP_NET_CONDUIT_TRANSPORT_UDP_PUBLISH_CONDITION == 'true' && needs.NET_CONDUIT_TRANSPORT_UDP_TEST.result == 'success' && needs.BENCHMARK_TEST.result == 'success' && needs.NET_CONDUIT_TRANSPORT_UDP_BUILD.result == 'success'"
     env:
       NUKE_PRE_SETUP: ${{ needs.PRE_SETUP.outputs.NUKE_PRE_SETUP }}
   NET_CONDUIT_TRANSPORT_IPC_PUBLISH:
@@ -1771,8 +1852,9 @@ jobs:
     needs:
     - PRE_SETUP
     - NET_CONDUIT_TRANSPORT_IPC_TEST
+    - BENCHMARK_TEST
     - NET_CONDUIT_TRANSPORT_IPC_BUILD
-    if: "! failure() && ! cancelled() && needs.PRE_SETUP.outputs.NUKE_PRE_SETUP_NET_CONDUIT_TRANSPORT_IPC_PUBLISH_CONDITION == 'true' && needs.NET_CONDUIT_TRANSPORT_IPC_TEST.result == 'success' && needs.NET_CONDUIT_TRANSPORT_IPC_BUILD.result == 'success'"
+    if: "! failure() && ! cancelled() && needs.PRE_SETUP.outputs.NUKE_PRE_SETUP_NET_CONDUIT_TRANSPORT_IPC_PUBLISH_CONDITION == 'true' && needs.NET_CONDUIT_TRANSPORT_IPC_TEST.result == 'success' && needs.BENCHMARK_TEST.result == 'success' && needs.NET_CONDUIT_TRANSPORT_IPC_BUILD.result == 'success'"
     env:
       NUKE_PRE_SETUP: ${{ needs.PRE_SETUP.outputs.NUKE_PRE_SETUP }}
   NET_CONDUIT_TRANSPORT_QUIC_PUBLISH:
@@ -1821,8 +1903,9 @@ jobs:
     needs:
     - PRE_SETUP
     - NET_CONDUIT_TRANSPORT_QUIC_TEST
+    - BENCHMARK_TEST
     - NET_CONDUIT_TRANSPORT_QUIC_BUILD
-    if: "! failure() && ! cancelled() && needs.PRE_SETUP.outputs.NUKE_PRE_SETUP_NET_CONDUIT_TRANSPORT_QUIC_PUBLISH_CONDITION == 'true' && needs.NET_CONDUIT_TRANSPORT_QUIC_TEST.result == 'success' && needs.NET_CONDUIT_TRANSPORT_QUIC_BUILD.result == 'success'"
+    if: "! failure() && ! cancelled() && needs.PRE_SETUP.outputs.NUKE_PRE_SETUP_NET_CONDUIT_TRANSPORT_QUIC_PUBLISH_CONDITION == 'true' && needs.NET_CONDUIT_TRANSPORT_QUIC_TEST.result == 'success' && needs.BENCHMARK_TEST.result == 'success' && needs.NET_CONDUIT_TRANSPORT_QUIC_BUILD.result == 'success'"
     env:
       NUKE_PRE_SETUP: ${{ needs.PRE_SETUP.outputs.NUKE_PRE_SETUP }}
   NET_CONDUIT_MESH_PUBLISH:

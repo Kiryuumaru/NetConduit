@@ -19,6 +19,11 @@ public static class QuicMultiplexer
 {
     private const string DefaultAlpn = "netconduit";
 
+    // 1-byte NetConduit protocol preface. Both endpoints must agree on this
+    // byte before the mux runs framing on the QUIC stream. Bumping this value
+    // is the protocol-version gate.
+    private const byte ExpectedPreface = 0x01;
+
     /// <summary>
     /// Creates multiplexer options that connect to the specified QUIC endpoint.
     /// Supports reconnection — each call to StreamFactory creates a new QUIC connection.
@@ -38,12 +43,12 @@ public static class QuicMultiplexer
             throw new PlatformNotSupportedException("QUIC is not supported on this platform.");
 
         ArgumentNullException.ThrowIfNull(host);
+        var applicationProtocol = CreateApplicationProtocol(alpn);
 
         return new MultiplexerOptions
         {
             StreamFactory = async ct =>
             {
-                var applicationProtocol = new SslApplicationProtocol(alpn ?? DefaultAlpn);
                 var endpoints = await Dns.GetHostAddressesAsync(host, ct).ConfigureAwait(false);
                 return await ConnectToAnyEndpointAsync(endpoints, port, host, applicationProtocol, allowInsecure, ct)
                     .ConfigureAwait(false);
@@ -126,7 +131,7 @@ public static class QuicMultiplexer
             var stream = await connection.OpenOutboundStreamAsync(QuicStreamType.Bidirectional, ct).ConfigureAwait(false);
             try
             {
-                await stream.WriteAsync(new byte[] { 0x01 }, ct).ConfigureAwait(false);
+                await stream.WriteAsync(new byte[] { ExpectedPreface }, ct).ConfigureAwait(false);
                 await stream.FlushAsync(ct).ConfigureAwait(false);
 
                 return new StreamPair(stream, stream, connection);
@@ -179,7 +184,10 @@ public static class QuicMultiplexer
         ArgumentNullException.ThrowIfNull(endPoint);
         ArgumentNullException.ThrowIfNull(certificate);
 
-        var applicationProtocol = new SslApplicationProtocol(alpn ?? DefaultAlpn);
+        if (!certificate.HasPrivateKey)
+            throw new ArgumentException("QUIC server certificate must have a private key.", nameof(certificate));
+
+        var applicationProtocol = CreateApplicationProtocol(alpn);
 
         var listenerOptions = new QuicListenerOptions
         {
@@ -202,6 +210,15 @@ public static class QuicMultiplexer
 
         var listener = await QuicListener.ListenAsync(listenerOptions, cancellationToken).ConfigureAwait(false);
         return listener;
+    }
+
+    private static SslApplicationProtocol CreateApplicationProtocol(string? alpn)
+    {
+        var protocol = alpn ?? DefaultAlpn;
+        if (protocol.Length == 0)
+            throw new ArgumentException("QUIC ALPN value must not be empty.", nameof(alpn));
+
+        return new SslApplicationProtocol(protocol);
     }
 
     /// <summary>
@@ -242,8 +259,29 @@ public static class QuicMultiplexer
                 {
                     connection = await listener.AcceptConnectionAsync(ct).ConfigureAwait(false);
                     stream = await connection.AcceptInboundStreamAsync(ct).ConfigureAwait(false);
+
+                    // Read the 1-byte NetConduit preface fully and validate it.
+                    // QuicStream.ReadAsync may return 0 (peer closed write side without
+                    // sending the preface) or a short read; both must be rejected so the
+                    // mux gets a clear protocol-mismatch error instead of an EOF or
+                    // garbage on the first frame-header read.
                     var preface = new byte[1];
-                    _ = await stream.ReadAsync(preface, ct).ConfigureAwait(false);
+                    int total = 0;
+                    while (total < preface.Length)
+                    {
+                        int n = await stream.ReadAsync(preface.AsMemory(total), ct).ConfigureAwait(false);
+                        if (n == 0)
+                        {
+                            throw new InvalidOperationException(
+                                "QUIC peer closed the inbound stream before sending the NetConduit preface byte.");
+                        }
+                        total += n;
+                    }
+                    if (preface[0] != ExpectedPreface)
+                    {
+                        throw new InvalidOperationException(
+                            $"QUIC peer sent invalid NetConduit preface byte 0x{preface[0]:X2}; expected 0x{ExpectedPreface:X2}.");
+                    }
 
                     Interlocked.Exchange(ref state, 2);
                     return new StreamPair(stream, stream, connection);

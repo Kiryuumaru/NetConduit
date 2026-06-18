@@ -20,17 +20,46 @@ public static class WebSocketMultiplexer
         Uri uri,
         Action<ClientWebSocketOptions>? clientOptions = null)
     {
-        ArgumentNullException.ThrowIfNull(uri);
+        ValidateClientUri(uri, nameof(uri));
 
+        return CreateOptionsCore(uri, clientOptions);
+    }
+
+    private static void ValidateClientUri(Uri uri, string paramName)
+    {
+        ArgumentNullException.ThrowIfNull(uri, paramName);
+
+        if (!uri.IsAbsoluteUri)
+            throw new ArgumentException("WebSocket URI must be absolute.", paramName);
+
+        if (!string.Equals(uri.Scheme, "ws", StringComparison.OrdinalIgnoreCase)
+            && !string.Equals(uri.Scheme, "wss", StringComparison.OrdinalIgnoreCase))
+        {
+            throw new ArgumentException("WebSocket URI scheme must be 'ws' or 'wss'.", paramName);
+        }
+    }
+
+    private static MultiplexerOptions CreateOptionsCore(
+        Uri uri,
+        Action<ClientWebSocketOptions>? clientOptions)
+    {
         return new MultiplexerOptions
         {
             StreamFactory = async ct =>
             {
                 var webSocket = new ClientWebSocket();
                 clientOptions?.Invoke(webSocket.Options);
-                await webSocket.ConnectAsync(uri, ct).ConfigureAwait(false);
-                var stream = new WebSocketStream(webSocket);
-                return new StreamPair(stream, webSocket);
+                try
+                {
+                    await webSocket.ConnectAsync(uri, ct).ConfigureAwait(false);
+                    var stream = new WebSocketStream(webSocket);
+                    return new StreamPair(stream, webSocket);
+                }
+                catch
+                {
+                    webSocket.Dispose();
+                    throw;
+                }
             }
         };
     }
@@ -46,7 +75,13 @@ public static class WebSocketMultiplexer
         string url,
         Action<ClientWebSocketOptions>? clientOptions = null)
     {
-        return CreateOptions(new Uri(url), clientOptions);
+        ArgumentNullException.ThrowIfNull(url);
+
+        if (!Uri.TryCreate(url, UriKind.Absolute, out Uri? uri))
+            throw new ArgumentException("WebSocket URL must be an absolute URI.", nameof(url));
+
+        ValidateClientUri(uri, nameof(url));
+        return CreateOptionsCore(uri, clientOptions);
     }
 
     /// <summary>

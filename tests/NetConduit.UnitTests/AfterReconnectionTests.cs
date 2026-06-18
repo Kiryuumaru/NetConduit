@@ -304,6 +304,111 @@ public sealed class AfterReconnectionTests : IAsyncDisposable
     }
 
     // =====================================================================
+    // Regression for issue: when the reader has crossed the ACK threshold
+    // (so the writer's _ackedPos was advanced via OnAck), reconnect must still
+    // not duplicate-deliver any of the previously-acked bytes. Exercises the
+    // new reconnect-handshake replay-base advertisement path together with the
+    // existing OnAck path; with the old code, an in-flight ACK lost on the
+    // failing transport would leave writer._ackedPos behind reader._frameBytesReceived
+    // and the post-reconnect replay would duplicate the gap into ReadAsync.
+    // =====================================================================
+
+    [Fact]
+    public async Task Reconnect_AfterAckThresholdCrossed_NoDuplicateDelivery()
+    {
+        var client = StreamMultiplexer.Create(new MultiplexerOptions
+        {
+            StreamFactory = ct => _factory.CreateSideA(ct),
+            PingInterval = TimeSpan.Zero,
+            MaxAutoReconnectAttempts = 5,
+            AutoReconnectDelay = TimeSpan.FromMilliseconds(10),
+        });
+
+        var server = StreamMultiplexer.Create(new MultiplexerOptions
+        {
+            StreamFactory = ct => _factory.CreateSideB(ct),
+            PingInterval = TimeSpan.Zero,
+            MaxAutoReconnectAttempts = 5,
+            AutoReconnectDelay = TimeSpan.FromMilliseconds(10),
+        });
+
+        client.Start();
+        server.Start();
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(120));
+        await Task.WhenAll(
+            client.WaitForReadyAsync(cts.Token),
+            server.WaitForReadyAsync(cts.Token));
+
+        // Use the minimum slab (64 KiB) so the ACK threshold (slabSize / 16 = 4 KiB)
+        // is comfortably exceeded by the first batch without exhausting the slab.
+        var wch = client.OpenChannel("bulk");
+        var rch = await server.AcceptChannelAsync("bulk", cts.Token);
+        await wch.WaitForReadyAsync(cts.Token);
+
+        // Write enough to push the reader well past the 4 KiB ACK threshold.
+        byte[] preData = new byte[16 * 1024];
+        for (int i = 0; i < preData.Length; i++) preData[i] = (byte)(i & 0xFF);
+        await wch.WriteAsync(preData);
+
+        byte[] preBuf = new byte[preData.Length];
+        int preRead = 0;
+        while (preRead < preData.Length)
+        {
+            int r = await rch.ReadAsync(preBuf.AsMemory(preRead), cts.Token);
+            if (r == 0) break;
+            preRead += r;
+        }
+        Assert.Equal(preData.Length, preRead);
+        Assert.Equal(preData, preBuf);
+
+        // Give the writer-side mux time to process the ACK frames the reader emitted.
+        // 50 ms is comfortable for the in-process DuplexMemoryStream transport.
+        await Task.Delay(50, cts.Token);
+
+        // Kill the transport and wait for symmetric reconnect.
+        var reconnectedClient = new TaskCompletionSource();
+        var reconnectedServer = new TaskCompletionSource();
+        client.Connected += (_, _) => reconnectedClient.TrySetResult();
+        server.Connected += (_, _) => reconnectedServer.TrySetResult();
+        _factory.KillCurrentTransport();
+        await Task.WhenAll(
+            reconnectedClient.Task.WaitAsync(cts.Token),
+            reconnectedServer.Task.WaitAsync(cts.Token));
+
+        // After reconnect, only post-reconnect bytes must arrive — no replayed prefix.
+        byte[] postData = [0xAA, 0xBB, 0xCC, 0xDD];
+        await wch.WriteAsync(postData);
+
+        byte[] postBuf = new byte[postData.Length];
+        int postRead = 0;
+        while (postRead < postData.Length)
+        {
+            int r = await rch.ReadAsync(postBuf.AsMemory(postRead), cts.Token);
+            if (r == 0) break;
+            postRead += r;
+        }
+        Assert.Equal(postData.Length, postRead);
+        Assert.Equal(postData, postBuf);
+
+        // No extra bytes should be queued — a duplicate-replay would land here.
+        using var spyCts = CancellationTokenSource.CreateLinkedTokenSource(cts.Token);
+        spyCts.CancelAfter(TimeSpan.FromMilliseconds(100));
+        byte[] spy = new byte[16];
+        try
+        {
+            int extra = await rch.ReadAsync(spy, spyCts.Token);
+            Assert.Equal(0, extra);
+        }
+        catch (OperationCanceledException)
+        {
+            // Expected: no further data ever arrives → ReadAsync stayed blocked.
+        }
+
+        await client.DisposeAsync();
+        await server.DisposeAsync();
+    }
+
+    // =====================================================================
     // Multiple sequential reconnections work
     // =====================================================================
 
