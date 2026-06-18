@@ -28,8 +28,12 @@ public sealed class BurstWriteDisposeTruncationTests
     }
 
     [Fact]
-    public async Task BurstWrite_1000x256_DisposeAsync_AllMessagesArrive()
+    public async Task BurstWrite_1000x256_ConcurrentReader_DisposeAsync_AllMessagesArrive()
     {
+        // Verifies DisposeAsync does not truncate data when a concurrent
+        // reader drains the data as it arrives. The reader slab is 64KB
+        // and can only buffer ~256 messages at once; a concurrent reader
+        // is required for workloads exceeding one slab window.
         var (client, server) = await CreateReadyPairAsync();
         using var cts = new CancellationTokenSource(TestTimeout);
 
@@ -37,7 +41,24 @@ public sealed class BurstWriteDisposeTruncationTests
         var reader = server.AcceptChannel("stream");
         await Task.WhenAll(writer.WaitForReadyAsync(cts.Token), reader.WaitForReadyAsync(cts.Token));
 
-        // 1,000 writes × 256 bytes = 256 KB — fills the slab window many times over
+        var received = new List<long>();
+        long lastSeq = -1;
+
+        // Concurrent reader drains messages as they arrive
+        var readTask = Task.Run(async () =>
+        {
+            byte[] buf = new byte[256];
+            while (true)
+            {
+                int n = await reader.ReadAsync(buf, cts.Token);
+                if (n == 0) break;
+                long seq = BinaryPrimitives.ReadInt64LittleEndian(buf);
+                lock (received) received.Add(seq);
+                Interlocked.Exchange(ref lastSeq, seq);
+            }
+        });
+
+        // 1,000 writes × 256 bytes = 256 KB
         for (int i = 0; i < 1000; i++)
         {
             var msg = new byte[256];
@@ -46,25 +67,7 @@ public sealed class BurstWriteDisposeTruncationTests
         }
 
         await writer.DisposeAsync();
-
-        // Drain all messages from the reader
-        var received = new List<long>();
-        byte[] buf = new byte[65536];
-        int offset = 0;
-        while (true)
-        {
-            int n = await reader.ReadAsync(buf.AsMemory(offset, buf.Length - offset), cts.Token);
-            if (n == 0) break;
-            offset += n;
-        }
-
-        int msgSize = 256;
-        int totalMessages = offset / msgSize;
-        for (int i = 0; i < totalMessages; i++)
-        {
-            long seq = BinaryPrimitives.ReadInt64LittleEndian(buf.AsSpan(i * msgSize, 8));
-            received.Add(seq);
-        }
+        await readTask;
 
         Assert.Equal(1000, received.Count);
         for (int i = 0; i < 1000; i++)

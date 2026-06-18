@@ -481,6 +481,15 @@ internal sealed class WriteChannel : Stream, IWriteChannel
                 // Without reconnection replay, treat sent as acked to free slab space
                 _ackedPos = _sentPos;
             }
+            // When a graceful close is in-flight, force the FIN through even
+            // with replay enabled. Without this, _ackedPos stays at 0 (peer
+            // ACKs require consumer draining), TryCompactLocked no-ops, and
+            // TryQueuePendingFinLocked cannot fit the FIN header — the slab
+            // is full and DisposeAsync drops all pending data (fixes #543).
+            else if (_finRequested && _enableReplay)
+            {
+                _ackedPos = _sentPos;
+            }
             // If a graceful close queued a FIN, finalize the Closing -> Closed
             // transition only after the writer thread has actually drained
             // everything (including the FIN). Synchronously finalizing inside
@@ -793,26 +802,7 @@ internal sealed class WriteChannel : Stream, IWriteChannel
         if (_state is not ChannelState.Closed)
         {
             await CloseAsync();
-            // Wait briefly for the writer thread to drain pending frames and
-            // the FIN frame before committing the close. Without this wait,
-            // SetClosed drops the slab while data is still in-flight and
-            // truncates everything beyond the first window (fixes #543).
-            //
-            // Use a bounded wait so channels that cannot drain (transport
-            // failure, slab permanently full, never-opened) still finalise
-            // promptly.
-            try
-            {
-                await _unregisteredTcs.Task
-                    .WaitAsync(TimeSpan.FromSeconds(5))
-                    .ConfigureAwait(false);
-            }
-            catch (TimeoutException)
-            {
-                // Drain did not complete in time — force-close below.
-            }
-            if (_state is not ChannelState.Closed)
-                SetClosed(ChannelCloseReason.LocalClose);
+            SetClosed(ChannelCloseReason.LocalClose);
         }
         // Wait until the writer thread has drained the FIN frame and the channel
         // has been removed from the owner's registry, so the channel ID is
