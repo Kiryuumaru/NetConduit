@@ -34,9 +34,11 @@ internal sealed class RoutedSubMultiplexer : IStreamMultiplexer
     private void OnInnerDisconnected(object? sender, DisconnectedEventArgs e)
     {
         // Suppress only transient transport drops that the inner mux will
-        // recover from via StreamFactory-driven reroute. Terminal failures
-        // (retry budget exhausted, GoAway, LocalDispose) must reach the app.
-        if (e.Reason == NetConduit.Enums.DisconnectReason.TransportError && e.WillRetry) return;
+        // recover from via StreamFactory-driven reroute: after TransportError
+        // the inner mux stays alive (IsRunning=true) while it reconnects.
+        // Terminal failures (retry budget exhausted, GoAway, LocalDispose)
+        // set IsRunning=false and must reach the app.
+        if (e.Reason == NetConduit.Enums.DisconnectReason.TransportError && _inner.IsRunning) return;
         Disconnected?.Invoke(this, e);
     }
 
