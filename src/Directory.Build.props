@@ -12,7 +12,7 @@
     so all optional packages line up on the same dependency contract.
   -->
   <PropertyGroup>
-    <NetConduitPackageVersion>3.1.0</NetConduitPackageVersion>
+    <NetConduitPackageVersion>3.1.2</NetConduitPackageVersion>
   </PropertyGroup>
 
 </Project>
