@@ -793,20 +793,31 @@ internal sealed class WriteChannel : Stream, IWriteChannel
         if (_state is not ChannelState.Closed)
         {
             await CloseAsync();
-            // Do NOT call SetClosed here — the writer thread drains
-            // pending frames and the FIN frame, then calls SetClosed
-            // itself via MarkSent → TryQueuePendingFinLocked.
-            // Calling SetClosed early drops the slab and truncates
-            // data that hasn't been sent yet (fixes #543).
+            // Wait briefly for the writer thread to drain pending frames and
+            // the FIN frame before committing the close. Without this wait,
+            // SetClosed drops the slab while data is still in-flight and
+            // truncates everything beyond the first window (fixes #543).
+            //
+            // Use a bounded wait so channels that cannot drain (transport
+            // failure, slab permanently full, never-opened) still finalise
+            // promptly.
+            try
+            {
+                await _unregisteredTcs.Task
+                    .WaitAsync(TimeSpan.FromSeconds(5))
+                    .ConfigureAwait(false);
+            }
+            catch (TimeoutException)
+            {
+                // Drain did not complete in time — force-close below.
+            }
+            if (_state is not ChannelState.Closed)
+                SetClosed(ChannelCloseReason.LocalClose);
         }
         // Wait until the writer thread has drained the FIN frame and the channel
         // has been removed from the owner's registry, so the channel ID is
         // immediately reusable after DisposeAsync completes.
         await _unregisteredTcs.Task.ConfigureAwait(false);
-        // Safety net: if the writer thread never drained (transport failure,
-        // channel never opened), force-close now.
-        if (_state is not ChannelState.Closed)
-            SetClosed(ChannelCloseReason.LocalClose);
         _spaceAvailable.Dispose();
         await base.DisposeAsync();
     }
