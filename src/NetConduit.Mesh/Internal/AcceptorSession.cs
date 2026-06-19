@@ -128,6 +128,21 @@ internal sealed class AcceptorSession : RoutedSessionBase
             return;
         }
 
+        // Wait for the inner mux reader to start before yielding to the
+        // consumer. Without this, the consumer opens channels and starts
+        // writing before B's ReadChannel has a reader, so no ACKs flow
+        // back to the writer-side WriteChannel and the slab fills at
+        // MinSlabSize (64KB), silently truncating burst data.
+        if (firstArrival)
+        {
+            try
+            {
+                await Inner!.WaitForReadyAsync().ConfigureAwait(false);
+            }
+            catch (OperationCanceledException) { }
+            catch (Exception) { }
+        }
+
         if (firstArrival && !_explicit)
         {
             // Emit via AcceptMultiplexersAsync exactly once per acceptor.
