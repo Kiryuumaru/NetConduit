@@ -3,18 +3,14 @@ using NetConduit.Internal;
 namespace NetConduit.UnitTests;
 
 /// <summary>
-/// Regression test for the FIN-on-Closed race from issue #546.
-/// When DisposeAsync calls SetClosed before the writer loop drains the slab,
-/// TryQueuePendingFinLocked rejected FIN queuing because state was Closed.
-/// The fix allows FIN queuing in both Closing and Closed states.
-///
-/// The 64 KB cap described in #546 (256 × 256-byte messages arriving when
-/// the reader isn't draining concurrently) is correct backpressure, not a
-/// bug. With a concurrent reader, all messages arrive — the isolation tests
-/// on the mesh branch confirm this. The actual bug is the shutdown-path
-/// FIN race fixed here.
+/// Regression test for the FIN-on-Closed race in WriteChannel.
+/// When DisposeAsync calls CloseAsync followed by SetClosed during graceful
+/// shutdown, the state transitions to Closed before the writer loop drains
+/// the slab. TryQueuePendingFinLocked rejected FIN queuing when state was
+/// Closed, so the FIN frame was never sent — the peer saw a hard EOF
+/// instead of a proper graceful close with trailing FIN.
 /// </summary>
-public sealed class BurstDrainDataLossTests
+public sealed class FinOnClosedRaceTests
 {
     private sealed class TestRouter : IChannelOwner
     {
