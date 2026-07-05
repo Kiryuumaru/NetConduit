@@ -496,7 +496,7 @@ internal sealed class WriteChannel : Stream, IWriteChannel
             // CloseAsync would unregister the channel before queued data frames
             // reach the wire and the peer would never receive them.
             finQueued = TryQueuePendingFinLocked();
-            finDrained = _state == ChannelState.Closing && _finQueued && _pendingPos <= _sentPos;
+            finDrained = (_state is ChannelState.Closing or ChannelState.Closed) && _finQueued && _pendingPos <= _sentPos;
         }
         // Wake any blocked writer waiting for space
         TryReleaseSpaceSignal();
@@ -621,7 +621,7 @@ internal sealed class WriteChannel : Stream, IWriteChannel
     // Must be called under _posLock.
     private bool TryQueuePendingFinLocked()
     {
-        if (!_finRequested || _finQueued || _state != ChannelState.Closing)
+        if (!_finRequested || _finQueued || _state is not (ChannelState.Closing or ChannelState.Closed))
             return false;
 
         TryCompactLocked();
