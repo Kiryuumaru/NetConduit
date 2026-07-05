@@ -1,11 +1,20 @@
+using System.Buffers.Binary;
 using NetConduit.Internal;
 
 namespace NetConduit.UnitTests;
 
 /// <summary>
-/// Regression tests for the burst-then-drain data loss scenario where
-/// DisposeAsync transitions state to Closed before the FIN frame is queued.
-/// After the fix, MarkSent must still queue FIN even in Closed state.
+/// Regression tests for the burst-then-drain data loss scenarios from #546.
+/// Two distinct bugs:
+/// 1. Burst-drain truncation: when the writer bursts past the peer's slab
+///    capacity and disposes before the reader drains, the flow-control proxy
+///    in WriteFrameAsync does not subtract _ackedPos from _writePos, causing
+///    the peer-free calculation to over-state available buffer after
+///    compaction. The writer admits frames past the peer's capacity, the peer
+///    throws ProtocolError on BufferInSlab overflow, the transport faults,
+///    and the dispose path drops undrained data from the writer's slab.
+/// 2. FIN-on-Closed race: TryQueuePendingFinLocked rejected Closed state
+///    (fixed in same change).
 /// </summary>
 public sealed class BurstDrainDataLossTests
 {
@@ -21,21 +30,83 @@ public sealed class BurstDrainDataLossTests
     }
 
     /// <summary>
-    /// Fill the slab so FIN cannot fit when CloseAsync runs. Call SetClosed
-    /// (simulating DisposeAsync's post-close state transition), then drain
-    /// via MarkSent. With the fix, TryQueuePendingFinLocked must allow
-    /// queuing FIN even in Closed state. Without the fix, FIN is never
-    /// queued and the peer sees a truncated stream.
+    /// Exact reproduction of issue #546: write 1000 messages then drain.
+    /// With replay disabled, MarkSent auto-advances _ackedPos, compaction
+    /// reduces _writePos, and the peerFree formula overstates available
+    /// peer buffer — admitting frames past the peer's slab capacity.
+    /// The peer throws ProtocolError on overflow, transport faults, and
+    /// DisposeAsync drops undrained data from the write slab.
+    /// </summary>
+    [Fact]
+    public async Task BurstThenDrain_AllMessagesArrive()
+    {
+        var duplex = new DuplexMemoryStream();
+        var client = StreamMultiplexer.Create(new MultiplexerOptions
+        {
+            StreamFactory = _ => Task.FromResult<IStreamPair>(duplex.SideA),
+            PingInterval = TimeSpan.Zero,
+            MaxAutoReconnectAttempts = 0,
+        });
+        var server = StreamMultiplexer.Create(new MultiplexerOptions
+        {
+            StreamFactory = _ => Task.FromResult<IStreamPair>(duplex.SideB),
+            PingInterval = TimeSpan.Zero,
+            MaxAutoReconnectAttempts = 0,
+        });
+        client.Start();
+        server.Start();
+        await Task.WhenAll(client.WaitForReadyAsync(), server.WaitForReadyAsync());
+
+        var writer = client.OpenChannel(new ChannelOptions
+        {
+            ChannelId = "burst",
+            SendTimeout = TimeSpan.FromSeconds(30),
+        });
+
+        // Accept the channel so INIT is processed, but don't drain the
+        // reader yet — the read channel buffers via direct delivery but
+        // the consumer never reads, so _consumedPos stays at 0.
+        var acceptTask = server.AcceptChannelAsync("burst");
+
+        const int messageCount = 1000;
+        const int messageSize = 256;
+        for (int i = 0; i < messageCount; i++)
+        {
+            var msg = new byte[messageSize];
+            BinaryPrimitives.WriteInt64LittleEndian(msg, i);
+            await writer.WriteAsync(msg);
+        }
+
+        await writer.DisposeAsync();
+
+        var reader = await acceptTask;
+        var received = new List<long>();
+        var buf = new byte[messageSize];
+        while (true)
+        {
+            int bytesRead = 0;
+            while (bytesRead < messageSize)
+            {
+                int n = await reader.ReadAsync(buf.AsMemory(bytesRead, messageSize - bytesRead));
+                if (n == 0) goto drainDone;
+                bytesRead += n;
+            }
+            received.Add(BinaryPrimitives.ReadInt64LittleEndian(buf));
+        }
+    drainDone:
+        Assert.Equal(messageCount, received.Count);
+    }
+
+    /// <summary>
+    /// FIN-on-Closed race: Fill the slab so FIN cannot fit when CloseAsync runs.
+    /// Call SetClosed (simulating DisposeAsync's post-close state transition),
+    /// then drain via MarkSent. With the fix, TryQueuePendingFinLocked must allow
+    /// queuing FIN even in Closed state.
     /// </summary>
     [Fact]
     public async Task MarkSent_AfterSetClosed_QueuesFinInClosedState()
     {
         var router = new TestRouter();
-        // slabSize = 135 = 15 frames × 9 bytes. After 14 frames drained via
-        // MarkSent, the 15th frame fills the remaining 9 bytes exactly.
-        // CloseAsync then has 0 bytes free so FIN (8 bytes) cannot fit.
-        // SetClosed transitions state to Closed; subsequent MarkSent must
-        // compact the slab and queue FIN.
         const int slabSize = 135;
         var channel = new WriteChannel(
             channelId: "test",
@@ -47,7 +118,6 @@ public sealed class BurstDrainDataLossTests
             enableReplay: true);
         channel.MarkOpen();
 
-        // Write and drain 14 frames (126 bytes, 9 bytes free for the 15th).
         for (int i = 0; i < 14; i++)
         {
             await channel.WriteAsync(new byte[1]);
@@ -55,25 +125,12 @@ public sealed class BurstDrainDataLossTests
             channel.MarkSent(ready.Length);
         }
 
-        // Write the 15th frame — exactly fills the last 9 bytes (135 total).
         await channel.WriteAsync(new byte[1]);
-
-        // TakeReady but don't MarkSent — simulates writer loop holding the slice.
         var heldFrame = channel.TakeReady();
-
-        // CloseAsync: _finRequested=true. TryCompactLocked no-ops (_ackedPos=0
-        // with replay). TryQueuePendingFinLocked: 0 bytes free < 8 → false.
         await channel.CloseAsync();
-
-        // DisposeAsync path: SetClosed transitions to Closed.
         channel.SetClosed(ChannelCloseReason.LocalClose);
-
-        // Writer loop completes its slice: MarkSent for the held frame.
         channel.MarkSent(heldFrame.Length);
 
-        // MarkSent with _finRequested && enableReplay forces _ackedPos forward,
-        // compaction clears the slab, and TryQueuePendingFinLocked queues FIN
-        // (now accepted in Closed state). Drain the queued FIN via TakeReady.
         var finFrame = channel.TakeReady();
         Assert.False(finFrame.IsEmpty,
             "Expected FIN frame to be queued by MarkSent after SetClosed.");
