@@ -3,15 +3,6 @@ using NetConduit.Internal;
 
 namespace NetConduit.UnitTests;
 
-// Two separate test classes for two distinct data-loss paths from #546.
-
-/// <summary>
-/// Burst-then-drain: writer bursts past the peer's read-slab capacity because
-/// compaction (triggered by MarkSent's no-replay _ackedPos auto-advance)
-/// resets _writePos, tricking the peerFree formula into admitting frames past
-/// the peer's slab. The peer's BufferInSlab throws ProtocolError, the
-/// transport faults, and DisposeAsync drops undrained data.
-/// </summary>
 public sealed class BurstDrainDataLossTests
 {
     [Fact]
@@ -72,12 +63,6 @@ public sealed class BurstDrainDataLossTests
     }
 }
 
-/// <summary>
-/// FIN-on-Closed race: during DisposeAsync, SetClosed transitions state to
-/// Closed before the writer loop drains. TryQueuePendingFinLocked rejected
-/// FIN queuing when state was Closed, so the peer saw a hard EOF instead of
-/// a graceful FIN-terminated close.
-/// </summary>
 public sealed class FinOnClosedRaceTests
 {
     private sealed class TestRouter : IChannelOwner
