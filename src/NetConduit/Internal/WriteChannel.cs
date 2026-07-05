@@ -47,20 +47,6 @@ internal sealed class WriteChannel : Stream, IWriteChannel
     private bool _routerReading; // true between TakeReady and MarkSent — blocks compaction
     private int _completionNotified; // CAS guard: ensures NotifyChannelCompleted fires exactly once
     private int _slabReturned; // CAS guard: ensures slab is returned to pool exactly once
-    // Cumulative frame bytes (header + payload) staged into the slab,
-    // NOT reset by compaction. Compared against the peer's ACK position
-    // to compute true outstanding bytes for flow-control admission.
-    // Without this, compaction (triggered by MarkSent's auto-advance of
-    // _ackedPos in no-replay mode) reduces _writePos and the peer-free
-    // formula under-reports outstanding bytes, admitting frames past the
-    // peer's read-slab capacity — the peer throws ProtocolError on
-    // BufferInSlab overflow and the transport faults.
-    private int _totalFrameBytesStaged;
-    // The peer's last-reported consumer-drained global position, updated
-    // only from real ACK frames received via OnAck. Not affected by
-    // MarkSent's local _ackedPos auto-advance (no-replay pseudo-ACK).
-    // Used as the flow-control baseline against _totalFrameBytesStaged.
-    private long _peerAckedGlobalPosition;
     // INIT frame bytes still pinned in the slab. The peer's HandleInitFrame
     // consumes the INIT inline and never buffers those bytes in its read-slab,
     // so they MUST NOT count against the peer-cap admission bound in
@@ -256,36 +242,24 @@ internal sealed class WriteChannel : Stream, IWriteChannel
         //      corrupts memory.
         //
         //   2. Peer slab flow control:
-        //      outstanding bytes in the peer's read slab must not exceed
-        //      its advertised receive-slab capacity. Before the first ACK,
-        //      _writePos is the correct proxy. After the first ACK, we use
-        //      _totalFrameBytesStaged vs _peerAckedGlobalPosition because
-        //      MarkSent auto-advances _ackedPos in no-replay mode, triggering
-        //      compaction that reduces _writePos and under-reports the true
-        //      outstanding count — admitting frames past the peer's capacity.
+        //          effectiveSlab - (_writePos - _initFrameBytesInSlab) >= frameSize
+        //      Outstanding bytes consumed in the peer's ReadChannel slab are
+        //      bounded by the peer's advertised receive-slab capacity. Using
+        //      _slabSize alone (the broken historical bound) admits cumulative
+        //      bursts of in-budget frames that overflow the peer's slab — the
+        //      peer faults its reader loop with ErrorCode.ProtocolError on
+        //      BufferInSlab, and every reconnect replays the same overflow
+        //      until MaxAutoReconnectAttempts is exhausted. The peer
+        //      processes INIT inline (HandleInitFrame) and never buffers
+        //      those bytes in its read-slab, so _initFrameBytesInSlab is
+        //      subtracted from the outstanding count.
         while (true)
         {
             lock (_posLock)
             {
                 TryCompactLocked();
                 int localFree = _slabSize - _writePos;
-                // Peer flow control: compute true outstanding bytes. Before
-                // the first ACK arrives, use _writePos (correct; no compaction
-                // can happen when _ackedPos stays at 0). After the first ACK,
-                // use _peerAckedGlobalPosition because MarkSent may have auto-
-                // advanced _ackedPos (no-replay mode), triggering compaction
-                // that reduces _writePos while the peer hasn't actually
-                // consumed those bytes — the old _writePos-based formula would
-                // under-report outstanding bytes and admit frames past the
-                // peer's read-slab capacity.
-                int outstanding = _writePos - _initFrameBytesInSlab;
-                if (_peerAckedGlobalPosition > 0)
-                {
-                    int peerOutstanding = _totalFrameBytesStaged - (int)_peerAckedGlobalPosition;
-                    if (peerOutstanding > outstanding)
-                        outstanding = peerOutstanding;
-                }
-                int peerFree = effectiveSlab - outstanding;
+                int peerFree = effectiveSlab - (_writePos - _initFrameBytesInSlab);
                 if (Math.Min(localFree, peerFree) >= frameSize) break;
             }
 
@@ -337,7 +311,6 @@ internal sealed class WriteChannel : Stream, IWriteChannel
             data.Span[..payloadLength].CopyTo(_slab.AsSpan(frameStart + FrameHeader.Size, payloadLength));
             _writePos = frameStart + frameSize;
             _pendingPos = _writePos;
-            _totalFrameBytesStaged += frameSize;
         }
 
         Interlocked.Add(ref Stats._bytesSent, payloadLength);
@@ -564,16 +537,6 @@ internal sealed class WriteChannel : Stream, IWriteChannel
             int slabRelative = (int)(ackedPosition - _compactionOffset);
             if (slabRelative > _ackedPos)
                 _ackedPos = slabRelative;
-
-            // Track the peer's true consumer-drained position for flow control.
-            // _ackedPos is inflated by MarkSent's no-replay auto-advance and
-            // the FIN-replay path; those are writer-local optimizations for
-            // compaction. The peer's ACK is the only authority on what the
-            // remote consumer has actually consumed, and the flow-control
-            // formula must use this value — not _ackedPos — to compute
-            // outstanding bytes in the peer's read slab.
-            if (ackedPosition > _peerAckedGlobalPosition)
-                _peerAckedGlobalPosition = ackedPosition;
 
             finQueued = TryQueuePendingFinLocked();
         }
