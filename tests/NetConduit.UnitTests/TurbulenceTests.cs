@@ -31,88 +31,92 @@ public sealed class TurbulenceTests
     [Fact]
     public async Task ContinuousStream_SurvivesRapidTopologyChurn()
     {
-        var (client, server) = await CreateReadyPairAsync();
-
-        const int MessageSize = 256;
-        using var streamCts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
-
-        var writer = client.OpenChannel(new ChannelOptions { ChannelId = "turbulence" });
-        var reader = server.AcceptChannel("turbulence");
-        await Task.WhenAll(writer.WaitForReadyAsync(streamCts.Token), reader.WaitForReadyAsync(streamCts.Token));
-
-        var receivedSeqs = new ConcurrentBag<long>();
-        long lastSeqWritten = -1;
-
-        var writerTask = Task.Run(async () =>
+        (StreamMultiplexer? client, StreamMultiplexer? server) = (null, null);
+        try
         {
-            long seq = 0;
-            while (!streamCts.Token.IsCancellationRequested)
+            (client, server) = await CreateReadyPairAsync();
+
+            const int MessageSize = 256;
+            using var streamCts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+
+            var writer = client.OpenChannel(new ChannelOptions { ChannelId = "turbulence" });
+            var reader = server.AcceptChannel("turbulence");
+            await Task.WhenAll(writer.WaitForReadyAsync(streamCts.Token), reader.WaitForReadyAsync(streamCts.Token));
+
+            var receivedSeqs = new ConcurrentBag<long>();
+            long lastSeqWritten = -1;
+
+            var writerTask = Task.Run(async () =>
             {
-                var msg = new byte[MessageSize];
-                BinaryPrimitives.WriteInt64LittleEndian(msg, seq);
+                long seq = 0;
+                while (!streamCts.Token.IsCancellationRequested)
+                {
+                    var msg = new byte[MessageSize];
+                    BinaryPrimitives.WriteInt64LittleEndian(msg, seq);
+                    try
+                    {
+                        await writer.WriteAsync(msg, streamCts.Token);
+                        Volatile.Write(ref lastSeqWritten, seq);
+                        seq++;
+                        await Task.Delay(25, streamCts.Token);
+                    }
+                    catch (OperationCanceledException)
+                    {
+                        break;
+                    }
+                }
+            });
+
+            var readerTask = Task.Run(async () =>
+            {
+                var buf = new byte[65536];
+                int off = 0;
+                int cnt = 0;
+
                 try
                 {
-                    await writer.WriteAsync(msg, streamCts.Token);
-                    Volatile.Write(ref lastSeqWritten, seq);
-                    seq++;
-                    await Task.Delay(50, streamCts.Token);
-                }
-                catch (OperationCanceledException)
-                {
-                    break;
-                }
-            }
-        });
+                    while (true)
+                    {
+                        int n = await reader.ReadAsync(buf.AsMemory(off + cnt), streamCts.Token);
+                        if (n == 0) break;
+                        cnt += n;
 
-        var readerTask = Task.Run(async () =>
+                        while (cnt >= MessageSize)
+                        {
+                            long seq = BinaryPrimitives.ReadInt64LittleEndian(buf.AsSpan(off, MessageSize));
+                            receivedSeqs.Add(seq);
+                            off += MessageSize;
+                            cnt -= MessageSize;
+                        }
+
+                        if (off > 0 && cnt > 0)
+                        {
+                            Array.Copy(buf, off, buf, 0, cnt);
+                            off = 0;
+                        }
+                        else if (cnt == 0) off = 0;
+                    }
+                }
+                catch (OperationCanceledException) { }
+            });
+
+            await Task.WhenAll(writerTask, readerTask);
+
+            var sorted = receivedSeqs.OrderBy(s => s).ToList();
+            long totalWritten = Volatile.Read(ref lastSeqWritten) + 1;
+
+            Assert.True(sorted.Count >= 200,
+                $"Expected at least 200 messages, got {sorted.Count}.");
+
+            for (int i = 0; i < sorted.Count; i++)
+                Assert.Equal(i, sorted[i]);
+
+            Assert.Equal(totalWritten, sorted.Count);
+        }
+        finally
         {
-            var buf = new byte[65536];
-            int off = 0;
-            int cnt = 0;
-
-            try
-            {
-                while (true)
-                {
-                    int n = await reader.ReadAsync(buf.AsMemory(off + cnt), streamCts.Token);
-                    if (n == 0) break;
-                    cnt += n;
-
-                    while (cnt >= MessageSize)
-                    {
-                        long seq = BinaryPrimitives.ReadInt64LittleEndian(buf.AsSpan(off, MessageSize));
-                        receivedSeqs.Add(seq);
-                        off += MessageSize;
-                        cnt -= MessageSize;
-                    }
-
-                    if (off > 0 && cnt > 0)
-                    {
-                        Array.Copy(buf, off, buf, 0, cnt);
-                        off = 0;
-                    }
-                    else if (cnt == 0) off = 0;
-                }
-            }
-            catch (OperationCanceledException) { }
-        });
-
-        await Task.WhenAll(writerTask, readerTask);
-
-        var sorted = receivedSeqs.OrderBy(s => s).ToList();
-        long totalWritten = Volatile.Read(ref lastSeqWritten) + 1;
-
-        Assert.True(sorted.Count >= 200,
-            $"Expected at least 200 messages, got {sorted.Count}. The 256-message cap bug (#553) may be active.");
-
-        for (int i = 0; i < sorted.Count; i++)
-            Assert.Equal(i, sorted[i]);
-
-        Assert.Equal(totalWritten, sorted.Count);
-
-        await writer.DisposeAsync();
-        await reader.DisposeAsync();
-        await client.DisposeAsync();
-        await server.DisposeAsync();
+            if (client is not null) await client.DisposeAsync();
+            if (server is not null) await server.DisposeAsync();
+        }
     }
 }
