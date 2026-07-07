@@ -17,4 +17,5 @@ Read these in order, or jump to the topic you need.
 | [Graceful shutdown](graceful-shutdown.md) | `GoAwayAsync`, drain semantics, dispose order. |
 | [Events](events.md) | Event ordering, when each event fires. |
 | [Statistics](statistics.md) | `MultiplexerStats` and `ChannelStats`. |
+| [Mesh multiplexer](mesh.md) | Routed overlay built on top of `StreamMultiplexer`. |
 | [AOT and source generators](aot.md) | Trim-safe APIs and JSON source generation. |
