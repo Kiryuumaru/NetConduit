@@ -54,6 +54,7 @@ public sealed class PreHandshakePeerCapTests
         var writeTask = channel.WriteAsync(payload).AsTask();
         int stagedPayloadBytes = 0;
         int maxObservedPayload = 0;
+        long cumulativeDrainedFrameBytes = 0;
         while (!writeTask.IsCompleted)
         {
             var ready = channel.TakeReady();
@@ -67,6 +68,13 @@ public sealed class PreHandshakePeerCapTests
             stagedPayloadBytes += result.TotalBytes;
             maxObservedPayload = Math.Max(maxObservedPayload, result.MaxPayloadBytes);
             channel.MarkSent(ready.Length);
+            // Simulate the peer's consumer draining the shipped frames and
+            // ACKing the cumulative position. Under peer flow control the
+            // writer parks when staged-but-unacked bytes fill the peer window;
+            // without this simulated ACK the test would measure flow control
+            // instead of the pre-handshake per-frame cap it is verifying.
+            cumulativeDrainedFrameBytes += ready.Length;
+            channel.OnAck(cumulativeDrainedFrameBytes);
         }
 
         var remaining = channel.TakeReady();
