@@ -46,6 +46,7 @@ public sealed class BoundaryFixesTests
 
         var writeTask = channel.WriteAsync(payload).AsTask();
         int stagedPayloadBytes = 0;
+        long cumulativeDrainedFrameBytes = 0;
         while (!writeTask.IsCompleted)
         {
             var ready = channel.TakeReady();
@@ -57,6 +58,12 @@ public sealed class BoundaryFixesTests
 
             stagedPayloadBytes += CountDataPayloadBytes(ready.Span);
             channel.MarkSent(ready.Length);
+            // Simulate the peer consuming the drained frames (cumulative ACK);
+            // without it the peer-window bound correctly parks the writer
+            // mid-split and the test times out instead of verifying frame
+            // splitting.
+            cumulativeDrainedFrameBytes += ready.Length;
+            channel.OnAck(cumulativeDrainedFrameBytes);
         }
 
         var remaining = channel.TakeReady();
