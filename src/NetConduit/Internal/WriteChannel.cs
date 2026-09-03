@@ -44,6 +44,7 @@ internal sealed class WriteChannel : Stream, IWriteChannel
     private int _pendingPos;
     private int _writePos;
     private long _compactionOffset; // cumulative bytes compacted away (converts global ACK to slab-relative)
+    private long _peerAckedBytes; // cumulative bytes peer's consumer drained; high-water mark, never delta
     private bool _routerReading; // true between TakeReady and MarkSent — blocks compaction
     private int _completionNotified; // CAS guard: ensures NotifyChannelCompleted fires exactly once
     private int _slabReturned; // CAS guard: ensures slab is returned to pool exactly once
@@ -51,10 +52,11 @@ internal sealed class WriteChannel : Stream, IWriteChannel
     // consumes the INIT inline and never buffers those bytes in its read-slab,
     // so they MUST NOT count against the peer-cap admission bound in
     // WriteAsync — otherwise the very first data frame is mis-throttled and
-    // deadlocks when no consumer is reading. Set by WriteInitFrame; cleared
-    // by TryCompactLocked once the peer's cumulative ACK has covered them
-    // (at which point the INIT bytes are physically compacted out of the
-    // slab and no longer occupy any position).
+    // deadlocks when no consumer is reading. Set once by WriteInitFrame and
+    // never cleared: it is a channel-lifetime constant, and the live
+    // initUnacked computation in the peerFree formula (WriteFrameAsync)
+    // derives the still-excluded portion from _peerAckedBytes, so pre-ACK and
+    // post-ACK states both stay correct without mutating this field.
     private int _initFrameBytesInSlab;
     private bool _finRequested;
     private bool _finQueued;
@@ -242,7 +244,7 @@ internal sealed class WriteChannel : Stream, IWriteChannel
         //      corrupts memory.
         //
         //   2. Peer slab flow control:
-        //          effectiveSlab - (_writePos - _initFrameBytesInSlab) >= frameSize
+        //          effectiveSlab - (staged - peerAcked - initUnacked) >= frameSize
         //      Outstanding bytes consumed in the peer's ReadChannel slab are
         //      bounded by the peer's advertised receive-slab capacity. Using
         //      _slabSize alone (the broken historical bound) admits cumulative
@@ -251,15 +253,27 @@ internal sealed class WriteChannel : Stream, IWriteChannel
         //      BufferInSlab, and every reconnect replays the same overflow
         //      until MaxAutoReconnectAttempts is exhausted. The peer
         //      processes INIT inline (HandleInitFrame) and never buffers
-        //      those bytes in its read-slab, so _initFrameBytesInSlab is
-        //      subtracted from the outstanding count.
+        //      those bytes in its read-slab, so the still-unacked INIT
+        //      portion (initUnacked) is excluded from the outstanding count.
+        //
+        //      staged and _peerAckedBytes are cumulative (monotonic) counters,
+        //      so the bound survives slab compaction: compaction folds
+        //      compacted bytes into _compactionOffset and restarts _writePos,
+        //      but _peerAckedBytes keeps rising only on genuine peer ACKs
+        //      (OnAck/SetReplayBase) — never on MarkSent's non-replay auto-ack
+        //      (which only frees local slab space, not peer read-slab space).
         while (true)
         {
             lock (_posLock)
             {
                 TryCompactLocked();
                 int localFree = _slabSize - _writePos;
-                int peerFree = effectiveSlab - (_writePos - _initFrameBytesInSlab);
+                long staged = _compactionOffset + (long)_writePos;  // cumulative staged bytes (monotonic)
+                long initUnacked = _initFrameBytesInSlab > 0
+                    ? Math.Max(0, _initFrameBytesInSlab - _peerAckedBytes)
+                    : 0;
+                long outstanding = staged - _peerAckedBytes - initUnacked;
+                int peerFree = (int)Math.Clamp(effectiveSlab - outstanding, 0, effectiveSlab);
                 if (Math.Min(localFree, peerFree) >= frameSize) break;
             }
 
@@ -534,6 +548,8 @@ internal sealed class WriteChannel : Stream, IWriteChannel
             if (ackedPosition > upper)
                 ackedPosition = upper;
 
+            _peerAckedBytes = Math.Max(_peerAckedBytes, ackedPosition);
+
             int slabRelative = (int)(ackedPosition - _compactionOffset);
             if (slabRelative > _ackedPos)
                 _ackedPos = slabRelative;
@@ -576,6 +592,8 @@ internal sealed class WriteChannel : Stream, IWriteChannel
             long upper = _compactionOffset + _sentPos;
             if (peerReceivedPosition > upper)
                 peerReceivedPosition = upper;
+
+            _peerAckedBytes = Math.Max(_peerAckedBytes, peerReceivedPosition);
 
             int slabRelative = (int)(peerReceivedPosition - _compactionOffset);
             if (slabRelative > _ackedPos)
@@ -766,13 +784,6 @@ internal sealed class WriteChannel : Stream, IWriteChannel
         {
             _slab.AsSpan(acked, unackedLength).CopyTo(_slab.AsSpan(0, unackedLength));
         }
-
-        // Once the peer's cumulative ACK reaches the INIT frame's tail, the
-        // INIT bytes have been physically compacted out of the slab and no
-        // longer occupy any position. Drop the peer-cap exclusion so future
-        // bound checks treat the slab as data-only.
-        if (_initFrameBytesInSlab > 0 && acked >= _initFrameBytesInSlab)
-            _initFrameBytesInSlab = 0;
 
         _compactionOffset += acked;
         _sentPos -= acked;

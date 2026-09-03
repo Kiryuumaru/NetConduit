@@ -20,7 +20,7 @@ public sealed class WriteChannelTests
         public void NotifyChannelOpened(string channelId) { }
         public bool SendAck(ushort channelIndex, ulong consumedPosition) => true;
         public void NotifyEventHandlerException(Exception exception) { }
-        public int PeerMaxRecvPayload => FrameConstants.MaxSlabSize;
+        public int PeerMaxRecvPayload { get; set; } = FrameConstants.MaxSlabSize;
     }
 
     private static WriteChannel CreateChannel(TestRouter? router = null, int slabSize = 64 * 1024)
@@ -441,5 +441,122 @@ public sealed class WriteChannelTests
 
         var ex = await Assert.ThrowsAsync<ChannelClosedException>(() => blocked);
         Assert.Equal(ChannelCloseReason.LocalClose, ex.CloseReason);
+    }
+
+    [Fact]
+    public async Task WriteAsync_NonReplay_BlocksAtPeerWindow_UntilPeerAcks()
+    {
+        // A non-replay channel must still enforce the peer's advertised receive
+        // window. If MarkSent alone is treated as a peer ACK, compaction resets
+        // the outstanding-byte accounting after every drained frame and
+        // WriteAsync never parks — an unbounded burst then overflows the peer's
+        // read slab and the peer faults with ProtocolError (silent data loss).
+        var router = new TestRouter { PeerMaxRecvPayload = FrameConstants.DefaultSlabSize };
+        var channel = CreateChannel(router, slabSize: 4 * 1024 * 1024);
+        channel.MarkConnected();
+
+        byte[] payload = new byte[256];
+        int frameSize = FrameHeader.Size + payload.Length; // 264
+        int completed = 0;
+        Task? parkedWrite = null;
+
+        for (int i = 0; i < 5000 && parkedWrite is null; i++)
+        {
+            Task write = channel.WriteAsync(payload).AsTask();
+            Task winner = await Task.WhenAny(write, Task.Delay(500));
+            if (winner != write)
+            {
+                parkedWrite = write;
+                break;
+            }
+            await write;
+            completed++;
+
+            // Simulate the mux writer thread draining the frame.
+            Memory<byte> ready = channel.TakeReady();
+            Assert.False(ready.IsEmpty);
+            channel.MarkSent(ready.Length);
+        }
+
+        // 1 MiB peer window at 264 B/frame admits ~3970 frames before the
+        // window is exhausted; the next write must park until the peer ACKs.
+        Assert.True(parkedWrite is not null,
+            "Expected WriteAsync to park once the peer receive window (1 MiB) is exhausted in non-replay mode; "
+            + $"it never stalled across {completed} writes — MarkSent appears to bypass peer flow control.");
+        Assert.InRange(completed, 3000, 4500);
+
+        // A genuine peer ACK at the cumulative position releases the writer.
+        channel.OnAck(long.MaxValue);
+        await parkedWrite.WaitAsync(TimeSpan.FromSeconds(2));
+    }
+
+    [Fact]
+    public async Task WriteAsync_NonReplay_WithInitFrame_BlocksAtPeerWindow_UntilPeerAcks()
+    {
+        // Same guarantee with an INIT frame staged and drained first. The INIT
+        // bytes are processed inline by the peer and must not count against the
+        // window, but draining the INIT through MarkSent must not clear the
+        // exclusion while unacked data is still outstanding — on the buggy path
+        // the INIT drain auto-acks, compacts, and unlocks the peer window early.
+        var router = new TestRouter { PeerMaxRecvPayload = FrameConstants.DefaultSlabSize };
+        var channel = CreateChannel(router, slabSize: 4 * 1024 * 1024);
+        channel.MarkConnected();
+
+        channel.WriteInitFrame("peer-window-channel"u8);
+        Memory<byte> initReady = channel.TakeReady();
+        Assert.False(initReady.IsEmpty);
+        channel.MarkSent(initReady.Length);
+
+        byte[] payload = new byte[256];
+        int completed = 0;
+        Task? parkedWrite = null;
+
+        for (int i = 0; i < 5000 && parkedWrite is null; i++)
+        {
+            Task write = channel.WriteAsync(payload).AsTask();
+            Task winner = await Task.WhenAny(write, Task.Delay(500));
+            if (winner != write)
+            {
+                parkedWrite = write;
+                break;
+            }
+            await write;
+            completed++;
+
+            // Simulate the mux writer thread draining the frame.
+            Memory<byte> ready = channel.TakeReady();
+            Assert.False(ready.IsEmpty);
+            channel.MarkSent(ready.Length);
+        }
+
+        Assert.True(parkedWrite is not null,
+            "Expected WriteAsync to park once the peer receive window (1 MiB) is exhausted in non-replay mode "
+            + "even when an INIT frame preceded the burst; "
+            + $"it never stalled across {completed} writes.");
+        Assert.InRange(completed, 3000, 4500);
+
+        channel.OnAck(long.MaxValue);
+        await parkedWrite.WaitAsync(TimeSpan.FromSeconds(2));
+    }
+
+    [Fact]
+    public async Task OnAck_OversizedPeerAck_IsClampedToHighWaterMark()
+    {
+        // A buggy or hostile peer may ACK a cumulative position far beyond what
+        // was actually written. OnAck must clamp to the slab high-water mark
+        // instead of corrupting the position fields (which would make the next
+        // WriteAsync throw ArgumentOutOfRangeException from slab indexing).
+        var router = new TestRouter();
+        var channel = CreateChannel(router, slabSize: 256);
+
+        await channel.WriteAsync(new byte[100]);
+        Memory<byte> ready = channel.TakeReady();
+        channel.MarkSent(ready.Length);
+
+        // Oversized ACK: a position far beyond the written high-water mark.
+        channel.OnAck(long.MaxValue);
+
+        // The channel must remain writable and positions must stay sane.
+        await channel.WriteAsync(new byte[100]);
     }
 }
