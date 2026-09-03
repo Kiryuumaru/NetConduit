@@ -1,4 +1,6 @@
 using System.Buffers.Binary;
+using System.Diagnostics;
+using Xunit.Abstractions;
 
 namespace NetConduit.UnitTests;
 
@@ -12,6 +14,13 @@ namespace NetConduit.UnitTests;
 /// </summary>
 public sealed class BurstWriteDisposeTruncationTests
 {
+    private readonly ITestOutputHelper _output;
+
+    public BurstWriteDisposeTruncationTests(ITestOutputHelper output)
+    {
+        _output = output ?? throw new ArgumentNullException(nameof(output));
+    }
+
     private static readonly TimeSpan TestTimeout = TimeSpan.FromSeconds(60);
 
     private static async Task<(StreamMultiplexer Client, StreamMultiplexer Server)> CreateReadyPairAsync(
@@ -673,21 +682,28 @@ public sealed class BurstWriteDisposeTruncationTests
         // A burst that exceeds the peer window, drained only after the window
         // is exhausted, then a graceful DisposeAsync — every message must still
         // arrive and EOF must follow the FIN (no truncation on dispose).
+        // Each phase runs under its own budget: a single shared timeout made
+        // the next failure anonymous, surfacing wherever the reader happened
+        // to be parked instead of naming the slow phase.
         var (client, server) = await CreateReadyPairAsync(replayEnabled: false);
-        using var cts = new CancellationTokenSource(TestTimeout);
 
         var writer = client.OpenChannel(new ChannelOptions { ChannelId = "stream-dispose" });
         var reader = server.AcceptChannel("stream-dispose");
-        await Task.WhenAll(writer.WaitForReadyAsync(cts.Token), reader.WaitForReadyAsync(cts.Token));
+        using (var readyCts = new CancellationTokenSource(TimeSpan.FromSeconds(30)))
+        {
+            await Task.WhenAll(writer.WaitForReadyAsync(readyCts.Token), reader.WaitForReadyAsync(readyCts.Token));
+        }
 
         const int count = 5000;
+        var stopwatch = Stopwatch.StartNew();
+        using var burstCts = new CancellationTokenSource(TimeSpan.FromSeconds(60));
         Exception? writerFault = null;
         var writerTask = Task.Run(async () =>
         {
             try
             {
                 for (int i = 0; i < count; i++)
-                    await writer.WriteAsync(BuildMessage(i, 256), cts.Token);
+                    await writer.WriteAsync(BuildMessage(i, 256), burstCts.Token);
             }
             catch (Exception ex)
             {
@@ -695,49 +711,78 @@ public sealed class BurstWriteDisposeTruncationTests
             }
         });
 
-        await Task.Delay(2000, cts.Token);
-
+        // Wait up to 5 s for the writer to park at the 1 MiB peer window
+        // instead of burning a fixed delay: the stall proves the premise
+        // of this test, and the poll exits early if the writer ever
+        // completes without parking (surfaced by the assert below).
+        // The deadline stays well under the 30 s SendTimeout: no reader
+        // drains during this window, so no ACK arrives and the parked writer
+        // would fault with TimeoutException if held here too long.
         var received = new List<long>();
         Exception? readerFault = null;
         byte[] buf = new byte[256];
+        var parkDeadline = TimeSpan.FromSeconds(5);
+        while (!writerTask.IsCompleted && stopwatch.Elapsed < parkDeadline)
+            await Task.Delay(50, CancellationToken.None);
+        Assert.False(writerTask.IsCompleted,
+            $"Writer should park at the 1 MiB peer window; it finished {count} burst writes without stalling.");
+        var parkElapsed = stopwatch.Elapsed;
+        _output.WriteLine($"Phase park: elapsed={parkElapsed} received={received.Count} writerCompleted={writerTask.IsCompleted}");
 
-        while (!writerTask.IsCompleted)
+        using (var drainCts = new CancellationTokenSource(TimeSpan.FromSeconds(60)))
         {
-            int n;
-            try
+            while (!writerTask.IsCompleted)
             {
-                n = await reader.ReadAsync(buf, cts.Token);
+                int n;
+                try
+                {
+                    n = await reader.ReadAsync(buf, drainCts.Token);
+                }
+                catch (ChannelClosedException ex)
+                {
+                    readerFault = ex;
+                    break;
+                }
+                if (n == 0) break;
+                received.Add(BinaryPrimitives.ReadInt64LittleEndian(buf));
             }
-            catch (ChannelClosedException ex)
-            {
-                readerFault = ex;
-                break;
-            }
-            if (n == 0) break;
-            received.Add(BinaryPrimitives.ReadInt64LittleEndian(buf));
         }
+
+        var drainElapsed = stopwatch.Elapsed;
+        _output.WriteLine($"Phase drain: elapsed={drainElapsed} (park took {parkElapsed}) received={received.Count}/{count} writerFault={writerFault is not null}");
 
         await writerTask;
 
         // Dispose must not drop pending data: all writes completed before FIN.
+        // Bounded so a stall here names the dispose phase instead of firing
+        // a shared timeout while the tail reader is parked.
         if (writerFault is null)
-            await writer.DisposeAsync();
+            await writer.DisposeAsync().AsTask().WaitAsync(TimeSpan.FromSeconds(60));
 
-        while (true)
+        var disposeElapsed = stopwatch.Elapsed;
+        _output.WriteLine($"Phase dispose: elapsed={disposeElapsed} received={received.Count}/{count}");
+
+        using (var tailCts = new CancellationTokenSource(TimeSpan.FromSeconds(60)))
         {
-            int n;
-            try
+            while (true)
             {
-                n = await reader.ReadAsync(buf, cts.Token);
+                int n;
+                try
+                {
+                    n = await reader.ReadAsync(buf, tailCts.Token);
+                }
+                catch (ChannelClosedException ex)
+                {
+                    readerFault = ex;
+                    break;
+                }
+                if (n == 0) break;
+                received.Add(BinaryPrimitives.ReadInt64LittleEndian(buf));
             }
-            catch (ChannelClosedException ex)
-            {
-                readerFault = ex;
-                break;
-            }
-            if (n == 0) break;
-            received.Add(BinaryPrimitives.ReadInt64LittleEndian(buf));
         }
+
+        stopwatch.Stop();
+        _output.WriteLine($"Phase tail: total={stopwatch.Elapsed} received={received.Count}/{count}");
 
         Assert.Null(writerFault);
         Assert.Null(readerFault);
