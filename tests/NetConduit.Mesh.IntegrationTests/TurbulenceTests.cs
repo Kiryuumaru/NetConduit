@@ -43,144 +43,197 @@ public class TurbulenceTests
 
         await meshA.WaitForReachableAsync("D", cts.Token);
 
-        var acceptAtD = Task.Run(async () =>
-        {
-            await foreach (var inc in meshD.AcceptMultiplexersAsync(cts.Token))
-                return inc;
-            throw new Exception("never accepted");
-        });
-
-        var subA = await meshA.OpenMultiplexerAsync("D", "turbulence", cts.Token);
-        var atD = await acceptAtD;
-
-        var writer = subA.OpenChannel(new ChannelOptions { ChannelId = "stream", SlabSize = 8 * 1024 * 1024 });
-        var reader = atD.Multiplexer.AcceptChannel("stream");
-        await Task.WhenAll(writer.WaitForReadyAsync(cts.Token), reader.WaitForReadyAsync(cts.Token));
-
         int terminalDisconnect = 0;
-        subA.Disconnected += (_, _) => Interlocked.Exchange(ref terminalDisconnect, 1);
-
         long lastSeqWritten = -1;
 
-        // ─ Churn: randomly kill and recreate links ────────────────────
+        // Background loops and channels created inside the try are tracked
+        // here so the finally block can stop and dispose everything even
+        // when an assertion throws — no leaks on failure paths.
+        IStreamMultiplexer? subA = null;
+        RoutedMultiplexer? atD = null;
+        IWriteChannel? writer = null;
+        IReadChannel? reader = null;
+        Task? churnTask = null;
+        Task? writerTask = null;
+        Task? readerTask = null;
+
+        // Churn replaces entries in this array as it kills and recreates
+        // links; finally tears down whatever is CURRENTLY installed in it,
+        // so links freshly created by churn are not leaked.
+        var liveLinks = links.ToArray();
         using var churnCts = CancellationTokenSource.CreateLinkedTokenSource(cts.Token);
-        var churnTask = Task.Run(async () =>
-        {
-            var rng = new Random(42);
-            var snapshot = links.ToArray();
-            var sync = new object();
-            try
-            {
-                while (!churnCts.IsCancellationRequested)
-                {
-                    MuxLink target;
-                    lock (sync) target = snapshot[rng.Next(snapshot.Length)];
-
-                    await MuxLink.TearDownAsync(target);
-                    await Task.Delay(400 + rng.Next(200), churnCts.Token);
-
-                    var fresh = await MuxLink.CreateAsync(
-                        target.NodeA_Id, target.NodeA_Mesh,
-                        target.NodeB_Id, target.NodeB_Mesh, churnCts.Token);
-                    lock (sync) { var i = Array.IndexOf(snapshot, target); if (i >= 0) snapshot[i] = fresh; }
-
-                    await Task.Delay(400 + rng.Next(200), churnCts.Token);
-                }
-            }
-            catch (OperationCanceledException) { }
-        }, churnCts.Token);
-
-        // ─ Stream: A writes continuously ──────────────────────────────
         using var streamCts = CancellationTokenSource.CreateLinkedTokenSource(cts.Token);
-        var writerDone = new TaskCompletionSource();
-        var writerTask = Task.Run(async () =>
+
+        try
         {
-            try
+            var acceptAtD = Task.Run(async () =>
             {
-                for (long seq = 0; !streamCts.IsCancellationRequested; seq++)
-                {
-                    var msg = BuildMessage(seq);
-                    while (!streamCts.IsCancellationRequested)
-                    {
-                        try { await writer.WriteAsync(msg, streamCts.Token); break; }
-                        catch (OperationCanceledException) when (!streamCts.IsCancellationRequested)
-                        { await Task.Delay(100, streamCts.Token); }
-                    }
-                    await Task.Delay(50, streamCts.Token);
-                    Volatile.Write(ref lastSeqWritten, seq);
-                }
-            }
-            catch (OperationCanceledException) { }
-            writerDone.TrySetResult();
-        }, streamCts.Token);
+                await foreach (var inc in meshD.AcceptMultiplexersAsync(cts.Token))
+                    return inc;
+                throw new Exception("never accepted");
+            });
 
-        // ─ Reader: D drains live ─────────────────────────────────────
-        var received = new ConcurrentBag<(long Seq, byte[] Payload)>();
-        var readerDone = new TaskCompletionSource();
-        var readerTask = Task.Run(async () =>
-        {
-            var buf = new byte[65536]; int off = 0, cnt = 0;
-            try
+            subA = await meshA.OpenMultiplexerAsync("D", "turbulence", cts.Token);
+            atD = await acceptAtD;
+
+            writer = subA.OpenChannel(new ChannelOptions { ChannelId = "stream", SlabSize = 8 * 1024 * 1024 });
+            reader = atD.Value.Multiplexer.AcceptChannel("stream");
+            await Task.WhenAll(writer.WaitForReadyAsync(cts.Token), reader.WaitForReadyAsync(cts.Token));
+
+            subA.Disconnected += (_, _) => Interlocked.Exchange(ref terminalDisconnect, 1);
+
+            // ─ Churn: randomly kill and recreate links ────────────────────
+            var churnSync = new object();
+            churnTask = Task.Run(async () =>
             {
-                while (true)
+                var rng = new Random(42);
+                try
                 {
-                    int n = await reader.ReadAsync(buf.AsMemory(off + cnt), cts.Token);
-                    if (n == 0) break;
-                    cnt += n;
-                    while (cnt >= MessageSize)
+                    while (!churnCts.IsCancellationRequested)
                     {
-                        long seq = BinaryPrimitives.ReadInt64LittleEndian(buf.AsSpan(off, 8));
-                        var payload = new byte[PayloadSize];
-                        Array.Copy(buf, off + 8, payload, 0, PayloadSize);
-                        received.Add((seq, payload));
-                        off += MessageSize; cnt -= MessageSize;
+                        MuxLink target;
+                        lock (churnSync) target = liveLinks[rng.Next(liveLinks.Length)];
+
+                        await MuxLink.TearDownAsync(target);
+                        await Task.Delay(400 + rng.Next(200), churnCts.Token);
+
+                        var fresh = await MuxLink.CreateAsync(
+                            target.NodeA_Id, target.NodeA_Mesh,
+                            target.NodeB_Id, target.NodeB_Mesh, churnCts.Token);
+                        lock (churnSync) { var i = Array.IndexOf(liveLinks, target); if (i >= 0) liveLinks[i] = fresh; }
+
+                        await Task.Delay(400 + rng.Next(200), churnCts.Token);
                     }
-                    if (off > 0 && cnt > 0) { Array.Copy(buf, off, buf, 0, cnt); off = 0; }
                 }
+                catch (OperationCanceledException) { }
+            }, churnCts.Token);
+
+            // ─ Stream: A writes continuously ──────────────────────────────
+            var writerDone = new TaskCompletionSource();
+            writerTask = Task.Run(async () =>
+            {
+                try
+                {
+                    for (long seq = 0; !streamCts.IsCancellationRequested; seq++)
+                    {
+                        var msg = BuildMessage(seq);
+                        while (!streamCts.IsCancellationRequested)
+                        {
+                            try
+                            {
+                                await writer!.WriteAsync(msg, streamCts.Token);
+                                // Record the seq the instant the write
+                                // succeeds — before any cancellable delay —
+                                // or a CTS fire during the delay below would
+                                // lose the last written seq (off-by-one).
+                                Volatile.Write(ref lastSeqWritten, seq);
+                                break;
+                            }
+                            catch (OperationCanceledException) when (!streamCts.IsCancellationRequested)
+                            { await Task.Delay(100, streamCts.Token); }
+                        }
+                        await Task.Delay(50, streamCts.Token);
+                    }
+                }
+                catch (OperationCanceledException) { }
+                writerDone.TrySetResult();
+            }, streamCts.Token);
+
+            // ─ Reader: D drains live ─────────────────────────────────────
+            var received = new ConcurrentBag<(long Seq, byte[] Payload)>();
+            var readerDone = new TaskCompletionSource();
+            readerTask = Task.Run(async () =>
+            {
+                var buf = new byte[65536]; int off = 0, cnt = 0;
+                try
+                {
+                    while (true)
+                    {
+                        // Invariant: this buffer is never empty while the
+                        // stream is open. The compaction below resets off
+                        // whenever cnt == 0, so off + cnt never reaches
+                        // buf.Length; ReadChannel.ReadAsync returns 0 for an
+                        // empty buffer, which must not be mistaken for EOF.
+                        int n = await reader!.ReadAsync(buf.AsMemory(off + cnt), cts.Token);
+                        if (n == 0) break; // EOF — only legitimate after the writer completed
+                        cnt += n;
+                        while (cnt >= MessageSize)
+                        {
+                            long seq = BinaryPrimitives.ReadInt64LittleEndian(buf.AsSpan(off, 8));
+                            var payload = new byte[PayloadSize];
+                            Array.Copy(buf, off + 8, payload, 0, PayloadSize);
+                            received.Add((seq, payload));
+                            off += MessageSize; cnt -= MessageSize;
+                        }
+                        if (off > 0 && cnt > 0) { Array.Copy(buf, off, buf, 0, cnt); off = 0; }
+                        else if (cnt == 0) { off = 0; }
+                    }
+                }
+                catch (OperationCanceledException) { } // normal termination when the outer CTS fires
+                catch (IOException) { }
+                readerDone.TrySetResult();
+            }, cts.Token);
+
+            // ─ Run churn + streaming for 90s ──────────────────────────────
+            await Task.Delay(TimeSpan.FromSeconds(90), cts.Token);
+            churnCts.Cancel(); try { await churnTask; } catch { }
+            await meshA.WaitForReachableAsync("D", cts.Token);
+
+            await Task.Delay(TimeSpan.FromSeconds(5), cts.Token);
+
+            streamCts.Cancel(); await writerDone.Task;
+            await Task.Delay(TimeSpan.FromSeconds(2), cts.Token);
+
+            try { await writer.DisposeAsync(); } catch { }
+            await Task.Delay(TimeSpan.FromSeconds(2), cts.Token);
+            await readerDone.Task;
+
+            // ─ Assert ─────────────────────────────────────────────────────
+            var sorted = received.OrderBy(r => r.Seq).ToList();
+            long totalWritten = Volatile.Read(ref lastSeqWritten) + 1;
+
+            Assert.Equal(0, Volatile.Read(ref terminalDisconnect));
+
+            // All messages written must arrive — in order, no gaps, no corruption.
+            Assert.Equal(totalWritten, sorted.Count);
+
+            for (int i = 0; i < sorted.Count; i++)
+            {
+                var (seq, payload) = sorted[i];
+                Assert.Equal((long)i, seq);
+                Assert.Equal(CreatePayload(seq), payload);
             }
-            catch (OperationCanceledException) { }
-            catch (IOException) { }
-            readerDone.TrySetResult();
-        }, cts.Token);
 
-        // ─ Run churn + streaming for 90s ──────────────────────────────
-        await Task.Delay(TimeSpan.FromSeconds(90), cts.Token);
-        churnCts.Cancel(); try { await churnTask; } catch { }
-        await meshA.WaitForReachableAsync("D", cts.Token);
-
-        await Task.Delay(TimeSpan.FromSeconds(5), cts.Token);
-
-        streamCts.Cancel(); await writerDone.Task;
-        await Task.Delay(TimeSpan.FromSeconds(2), cts.Token);
-
-        try { await writer.DisposeAsync(); } catch { }
-        await Task.Delay(TimeSpan.FromSeconds(2), cts.Token);
-        await readerDone.Task;
-
-        // ─ Assert ─────────────────────────────────────────────────────
-        var sorted = received.OrderBy(r => r.Seq).ToList();
-        long totalWritten = Volatile.Read(ref lastSeqWritten) + 1;
-
-        Assert.Equal(0, Volatile.Read(ref terminalDisconnect));
-
-        // All messages written must arrive — in order, no gaps, no corruption.
-        Assert.Equal(totalWritten, sorted.Count);
-
-        for (int i = 0; i < sorted.Count; i++)
-        {
-            var (seq, payload) = sorted[i];
-            Assert.Equal((long)i, seq);
-            Assert.Equal(CreatePayload(seq), payload);
+            Assert.True(meshR1.Stats.RelayBytesForwarded + meshR2.Stats.RelayBytesForwarded
+                      + meshR3.Stats.RelayBytesForwarded > 0, "No relay bytes");
         }
+        finally
+        {
+            // Stop background loops first so nothing writes/reads during teardown.
+            try { churnCts.Cancel(); } catch { }
+            try { streamCts.Cancel(); } catch { }
+            if (churnTask is not null) try { await churnTask; } catch { }
+            if (writerTask is not null) try { await writerTask; } catch { }
 
-        Assert.True(meshR1.Stats.RelayBytesForwarded + meshR2.Stats.RelayBytesForwarded
-                  + meshR3.Stats.RelayBytesForwarded > 0, "No relay bytes");
+            // Writer FIN lets the reader observe EOF and exit.
+            if (writer is not null) try { await writer.DisposeAsync(); } catch { }
+            if (readerTask is not null) try { await readerTask; } catch { }
+            if (reader is not null) try { await reader.DisposeAsync(); } catch { }
 
-        await writer.DisposeAsync(); await reader.DisposeAsync();
-        await subA.DisposeAsync(); await atD.Multiplexer.DisposeAsync();
-        foreach (var l in links) try { await MuxLink.TearDownAsync(l); } catch { }
-        await meshA.DisposeAsync(); await meshD.DisposeAsync();
-        await meshR1.DisposeAsync(); await meshR2.DisposeAsync(); await meshR3.DisposeAsync();
+            if (subA is not null) try { await subA.DisposeAsync(); } catch { }
+            if (atD is not null) try { await atD.Value.Multiplexer.DisposeAsync(); } catch { }
+
+            // Tear down the CURRENT links (churn swapped fresh ones into
+            // liveLinks) — the original list would leave fresh links undisposed.
+            foreach (var link in liveLinks)
+                try { await MuxLink.TearDownAsync(link); } catch { }
+
+            try { await meshA.DisposeAsync(); } catch { }
+            try { await meshD.DisposeAsync(); } catch { }
+            try { await meshR1.DisposeAsync(); } catch { }
+            try { await meshR2.DisposeAsync(); } catch { }
+            try { await meshR3.DisposeAsync(); } catch { }
+        }
     }
 
     private static byte[] BuildMessage(long seq)
