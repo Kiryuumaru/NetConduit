@@ -10,6 +10,12 @@ All packages target **net8.0**, **net9.0**, and **net10.0** and are AOT-compatib
 | --- | --- |
 | [`NetConduit`](https://www.nuget.org/packages/NetConduit) | `StreamMultiplexer`, `StreamPair`, channel interfaces, options, framing, flow control, keepalive, reconnection |
 
+## Multi-hop routing
+
+| Package | Contains |
+| --- | --- |
+| [`NetConduit.Mesh`](https://www.nuget.org/packages/NetConduit.Mesh) | `MeshMultiplexer` — routed overlay on top of neighbour `StreamMultiplexer` instances |
+
 ## Transits
 
 Transits are optional layers that wrap one or two channels and turn raw bytes into a higher-level abstraction (a `Stream`, a typed message queue, or a delta-synced state).
@@ -42,18 +48,18 @@ See [Transports overview](transports/index.md) for a per-transport feature matri
 ```
         Your app
            |
-       picks 1+ transits        picks exactly 1 transport
-           |                                |
-   +-------+--------+              +--------+-------+
-   |               |              |               |
-Transit.Stream    Transit.Message Transport.Tcp   Transport.Quic
-Transit.Duplex…   Transit.Delta…  Transport.WebS… Transport.Ipc
-                                  Transport.Udp
-           \              |             /
-            \             |            /
-             \            |           /
-              +-----> NetConduit <----+
+       picks 1+ transits        picks exactly 1 transport      picks mesh
+           |                                |                      |
+   +-------+--------+              +--------+-------+              |
+   |               |              |               |                |
+Transit.Stream    Transit.Message Transport.Tcp   Transport.Quic   NetConduit.Mesh
+Transit.Duplex…   Transit.Delta…  Transport.WebS… Transport.Ipc     |
+                                  Transport.Udp                     |
+           \              |             /                          /
+            \             |            /                          /
+             \            |           /                          /
+              +-----> NetConduit <----+-------------------------+
                        (core)
 ```
 
-The core package has no third-party dependencies. Each transport package uses only `System.*` libraries (with QUIC requiring OS QUIC support via `System.Net.Quic`). Each transit depends only on the core and `System.Text.Json`.
+The core package has no third-party dependencies. `NetConduit.Mesh` depends only on the core. Each transport package uses only `System.*` libraries (with QUIC requiring OS QUIC support via `System.Net.Quic`). Each transit depends only on the core and `System.Text.Json`.
