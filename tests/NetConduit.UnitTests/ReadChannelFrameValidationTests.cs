@@ -33,6 +33,21 @@ public sealed class ReadChannelFrameValidationTests
     }
 
     [Fact]
+    public async Task AckOnInboundReadChannel_RaisesProtocolError()
+    {
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        await using var context = await RawMuxContext.CreateAsync(cts.Token);
+        await using var accepted = await context.OpenAcceptedChannelAsync("ack-swallow", cts.Token);
+        var errorTask = context.CaptureNextError();
+        byte[] payload = new byte[sizeof(ulong)];
+        BinaryPrimitives.WriteUInt64BigEndian(payload, 0);
+
+        await context.SendUserFrameAsync(UserChannelIndex, FrameFlags.Ack, payload, cts.Token);
+
+        await AssertProtocolErrorAsync(errorTask, cts.Token);
+    }
+
+    [Fact]
     public async Task UserChannelPingFrame_RaisesProtocolError()
     {
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));

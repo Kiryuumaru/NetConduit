@@ -73,8 +73,6 @@ internal sealed class ReadChannel : Stream, IReadChannel, IValueTaskSource<int>
     // default whenever _readCompletionActive transitions to false.
     private CancellationTokenRegistration _readCancelReg;
 
-    private WriteChannel? _ackChannel;
-
     private volatile ChannelState _state = ChannelState.Opening;
     private volatile bool _isReady;
     private volatile bool _isConnected;
@@ -289,8 +287,6 @@ internal sealed class ReadChannel : Stream, IReadChannel, IValueTaskSource<int>
         MaybeSendAck(force: true);
     }
 
-    internal void SetAckChannel(WriteChannel ackChannel) => _ackChannel = ackChannel;
-
     internal void SetChannelIndex(ushort index) => _channelIndex = index;
 
     /// <summary>
@@ -449,9 +445,14 @@ internal sealed class ReadChannel : Stream, IReadChannel, IValueTaskSource<int>
                 if (payload.Length != AckPayloadSize)
                     throw new MultiplexerException(ErrorCode.ProtocolError, $"ACK payload must be {AckPayloadSize} bytes, got {payload.Length}.");
 
-                long ackPos = (long)BinaryPrimitives.ReadUInt64BigEndian(payload);
-                _ackChannel?.OnAck(ackPos);
-                break;
+                // ACK frames acknowledge write-slab positions on locally-owned
+                // write channels, which the mux routes via its write-side
+                // branch. An inbound read channel owns no write slab, so a
+                // peer-sent ACK here is a direction violation. Reject loudly
+                // instead of swallowing it, or flow-control stalls hide.
+                throw new MultiplexerException(
+                    ErrorCode.ProtocolError,
+                    $"ACK frame is not valid for inbound read channel index {_channelIndex}.");
 
             case FrameFlags.Fin:
                 if (!payload.IsEmpty)

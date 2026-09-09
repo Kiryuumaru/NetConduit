@@ -985,6 +985,17 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IChannelOwner
         // a transient _readChannels entry.
         lock (_registry.AcceptLock)
         {
+            // Direction validation: read and write channels live in separate
+            // maps, so an INIT claiming a locally write-owned index would
+            // silently alias it and later frames would route ambiguously.
+            var writeOwned = _registry.GetWriteChannel(header.ChannelIndex);
+            if (writeOwned is not null)
+            {
+                throw new MultiplexerException(
+                    ErrorCode.ProtocolError,
+                    $"INIT for channel index {header.ChannelIndex} collides with local write channel '{writeOwned.ChannelId}'.");
+            }
+
             // After reconnect, Init frames are replayed from the slab.
             // If the channel already exists, skip re-registration.
             var existing = _registry.GetReadChannel(header.ChannelIndex);
