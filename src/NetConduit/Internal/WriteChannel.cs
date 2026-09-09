@@ -262,69 +262,78 @@ internal sealed class WriteChannel : Stream, IWriteChannel
         //      but _peerAckedBytes keeps rising only on genuine peer ACKs
         //      (OnAck/SetReplayBase) — never on MarkSent's non-replay auto-ack
         //      (which only frees local slab space, not peer read-slab space).
+        // Admission runs in two separate _posLock sections (the lock cannot
+        // be held across the await below), so a concurrent writer can commit
+        // between the gate and the commit and fill the slab. The commit
+        // revalidates admission post-TryCompactLocked; on a lost race it
+        // loops back to the gate park/TimeoutException path instead of
+        // indexing past the slab end (ArgumentOutOfRangeException).
         while (true)
         {
-            lock (_posLock)
+            while (true)
             {
-                TryCompactLocked();
-                int localFree = _slabSize - _writePos;
-                long staged = _compactionOffset + (long)_writePos;  // cumulative staged bytes (monotonic)
-                long initUnacked = _initFrameBytesInSlab > 0
-                    ? Math.Max(0, _initFrameBytesInSlab - _peerAckedBytes)
-                    : 0;
-                long outstanding = staged - _peerAckedBytes - initUnacked;
-                int peerFree = (int)Math.Clamp(effectiveSlab - outstanding, 0, effectiveSlab);
-                if (Math.Min(localFree, peerFree) >= frameSize) break;
-            }
+                lock (_posLock)
+                {
+                    TryCompactLocked();
+                    if (FitsLocked(frameSize, effectiveSlab)) break;
+                }
 
-            // Re-check state before re-parking. SetClosed/Abort wake parked
-            // writers via TryReleaseSpaceSignal precisely so they can unwind
-            // here with ChannelClosedException instead of stalling for the
-            // full SendTimeout or surfacing ObjectDisposedException when the
-            // semaphore is disposed by Abort.
-            if (_state is not (ChannelState.Open or ChannelState.Opening))
-                throw new ChannelClosedException(ChannelId, _closeReason ?? ChannelCloseReason.LocalClose);
-
-            bool acquired;
-            try
-            {
-                acquired = await _spaceAvailable.WaitAsync(_sendTimeout, ct).ConfigureAwait(false);
-            }
-            catch (ObjectDisposedException)
-            {
-                throw new ChannelClosedException(ChannelId, _closeReason ?? ChannelCloseReason.LocalClose);
-            }
-
-            if (!acquired)
-            {
-                // Distinguish "channel closed during the wait" from "no ACK
-                // arrived in time" — the close signal and the timeout race,
-                // and the caller should see ChannelClosedException whenever
-                // the close happened concurrently.
+                // Re-check state before re-parking. SetClosed/Abort wake parked
+                // writers via TryReleaseSpaceSignal precisely so they can unwind
+                // here with ChannelClosedException instead of stalling for the
+                // full SendTimeout or surfacing ObjectDisposedException when the
+                // semaphore is disposed by Abort.
                 if (_state is not (ChannelState.Open or ChannelState.Opening))
                     throw new ChannelClosedException(ChannelId, _closeReason ?? ChannelCloseReason.LocalClose);
-                throw new TimeoutException($"WriteChannel '{ChannelId}' timed out waiting for slab space.");
+
+                bool acquired;
+                try
+                {
+                    acquired = await _spaceAvailable.WaitAsync(_sendTimeout, ct).ConfigureAwait(false);
+                }
+                catch (ObjectDisposedException)
+                {
+                    throw new ChannelClosedException(ChannelId, _closeReason ?? ChannelCloseReason.LocalClose);
+                }
+
+                if (!acquired)
+                {
+                    // Distinguish "channel closed during the wait" from "no ACK
+                    // arrived in time" — the close signal and the timeout race,
+                    // and the caller should see ChannelClosedException whenever
+                    // the close happened concurrently.
+                    if (_state is not (ChannelState.Open or ChannelState.Opening))
+                        throw new ChannelClosedException(ChannelId, _closeReason ?? ChannelCloseReason.LocalClose);
+                    throw new TimeoutException($"WriteChannel '{ChannelId}' timed out waiting for slab space.");
+                }
             }
-        }
 
-        // Build the complete frame in the slab (under lock to prevent races with TakeReady).
-        // Re-check state INSIDE the lock to prevent the slab-use-after-free race in:
-        // a concurrent SetClosed/Abort can flip _state to Closed and return _slab to the
-        // ArrayPool while a writer is parked on _spaceAvailable.WaitAsync. Once the writer
-        // wakes (the close path releases the semaphore), the entry-state check at the top
-        // of WriteAsync no longer holds. SetClosed/Abort/TryNotifyCompleted now serialize
-        // their TryReturnSlab call under _posLock, so observing _state == Open here means
-        // the slab is still ours for the duration of this critical section.
-        lock (_posLock)
-        {
-            if (_state is not (ChannelState.Open or ChannelState.Opening))
-                throw new ChannelClosedException(ChannelId, _closeReason ?? ChannelCloseReason.LocalClose);
+            // Revalidate admission inside the commit lock (see gate comment).
+            // SetClosed/Abort/TryNotifyCompleted serialize TryReturnSlab
+            // under _posLock, so observing _state == Open here means the slab
+            // is still ours for the duration of this critical section.
+            bool committed;
+            lock (_posLock)
+            {
+                if (_state is not (ChannelState.Open or ChannelState.Opening))
+                    throw new ChannelClosedException(ChannelId, _closeReason ?? ChannelCloseReason.LocalClose);
 
-            int frameStart = _writePos;
-            FrameHeader.WriteTo(_slab.AsSpan(frameStart, FrameHeader.Size), _channelIndex, FrameFlags.Data, payloadLength);
-            data.Span[..payloadLength].CopyTo(_slab.AsSpan(frameStart + FrameHeader.Size, payloadLength));
-            _writePos = frameStart + frameSize;
-            _pendingPos = _writePos;
+                TryCompactLocked();
+                if (!FitsLocked(frameSize, effectiveSlab))
+                {
+                    committed = false;
+                }
+                else
+                {
+                    int frameStart = _writePos;
+                    FrameHeader.WriteTo(_slab.AsSpan(frameStart, FrameHeader.Size), _channelIndex, FrameFlags.Data, payloadLength);
+                    data.Span[..payloadLength].CopyTo(_slab.AsSpan(frameStart + FrameHeader.Size, payloadLength));
+                    _writePos = frameStart + frameSize;
+                    _pendingPos = _writePos;
+                    committed = true;
+                }
+            }
+            if (committed) break;
         }
 
         Interlocked.Add(ref Stats._bytesSent, payloadLength);
@@ -521,6 +530,12 @@ internal sealed class WriteChannel : Stream, IWriteChannel
         if (finDrained)
         {
             SetClosed(ChannelCloseReason.LocalClose);
+            // SetClosed early-returns when already Closed (DisposeAsync closes
+            // eagerly while staged data is still queued), which would skip the
+            // deferred slab return. TryNotifyCompleted is idempotent for
+            // events/registry (CAS guards) but makes the post-drain slab path
+            // reachable once the FIN is fully drained.
+            TryNotifyCompleted();
         }
         else
         {
@@ -790,6 +805,21 @@ internal sealed class WriteChannel : Stream, IWriteChannel
         _pendingPos -= acked;
         _writePos -= acked;
         _ackedPos = 0;
+    }
+
+    // Must be called under _posLock. Reports whether a frame of the given
+    // size currently fits both the local slab and the peer flow-control
+    // window (see WriteFrameAsync for the two bounds).
+    private bool FitsLocked(int frameSize, int effectiveSlab)
+    {
+        int localFree = _slabSize - _writePos;
+        long staged = _compactionOffset + (long)_writePos;  // cumulative staged bytes (monotonic)
+        long initUnacked = _initFrameBytesInSlab > 0
+            ? Math.Max(0, _initFrameBytesInSlab - _peerAckedBytes)
+            : 0;
+        long outstanding = staged - _peerAckedBytes - initUnacked;
+        int peerFree = (int)Math.Clamp(effectiveSlab - outstanding, 0, effectiveSlab);
+        return Math.Min(localFree, peerFree) >= frameSize;
     }
 
     // Stream plumbing
