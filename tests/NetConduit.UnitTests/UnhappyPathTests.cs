@@ -338,6 +338,30 @@ public sealed class UnhappyPathTests
     }
 
     [Fact]
+    public async Task StreamFactory_ThrowsArgumentException_WithRetries_ExhaustsAttempts()
+    {
+        int attempts = 0;
+        var mux = StreamMultiplexer.Create(new MultiplexerOptions
+        {
+            StreamFactory = _ =>
+            {
+                Interlocked.Increment(ref attempts);
+                throw new ArgumentException("Invalid argument from factory");
+            },
+            MaxAutoReconnectAttempts = 3,
+            AutoReconnectDelay = TimeSpan.FromMilliseconds(10),
+            MaxAutoReconnectDelay = TimeSpan.FromMilliseconds(50),
+        });
+        mux.Start();
+
+        var ex = await Assert.ThrowsAsync<MultiplexerException>(() => mux.WaitForReadyAsync());
+        Assert.Contains("3 attempts", ex.Message);
+        Assert.Equal(3, attempts);
+
+        await mux.DisposeAsync();
+    }
+
+    [Fact]
     public async Task StreamFactory_ReturnsNull_ThrowsNullRef()
     {
         var mux = StreamMultiplexer.Create(new MultiplexerOptions
