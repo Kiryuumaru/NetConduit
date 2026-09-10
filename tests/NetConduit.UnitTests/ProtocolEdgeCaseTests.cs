@@ -380,6 +380,87 @@ public sealed class ProtocolEdgeCaseTests
         await server.DisposeAsync();
     }
 
+    [Fact]
+    public async Task ConcurrentSameIdOpenFromBothSides_SessionSurvives()
+    {
+        // Rendezvous: both peers open the same channel ID at the same time.
+        // Each side already owns the ID for its outbound write channel, so the
+        // inbound INIT for the same ID collides. The collision must stay scoped
+        // to the colliding channel: the session itself stays connected and
+        // unrelated channels keep working.
+        var duplex = new DuplexMemoryStream();
+        await using var client = StreamMultiplexer.Create(new MultiplexerOptions
+        {
+            StreamFactory = _ => Task.FromResult<IStreamPair>(duplex.SideA),
+            PingInterval = TimeSpan.Zero,
+            MaxAutoReconnectAttempts = 0,
+        });
+        await using var server = StreamMultiplexer.Create(new MultiplexerOptions
+        {
+            StreamFactory = _ => Task.FromResult<IStreamPair>(duplex.SideB),
+            PingInterval = TimeSpan.Zero,
+            MaxAutoReconnectAttempts = 0,
+        });
+
+        client.Start();
+        server.Start();
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        await Task.WhenAll(client.WaitForReadyAsync(cts.Token), server.WaitForReadyAsync(cts.Token));
+
+        var clientTransportDropped = new TaskCompletionSource<DisconnectedEventArgs>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var serverTransportDropped = new TaskCompletionSource<DisconnectedEventArgs>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var clientErrors = new System.Collections.Concurrent.ConcurrentQueue<Exception>();
+        var serverErrors = new System.Collections.Concurrent.ConcurrentQueue<Exception>();
+        client.Error += (_, e) => clientErrors.Enqueue(e.Exception);
+        server.Error += (_, e) => serverErrors.Enqueue(e.Exception);
+        client.Disconnected += (_, e) =>
+        {
+            if (e.Reason == DisconnectReason.TransportError)
+                clientTransportDropped.TrySetResult(e);
+        };
+        server.Disconnected += (_, e) =>
+        {
+            if (e.Reason == DisconnectReason.TransportError)
+                serverTransportDropped.TrySetResult(e);
+        };
+
+        // Both sides open the same ID concurrently, then accept it.
+        var clientWrite = client.OpenChannel("rendezvous");
+        var serverWrite = server.OpenChannel("rendezvous");
+        using var rendezvousCts = CancellationTokenSource.CreateLinkedTokenSource(cts.Token);
+        var clientRendezvousAccept = client.AcceptChannelAsync("rendezvous", rendezvousCts.Token).AsTask();
+        var serverRendezvousAccept = server.AcceptChannelAsync("rendezvous", rendezvousCts.Token).AsTask();
+
+        // Allow the colliding INITs to cross before asserting: on the
+        // session-teardown path the reader faults promptly and both
+        // TransportError signals fire well within this bound.
+        await Task.WhenAny(
+            Task.WhenAll(clientTransportDropped.Task, serverTransportDropped.Task),
+            Task.Delay(TimeSpan.FromSeconds(3), cts.Token));
+
+        Assert.False(clientTransportDropped.Task.IsCompleted, $"Session must survive a same-ID open collision; the failure must stay scoped to the colliding channel. Client errors: {string.Join("; ", clientErrors.Select(e => e.GetType().Name + ": " + e.Message))}");
+        Assert.False(serverTransportDropped.Task.IsCompleted, $"Session must survive a same-ID open collision; the failure must stay scoped to the colliding channel. Server errors: {string.Join("; ", serverErrors.Select(e => e.GetType().Name + ": " + e.Message))}");
+        Assert.True(client.IsConnected);
+        Assert.True(server.IsConnected);
+
+        // Unrelated channels on the same session keep working.
+        var probe = client.OpenChannel("probe-after-collision");
+        var probeReader = await server.AcceptChannelAsync("probe-after-collision", cts.Token);
+        await probe.WriteAsync(new byte[] { 7 }, cts.Token);
+        var buf = new byte[1];
+        Assert.Equal(1, await probeReader.ReadAsync(buf, cts.Token));
+        Assert.Equal(7, buf[0]);
+
+        await clientWrite.DisposeAsync();
+        await serverWrite.DisposeAsync();
+        rendezvousCts.Cancel();
+        foreach (var accept in new[] { clientRendezvousAccept, serverRendezvousAccept })
+        {
+            try { await accept; }
+            catch (OperationCanceledException) { }
+        }
+    }
+
     #endregion
 
     #region Frame Header Validation
