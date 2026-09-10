@@ -51,6 +51,19 @@ public sealed class InitFrameValidationTests
         await AssertProtocolErrorAsync(errorTask, cts.Token);
     }
 
+    [Fact]
+    public async Task InitOnLocalWriteChannelIndex_RaisesProtocolError()
+    {
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        await using var context = await RawMuxContext.CreateAsync(cts.Token);
+        var (_, channelIndex) = await context.OpenOutboundChannelAsync("local-out", cts.Token);
+        var errorTask = context.CaptureNextError();
+
+        await context.SendUserFrameAsync(channelIndex, FrameFlags.Init, Encoding.UTF8.GetBytes("peer-in"), cts.Token);
+
+        await AssertProtocolErrorAsync(errorTask, cts.Token);
+    }
+
     private static async Task AssertProtocolErrorAsync(Task<Exception> errorTask, CancellationToken ct)
     {
         var timeoutTask = Task.Delay(TimeSpan.FromSeconds(3), ct);
@@ -86,6 +99,21 @@ public sealed class InitFrameValidationTests
             var error = new TaskCompletionSource<Exception>(TaskCreationOptions.RunContinuationsAsynchronously);
             server.Error += (_, args) => error.TrySetResult(args.Exception);
             return error.Task;
+        }
+
+        public async ValueTask<(IWriteChannel WriteChannel, ushort ChannelIndex)> OpenOutboundChannelAsync(string channelId, CancellationToken ct)
+        {
+            var writeChannel = server.OpenChannel(channelId);
+            byte[] headerBytes = new byte[FrameHeader.Size];
+            await rawPeer.ReadStream.ReadExactlyAsync(headerBytes, ct);
+            var header = FrameHeader.Parse(headerBytes);
+            Assert.Equal(FrameFlags.Init, header.Flags);
+
+            byte[] payload = new byte[header.PayloadLength];
+            await rawPeer.ReadStream.ReadExactlyAsync(payload, ct);
+            Assert.Equal(channelId, Encoding.UTF8.GetString(payload));
+
+            return (writeChannel, header.ChannelIndex);
         }
 
         public async ValueTask SendUserFrameAsync(ushort channelIndex, FrameFlags flags, ReadOnlyMemory<byte> payload, CancellationToken ct)

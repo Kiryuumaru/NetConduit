@@ -559,4 +559,86 @@ public sealed class WriteChannelTests
         // The channel must remain writable and positions must stay sane.
         await channel.WriteAsync(new byte[100]);
     }
+
+    [Fact]
+    public async Task ConcurrentFullSlabWrites_SerializesSlabAdmission()
+    {
+        // Two writers racing to fill the same minimum-size slab must not both
+        // commit: the loser blocks on the space signal and observes the
+        // documented backpressure signal (TimeoutException after SendTimeout).
+        // The gate/commit race wins only on a narrow scheduling window
+        // (~1-2% per round), so this runs many short-timeout rounds: a short
+        // SendTimeout costs nothing in signal quality (TimeoutException is
+        // always an acceptable outcome) and buys ~3x the collision attempts
+        // per second of wall time.
+        const int SlabSize = 64 * 1024;
+        int fullPayload = SlabSize - FrameHeader.Size;
+        List<string> anomalies = new();
+
+        for (int round = 0; round < 300 && anomalies.Count == 0; round++)
+        {
+            var router = new TestRouter();
+            var channel = new WriteChannel(
+                channelId: "test",
+                channelIndex: 1,
+                priority: ChannelPriority.Normal,
+                slabSize: SlabSize,
+                sendTimeout: TimeSpan.FromMilliseconds(10),
+                owner: router);
+            channel.MarkOpen();
+
+            using var barrier = new Barrier(2);
+            var payloadA = new byte[fullPayload];
+            var payloadB = new byte[fullPayload];
+
+            Exception? exA = null, exB = null;
+            Task tA = Task.Run(async () =>
+            {
+                barrier.SignalAndWait(TimeSpan.FromSeconds(10));
+                try { await channel.WriteAsync(payloadA); }
+                catch (Exception ex) { exA = ex; }
+            });
+            Task tB = Task.Run(async () =>
+            {
+                barrier.SignalAndWait(TimeSpan.FromSeconds(10));
+                try { await channel.WriteAsync(payloadB); }
+                catch (Exception ex) { exB = ex; }
+            });
+            await Task.WhenAll(tA, tB).WaitAsync(TimeSpan.FromSeconds(30));
+
+            foreach (Exception? ex in new[] { exA, exB })
+            {
+                if (ex is not null && ex is not TimeoutException)
+                    anomalies.Add($"round {round}: {ex.GetType().FullName}: {ex.Message}");
+            }
+
+            channel.Abort(ChannelCloseReason.LocalClose);
+        }
+
+        Assert.True(anomalies.Count == 0,
+            $"Concurrent full-slab writes escaped backpressure: {string.Join(" | ", anomalies)}");
+    }
+
+    [Fact]
+    public async Task GracefulCloseWithStagedWrite_ReturnsSlabAfterDrain()
+    {
+        // WriteAsync + DisposeAsync with data still staged defers the slab
+        // return until the writer drains. Once everything including the FIN is
+        // drained via TakeReady/MarkSent, the slab must be back in the pool.
+        var router = new TestRouter();
+        var channel = CreateChannel(router);
+
+        await channel.WriteAsync(new byte[1000]);
+        await channel.DisposeAsync();
+
+        Memory<byte> ready = channel.TakeReady();
+        while (!ready.IsEmpty)
+        {
+            channel.MarkSent(ready.Length);
+            ready = channel.TakeReady();
+        }
+
+        Assert.True(SlabWasReturned(channel),
+            "Expected the slab to be returned to the pool once the writer drained all staged bytes including the FIN.");
+    }
 }

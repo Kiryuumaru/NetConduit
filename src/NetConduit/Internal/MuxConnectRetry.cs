@@ -160,8 +160,6 @@ internal sealed class MuxConnectRetry(
     // loop so honest-peer transient failures still recover.
     private static bool IsFatalFactoryException(Exception ex)
     {
-        // User-error exceptions thrown by misconfigured factory args.
-        if (ex is ArgumentException) return true;
         // Server-side one-shot helpers across all transports throw
         // InvalidOperationException with this exact phrase once their accept
         // state is consumed. A second invocation can never succeed.
