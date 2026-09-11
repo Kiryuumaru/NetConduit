@@ -49,7 +49,7 @@ Always-on rules for agentic contributors. Code is source of truth; docs follow c
 - MUST fix docs when docs and code mismatch. NEVER change code to match docs.
 - NEVER commit `investigate/` or any gitignored path.
 
-## 8. Skills index
+## 8. Skills
 
-- MUST load the narrowest skill for the task at hand. When present, skills live in `.agents/skills/<name>/SKILL.md`.
-- Available pointers: `disciplined-fix`, `docs-sync`, `dotnet-workflow`, `bug-hunt`, `arch-review`, `qa-regression`, `triage-fix`, `issue-filing`, `github-workflow`, `scope-guard`, `dev-loop`, optional `rule-authoring`.
+- MUST load the narrowest harness-provided skill for the task at hand
+- MUST NOT expect project-local skills — `.agents/` carries no skill content
