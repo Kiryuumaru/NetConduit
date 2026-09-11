@@ -95,6 +95,12 @@ class Build : BaseNukeBuildHelpers
             AppId = "net_conduit_transport_quic",
             ProjectName = "NetConduit.Transport.Quic",
             ProjectTestName = "NetConduit.Transport.Quic.IntegrationTests"
+        },
+        new DeploymentAppSpec
+        {
+            AppId = "net_conduit_mesh",
+            ProjectName = "NetConduit.Mesh",
+            ProjectTestName = "NetConduit.Mesh.IntegrationTests"
         }
     ];
 

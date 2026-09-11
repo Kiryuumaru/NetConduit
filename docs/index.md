@@ -12,6 +12,10 @@ NetConduit is a transport-agnostic stream multiplexer for .NET. It carries any n
 
 - [Concepts](concepts/index.md) — multiplexer lifecycle, channels, transports, transits, framing, backpressure, reconnection, events, AOT.
 
+## Multi-hop routing
+
+- [Mesh multiplexer](concepts/mesh.md) — routed overlay on top of `StreamMultiplexer`. Open a full multiplexer to any reachable node through intermediate neighbors.
+
 ## Pick a transport
 
 - [Transports overview](transports/index.md) — comparison table and selection guide.

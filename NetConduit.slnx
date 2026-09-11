@@ -11,6 +11,7 @@
     <Project Path="src/NetConduit.Transport.Udp/NetConduit.Transport.Udp.csproj" />
     <Project Path="src/NetConduit.Transport.Ipc/NetConduit.Transport.Ipc.csproj" />
     <Project Path="src/NetConduit.Transport.Quic/NetConduit.Transport.Quic.csproj" />
+    <Project Path="src/NetConduit.Mesh/NetConduit.Mesh.csproj" />
   </Folder>
   <Folder Name="/tests/">
     <Project Path="tests/NetConduit.UnitTests/NetConduit.UnitTests.csproj" />
@@ -22,11 +23,13 @@
     <Project Path="tests/NetConduit.Transport.WebSocket.IntegrationTests/NetConduit.Transport.WebSocket.IntegrationTests.csproj" />
     <Project Path="tests/NetConduit.Transport.Udp.IntegrationTests/NetConduit.Transport.Udp.IntegrationTests.csproj" />
     <Project Path="tests/NetConduit.Transport.Ipc.IntegrationTests/NetConduit.Transport.Ipc.IntegrationTests.csproj" />
-    <Project Path="tests/NetConduit.Transport.Quic.IntegrationTests/NetConduit.Transport.Quic.IntegrationTests.csproj" />
+    <Project Path="tests/NetConduit.Mesh.UnitTests/NetConduit.Mesh.UnitTests.csproj" />
+    <Project Path="tests/NetConduit.Mesh.IntegrationTests/NetConduit.Mesh.IntegrationTests.csproj" />
   </Folder>
   <Folder Name="/samples/">
     <Project Path="samples/FileTransferSample/FileTransferSample.csproj" />
     <Project Path="samples/GroupChatSample/GroupChatSample.csproj" />
+    <Project Path="samples/MeshHowTo/MeshHowTo.csproj" />
     <Project Path="samples/PongGame/PongGame.csproj" />
     <Project Path="samples/RemoteShellSample/RemoteShellSample.csproj" />
     <Project Path="samples/RpcFrameworkSample/RpcFrameworkSample.csproj" />
