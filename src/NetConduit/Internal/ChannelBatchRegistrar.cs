@@ -14,6 +14,18 @@ namespace NetConduit.Internal;
 /// the reader's INIT-arrival adoption, (3) emit INIT frames + stats updates
 /// for freshly-committed write channels. Any Phase-2 collision rolls back
 /// every prior commit from the same batch.
+/// <para>
+/// Ownership pin (#623): teardown stays in <c>ChannelRegistry</c> and the
+/// multiplexer (<c>MarkAllChannelsDisconnected</c> / <c>CloseAll</c> /
+/// <c>AbortAll</c>); this registrar owns Phase-1 shape validation (advisory)
+/// plus the in-lock commit under ChannelIndexLock -&gt; AcceptLock. The
+/// single shutdown latch is <see cref="IChannelOwner.IsShuttingDown"/>, read
+/// authoritatively inside the lock; the multiplexer's entry-point pre-check
+/// is advisory-only. Validators stay single-owner via paramName threading
+/// (no twins). Folding rule: <c>false</c> means id-collision-only, every
+/// other failure throws. Cancel is an error, never <c>false</c>; borrowed
+/// handles are invalidated at teardown (use-after reads as disposed).
+/// </para>
 /// </summary>
 internal sealed class ChannelBatchRegistrar(
     ChannelRegistry registry,
@@ -26,6 +38,14 @@ internal sealed class ChannelBatchRegistrar(
     /// outbound id collides with an existing write/read/pending-accept entry
     /// (every prior commit in the same batch is rolled back). Throws if any
     /// registration fails Phase-1 validation.
+    /// <para>
+    /// Folding rule: <c>false</c> is collision-only; every other failure
+    /// throws. Cancel is an error, never <c>false</c>, and teardown is
+    /// idempotent. Slab discipline: each fresh channel rents its slab in the
+    /// ctor; a rolled-back commit aborts it back to the pool here, while
+    /// teardown slabs return only via <c>CloseAllChannels</c> after the
+    /// writer has exited — borrowed handles are invalidated at teardown.
+    /// </para>
     /// </summary>
     /// <param name="registrations">Registrations to commit.</param>
     /// <param name="channels">On success, maps each registration to its
@@ -129,10 +149,11 @@ internal sealed class ChannelBatchRegistrar(
         {
         lock (registry.AcceptLock)
         {
-            // Re-check the shutdown latch inside the lock to close the TOCTOU
-            // window: a concurrent GoAwayAsync can set _isShuttingDown after
-            // the caller's outer check passes but before we acquire the lock.
-            if (((StreamMultiplexer)owner).IsShuttingDown)
+            // Re-check the single shutdown latch inside the lock to close the
+            // TOCTOU window: a concurrent GoAwayAsync can set it after the
+            // caller's advisory outer check passes but before we acquire the
+            // lock. This in-lock read is authoritative (#623).
+            if (owner.IsShuttingDown)
                 throw new InvalidOperationException("Cannot register new channels after GoAwayAsync.");
 
             for (int i = 0; i < count; i++)
