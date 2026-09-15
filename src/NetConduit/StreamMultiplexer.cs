@@ -1040,6 +1040,26 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IChannelOwner
             if (IsShuttingDown && pendingChannel is null)
                 return;
 
+            // Same-ID rendezvous (fixes #604). Channel IDs share one
+            // _idToIndex namespace across directions, so an inbound INIT
+            // whose ID is already owned locally — by an outbound write
+            // channel (both peers opened the same ID concurrently) or by
+            // a live inbound read channel — cannot register without
+            // breaking id-uniqueness. Drop it so the collision stays
+            // scoped to the colliding channel instead of faulting the
+            // reader loop and tearing down the session; the orphaned peer
+            // opener stays in Opening until disposed or timed out. A
+            // Closed read slot still falls through to the peer-reopen
+            // eviction below; only live owners win here. The drop wins
+            // over a same-ID pending accept, which stays pending until
+            // the caller cancels or disposes it. This branch itself
+            // performs no registration, ACK, stats, event, or slab work.
+            if (_registry.GetWriteChannelById(channelId) is not null)
+                return;
+            var idOwner = _registry.GetReadChannelById(channelId);
+            if (idOwner is not null && idOwner.State != ChannelState.Closed)
+                return;
+
             if (pendingChannel is not null)
             {
                 readChannel = pendingChannel;

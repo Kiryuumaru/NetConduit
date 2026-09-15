@@ -23,17 +23,36 @@ An SSH-like CLI tool. The client opens a persistent shell session on the server 
 
 ## Run
 
-Server:
+Server (loopback-only by default; auth required unless you pass the insecure escape hatch):
 
 ```powershell
-dotnet run --project samples/RemoteShellSample -- server 5000
+$env:SHELL_TOKEN = "correct horse battery staple"
+dotnet run --project samples/RemoteShellSample -- server 5000 --auth-env SHELL_TOKEN
 ```
 
-Client:
+Client (arg order `client <port> <host>` is intentional):
 
 ```powershell
-dotnet run --project samples/RemoteShellSample -- client 5000 127.0.0.1
+dotnet run --project samples/RemoteShellSample -- client 5000 127.0.0.1 --auth-env SHELL_TOKEN
 ```
+
+### Flags
+
+| Flag | Effect |
+| --- | --- |
+| `--bind loopback` (default) | Listen on localhost only. |
+| `--bind any` | Listen on all interfaces. **WARNING:** exposes a remote shell to the network. Token + shell I/O travel as cleartext (no TLS): use loopback only, or tunnel over TLS/SSH on untrusted networks. |
+| `--auth <token>` | Shared token the client must prove before any shell starts. |
+| `--auth-env NAME` | Read the token from environment variable `NAME` (preferred over `--auth`, which leaks via process lists). |
+| `--allow-no-auth` | **Insecure, local demos only.** Skips the auth gate; anyone who can connect gets a shell. |
+
+The server refuses to start without `--auth`/`--auth-env` or explicit `--allow-no-auth` (fail-closed).
+Connection setup and the auth gate are each bounded (~5s per stage, so an unauthenticated peer is dropped after ~10s worst-case); failures are logged with endpoint + reason and the
+connection is closed with no shell process started. Tokens are compared in constant time over content (lengths visible) and never logged.
+
+The token and all shell I/O travel as cleartext with no TLS: use loopback only, or tunnel over TLS/SSH on untrusted networks.
+
+> Do not expose this sample to untrusted networks.
 
 | Arg | Server | Client |
 | --- | --- | --- |
