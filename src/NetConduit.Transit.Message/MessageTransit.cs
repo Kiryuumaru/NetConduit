@@ -418,11 +418,24 @@ public sealed class MessageTransit<TSend, TReceive> : ITransit
             {
                 if (_receiveTypeInfo is not null)
                 {
-                    return JsonSerializer.Deserialize(payload.AsSpan(0, payloadLength), _receiveTypeInfo);
+                    // JsonTypeInfo is source-generated and immutable, so its
+                    // configured depth cannot be clamped per call: a setup
+                    // deeper than the transit backstop (64, down-only) is
+                    // rejected loudly with JsonException instead of being
+                    // silently widened. Parse is additionally gated on depth
+                    // (64) + token budget (1M) before touching the serializer.
+                    TransitJsonLimits.ThrowIfTypeInfoDepthExceeded(_receiveTypeInfo);
+                    using var gate = JsonHardening.GateDocument(payload.AsMemory(0, payloadLength));
+                    return JsonSerializer.Deserialize(gate.RootElement, _receiveTypeInfo);
                 }
                 else
                 {
-                    return JsonSerializer.Deserialize<TReceive>(payload.AsSpan(0, payloadLength), _jsonOptions);
+                    // Clone-never-mutate: the caller's options keep their
+                    // converters/settings; only an over-wide MaxDepth is
+                    // clamped down to the transit backstop.
+                    var effective = TransitJsonLimits.ClampSerializerOptions(_jsonOptions);
+                    using var gate = JsonHardening.GateDocument(payload.AsMemory(0, payloadLength));
+                    return JsonSerializer.Deserialize<TReceive>(gate.RootElement, effective);
                 }
             }
             finally
