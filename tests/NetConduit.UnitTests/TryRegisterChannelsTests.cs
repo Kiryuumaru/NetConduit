@@ -58,14 +58,14 @@ public sealed class TryRegisterChannelsTests
     }
 
     [Fact]
-    public async Task TryRegisterChannels_DuplicateInBatch_ReturnsFalse()
+    public async Task TryRegisterChannels_DuplicateInBatch_ThrowsArgumentException()
     {
         var (client, server) = await StartedPairAsync();
 
         var dup = new ChannelRegistration("dup", ChannelDirection.Outbound);
         ChannelRegistration[] regs = [dup, dup];
 
-        Assert.False(client.TryRegisterChannels(regs, out _));
+        Assert.Throws<ArgumentException>(() => client.TryRegisterChannels(regs, out _));
 
         // Nothing was committed.
         Assert.Null(client.GetWriteChannel("dup"));
@@ -167,7 +167,7 @@ public sealed class TryRegisterChannelsTests
     }
 
     [Fact]
-    public async Task TryRegisterChannels_OptionsChannelIdMismatch_ReturnsFalse()
+    public async Task TryRegisterChannels_OptionsChannelIdMismatch_ThrowsArgumentException()
     {
         var (client, server) = await StartedPairAsync();
 
@@ -176,7 +176,7 @@ public sealed class TryRegisterChannelsTests
             Options = new ChannelOptions { ChannelId = "wrong" },
         };
         ChannelRegistration[] regsArr = [bad];
-        Assert.False(client.TryRegisterChannels(regsArr, out _));
+        Assert.Throws<ArgumentException>(() => client.TryRegisterChannels(regsArr, out _));
 
         await client.DisposeAsync();
         await server.DisposeAsync();
@@ -206,7 +206,7 @@ public sealed class TryRegisterChannelsTests
     }
 
     [Fact]
-    public async Task DuplicateChannelIdsInBatch_ReturnsFalse()
+    public async Task DuplicateChannelIdsInBatch_ThrowsArgumentException()
     {
         var (client, server) = await StartedPairAsync();
 
@@ -215,8 +215,7 @@ public sealed class TryRegisterChannelsTests
             new() { ChannelId = "dup", Direction = ChannelDirection.Outbound }
         };
 
-        bool ok = client.TryRegisterChannels(regs, out _);
-        Assert.False(ok);
+        Assert.Throws<ArgumentException>(() => client.TryRegisterChannels(regs, out _));
 
         await client.DisposeAsync();
         await server.DisposeAsync();

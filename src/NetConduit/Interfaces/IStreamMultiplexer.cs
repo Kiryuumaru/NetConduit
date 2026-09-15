@@ -173,6 +173,10 @@ public interface IStreamMultiplexer : IAsyncDisposable
     /// <returns>
     /// <c>true</c> if every channel was registered. <c>false</c> if any channel id was
     /// already in use; in that case the registry is restored to its pre-call state.
+    /// <c>false</c> is returned only for id collisions and commit races — validation
+    /// failures throw instead of returning <c>false</c>. The entry-point
+    /// shutdown pre-check is advisory-only; the registrar's in-lock latch read
+    /// is authoritative (#623).
     /// </returns>
     /// <exception cref="InvalidOperationException">
     /// The multiplexer has not been started, or shutdown has been initiated.
