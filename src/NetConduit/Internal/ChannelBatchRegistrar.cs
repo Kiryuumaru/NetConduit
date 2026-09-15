@@ -1,3 +1,4 @@
+using System.ComponentModel;
 using NetConduit.Enums;
 using NetConduit.Exceptions;
 using NetConduit.Interfaces;
@@ -22,10 +23,14 @@ internal sealed class ChannelBatchRegistrar(
     IChannelOwner owner)
 {
     /// <summary>
-    /// Atomically register a batch of channels. Returns <c>false</c> if any
-    /// outbound id collides with an existing write/read/pending-accept entry
-    /// (every prior commit in the same batch is rolled back). Throws if any
-    /// registration fails Phase-1 validation.
+    /// Atomically register a batch of channels. Returns <c>false</c> if and only
+    /// if a Phase-2 id collision occurs (an outbound id already bound to an
+    /// existing write/read/pending-accept entry, or an inbound id already bound
+    /// to an outbound channel); every prior commit in the same batch is rolled
+    /// back. Throws if any registration fails Phase-1 validation. This is the
+    /// internal entry behind the public <c>TryRegisterChannels</c> facade, which
+    /// propagates both the collision-<c>false</c> and the validation throws
+    /// unchanged.
     /// </summary>
     /// <param name="registrations">Registrations to commit.</param>
     /// <param name="channels">On success, maps each registration to its
@@ -47,6 +52,12 @@ internal sealed class ChannelBatchRegistrar(
         {
             var reg = registrations[i];
             string paramPath = $"{nameof(registrations)}[{i}]";
+
+            if (!Enum.IsDefined(reg.Direction))
+                throw new InvalidEnumArgumentException(
+                    $"{paramPath}.{nameof(ChannelRegistration.Direction)}",
+                    (int)reg.Direction,
+                    typeof(ChannelDirection));
 
             if (reg.ChannelId is null)
                 throw new ArgumentException($"{paramPath}.{nameof(ChannelRegistration.ChannelId)} is null.", nameof(registrations));
@@ -86,7 +97,12 @@ internal sealed class ChannelBatchRegistrar(
             }
             else
             {
-                // Inbound: Options is not consulted; ReadChannel uses defaults today.
+                // Inbound: Options must be null; ReadChannel uses defaults today.
+                if (reg.Options is not null)
+                    throw new ArgumentException(
+                        $"{paramPath}: inbound registrations must not carry {nameof(ChannelRegistration.Options)}.",
+                        nameof(registrations));
+
                 effectiveOptions = new ChannelOptions
                 {
                     ChannelId = reg.ChannelId,
