@@ -1,6 +1,8 @@
 using System.Collections.Concurrent;
 using System.Net;
 using System.Net.Sockets;
+using System.Security.Cryptography;
+using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using NetConduit;
@@ -66,10 +68,18 @@ static int PrintUsage(string? error = null)
         ═══════════════════════════════════════════════════════════════
 
         Usage:
-          relay <tcp-port> <ws-port/path>         Start relay server
-          agent <relay-host> <port[/path]> <name> <local-port>
-          forward <relay-host> <port[/path]> <name> <local-port>
-          list <relay-host> <port[/path]>
+          relay <tcp-port> <ws-port/path> [--bind loopback|any] [--auth <token> | --auth-env NAME | --allow-no-auth] [--allow-service NAME]...
+          agent <relay-host> <port[/path]> <name> <local-port> [--auth <token> | --auth-env NAME]
+          forward <relay-host> <port[/path]> <name> <local-port> [--auth <token> | --auth-env NAME]
+          list <relay-host> <port[/path]> [--auth <token> | --auth-env NAME]
+
+        Flags:
+          --bind loopback (default) listens on localhost only.
+          --bind any listens on all interfaces. WARNING: exposes the relay to the network; token + tunnel bytes travel as cleartext (no TLS), so use loopback only or tunnel over TLS/SSH on untrusted networks.
+          Relay requires --auth/--auth-env, or explicit --allow-no-auth (insecure, local demos only).
+          --allow-service NAME (repeatable) restricts which service names may register.
+          Clients pass --auth/--auth-env to authenticate to a relay that requires it. Prefer --auth-env: --auth exposes the token in process lists.
+          Do not expose this sample to untrusted networks.
 
         Port Format:
           5000        TCP connection (direct)
@@ -77,19 +87,19 @@ static int PrintUsage(string? error = null)
 
         Examples:
           # Start relay (TCP:5000, WS:5001/relay)
-          dotnet run -- relay 5000 5001/relay
+          dotnet run -- relay 5000 5001/relay --auth-env TUNNEL_TOKEN
 
           # Agent: expose local :8080 as "web" via TCP
-          dotnet run -- agent localhost 5000 web 8080
+          dotnet run -- agent localhost 5000 web 8080 --auth-env TUNNEL_TOKEN
 
           # Forward: access "web" on local :4000 via TCP
-          dotnet run -- forward localhost 5000 web 4000
+          dotnet run -- forward localhost 5000 web 4000 --auth-env TUNNEL_TOKEN
 
           # Agent via WebSocket (firewall-friendly)
-          dotnet run -- agent relay.example.com 5001/relay myapp 3000
+          dotnet run -- agent relay.example.com 5001/relay myapp 3000 --auth-env TUNNEL_TOKEN
 
           # List available services
-          dotnet run -- list localhost 5000
+          dotnet run -- list localhost 5000 --auth-env TUNNEL_TOKEN
         """);
 
     return error != null ? 1 : 0;
@@ -109,6 +119,36 @@ static async Task<int> RunRelayAsync(string[] args, CancellationToken ct)
 
     var (wsPort, wsPath) = ParseWsPortPath(args[2]);
 
+    var rest = args[3..];
+    var loopbackOnly = true;
+    var bindIdx = Array.IndexOf(rest, "--bind");
+    if (bindIdx >= 0)
+    {
+        if (bindIdx != Array.LastIndexOf(rest, "--bind"))
+            return PrintUsage("Duplicate --bind flag specified.");
+        if (bindIdx + 1 >= rest.Length)
+            return PrintUsage("Missing value for --bind (expected 'loopback' or 'any').");
+        var mode = rest[bindIdx + 1].ToLowerInvariant();
+        if (mode == "loopback") loopbackOnly = true;
+        else if (mode == "any") loopbackOnly = false;
+        else return PrintUsage("Invalid --bind value (expected 'loopback' or 'any').");
+    }
+
+    if (!TryResolveRelayAuth(rest, out var authToken, out var authError))
+        return PrintUsage(authError);
+
+    var allowedServices = new HashSet<string>(StringComparer.Ordinal);
+    for (var i = 0; i < rest.Length; i++)
+    {
+        if (rest[i] == "--allow-service")
+        {
+            if (i + 1 >= rest.Length)
+                return PrintUsage("Missing value for --allow-service.");
+            allowedServices.Add(rest[i + 1]);
+            i++;
+        }
+    }
+
     var agents = new ConcurrentDictionary<string, AgentConnection>();
     var forwards = new ConcurrentDictionary<string, ForwardConnection>();
 
@@ -120,20 +160,36 @@ static async Task<int> RunRelayAsync(string[] args, CancellationToken ct)
     Console.WriteLine($"╚══════════════════════════════════════════════════════════════╝");
     Console.WriteLine();
 
+    if (!loopbackOnly)
+    {
+        Console.WriteLine("WARNING: --bind any listens on all network interfaces.");
+        Console.WriteLine("WARNING: anyone who can reach these ports and knows the token can register/request tunnels. Token + tunnel bytes are cleartext (no TLS). Do not expose to untrusted networks.");
+        Console.WriteLine();
+    }
+    if (authToken == null)
+    {
+        Console.WriteLine("WARNING: running with --allow-no-auth: anyone can register services and open tunnels. Local demos only.");
+        Console.WriteLine();
+    }
+    if (allowedServices.Count > 0)
+        Console.WriteLine($"[Relay] Service allowlist: {string.Join(", ", allowedServices)}");
+
     // Start TCP listener
-    var tcpListener = new TcpListener(IPAddress.Any, tcpPort);
+    var tcpListener = new TcpListener(loopbackOnly ? IPAddress.Loopback : IPAddress.Any, tcpPort);
     tcpListener.Start();
-    Console.WriteLine($"[Relay] TCP listening on port {tcpPort}");
+    Console.WriteLine($"[Relay] TCP listening on {(loopbackOnly ? "127.0.0.1" : "0.0.0.0")}:{tcpPort}");
 
     // Start WebSocket listener
     var wsListener = new HttpListener();
-    wsListener.Prefixes.Add($"http://+:{wsPort}{wsPath}/");
+    wsListener.Prefixes.Add(loopbackOnly
+        ? $"http://localhost:{wsPort}{wsPath}/"
+        : $"http://+:{wsPort}{wsPath}/");
     wsListener.Start();
     Console.WriteLine($"[Relay] WebSocket listening on port {wsPort}{wsPath}");
 
     // Accept tasks
-    var tcpAcceptTask = AcceptTcpConnectionsAsync(tcpListener, agents, forwards, ct);
-    var wsAcceptTask = AcceptWebSocketConnectionsAsync(wsListener, wsPath, agents, forwards, ct);
+    var tcpAcceptTask = AcceptTcpConnectionsAsync(tcpListener, agents, forwards, authToken, allowedServices, ct);
+    var wsAcceptTask = AcceptWebSocketConnectionsAsync(wsListener, wsPath, agents, forwards, authToken, allowedServices, ct);
 
     try
     {
@@ -152,6 +208,8 @@ static async Task AcceptTcpConnectionsAsync(
     TcpListener listener,
     ConcurrentDictionary<string, AgentConnection> agents,
     ConcurrentDictionary<string, ForwardConnection> forwards,
+    string? authToken,
+    HashSet<string> allowedServices,
     CancellationToken ct)
 {
     while (!ct.IsCancellationRequested)
@@ -164,6 +222,8 @@ static async Task AcceptTcpConnectionsAsync(
                 "TCP",
                 agents,
                 forwards,
+                authToken,
+                allowedServices,
                 ct);
         }
         catch (OperationCanceledException) { break; }
@@ -179,6 +239,8 @@ static async Task AcceptWebSocketConnectionsAsync(
     string expectedPath,
     ConcurrentDictionary<string, AgentConnection> agents,
     ConcurrentDictionary<string, ForwardConnection> forwards,
+    string? authToken,
+    HashSet<string> allowedServices,
     CancellationToken ct)
 {
     while (!ct.IsCancellationRequested)
@@ -202,6 +264,8 @@ static async Task AcceptWebSocketConnectionsAsync(
                 "WebSocket",
                 agents,
                 forwards,
+                authToken,
+                allowedServices,
                 ct);
         }
         catch (OperationCanceledException) { break; }
@@ -217,10 +281,13 @@ static async Task HandleRelayConnectionAsync(
     string transport,
     ConcurrentDictionary<string, AgentConnection> agents,
     ConcurrentDictionary<string, ForwardConnection> forwards,
+    string? authToken,
+    HashSet<string> allowedServices,
     CancellationToken ct)
 {
     string? registeredService = null;
     string? connectionId = null;
+    var authed = authToken == null; // no-auth mode: everything already permitted
 
     try
     {
@@ -231,16 +298,25 @@ static async Task HandleRelayConnectionAsync(
 
         await using var mux = StreamMultiplexer.Create(options);
         mux.Start();
-        await mux.WaitForReadyAsync(ct);
+        // Bounded handshake (~5s) so a peer that never completes setup
+        // cannot hold this handler open indefinitely.
+        using var readyCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        readyCts.CancelAfter(TimeSpan.FromSeconds(5));
+        try { await mux.WaitForReadyAsync(readyCts.Token); }
+        catch (OperationCanceledException) when (!ct.IsCancellationRequested) { return; }
 
         connectionId = Guid.NewGuid().ToString()[..8];
         Console.WriteLine($"[Relay] {transport} connection {connectionId} established");
 
-        // Open control channels
+        // Open control channels (bounded: a peer that never opens its
+        // control channel cannot hold this handler open indefinitely).
         var ctrlSend = mux.OpenChannel("ctrl<<");
         IReadChannel? ctrlRecv = null;
 
-        await foreach (var ch in mux.AcceptChannelsAsync(ct: ct))
+        using var ctrlCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        ctrlCts.CancelAfter(TimeSpan.FromSeconds(5));
+
+        await foreach (var ch in mux.AcceptChannelsAsync(ct: ctrlCts.Token))
         {
             if (ch.ChannelId == "ctrl>>")
             {
@@ -260,11 +336,40 @@ static async Task HandleRelayConnectionAsync(
             TunnelJsonContext.Default.TunnelMessage,
             TunnelJsonContext.Default.TunnelMessage);
 
-        await foreach (var msg in transit.ReceiveAllAsync(ct))
+        // Bounded auth grace period: an unauthenticated connection that does
+        // not prove its token within ~5s is closed. The timer is disabled
+        // once this connection authenticates.
+        using var authGraceCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        if (authToken != null)
+            authGraceCts.CancelAfter(TimeSpan.FromSeconds(5));
+
+        await foreach (var msg in transit.ReceiveAllAsync(authGraceCts.Token))
         {
             switch (msg)
             {
+                case Authenticate auth:
+                    if (authToken != null && FixedTimeEquals(auth.Token ?? "", authToken))
+                    {
+                        authed = true;
+                        authGraceCts.CancelAfter(Timeout.InfiniteTimeSpan);
+                    }
+                    else if (authToken != null)
+                        Console.WriteLine($"[Relay] {connectionId} auth failed");
+                    break;
+
                 case RegisterService reg:
+                    if (!authed)
+                    {
+                        Console.WriteLine($"[Relay] {connectionId} rejected unauthenticated register of '{reg.Name}'");
+                        await transit.SendAsync(new RegisterAck(false, "Not authenticated"), ct);
+                        break;
+                    }
+                    if (allowedServices.Count > 0 && !allowedServices.Contains(reg.Name))
+                    {
+                        Console.WriteLine($"[Relay] {connectionId} rejected non-allowlisted service '{reg.Name}'");
+                        await transit.SendAsync(new RegisterAck(false, $"Service '{reg.Name}' is not allowlisted"), ct);
+                        break;
+                    }
                     Console.WriteLine($"[Relay] {connectionId} registering service '{reg.Name}' (device: {reg.DeviceId}, port: {reg.LocalPort})");
 
                     var agentConn = new AgentConnection(mux, transit, reg.DeviceId, reg.LocalPort);
@@ -282,6 +387,12 @@ static async Task HandleRelayConnectionAsync(
                     break;
 
                 case TunnelRequest req:
+                    if (!authed)
+                    {
+                        Console.WriteLine($"[Relay] {connectionId} rejected unauthenticated tunnel to '{req.ServiceName}' (id: {req.TunnelId})");
+                        await transit.SendAsync(new TunnelReject(req.TunnelId, "Not authenticated"), ct);
+                        break;
+                    }
                     Console.WriteLine($"[Relay] {connectionId} requesting tunnel to '{req.ServiceName}' (id: {req.TunnelId})");
 
                     if (!agents.TryGetValue(req.ServiceName, out var agent))
@@ -312,6 +423,11 @@ static async Task HandleRelayConnectionAsync(
                     break;
 
                 case ListRequest:
+                    if (!authed)
+                    {
+                        Console.WriteLine($"[Relay] {connectionId} rejected unauthenticated list request");
+                        return; // close without enumeration
+                    }
                     var services = agents.Select(kv => new ServiceInfo(
                         kv.Key, kv.Value.DeviceId, kv.Value.LocalPort)).ToArray();
                     await transit.SendAsync(new ServiceList(services), ct);
@@ -319,7 +435,11 @@ static async Task HandleRelayConnectionAsync(
             }
         }
     }
-    catch (OperationCanceledException) { }
+    catch (OperationCanceledException)
+    {
+        if (!ct.IsCancellationRequested && authToken != null && !authed)
+            Console.WriteLine($"[Relay] Connection {connectionId} closed: auth timeout");
+    }
     catch (Exception ex)
     {
         Console.WriteLine($"[Relay] Connection {connectionId} error: {ex.Message}");
@@ -370,6 +490,9 @@ static async Task<int> RunAgentAsync(string[] args, CancellationToken ct)
 
     if (!int.TryParse(args[4], out var localPort))
         return PrintUsage($"Invalid local port: {args[4]}");
+
+    if (!TryResolveClientAuth(args[5..], out var agentAuthToken, out var agentAuthError))
+        return PrintUsage(agentAuthError);
 
     var deviceId = Environment.MachineName;
     var (options, isWs) = CreateClientOptions(host, portPath);
@@ -425,7 +548,9 @@ static async Task<int> RunAgentAsync(string[] args, CancellationToken ct)
         TunnelJsonContext.Default.TunnelMessage,
         TunnelJsonContext.Default.TunnelMessage);
 
-    // Register service
+    // Register service (auth first when the relay requires it)
+    if (agentAuthToken != null)
+        await transit.SendAsync(new Authenticate(agentAuthToken), ct);
     await transit.SendAsync(new RegisterService(serviceName, deviceId, localPort), ct);
 
     var ackMsg = await transit.ReceiveAsync(ct);
@@ -521,6 +646,9 @@ static async Task<int> RunForwardAsync(string[] args, CancellationToken ct)
     if (!int.TryParse(args[4], out var localPort))
         return PrintUsage($"Invalid local port: {args[4]}");
 
+    if (!TryResolveClientAuth(args[5..], out var forwardAuthToken, out var forwardAuthError))
+        return PrintUsage(forwardAuthError);
+
     var (options, isWs) = CreateClientOptions(host, portPath);
     var transport = isWs ? "WebSocket" : "TCP";
 
@@ -556,7 +684,7 @@ static async Task<int> RunForwardAsync(string[] args, CancellationToken ct)
 
     IReadChannel? ctrlRecv = null;
     var ctrlReceivedTcs = new TaskCompletionSource();
-    
+
     // Accept task runs continuously to handle both control and tunnel channels
     _ = Task.Run(async () =>
     {
@@ -606,6 +734,10 @@ static async Task<int> RunForwardAsync(string[] args, CancellationToken ct)
         ctrlSend, ctrlRecv,
         TunnelJsonContext.Default.TunnelMessage,
         TunnelJsonContext.Default.TunnelMessage);
+
+    // Auth first when the relay requires it; tunnel requests follow per connection.
+    if (forwardAuthToken != null)
+        await transit.SendAsync(new Authenticate(forwardAuthToken), ct);
 
     // Start local listener
     var listener = new TcpListener(IPAddress.Loopback, localPort);
@@ -723,6 +855,9 @@ static async Task<int> RunListAsync(string[] args, CancellationToken ct)
     var host = args[1];
     var portPath = args[2];
 
+    if (!TryResolveClientAuth(args[3..], out var listAuthToken, out var listAuthError))
+        return PrintUsage(listAuthError);
+
     var (options, isWs) = CreateClientOptions(host, portPath);
     var transport = isWs ? "WebSocket" : "TCP";
 
@@ -759,6 +894,9 @@ static async Task<int> RunListAsync(string[] args, CancellationToken ct)
         TunnelJsonContext.Default.TunnelMessage,
         TunnelJsonContext.Default.TunnelMessage);
 
+    // Auth first so an auth-gated relay permits the listing.
+    if (listAuthToken != null)
+        await transit.SendAsync(new Authenticate(listAuthToken), ct);
     await transit.SendAsync(new ListRequest(), ct);
     var response = await transit.ReceiveAsync(ct);
 
@@ -793,6 +931,145 @@ static async Task<int> RunListAsync(string[] args, CancellationToken ct)
 // ═══════════════════════════════════════════════════════════════
 //   Helpers
 // ═══════════════════════════════════════════════════════════════
+
+// Fail-closed relay auth: requires --auth/--auth-env or explicit
+// --allow-no-auth. Never logs the token itself.
+static bool TryResolveRelayAuth(string[] rest, out string? token, out string? error)
+{
+    token = null;
+    error = null;
+
+    var authIdx = Array.IndexOf(rest, "--auth");
+    var envIdx = Array.IndexOf(rest, "--auth-env");
+    var allowNoAuth = rest.Contains("--allow-no-auth");
+
+    if (authIdx >= 0 && authIdx != Array.LastIndexOf(rest, "--auth"))
+    {
+        error = "Duplicate --auth flag specified.";
+        return false;
+    }
+    if (envIdx >= 0 && envIdx != Array.LastIndexOf(rest, "--auth-env"))
+    {
+        error = "Duplicate --auth-env flag specified.";
+        return false;
+    }
+
+    string? flagToken = authIdx >= 0
+        ? (authIdx + 1 < rest.Length ? rest[authIdx + 1] : null)
+        : null;
+    if (authIdx >= 0 && flagToken == null)
+    {
+        error = "Missing value for --auth.";
+        return false;
+    }
+    if (flagToken != null && string.IsNullOrWhiteSpace(flagToken))
+    {
+        error = "--auth value must not be empty.";
+        return false;
+    }
+
+    string? envToken = null;
+    if (envIdx >= 0)
+    {
+        if (envIdx + 1 >= rest.Length)
+        {
+            error = "Missing value for --auth-env.";
+            return false;
+        }
+        envToken = Environment.GetEnvironmentVariable(rest[envIdx + 1]);
+        if (string.IsNullOrEmpty(envToken))
+        {
+            error = $"Environment variable '{rest[envIdx + 1]}' is not set or empty.";
+            return false;
+        }
+    }
+
+    if (flagToken != null && envToken != null)
+    {
+        error = "Specify only one of --auth or --auth-env.";
+        return false;
+    }
+
+    token = flagToken ?? envToken;
+
+    if (token == null && !allowNoAuth)
+    {
+        error = "No auth configured. Pass --auth <token>, --auth-env NAME, or --allow-no-auth (insecure, local demos only).";
+        return false;
+    }
+
+    return true;
+}
+
+// Clients pass a token through when given; no fail-closed requirement.
+static bool TryResolveClientAuth(string[] rest, out string? token, out string? error)
+{
+    token = null;
+    error = null;
+
+    var authIdx = Array.IndexOf(rest, "--auth");
+    var envIdx = Array.IndexOf(rest, "--auth-env");
+
+    if (authIdx >= 0 && authIdx != Array.LastIndexOf(rest, "--auth"))
+    {
+        error = "Duplicate --auth flag specified.";
+        return false;
+    }
+    if (envIdx >= 0 && envIdx != Array.LastIndexOf(rest, "--auth-env"))
+    {
+        error = "Duplicate --auth-env flag specified.";
+        return false;
+    }
+
+    if (authIdx >= 0)
+    {
+        if (authIdx + 1 >= rest.Length)
+        {
+            error = "Missing value for --auth.";
+            return false;
+        }
+        token = rest[authIdx + 1];
+        if (string.IsNullOrWhiteSpace(token))
+        {
+            token = null;
+            error = "--auth value must not be empty.";
+            return false;
+        }
+    }
+
+    if (envIdx >= 0)
+    {
+        if (envIdx + 1 >= rest.Length)
+        {
+            error = "Missing value for --auth-env.";
+            return false;
+        }
+        if (token != null)
+        {
+            error = "Specify only one of --auth or --auth-env.";
+            return false;
+        }
+        token = Environment.GetEnvironmentVariable(rest[envIdx + 1]);
+        if (string.IsNullOrEmpty(token))
+        {
+            token = null;
+            error = $"Environment variable '{rest[envIdx + 1]}' is not set or empty.";
+            return false;
+        }
+    }
+
+    return true;
+}
+
+// Constant-time token comparison over content so auth failures don't leak
+// prefix length via timing. Lengths still differ observably (short-circuits
+// on length mismatch); only equal-length content compares in constant time.
+static bool FixedTimeEquals(string a, string b)
+{
+    var ab = Encoding.UTF8.GetBytes(a);
+    var bb = Encoding.UTF8.GetBytes(b);
+    return CryptographicOperations.FixedTimeEquals(ab, bb);
+}
 
 static (int port, string path) ParseWsPortPath(string portPath)
 {
@@ -840,6 +1117,7 @@ static (MultiplexerOptions options, bool isWebSocket) CreateClientOptions(string
 // ═══════════════════════════════════════════════════════════════
 
 [JsonPolymorphic(TypeDiscriminatorPropertyName = "$type")]
+[JsonDerivedType(typeof(Authenticate), "auth")]
 [JsonDerivedType(typeof(RegisterService), "register")]
 [JsonDerivedType(typeof(RegisterAck), "register-ack")]
 [JsonDerivedType(typeof(TunnelRequest), "tunnel-req")]
@@ -849,6 +1127,7 @@ static (MultiplexerOptions options, bool isWebSocket) CreateClientOptions(string
 [JsonDerivedType(typeof(ServiceList), "list")]
 public abstract record TunnelMessage;
 
+public record Authenticate(string? Token) : TunnelMessage;
 public record RegisterService(string Name, string DeviceId, int LocalPort) : TunnelMessage;
 public record RegisterAck(bool Success, string? Error) : TunnelMessage;
 public record TunnelRequest(string ServiceName, string TunnelId) : TunnelMessage;
@@ -862,6 +1141,7 @@ record AgentConnection(IStreamMultiplexer Mux, MessageTransit<TunnelMessage, Tun
 record ForwardConnection(IStreamMultiplexer Mux, MessageTransit<TunnelMessage, TunnelMessage> Transit);
 
 [JsonSerializable(typeof(TunnelMessage))]
+[JsonSerializable(typeof(Authenticate))]
 [JsonSerializable(typeof(RegisterService))]
 [JsonSerializable(typeof(RegisterAck))]
 [JsonSerializable(typeof(TunnelRequest))]
