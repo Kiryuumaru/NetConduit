@@ -84,6 +84,20 @@ internal interface IChannelOwner
     int PeerMaxRecvPayload { get; }
 
     /// <summary>
+    /// Single shutdown latch for the owning multiplexer. The registrar reads
+    /// this authoritatively inside the commit lock (ChannelIndexLock -&gt;
+    /// AcceptLock); any <c>IsShuttingDown</c> check on the multiplexer entry
+    /// point itself is advisory-only and exists to fail fast. Teardown itself
+    /// stays in <c>ChannelRegistry</c> / the multiplexer, never here.
+    /// </summary>
+    /// <remarks>
+    /// Defaults to <c>false</c> so isolated test fakes that exercise
+    /// individual channels without a real multiplexer do not need to
+    /// implement this member.
+    /// </remarks>
+    bool IsShuttingDown => false;
+
+    /// <summary>
     /// Live snapshot of the multiplexer's transport-connected state. The
     /// batch-register path reads this AFTER publishing a fresh channel into
     /// the registry so it observes the same publish-then-read invariant as

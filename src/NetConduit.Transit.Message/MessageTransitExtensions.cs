@@ -1,10 +1,7 @@
 using System.Diagnostics.CodeAnalysis;
 using System.Text.Json;
 using System.Text.Json.Serialization.Metadata;
-using NetConduit.Enums;
-using NetConduit.Exceptions;
 using NetConduit.Interfaces;
-using NetConduit.Models;
 
 namespace NetConduit.Transit.Message;
 
@@ -51,7 +48,7 @@ public static class MessageTransitExtensions
         int maxMessageSize = 16 * 1024 * 1024)
     {
         ValidateBaseChannelId(channelId);
-        var (writeChannel, readChannel) = RegisterPair(mux, channelId + OutboundSuffix, channelId + InboundSuffix);
+        var (writeChannel, readChannel) = mux.RegisterChannelPair(channelId + OutboundSuffix, channelId + InboundSuffix);
         return new MessageTransit<TSend, TReceive>(writeChannel, readChannel, sendTypeInfo, receiveTypeInfo, maxMessageSize);
     }
 
@@ -96,7 +93,7 @@ public static class MessageTransitExtensions
         int maxMessageSize = 16 * 1024 * 1024)
     {
         ValidateBaseChannelId(channelId);
-        var (writeChannel, readChannel) = RegisterPair(mux, channelId + InboundSuffix, channelId + OutboundSuffix);
+        var (writeChannel, readChannel) = mux.RegisterChannelPair(channelId + InboundSuffix, channelId + OutboundSuffix);
         return new MessageTransit<TSend, TReceive>(writeChannel, readChannel, sendTypeInfo, receiveTypeInfo, maxMessageSize);
     }
 
@@ -190,7 +187,7 @@ public static class MessageTransitExtensions
         JsonTypeInfo<TReceive> receiveTypeInfo,
         int maxMessageSize = 16 * 1024 * 1024)
     {
-        var (writeChannel, readChannel) = RegisterPair(mux, writeChannelId, readChannelId);
+        var (writeChannel, readChannel) = mux.RegisterChannelPair(writeChannelId, readChannelId);
         return new MessageTransit<TSend, TReceive>(writeChannel, readChannel, sendTypeInfo, receiveTypeInfo, maxMessageSize);
     }
 
@@ -291,7 +288,7 @@ public static class MessageTransitExtensions
         int maxMessageSize = 16 * 1024 * 1024)
     {
         ValidateBaseChannelId(channelId);
-        var (writeChannel, readChannel) = RegisterPair(mux, channelId + OutboundSuffix, channelId + InboundSuffix);
+        var (writeChannel, readChannel) = mux.RegisterChannelPair(channelId + OutboundSuffix, channelId + InboundSuffix);
         return new MessageTransit<TSend, TReceive>(writeChannel, readChannel, jsonOptions, maxMessageSize);
     }
 
@@ -335,7 +332,7 @@ public static class MessageTransitExtensions
         int maxMessageSize = 16 * 1024 * 1024)
     {
         ValidateBaseChannelId(channelId);
-        var (writeChannel, readChannel) = RegisterPair(mux, channelId + InboundSuffix, channelId + OutboundSuffix);
+        var (writeChannel, readChannel) = mux.RegisterChannelPair(channelId + InboundSuffix, channelId + OutboundSuffix);
         return new MessageTransit<TSend, TReceive>(writeChannel, readChannel, jsonOptions, maxMessageSize);
     }
 
@@ -432,7 +429,7 @@ public static class MessageTransitExtensions
         JsonSerializerOptions? jsonOptions,
         int maxMessageSize = 16 * 1024 * 1024)
     {
-        var (writeChannel, readChannel) = RegisterPair(mux, writeChannelId, readChannelId);
+        var (writeChannel, readChannel) = mux.RegisterChannelPair(writeChannelId, readChannelId);
         return new MessageTransit<TSend, TReceive>(writeChannel, readChannel, jsonOptions, maxMessageSize);
     }
 
@@ -535,23 +532,4 @@ public static class MessageTransitExtensions
         }
     }
 
-    // Atomic registration of the write+read channel pair via the multiplexer's
-    // TryRegisterChannels primitive. Either both channels are registered or
-    // neither is — no leaked channel id, no phantom INIT frame on the wire.
-    private static (IWriteChannel Write, IReadChannel Read) RegisterPair(
-        IStreamMultiplexer mux,
-        string writeChannelId,
-        string readChannelId)
-    {
-        var writeReg = new ChannelRegistration(writeChannelId, ChannelDirection.Outbound);
-        var readReg = new ChannelRegistration(readChannelId, ChannelDirection.Inbound);
-        ReadOnlySpan<ChannelRegistration> regs = [writeReg, readReg];
-        if (!mux.TryRegisterChannels(regs, out var channels))
-        {
-            throw new MultiplexerException(
-                ErrorCode.ChannelExists,
-                $"Channel id '{writeChannelId}' or '{readChannelId}' is already in use.");
-        }
-        return ((IWriteChannel)channels[writeReg], (IReadChannel)channels[readReg]);
-    }
 }

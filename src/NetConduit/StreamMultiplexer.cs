@@ -410,20 +410,17 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IChannelOwner
     {
         if (!_isRunning)
             throw new InvalidOperationException("Multiplexer has not been started.");
+        // Advisory-only fast path; the registrar's in-lock IsShuttingDown
+        // read is authoritative (#623).
         if (IsShuttingDown)
             throw new InvalidOperationException("Cannot register new channels after GoAwayAsync.");
         if (registrations.IsEmpty)
             throw new ArgumentException("At least one registration is required.", nameof(registrations));
 
-        try
-        {
-            return _channelRegistrar.TryRegisterChannels(registrations, out channels);
-        }
-        catch (ArgumentException)
-        {
-            channels = new Dictionary<ChannelRegistration, IChannel>();
-            return false;
-        }
+        // Phase-1 validation failures (ArgumentException and its subclass
+        // ArgumentOutOfRangeException) propagate to the caller per contract;
+        // only a Phase-2 id collision / commit race returns false.
+        return _channelRegistrar.TryRegisterChannels(registrations, out channels);
     }
 
     /// <inheritdoc />
