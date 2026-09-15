@@ -168,11 +168,16 @@ public interface IStreamMultiplexer : IAsyncDisposable
     /// <param name="channels">
     /// On success, a dictionary mapping each input registration to the created
     /// <see cref="IChannel"/> (cast to <see cref="IWriteChannel"/> for outbound or
-    /// <see cref="IReadChannel"/> for inbound by the caller). On failure, <c>null</c>.
+    /// <see cref="IReadChannel"/> for inbound by the caller). On a <c>false</c>
+    /// return, <c>null</c>; when this method throws, the value is unspecified.
     /// </param>
     /// <returns>
-    /// <c>true</c> if every channel was registered. <c>false</c> if any channel id was
-    /// already in use; in that case the registry is restored to its pre-call state.
+    /// <c>true</c> if every channel was registered. <c>false</c> if and only if a
+    /// Phase-2 id collision occurred (an outbound id already bound to an existing
+    /// write channel, read channel, or pending accept, or an inbound id already
+    /// bound to an outbound channel); in that case the registry is restored to its
+    /// pre-call state and no INIT frames are emitted for any rolled-back outbound
+    /// registration. Validation failures throw instead of returning <c>false</c>.
     /// </returns>
     /// <exception cref="InvalidOperationException">
     /// The multiplexer has not been started, or shutdown has been initiated.
@@ -180,13 +185,20 @@ public interface IStreamMultiplexer : IAsyncDisposable
     /// <exception cref="ArgumentException">
     /// <paramref name="registrations"/> is empty, contains a null channel id, contains
     /// an invalid channel id (empty or longer than the maximum permitted UTF-8 byte
-    /// length), contains a duplicate (<c>ChannelId</c>, <c>Direction</c>) pair, or an
+    /// length), contains a duplicate (<c>ChannelId</c>, <c>Direction</c>) pair, an
     /// outbound registration carries a <see cref="Models.ChannelOptions"/> whose
     /// <see cref="Models.ChannelOptions.ChannelId"/> disagrees with the registration's
-    /// own <c>ChannelId</c>.
+    /// own <c>ChannelId</c>, or an inbound registration carries a non-null
+    /// <see cref="Models.ChannelRegistration.Options"/>.
     /// </exception>
     /// <exception cref="ArgumentOutOfRangeException">
-    /// An outbound registration carries options with an out-of-range <c>SlabSize</c>.
+    /// An outbound registration carries options with an out-of-range <c>SlabSize</c>,
+    /// or with a <c>SendTimeout</c> that is neither
+    /// <see cref="Timeout.InfiniteTimeSpan"/> nor a non-negative value of at most
+    /// <see cref="int.MaxValue"/> milliseconds.
+    /// </exception>
+    /// <exception cref="System.ComponentModel.InvalidEnumArgumentException">
+    /// A registration carries an undefined <see cref="Enums.ChannelDirection"/> value.
     /// </exception>
     bool TryRegisterChannels(
         ReadOnlySpan<ChannelRegistration> registrations,
