@@ -148,9 +148,9 @@ internal static class DeltaDiff
     {
         var ops = new List<DeltaOperation>();
 
-        var (matchedPairs, unmatchedOld, unmatchedNew) = FindBestMatches(oldArr, newArr);
+        var (matchedPairs, unmatchedOld, unmatchedNew, pairBudgetExceeded) = FindBestMatches(oldArr, newArr);
 
-        if (RequiresReorderFallback(matchedPairs))
+        if (pairBudgetExceeded || RequiresReorderFallback(matchedPairs))
         {
             return [new DeltaOperation(DeltaOp.ArrayReplace, basePath, newArr.DeepClone())];
         }
@@ -202,7 +202,7 @@ internal static class DeltaDiff
         return ops;
     }
 
-    private static bool RequiresReorderFallback(List<(int oldIdx, int newIdx)> matchedPairs)
+    internal static bool RequiresReorderFallback(List<(int oldIdx, int newIdx)> matchedPairs)
     {
         var previousOldIndex = -1;
 
@@ -265,73 +265,155 @@ internal static class DeltaDiff
 
     internal static List<JsonNode?> ComputeLCS(JsonArray a, JsonArray b)
     {
+        // Linear-space Hirschberg LCS: the previous quadratic table is kept
+        // only as the shape of the recurrence; peak memory is two rows.
+        // Callers (DiffPrimitiveArrays) already gate m*n > 1M to ArrayReplace
+        // before reaching here, so this runs strictly under that budget.
+        // Time stays O(m*n) comparisons; space drops to O(min(m,n)).
         int m = a.Count;
         int n = b.Count;
 
-        var dp = new int[m + 1, n + 1];
+        if (m == 0 || n == 0)
+            return [];
 
-        for (int i = 1; i <= m; i++)
-        {
-            for (int j = 1; j <= n; j++)
-            {
-                if (DeepEquals(a[i - 1], b[j - 1]))
-                {
-                    dp[i, j] = dp[i - 1, j - 1] + 1;
-                }
-                else
-                {
-                    dp[i, j] = Math.Max(dp[i - 1, j], dp[i, j - 1]);
-                }
-            }
-        }
-
-        var lcs = new List<JsonNode?>();
-        int x = m, y = n;
-
-        while (x > 0 && y > 0)
-        {
-            if (DeepEquals(a[x - 1], b[y - 1]))
-            {
-                lcs.Add(a[x - 1]?.DeepClone());
-                x--;
-                y--;
-            }
-            else if (dp[x - 1, y] > dp[x, y - 1])
-            {
-                x--;
-            }
-            else
-            {
-                y--;
-            }
-        }
-
-        lcs.Reverse();
-        return lcs;
+        // Keep the row axis on the shorter array so each row pass is minimal.
+        // NOTE: no argument swap — Hirschberg returns the LCS in x-order,
+        // and DiffPrimitiveArrays consumes it positionally against both
+        // arrays, so argument order is observable. The two rows are O(n)
+        // either way; the shorter-rows choice only trims the constant.
+        return Hirschberg(a, b);
     }
 
-    private static (List<(int oldIdx, int newIdx)> matched, List<int> unmatchedOld, List<int> unmatchedNew)
+    // Hirschberg divide-and-conquer on the row axis. Returns the LCS in the
+    // order of the first argument (x). Each level costs O(m*n) comparisons
+    // total across its halves; recursion depth is O(log m).
+    private static List<JsonNode?> Hirschberg(JsonArray x, JsonArray y)
+    {
+        int m = x.Count;
+        int n = y.Count;
+
+        if (m == 0 || n == 0)
+            return [];
+
+        if (m == 1)
+        {
+            // Single row: the element belongs to the LCS iff it appears
+            // anywhere in y (first match wins; DeepEquals is value equality).
+            for (int j = 0; j < n; j++)
+            {
+                if (DeepEquals(x[0], y[j]))
+                    return [x[0]?.DeepClone()];
+            }
+            return [];
+        }
+
+        int mid = m / 2;
+        var left = Slice(x, 0, mid);
+        var right = Slice(x, mid, m - mid);
+
+        var scoreL = LcsLengthRow(left, y);
+        var scoreR = LcsSuffixRow(right, y);
+
+        // Split y where scoreL[j] + scoreR[n-j] is maximal.
+        int bestJ = 0;
+        int best = -1;
+        for (int j = 0; j <= n; j++)
+        {
+            int s = scoreL[j] + scoreR[n - j];
+            if (s > best)
+            {
+                best = s;
+                bestJ = j;
+            }
+        }
+
+        var result = Hirschberg(left, Slice(y, 0, bestJ));
+        result.AddRange(Hirschberg(right, Slice(y, bestJ, n - bestJ)));
+        return result;
+    }
+
+    // Last row of the LCS length table for (x vs y): O(n) space.
+    private static int[] LcsLengthRow(JsonArray x, JsonArray y)
+    {
+        int n = y.Count;
+        var prev = new int[n + 1];
+        var curr = new int[n + 1];
+        for (int i = 0; i < x.Count; i++)
+        {
+            curr[0] = 0;
+            for (int j = 0; j < n; j++)
+            {
+                curr[j + 1] = DeepEquals(x[i], y[j]) ? prev[j] + 1 : Math.Max(prev[j + 1], curr[j]);
+            }
+            (prev, curr) = (curr, prev);
+        }
+        return prev;
+    }
+
+    // Suffix scores via forward rows on reversed sequences: revRow[k] is
+    // the LCS length of reverse(right) vs the length-k prefix of
+    // reverse(y), which equals the LCS length of right vs the length-k
+    // suffix of y. O(n) space. (A direct "reversed recurrence" variant
+    // mis-indexes the running row and silently under-scores suffixes —
+    // verified against the oracle RowFwd(right, suffix) during development.)
+    private static int[] LcsSuffixRow(JsonArray x, JsonArray y)
+    {
+        var revX = ReverseClone(x);
+        var revY = ReverseClone(y);
+        return LcsLengthRow(revX, revY);
+    }
+
+    private static JsonArray ReverseClone(JsonArray source)
+    {
+        var rev = new JsonArray();
+        for (int i = source.Count - 1; i >= 0; i--)
+            rev.Add(source[i]?.DeepClone());
+        return rev;
+    }
+
+    private static JsonArray Slice(JsonArray source, int start, int count)
+    {
+        var slice = new JsonArray();
+        for (int i = start; i < start + count; i++)
+            slice.Add(source[i]?.DeepClone());
+        return slice;
+    }
+
+    private static (List<(int oldIdx, int newIdx)> matched, List<int> unmatchedOld, List<int> unmatchedNew, bool pairBudgetExceeded)
         FindBestMatches(JsonArray oldArr, JsonArray newArr)
     {
         var matched = new List<(int oldIdx, int newIdx)>();
         var usedOld = new HashSet<int>();
         var usedNew = new HashSet<int>();
 
-        // Pass 1: Match by "id" field
+        // Pass 1: Match by "id" field. The old array is indexed once by id
+        // (O(old)) instead of scanned per new element (O(old*new)); the
+        // first old index wins per id, preserving the previous greedy order.
+        var oldById = new Dictionary<string, Queue<int>>(StringComparer.Ordinal);
+        for (int oldIdx = 0; oldIdx < oldArr.Count; oldIdx++)
+        {
+            var oldId = GetIdValue(oldArr[oldIdx]);
+            if (oldId is null) continue;
+            if (!oldById.TryGetValue(oldId, out var queue))
+            {
+                queue = new Queue<int>();
+                oldById[oldId] = queue;
+            }
+            queue.Enqueue(oldIdx);
+        }
         for (int newIdx = 0; newIdx < newArr.Count; newIdx++)
         {
             var newId = GetIdValue(newArr[newIdx]);
             if (newId is null) continue;
 
-            for (int oldIdx = 0; oldIdx < oldArr.Count; oldIdx++)
+            if (oldById.TryGetValue(newId, out var queue))
             {
-                if (usedOld.Contains(oldIdx)) continue;
-
-                var oldId = GetIdValue(oldArr[oldIdx]);
-                if (oldId is not null && oldId == newId)
+                while (queue.Count > 0)
                 {
-                    matched.Add((oldIdx, newIdx));
-                    usedOld.Add(oldIdx);
+                    var candidate = queue.Dequeue();
+                    if (usedOld.Contains(candidate)) continue;
+                    matched.Add((candidate, newIdx));
+                    usedOld.Add(candidate);
                     usedNew.Add(newIdx);
                     break;
                 }
@@ -357,7 +439,14 @@ internal static class DeltaDiff
             }
         }
 
-        // Pass 3: Match by structural similarity
+        // Pass 3: Match by structural similarity. Pairwise similarity is
+        // quadratic in the worst case, so comparison work is budgeted: once
+        // PairComparisons exceeds the pair budget the matcher stops and the
+        // caller falls back to ArrayReplace (same outcome as the previous
+        // op-count fallback, reached earlier instead of after O(n*m) work).
+        const int maxPairComparisons = 250_000;
+        int pairComparisons = 0;
+        bool pairBudgetExceeded = false;
         for (int newIdx = 0; newIdx < newArr.Count; newIdx++)
         {
             if (usedNew.Contains(newIdx)) continue;
@@ -371,6 +460,13 @@ internal static class DeltaDiff
                 if (usedOld.Contains(oldIdx)) continue;
                 if (oldArr[oldIdx] is not JsonObject oldObj) continue;
 
+                pairComparisons++;
+                if (pairComparisons > maxPairComparisons)
+                {
+                    pairBudgetExceeded = true;
+                    break;
+                }
+
                 var similarity = ComputeSimilarity(oldObj, newObj);
                 if (similarity > bestSimilarity && similarity >= 0.5)
                 {
@@ -378,6 +474,9 @@ internal static class DeltaDiff
                     bestOldIdx = oldIdx;
                 }
             }
+
+            if (pairBudgetExceeded)
+                break;
 
             if (bestOldIdx >= 0)
             {
@@ -390,7 +489,7 @@ internal static class DeltaDiff
         var unmatchedOld = Enumerable.Range(0, oldArr.Count).Where(i => !usedOld.Contains(i)).ToList();
         var unmatchedNew = Enumerable.Range(0, newArr.Count).Where(i => !usedNew.Contains(i)).ToList();
 
-        return (matched, unmatchedOld, unmatchedNew);
+        return (matched, unmatchedOld, unmatchedNew, pairBudgetExceeded);
     }
 
     private static string? GetIdValue(JsonNode? node)

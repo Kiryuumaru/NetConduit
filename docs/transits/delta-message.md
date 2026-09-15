@@ -196,5 +196,19 @@ await transit.SendAsync(board);   // sends only the "alice" delta
 ## Limits
 
 - Maximum frame size: `maxMessageSize` (default 16 MiB), same as `MessageTransit`.
+- JSON hardening: peer payloads are parsed with a depth cap of 64 and a token budget of 1M (see ADR-0001 in `../adr/0001-transit-json-limits-618.md`). Breaches throw `JsonException` at parse time and never trigger a resync.
+- Delta path validation: path segments must be strings (object keys) or integers (array indexes). Anything else (boolean, null, float, object, array) throws `JsonException` naming the op and segment index — before the delta reaches apply, so malformed paths never trigger a resync either.
 - `T` must be JSON-serializable. For AOT, supply a `JsonTypeInfo<T>` from a source-generated `JsonSerializerContext`.
 - Best for relatively small state objects with frequent updates. For arbitrary blob transfers, use [`StreamTransit`](stream.md).
+
+## Delta benchmarks (S/M/L)
+
+`DeltaDiffBenchmarks` in the DeltaMessage unit tests reports ops-count + wall-time + new-state JSON bytes for three sizes (run: `dotnet test --filter DeltaDiffBenchmarks`, look for `[delta-bench]` lines):
+
+| Size | Input | Result (2026-09-15, CI runner; wall-time illustrative, machine-dependent) |
+| --- | --- | --- |
+| S | 10 props, 1-field change | ops=1, ~3ms, 71 bytes |
+| M | 1000 props, 10-field change | ops=10, ~1ms, 10782 bytes |
+| L | 1200→1250 primitives (1.5M product, over the 1M gate) | single ArrayReplace, ~2ms, 5154 bytes |
+
+These cover the DeltaMessage diff lane only and are fenced from the transport comparison tables in `../benchmarks.md`.

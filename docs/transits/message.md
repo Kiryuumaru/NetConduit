@@ -46,6 +46,7 @@ public sealed class MessageTransit<TSend, TReceive> : ITransit
 
 - Either `writeChannel` or `readChannel` may be `null` (send-only or receive-only transit).
 - `maxMessageSize` rejects oversized frames on both ends. Default 16 MiB (matches `FrameConstants.MaxFramePayloadSize`).
+- JSON hardening: receives are parsed with a depth cap of 64 and a token budget of 1M (see ADR-0001 in `../adr/0001-transit-json-limits-618.md`). Breaches throw `JsonException` at parse time. Caller `JsonSerializerOptions` are never mutated (clamped on a copy); a `JsonTypeInfo` configured deeper than 64 is rejected loudly.
 - `ReceiveAsync` returns `default(TReceive?)` on EOF.
 
 ## Extension methods
