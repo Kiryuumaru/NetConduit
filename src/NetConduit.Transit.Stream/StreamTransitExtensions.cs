@@ -33,6 +33,32 @@ public static class StreamTransitExtensions
     }
 
     /// <summary>
+    /// Opens a channel and wraps it as a write-only Stream.
+    /// Waits until the channel is ready before returning.
+    /// </summary>
+    public static Task<StreamTransit> OpenStreamAsync(
+        this IStreamMultiplexer mux,
+        string channelId,
+        CancellationToken cancellationToken = default)
+    {
+        var transit = mux.OpenStream(channelId);
+        return WaitAndOwnAsync(transit, cancellationToken);
+    }
+
+    /// <summary>
+    /// Opens a channel with custom options and wraps it as a write-only Stream.
+    /// Waits until the channel is ready before returning.
+    /// </summary>
+    public static Task<StreamTransit> OpenStreamAsync(
+        this IStreamMultiplexer mux,
+        ChannelOptions options,
+        CancellationToken cancellationToken = default)
+    {
+        var transit = mux.OpenStream(options);
+        return WaitAndOwnAsync(transit, cancellationToken);
+    }
+
+    /// <summary>
     /// Accepts a channel and wraps it as a read-only Stream.
     /// Returns immediately in pending state. Use <see cref="ITransit.WaitForReadyAsync"/> to wait for readiness.
     /// </summary>
@@ -54,6 +80,22 @@ public static class StreamTransitExtensions
         CancellationToken cancellationToken = default)
     {
         var transit = mux.AcceptStream(channelId);
+        try
+        {
+            await transit.WaitForReadyAsync(cancellationToken).ConfigureAwait(false);
+        }
+        catch
+        {
+            await transit.DisposeAsync().ConfigureAwait(false);
+            throw;
+        }
+        return transit;
+    }
+
+    private static async Task<StreamTransit> WaitAndOwnAsync(
+        StreamTransit transit,
+        CancellationToken cancellationToken)
+    {
         try
         {
             await transit.WaitForReadyAsync(cancellationToken).ConfigureAwait(false);

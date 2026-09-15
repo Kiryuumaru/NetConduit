@@ -3,7 +3,7 @@ namespace NetConduit.UnitTests;
 public sealed class PriorityTests
 {
     [Fact]
-    public async Task HighPriorityChannel_SentBeforeLowPriority()
+    public async Task HighAndLowPriorityChannels_BothDeliverPayloads()
     {
         var duplex = new DuplexMemoryStream();
 
@@ -39,7 +39,7 @@ public sealed class PriorityTests
         var lowRead = await server.AcceptChannelAsync("low", cts.Token);
         var highRead = await server.AcceptChannelAsync("high", cts.Token);
 
-        // Write low FIRST, then high — priority sorting should send high before low
+        // Write on both channels; each payload arrives on its own channel.
         await lowCh.WriteAsync(new byte[] { 0xBB });
         await highCh.WriteAsync(new byte[] { 0xAA });
 
