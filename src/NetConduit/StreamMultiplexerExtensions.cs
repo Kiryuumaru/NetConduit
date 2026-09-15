@@ -1,3 +1,5 @@
+using NetConduit.Enums;
+using NetConduit.Exceptions;
 using NetConduit.Interfaces;
 using NetConduit.Models;
 
@@ -89,5 +91,30 @@ public static class StreamMultiplexerExtensions
             await channel.DisposeAsync().ConfigureAwait(false);
             throw;
         }
+    }
+
+    /// <summary>
+    /// Atomically register a write+read channel pair via the multiplexer's
+    /// TryRegisterChannels primitive. Either both channels are registered or
+    /// neither is — no leaked channel id, no phantom INIT frame on the wire.
+    /// Maps a <c>false</c> return (id collision only, per contract) to
+    /// <see cref="MultiplexerException"/> with <see cref="ErrorCode.ChannelExists"/>.
+    /// Validation failures propagate from TryRegisterChannels as documented there.
+    /// </summary>
+    public static (IWriteChannel Write, IReadChannel Read) RegisterChannelPair(
+        this IStreamMultiplexer mux,
+        string writeChannelId,
+        string readChannelId)
+    {
+        var writeReg = new ChannelRegistration(writeChannelId, ChannelDirection.Outbound);
+        var readReg = new ChannelRegistration(readChannelId, ChannelDirection.Inbound);
+        ReadOnlySpan<ChannelRegistration> regs = [writeReg, readReg];
+        if (!mux.TryRegisterChannels(regs, out var channels))
+        {
+            throw new MultiplexerException(
+                ErrorCode.ChannelExists,
+                $"Channel id '{writeChannelId}' or '{readChannelId}' is already in use.");
+        }
+        return ((IWriteChannel)channels[writeReg], (IReadChannel)channels[readReg]);
     }
 }
