@@ -2,6 +2,7 @@ using System.Diagnostics;
 using System.Net;
 using System.Net.Sockets;
 using System.Runtime.InteropServices;
+using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json.Serialization;
 using NetConduit;
@@ -24,31 +25,162 @@ if (args.Length < 2)
 }
 
 if (args[0] == "server" && int.TryParse(args[1], out var port))
-    await RunServerAsync(port);
+{
+    var rest = args[2..];
+    var bind = ParseBind(rest);
+    if (bind == null) { PrintUsage("Invalid --bind value (expected 'loopback' or 'any')."); return; }
+    if (!TryResolveAuth(rest, out var token, out var authError)) { PrintUsage(authError); return; }
+    if (bind.Equals(IPAddress.Any))
+        WriteBindAnyWarning();
+    if (token == null)
+        WriteNoAuthWarning();
+    await RunServerAsync(port, bind, token);
+}
 else if (args[0] == "client" && int.TryParse(args[1], out var cport) && args.Length >= 3)
-    await RunClientAsync(args[2], cport);
+{
+    var rest = args[3..];
+    if (!TryResolveClientAuth(rest, out var ctoken, out var cauthError)) { PrintUsage(cauthError); return; }
+    await RunClientAsync(args[2], cport, ctoken);
+}
 else
     PrintUsage();
 
 return;
 
-void PrintUsage()
+// "any" binds all interfaces (convenient but exposed); default is loopback.
+IPAddress? ParseBind(string[] rest)
 {
+    var idx = Array.IndexOf(rest, "--bind");
+    if (idx < 0) return IPAddress.Loopback;
+    if (idx != Array.LastIndexOf(rest, "--bind")) return null;
+    if (idx + 1 >= rest.Length) return null;
+    return rest[idx + 1].ToLowerInvariant() switch
+    {
+        "loopback" => IPAddress.Loopback,
+        "any" => IPAddress.Any,
+        _ => null,
+    };
+}
+
+// Fail-closed: a server must have either a token (--auth/--auth-env) or an
+// explicit --allow-no-auth escape hatch. Returns (ok, token-or-null, error).
+bool TryResolveAuth(string[] rest, out string? token, out string? error)
+{
+    return TryResolveAuthCommon(rest, out token, out error);
+}
+
+// Clients just pass a token through if given; no fail-closed requirement.
+bool TryResolveClientAuth(string[] rest, out string? token, out string? error)
+{
+    return TryResolveAuthCommon(rest, out token, out error, clientMode: true);
+}
+
+bool TryResolveAuthCommon(string[] rest, out string? token, out string? error, bool clientMode = false)
+{
+    token = null;
+    error = null;
+
+    var authIdx = Array.IndexOf(rest, "--auth");
+    var envIdx = Array.IndexOf(rest, "--auth-env");
+    var allowNoAuth = rest.Contains("--allow-no-auth");
+
+    if (authIdx >= 0 && authIdx != Array.LastIndexOf(rest, "--auth"))
+    {
+        error = "Duplicate --auth flag specified.";
+        return false;
+    }
+    if (envIdx >= 0 && envIdx != Array.LastIndexOf(rest, "--auth-env"))
+    {
+        error = "Duplicate --auth-env flag specified.";
+        return false;
+    }
+
+    string? flagToken = authIdx >= 0
+        ? (authIdx + 1 < rest.Length ? rest[authIdx + 1] : null)
+        : null;
+    if (authIdx >= 0 && flagToken == null)
+    {
+        error = "Missing value for --auth.";
+        return false;
+    }
+    if (flagToken != null && string.IsNullOrWhiteSpace(flagToken))
+    {
+        error = "--auth value must not be empty.";
+        return false;
+    }
+
+    string? envToken = null;
+    if (envIdx >= 0)
+    {
+        if (envIdx + 1 >= rest.Length)
+        {
+            error = "Missing value for --auth-env.";
+            return false;
+        }
+        envToken = Environment.GetEnvironmentVariable(rest[envIdx + 1]);
+        if (string.IsNullOrEmpty(envToken))
+        {
+            error = $"Environment variable '{rest[envIdx + 1]}' is not set or empty.";
+            return false;
+        }
+    }
+
+    if (flagToken != null && envToken != null)
+    {
+        error = "Specify only one of --auth or --auth-env.";
+        return false;
+    }
+
+    token = flagToken ?? envToken;
+
+    if (token == null && !allowNoAuth && !clientMode)
+    {
+        error = "No auth configured. Pass --auth <token>, --auth-env NAME, or --allow-no-auth (insecure, local demos only).";
+        return false;
+    }
+
+    return true;
+}
+
+void PrintUsage(string? error = null)
+{
+    if (error != null)
+        Console.Error.WriteLine($"Error: {error}\n");
     Console.WriteLine("NetConduit Remote Shell");
     Console.WriteLine();
     Console.WriteLine("Usage:");
-    Console.WriteLine("  server <port>        Start shell server");
-    Console.WriteLine("  client <port> <host> Connect to server");
+    Console.WriteLine("  server <port> [--bind loopback|any] [--auth <token> | --auth-env NAME | --allow-no-auth]");
+    Console.WriteLine("  client <port> <host> [--auth <token> | --auth-env NAME]");
+    Console.WriteLine();
+    Console.WriteLine("  --bind loopback (default) listens on localhost only.");
+    Console.WriteLine("  --bind any listens on all interfaces. WARNING: exposes a remote shell to the network.");
+    Console.WriteLine("  Token + shell I/O travel as cleartext (no TLS): use loopback only, or tunnel over TLS/SSH on untrusted networks.");
+    Console.WriteLine("  A server requires --auth/--auth-env, or explicit --allow-no-auth (insecure, local demos only).");
+    Console.WriteLine("  Do not expose this sample to untrusted networks.");
+}
+
+void WriteBindAnyWarning()
+{
+    WriteColored("WARNING: ", ConsoleColor.Yellow);
+    Console.WriteLine("--bind any listens on all network interfaces.");
+    WriteColored("WARNING: ", ConsoleColor.Yellow);
+    Console.WriteLine("Anyone who can reach this port and knows the token gets a shell. Token + shell I/O are cleartext (no TLS). Do not expose to untrusted networks.");
+}
+
+void WriteNoAuthWarning()
+{
+    WriteColored("WARNING: ", ConsoleColor.Yellow);
+    Console.WriteLine("Running with --allow-no-auth: any client can execute commands. Local demos only.");
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // SERVER
 // ═══════════════════════════════════════════════════════════════════════════════
 
-async Task RunServerAsync(int port)
+async Task RunServerAsync(int port, IPAddress bind, string? authToken)
 {
     var cts = new CancellationTokenSource();
-    var listener = new TcpListener(IPAddress.Any, port);
+    var listener = new TcpListener(bind, port);
 
     void Shutdown()
     {
@@ -70,7 +202,7 @@ async Task RunServerAsync(int port)
 
     listener.Start();
     WriteColored("● ", ConsoleColor.Green);
-    Console.WriteLine($"Remote Shell Server listening on port {port}");
+    Console.WriteLine($"Remote Shell Server listening on {bind}:{port}");
     WriteColored("  Press Ctrl+C to stop", ConsoleColor.DarkGray);
     Console.WriteLine();
     Console.WriteLine();
@@ -90,7 +222,7 @@ async Task RunServerAsync(int port)
             WriteColored($"+ ", ConsoleColor.Cyan);
             Console.WriteLine($"Client connected: {endpoint}");
 
-            _ = HandleClientAsync(tcp, endpoint, cts.Token);
+            _ = HandleClientAsync(tcp, endpoint, authToken, cts.Token);
         }
     }
     catch { }
@@ -98,9 +230,64 @@ async Task RunServerAsync(int port)
     Console.WriteLine("Server stopped.");
 }
 
-async Task HandleClientAsync(TcpClient tcp, string endpoint, CancellationToken serverCt)
+async Task HandleClientAsync(TcpClient tcp, string endpoint, string? authToken, CancellationToken serverCt)
 {
     Process? shellProcess = null;
+
+    // Fail-closed auth gate: no shell starts until the client proves the token.
+    // The auth channel ("auth") is accepted first with a ~5s timeout; on any
+    // failure the connection is disposed without Process.Start.
+    async Task<bool> AuthenticateAsync(IStreamMultiplexer mux, CancellationToken ct)
+    {
+        if (authToken == null) return true;
+
+        // The client opens its "auth>>" send channel; accept it here (~5s).
+        // Prefix-filtered so cmd/ctrl channels arriving early stay queued
+        // for the later generic accept instead of being swallowed here.
+        IReadChannel? recv = null;
+        using var authCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        authCts.CancelAfter(5000);
+
+        try
+        {
+            await foreach (var ch in mux.AcceptChannelsAsync("auth>>", ct: authCts.Token))
+            {
+                recv = ch;
+                break;
+            }
+        }
+        catch (OperationCanceledException) { }
+
+        if (recv == null)
+        {
+            WriteColored($"  ✗ ", ConsoleColor.Red);
+            Console.WriteLine($"[{endpoint}] auth failed: no auth channel (timeout)");
+            return false;
+        }
+
+        var transit = new MessageTransit<Msg, Msg>(null, recv, Ctx.Default.Msg, Ctx.Default.Msg);
+        Msg? msg = null;
+        try
+        {
+            using var msgCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            msgCts.CancelAfter(5000);
+            await foreach (var m in transit.ReceiveAllAsync(msgCts.Token))
+            {
+                msg = m;
+                break;
+            }
+        }
+        catch (OperationCanceledException) { }
+
+        if (msg?.T != "auth" || msg.D == null || !FixedTimeEquals(msg.D, authToken))
+        {
+            WriteColored($"  ✗ ", ConsoleColor.Red);
+            Console.WriteLine($"[{endpoint}] auth failed: bad or missing token");
+            return false;
+        }
+
+        return true;
+    }
 
     try
     {
@@ -118,7 +305,16 @@ async Task HandleClientAsync(TcpClient tcp, string endpoint, CancellationToken s
         await using var mux = StreamMultiplexer.Create(options);
         using var cts = CancellationTokenSource.CreateLinkedTokenSource(serverCt);
         mux.Start();
-        await mux.WaitForReadyAsync(cts.Token);
+        // Bound the handshake so an unauthenticated connection cannot hold
+        // this handler (and the auth gate below) open indefinitely.
+        using var readyCts = CancellationTokenSource.CreateLinkedTokenSource(cts.Token);
+        readyCts.CancelAfter(5000);
+        try { await mux.WaitForReadyAsync(readyCts.Token); }
+        catch (OperationCanceledException) when (!cts.Token.IsCancellationRequested) { return; }
+
+        // Auth gate runs before any cmd/ctrl channel is accepted and before
+        // any shell process starts. Failure disposes the mux without a shell.
+        if (!await AuthenticateAsync(mux, cts.Token)) return;
 
         // Accept channels from client
         IReadChannel? cmdCh = null;
@@ -267,7 +463,7 @@ async Task HandleClientAsync(TcpClient tcp, string endpoint, CancellationToken s
 // CLIENT
 // ═══════════════════════════════════════════════════════════════════════════════
 
-async Task RunClientAsync(string host, int port)
+async Task RunClientAsync(string host, int port, string? authToken)
 {
     WriteColored("Connecting to ", ConsoleColor.DarkGray);
     WriteColored($"{host}:{port}", ConsoleColor.Cyan);
@@ -286,7 +482,22 @@ async Task RunClientAsync(string host, int port)
         return;
     }
 
-    // Open channels
+    // Open channels (auth first, then cmd/ctrl — mirrors the server gate).
+    // When the server requires auth but this client has no token, no auth
+    // channel is opened and the server rejects us after its auth timeout.
+    if (authToken != null)
+    {
+        var authCh = mux.OpenChannel("auth>>");
+        var authTransit = new MessageTransit<Msg, Msg>(authCh, null, Ctx.Default.Msg, Ctx.Default.Msg);
+        try { await authTransit.SendAsync(new Msg { T = "auth", D = authToken }, mainCts.Token); }
+        catch
+        {
+            WriteColored("✗ ", ConsoleColor.Red);
+            Console.WriteLine("Failed to send auth token");
+            return;
+        }
+    }
+
     var cmdCh = mux.OpenChannel("cmd");
     var ctrlCh = mux.OpenChannel("ctrl");
 
@@ -551,14 +762,24 @@ void WriteColored(string text, ConsoleColor color)
     Console.ForegroundColor = prev;
 }
 
+// Constant-time token comparison over content so auth failures don't leak
+// prefix length via timing. Lengths still differ observably (short-circuits
+// on length mismatch); only equal-length content compares in constant time.
+bool FixedTimeEquals(string a, string b)
+{
+    var ab = Encoding.UTF8.GetBytes(a);
+    var bb = Encoding.UTF8.GetBytes(b);
+    return CryptographicOperations.FixedTimeEquals(ab, bb);
+}
+
 // ═══════════════════════════════════════════════════════════════════════════════
 // Messages
 // ═══════════════════════════════════════════════════════════════════════════════
 
 record Msg
 {
-    public string? T { get; init; } // Type: cmd, int (interrupt)
-    public string? D { get; init; } // Data
+    public string? T { get; init; } // Type: auth, cmd, int (interrupt)
+    public string? D { get; init; } // Data (auth token for T=auth, command for T=cmd)
 }
 
 [JsonSerializable(typeof(Msg))]
