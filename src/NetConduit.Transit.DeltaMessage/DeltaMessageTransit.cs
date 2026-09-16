@@ -344,6 +344,10 @@ public sealed class DeltaMessageTransit<T> : IAsyncDisposable
         // Stage all batched mutations on a local clone so an exception during the
         // accumulated delta flush does not advance _lastSentState past what the peer
         // actually received. _lastSentState is only committed after a successful send.
+        // Mid-batch flush: a batch of N states each changing one field would
+        // otherwise accumulate N ops into a single delta frame, so the combined
+        // buffer is flushed every MaxCombinedOps ops (commit-after-send preserved).
+        const int maxCombinedOps = 512;
         var stagedBaseline = _lastSentState?.DeepClone();
         var combinedOps = new List<DeltaOperation>();
 
@@ -365,6 +369,15 @@ public sealed class DeltaMessageTransit<T> : IAsyncDisposable
                 {
                     DeltaApply.ApplyDelta(stagedBaseline, ops);
                     combinedOps.AddRange(ops);
+                    if (combinedOps.Count >= maxCombinedOps)
+                    {
+                        // Flush early so one batch never builds an unbounded
+                        // delta frame. _lastSentState commits only after the
+                        // send succeeds, preserving commit-after-send.
+                        await SendDeltaAsync(combinedOps, cancellationToken).ConfigureAwait(false);
+                        _lastSentState = stagedBaseline.DeepClone();
+                        combinedOps.Clear();
+                    }
                 }
                 else
                 {
@@ -442,7 +455,14 @@ public sealed class DeltaMessageTransit<T> : IAsyncDisposable
             switch (messageType)
             {
                 case 0x00: // Full state
-                    var fullState = JsonNode.Parse(payload.Span);
+                    // Hardened parse: depth cap (64, down-only) throws
+                    // JsonException past the limit, then the token budget
+                    // (1M) rejects giant shapes that fit the 16MB frame.
+                    // Thrown from here — outside the apply try below — a
+                    // JsonException is a malformed-payload failure and never
+                    // sets _outgoingResyncPending: only ApplyDelta failures
+                    // (genuine state divergence) request a resync.
+                    var fullState = NetConduit.Transit.JsonHardening.ParseNode(payload.Span);
                     _lastReceivedState = fullState?.DeepClone();
                     return FromJsonNode(fullState);
 
@@ -818,7 +838,11 @@ public sealed class DeltaMessageTransit<T> : IAsyncDisposable
     internal static List<DeltaOperation> DeserializeDelta(ReadOnlySpan<byte> json)
     {
         var ops = new List<DeltaOperation>();
-        var array = JsonNode.Parse(json);
+        // Hardened parse (depth 64 + 1M token budget): hostile nesting or
+        // giant op arrays fail here with JsonException, before any op is
+        // decoded — and, as with #611, outside the apply try so a parse
+        // failure never maps to a resync request.
+        var array = NetConduit.Transit.JsonHardening.ParseNode(json);
         if (array is not JsonArray opsArray)
             throw new JsonException("Delta payload must be a JSON array.");
 
@@ -835,7 +859,7 @@ public sealed class DeltaMessageTransit<T> : IAsyncDisposable
             var opCode = (DeltaOp)rawOpCode;
             if (opArray[1] is not JsonArray pathArray)
                 throw new JsonException("Delta operation path must be a JSON array.");
-            var path = JsonArrayToPath(pathArray);
+            var path = JsonArrayToPath(pathArray, ops.Count);
 
             JsonNode? value = null;
             int? index = null;
@@ -886,7 +910,13 @@ public sealed class DeltaMessageTransit<T> : IAsyncDisposable
         return array;
     }
 
-    private static object[] JsonArrayToPath(JsonArray array)
+    // A path segment is an object property name (string) or an array index
+    // (integer). Anything else (boolean, null, float, object, array) is
+    // rejected here at parse time with JsonException so a malformed path
+    // never reaches DeltaApply, where it would surface as
+    // InvalidOperationException and trigger a baseline-reset plus resync
+    // request. Empty paths are legal (root operations).
+    private static object[] JsonArrayToPath(JsonArray array, int opIndex)
     {
         var path = new object[array.Count];
         for (int i = 0; i < array.Count; i++)
@@ -895,10 +925,17 @@ public sealed class DeltaMessageTransit<T> : IAsyncDisposable
             if (node is JsonValue val)
             {
                 if (val.TryGetValue<int>(out var intVal))
+                {
                     path[i] = intVal;
-                else if (val.TryGetValue<string>(out var strVal))
-                    path[i] = strVal!;
+                    continue;
+                }
+                if (val.TryGetValue<string>(out var strVal) && strVal is not null)
+                {
+                    path[i] = strVal;
+                    continue;
+                }
             }
+            throw new JsonException($"Delta op {opIndex} path segment at index {i} must be a string or integer.");
         }
         return path;
     }
