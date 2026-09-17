@@ -160,11 +160,21 @@ internal sealed class MuxConnectRetry(
     // loop so honest-peer transient failures still recover.
     private static bool IsFatalFactoryException(Exception ex)
     {
+        // Concurrent duplicate acceptance is a structural contract violation,
+        // never a transient: the one-shot loser can never succeed by waiting.
+        // Typed contract first (ServerAcceptConflictException subclasses
+        // InvalidOperationException so existing catch sites keep working),
+        // with the message substring as backstop for untyped/older factories.
+        if (ex is ServerAcceptConflictException)
+            return true;
         // Server-side one-shot helpers across all transports throw
-        // InvalidOperationException with this exact phrase once their accept
+        // InvalidOperationException with these exact phrases once their accept
         // state is consumed. A second invocation can never succeed.
         if (ex is InvalidOperationException && ex.Message.Contains(
                 "does not support reconnection", StringComparison.Ordinal))
+            return true;
+        if (ex is InvalidOperationException && ex.Message.Contains(
+                "is already accepting", StringComparison.Ordinal))
             return true;
         return false;
     }
