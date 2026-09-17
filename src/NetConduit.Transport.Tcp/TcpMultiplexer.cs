@@ -1,5 +1,6 @@
 using System.Net;
 using System.Net.Sockets;
+using NetConduit.Exceptions;
 using NetConduit.Interfaces;
 using NetConduit.Models;
 
@@ -96,7 +97,7 @@ public static class TcpMultiplexer
                 }
                 if (prev == 1)
                 {
-                    throw new InvalidOperationException(
+                    throw new ServerAcceptConflictException(
                         "Server-side multiplexer is already accepting a connection.");
                 }
 

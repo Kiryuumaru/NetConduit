@@ -4,6 +4,7 @@ using System.Net.Security;
 using System.Security.Authentication;
 using System.Security.Cryptography.X509Certificates;
 using System.Runtime.Versioning;
+using NetConduit.Exceptions;
 using NetConduit.Interfaces;
 using NetConduit.Models;
 
@@ -249,7 +250,7 @@ public static class QuicMultiplexer
                 }
                 if (prev == 1)
                 {
-                    throw new InvalidOperationException(
+                    throw new ServerAcceptConflictException(
                         "Server-side QUIC multiplexer is already accepting a connection.");
                 }
 
