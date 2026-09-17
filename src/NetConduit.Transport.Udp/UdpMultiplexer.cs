@@ -10,8 +10,9 @@ namespace NetConduit.Transport.Udp;
 /// </summary>
 public static class UdpMultiplexer
 {
-    private static readonly byte[] HelloPayload = "NC_HELLO"u8.ToArray();
-    private static readonly byte[] HelloAckPayload = "NC_HELLO_ACK"u8.ToArray();
+    // Canonical handshake bytes are owned by UdpHandshakeProtocol (Issue #616);
+    // this class never inlines NC_HELLO / NC_HELLO_ACK literals or SequenceEqual
+    // on the handshake path — sends use Hello/HelloAck, checks use IsHello/IsHelloAck.
 
     /// <summary>
     /// Creates multiplexer options that connect to the specified UDP endpoint.
@@ -37,7 +38,7 @@ public static class UdpMultiplexer
                 {
                     client.Client.DualMode = true;
                     await client.Client.ConnectAsync(host, port, ct).ConfigureAwait(false);
-                    await client.SendAsync(HelloPayload, ct).ConfigureAwait(false);
+                    await client.SendAsync(UdpHandshakeProtocol.Hello, ct).ConfigureAwait(false);
                     await ReceiveHelloAckAsync(client, ct).ConfigureAwait(false);
 
                     var reliable = new ReliableUdpStream(client, udpOptions);
@@ -58,10 +59,12 @@ public static class UdpMultiplexer
     /// </summary>
     /// <param name="listenPort">The port to listen on.</param>
     /// <param name="udpOptions">Optional reliable UDP stream options.</param>
+    /// <param name="acceptOptions">Optional accept policy (Issue #616 hardening); defaults preserve the existing wire contract.</param>
     /// <returns>MultiplexerOptions configured for UDP server acceptance.</returns>
     public static MultiplexerOptions CreateServerOptions(
         int listenPort,
-        ReliableUdpOptions? udpOptions = null)
+        ReliableUdpOptions? udpOptions = null,
+        UdpAcceptOptions? acceptOptions = null)
     {
         // 0 = idle, 1 = accepting, 2 = accepted
         var state = 0;
@@ -88,24 +91,19 @@ public static class UdpMultiplexer
                     listener.Client.DualMode = true;
                     listener.Client.Bind(new IPEndPoint(IPAddress.IPv6Any, listenPort));
 
-                    // Discard datagrams that are not NC_HELLO before latching the
-                    // socket. Without this loop a single stray UDP packet (port
-                    // scanner, leftover from a previous session, attacker probe,
-                    // health check) would Connect() the listener to a non-client
-                    // endpoint and permanently DoS the server.
-                    IPEndPoint remote;
-                    while (true)
-                    {
-                        var result = await listener.ReceiveAsync(ct).ConfigureAwait(false);
-                        if (result.Buffer.AsSpan().SequenceEqual(HelloPayload))
-                        {
-                            remote = result.RemoteEndPoint;
-                            break;
-                        }
-                    }
+                    var policy = acceptOptions ?? new UdpAcceptOptions();
+
+                    // Pre-commit accept policy lives in UdpHandshakeAcceptor (Issue #616):
+                    // stay unconnected through a bounded verification window, ACK every
+                    // admitted NC_HELLO claimant, prefer the data-proven/live winner,
+                    // and hold a competing first-seen through a bounded grace window
+                    // so a live competitor can migrate it pre-Connect. Discard
+                    // semantics for stray non-HELLO (#306) and the fail-loudly drain
+                    // (#347) are preserved below and inside the acceptor.
+                    IPEndPoint remote = await UdpHandshakeAcceptor.AcceptAsync(listener, policy, ct).ConfigureAwait(false);
 
                     listener.Connect(remote);
-                    await listener.SendAsync(HelloAckPayload, ct).ConfigureAwait(false);
+                    await listener.SendAsync(UdpHandshakeProtocol.HelloAck, ct).ConfigureAwait(false);
 
                     // Drain any duplicate NC_HELLO datagrams the client retransmitted
                     // while its first send was still in flight. Without this,
@@ -143,7 +141,7 @@ public static class UdpMultiplexer
                 using var cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
                 cts.CancelAfter(TimeSpan.FromMilliseconds(retryDelayMs));
                 var result = await client.ReceiveAsync(cts.Token).ConfigureAwait(false);
-                if (result.Buffer.AsSpan().SequenceEqual(HelloAckPayload))
+                if (UdpHandshakeProtocol.IsHelloAck(result.Buffer))
                 {
                     return;
                 }
@@ -160,12 +158,12 @@ public static class UdpMultiplexer
             }
             catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
             {
-                await client.SendAsync(HelloPayload, cancellationToken).ConfigureAwait(false);
+                await client.SendAsync(UdpHandshakeProtocol.Hello, cancellationToken).ConfigureAwait(false);
             }
             catch (SocketException)
             {
                 await Task.Delay(retryDelayMs, cancellationToken).ConfigureAwait(false);
-                await client.SendAsync(HelloPayload, cancellationToken).ConfigureAwait(false);
+                await client.SendAsync(UdpHandshakeProtocol.Hello, cancellationToken).ConfigureAwait(false);
             }
         }
 
@@ -205,7 +203,7 @@ public static class UdpMultiplexer
                 return;
             }
 
-            if (!next.Buffer.AsSpan().SequenceEqual(HelloPayload))
+            if (!UdpHandshakeProtocol.IsHello(next.Buffer))
             {
                 // Not a duplicate HELLO — this is the peer's first protocol
                 // frame. UdpClient gives no way to push it back into the receive
