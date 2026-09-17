@@ -194,12 +194,18 @@ class Build : BaseNukeBuildHelpers
                 {
                     version = app.PullRequestVersion.Version.ToString();
                 }
+                // PR-originated CI builds resolve NetConduit deps to local
+                // ProjectReferences; every other path (Bump / Commit / Local)
+                // packs against the pinned NuGet version. Single bool feeds
+                // both DotNetBuild and DotNetPack below so the NoRestore/NoBuild
+                // pack graph matches the build graph.
+                bool useLocalNetConduit = app.IsPullRequest;
                 app.OutputDirectory.DeleteDirectory();
                 DotNetTasks.DotNetClean(_ => _
                     .SetProject(RootDirectory / "src" / spec.ProjectName / $"{spec.ProjectName}.csproj"));
                 DotNetTasks.DotNetBuild(_ => _
                     .SetProjectFile(RootDirectory / "src" / spec.ProjectName / $"{spec.ProjectName}.csproj")
-                    .SetProperty("UseLocalNetConduit", false)
+                    .SetProperty("UseLocalNetConduit", useLocalNetConduit)
                     .SetConfiguration("Release"));
                 DotNetTasks.DotNetPack(_ => _
                     .SetProject(RootDirectory / "src" / spec.ProjectName / $"{spec.ProjectName}.csproj")
@@ -210,7 +216,7 @@ class Build : BaseNukeBuildHelpers
                     .SetSymbolPackageFormat("snupkg")
                     .SetVersion(version)
                     .SetPackageReleaseNotes(NormalizeReleaseNotes(releaseNotes))
-                    .SetProperty("UseLocalNetConduit", false)
+                    .SetProperty("UseLocalNetConduit", useLocalNetConduit)
                     .SetOutputDirectory(app.OutputDirectory));
             }));
 
