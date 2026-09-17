@@ -1,3 +1,5 @@
+using System.ComponentModel;
+
 namespace NetConduit.UnitTests;
 
 public sealed class TryRegisterChannelsTests
@@ -58,14 +60,14 @@ public sealed class TryRegisterChannelsTests
     }
 
     [Fact]
-    public async Task TryRegisterChannels_DuplicateInBatch_ReturnsFalse()
+    public async Task TryRegisterChannels_DuplicateInBatch_ThrowsArgumentException()
     {
         var (client, server) = await StartedPairAsync();
 
         var dup = new ChannelRegistration("dup", ChannelDirection.Outbound);
         ChannelRegistration[] regs = [dup, dup];
 
-        Assert.False(client.TryRegisterChannels(regs, out _));
+        Assert.Throws<ArgumentException>(() => client.TryRegisterChannels(regs, out _));
 
         // Nothing was committed.
         Assert.Null(client.GetWriteChannel("dup"));
@@ -167,7 +169,7 @@ public sealed class TryRegisterChannelsTests
     }
 
     [Fact]
-    public async Task TryRegisterChannels_OptionsChannelIdMismatch_ReturnsFalse()
+    public async Task TryRegisterChannels_OptionsChannelIdMismatch_ThrowsArgumentException()
     {
         var (client, server) = await StartedPairAsync();
 
@@ -176,7 +178,10 @@ public sealed class TryRegisterChannelsTests
             Options = new ChannelOptions { ChannelId = "wrong" },
         };
         ChannelRegistration[] regsArr = [bad];
-        Assert.False(client.TryRegisterChannels(regsArr, out _));
+        Assert.Throws<ArgumentException>(() => client.TryRegisterChannels(regsArr, out _));
+
+        // Nothing was committed.
+        Assert.Null(client.GetWriteChannel("right"));
 
         await client.DisposeAsync();
         await server.DisposeAsync();
@@ -206,7 +211,7 @@ public sealed class TryRegisterChannelsTests
     }
 
     [Fact]
-    public async Task DuplicateChannelIdsInBatch_ReturnsFalse()
+    public async Task DuplicateChannelIdsInBatch_ThrowsArgumentException()
     {
         var (client, server) = await StartedPairAsync();
 
@@ -215,8 +220,93 @@ public sealed class TryRegisterChannelsTests
             new() { ChannelId = "dup", Direction = ChannelDirection.Outbound }
         };
 
-        bool ok = client.TryRegisterChannels(regs, out _);
-        Assert.False(ok);
+        Assert.Throws<ArgumentException>(() => client.TryRegisterChannels(regs, out _));
+
+        // Nothing was committed.
+        Assert.Null(client.GetWriteChannel("dup"));
+
+        await client.DisposeAsync();
+        await server.DisposeAsync();
+    }
+
+    [Fact]
+    public async Task TryRegisterChannels_SendTimeoutRange_ThrowsOutOfRangeAcceptsInfinite()
+    {
+        var (client, server) = await StartedPairAsync();
+
+        var negative = new ChannelRegistration("neg", ChannelDirection.Outbound)
+        {
+            Options = new ChannelOptions { ChannelId = "neg", SendTimeout = TimeSpan.FromSeconds(-5) },
+        };
+        ChannelRegistration[] negativeRegs = [negative];
+        var negativeEx = Assert.Throws<ArgumentOutOfRangeException>(() => client.TryRegisterChannels(negativeRegs, out _));
+        Assert.Contains("SendTimeout", negativeEx.Message);
+        Assert.Null(client.GetWriteChannel("neg"));
+
+        var oversized = new ChannelRegistration("big", ChannelDirection.Outbound)
+        {
+            Options = new ChannelOptions { ChannelId = "big", SendTimeout = TimeSpan.FromDays(30) },
+        };
+        ChannelRegistration[] oversizedRegs = [oversized];
+        var oversizedEx = Assert.Throws<ArgumentOutOfRangeException>(() => client.TryRegisterChannels(oversizedRegs, out _));
+        Assert.Contains("SendTimeout", oversizedEx.Message);
+        Assert.Null(client.GetWriteChannel("big"));
+
+        var infinite = new ChannelRegistration("inf", ChannelDirection.Outbound)
+        {
+            Options = new ChannelOptions { ChannelId = "inf", SendTimeout = Timeout.InfiniteTimeSpan },
+        };
+        ChannelRegistration[] infiniteRegs = [infinite];
+        Assert.True(client.TryRegisterChannels(infiniteRegs, out _));
+        Assert.NotNull(client.GetWriteChannel("inf"));
+
+        await client.DisposeAsync();
+        await server.DisposeAsync();
+    }
+
+    [Fact]
+    public async Task TryRegisterChannels_UndefinedDirection_ThrowsInvalidEnumArgumentException()
+    {
+        var (client, server) = await StartedPairAsync();
+
+        var reg = new ChannelRegistration("ch", (ChannelDirection)99);
+        ChannelRegistration[] regs = [reg];
+
+        Assert.Throws<InvalidEnumArgumentException>(() => client.TryRegisterChannels(regs, out _));
+        Assert.Null(client.GetWriteChannel("ch"));
+
+        await client.DisposeAsync();
+        await server.DisposeAsync();
+    }
+
+    [Fact]
+    public async Task TryRegisterChannels_NullChannelId_ThrowsArgumentException()
+    {
+        var (client, server) = await StartedPairAsync();
+
+        var reg = new ChannelRegistration(null!, ChannelDirection.Outbound);
+        ChannelRegistration[] regs = [reg];
+
+        Assert.Throws<ArgumentException>(() => client.TryRegisterChannels(regs, out _));
+
+        await client.DisposeAsync();
+        await server.DisposeAsync();
+    }
+
+    [Fact]
+    public async Task TryRegisterChannels_OutboundAndInboundSameId_ReturnsFalseWithNullResult()
+    {
+        var (client, server) = await StartedPairAsync();
+
+        var outbound = new ChannelRegistration("x", ChannelDirection.Outbound);
+        var inbound = new ChannelRegistration("x", ChannelDirection.Inbound);
+        ChannelRegistration[] regs = [outbound, inbound];
+
+        Assert.False(client.TryRegisterChannels(regs, out var dict));
+        Assert.Null(dict);
+
+        // The outbound commit was rolled back — no leaked partial state.
+        Assert.Null(client.GetWriteChannel("x"));
 
         await client.DisposeAsync();
         await server.DisposeAsync();

@@ -119,10 +119,11 @@ var read  = (IReadChannel)channels[readReg];
 
 Semantics:
 
+- **Return contract:** `false` means collision only. An outbound entry collides when its id is already bound to a write channel, read channel, or pending accept; an inbound entry collides only when its id is already bound to an outbound channel. On `false` the registry is restored to its pre-call state, no `INIT` frame is buffered for any rolled-back outbound, and the `out` dictionary is `null`. Validation failures throw instead of returning `false` (the `out` value is then unspecified).
 - **Outbound** entries require a vacant id. Any pre-existing write channel, read channel, or pending accept on the same id causes the full batch to roll back and the method returns `false`.
-- **Inbound** entries are idempotent, like `AcceptChannel(string)`. An existing read channel or pending accept on the same id is reused and returned in the result dictionary. A pre-existing outbound binding on the same id is still a collision.
-- The same `(ChannelId, Direction)` pair may not appear twice in a single batch — that throws `ArgumentException`.
-- Invalid input (empty batch, null/oversized channel id, mismatched `Options.ChannelId`, out-of-range `SlabSize`) throws before any commit occurs.
+- **Inbound** entries are idempotent, like `AcceptChannel(string)`. An existing read channel or pending accept on the same id is reused and returned in the result dictionary. A pre-existing outbound binding on the same id is still a collision. Inbound entries must carry `Options = null`, otherwise `ArgumentException` is thrown.
+- The same `(ChannelId, Direction)` pair may not appear twice in a single batch — that throws `ArgumentException`. The same id in opposite directions is legal as input (it is not a duplicate pair); it is resolved by the collision rule above — on an otherwise empty registry the second entry collides with the first entry's commit, so the batch returns `false`.
+- Invalid input throws before any commit occurs: empty batch, null/empty/oversized channel id, duplicate `(ChannelId, Direction)` pair, mismatched `Options.ChannelId`, or inbound non-null `Options` throw `ArgumentException`; undefined `Direction` throws `InvalidEnumArgumentException`; out-of-range outbound `SlabSize`, or outbound `SendTimeout` that is neither `Timeout.InfiniteTimeSpan` nor a non-negative value of at most `int.MaxValue` milliseconds, throws `ArgumentOutOfRangeException`.
 - The multiplexer must be started and not shutting down, otherwise `InvalidOperationException` is thrown.
 
 This primitive is what the composite transit packages (`NetConduit.Transit.DuplexStream`, `NetConduit.Transit.Message`, `NetConduit.Transit.DeltaMessage`) use to allocate their write + read channel pair without leaking a half-committed channel id when the second registration would have failed.

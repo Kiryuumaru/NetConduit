@@ -18,7 +18,8 @@ public readonly record struct ChannelRegistration(string ChannelId, ChannelDirec
 {
     /// <summary>
     /// Per-channel options. Only consulted for <see cref="ChannelDirection.Outbound"/>
-    /// registrations. When <c>null</c>, the multiplexer's default channel options apply.
+    /// registrations; an inbound registration carrying non-null options throws
+    /// <see cref="ArgumentException"/>. When <c>null</c>, the multiplexer's default channel options apply.
     /// Excluded from value equality so the registration can be used directly as a
     /// dictionary key without options-instance fragility.
     /// </summary>
