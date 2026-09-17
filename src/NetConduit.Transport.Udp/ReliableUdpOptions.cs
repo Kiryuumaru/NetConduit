@@ -61,6 +61,26 @@ public sealed class ReliableUdpOptions
 
     private readonly TimeSpan _retransmitTimeout = TimeSpan.FromSeconds(1);
 
-    /// <summary>Maximum retransmission attempts before failing the write. Default: 5.</summary>
-    public int MaxRetransmits { get; init; } = 5;
+    /// <summary>
+    /// Maximum retransmissions after the initial send before failing the write. Default: 5 (up to 6 sends total).
+    /// Must be non-negative; 0 is legal and means send-once with no retries.
+    /// </summary>
+    public int MaxRetransmits
+    {
+        get => _maxRetransmits;
+        init
+        {
+            if (value < 0)
+            {
+                throw new ArgumentOutOfRangeException(
+                    nameof(MaxRetransmits),
+                    value,
+                    "MaxRetransmits must be non-negative.");
+            }
+
+            _maxRetransmits = value;
+        }
+    }
+
+    private readonly int _maxRetransmits = 5;
 }

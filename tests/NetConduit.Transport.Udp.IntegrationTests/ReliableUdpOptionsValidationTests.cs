@@ -42,4 +42,31 @@ public class ReliableUdpOptionsValidationTests
         _ = Assert.Throws<ArgumentOutOfRangeException>(() =>
             new ReliableUdpOptions { RetransmitTimeout = TimeSpan.FromMilliseconds(-2) });
     }
+
+    [Theory]
+    [InlineData(-1)]
+    [InlineData(-5)]
+    [InlineData(int.MinValue)]
+    public void MaxRetransmits_NegativeValue_Throws(int value)
+    {
+        var ex = Assert.Throws<ArgumentOutOfRangeException>(() =>
+            new ReliableUdpOptions { MaxRetransmits = value });
+        Assert.Equal(nameof(ReliableUdpOptions.MaxRetransmits), ex.ParamName);
+    }
+
+    [Fact]
+    public void MaxRetransmits_Zero_IsAccepted()
+    {
+        var options = new ReliableUdpOptions { MaxRetransmits = 0 };
+
+        Assert.Equal(0, options.MaxRetransmits);
+    }
+
+    [Fact]
+    public void MaxRetransmits_Default_IsFive()
+    {
+        var options = new ReliableUdpOptions();
+
+        Assert.Equal(5, options.MaxRetransmits);
+    }
 }
