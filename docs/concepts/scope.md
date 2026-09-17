@@ -43,6 +43,7 @@ Within that model:
 
 - The mux validates frames against the protocol and rejects malformed input with a `MultiplexerException` and a transport-level disconnect.
 - It bounds memory via slab and frame-size limits so a confused peer cannot drive unbounded allocation.
+- Read-liveness timeouts terminate stalled or slow-drip frame reads; this is resource hygiene for honest-but-degraded peers, not an adversarial defense — a malicious peer with wire access is still out of scope per above.
 - It does not attempt to recover from a peer that violates the protocol on purpose. The connection terminates.
 
 If your threat model includes a peer that may send hand-crafted raw frames, put authentication and integrity protection in the transport (mTLS, QUIC, signed framing) **before** NetConduit sees the bytes.
