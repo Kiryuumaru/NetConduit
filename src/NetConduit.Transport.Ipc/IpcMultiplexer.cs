@@ -2,7 +2,6 @@ using System.Net;
 using System.Net.Sockets;
 using System.Security.Cryptography;
 using System.Text;
-using NetConduit.Exceptions;
 using NetConduit.Interfaces;
 using NetConduit.Models;
 
@@ -96,7 +95,7 @@ public static class IpcMultiplexer
                 }
                 if (prev == 1)
                 {
-                    throw new ServerAcceptConflictException(
+                    throw new InvalidOperationException(
                         "Server-side IPC multiplexer is already accepting a connection.");
                 }
 

@@ -1,6 +1,5 @@
 using System.Net;
 using System.Net.Sockets;
-using NetConduit.Exceptions;
 using NetConduit.Interfaces;
 using NetConduit.Models;
 
@@ -79,7 +78,7 @@ public static class UdpMultiplexer
                 }
                 if (prev == 1)
                 {
-                    throw new ServerAcceptConflictException(
+                    throw new InvalidOperationException(
                         "Server-side UDP multiplexer is already accepting a connection.");
                 }
 
