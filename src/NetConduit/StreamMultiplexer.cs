@@ -269,6 +269,20 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IChannelOwner
                 "ConnectionTimeout must be non-negative, or Timeout.InfiniteTimeSpan to disable per-attempt timeout.");
         if (options.ConnectionTimeout != Timeout.InfiniteTimeSpan)
             ValidateTaskDelayUpperBound(options.ConnectionTimeout, nameof(options.ConnectionTimeout));
+
+        if (options.FrameReadTimeout != Timeout.InfiniteTimeSpan && options.FrameReadTimeout < TimeSpan.Zero)
+            throw new ArgumentOutOfRangeException(
+                nameof(options),
+                options.FrameReadTimeout,
+                "FrameReadTimeout must be non-negative, or Timeout.InfiniteTimeSpan to disable frame-read timeout.");
+        if (options.FrameReadTimeout != Timeout.InfiniteTimeSpan)
+            ValidateTaskDelayUpperBound(options.FrameReadTimeout, nameof(options.FrameReadTimeout));
+
+        if (options.FrameMinReadRateBytesPerSecond < 0)
+            throw new ArgumentOutOfRangeException(
+                nameof(options),
+                options.FrameMinReadRateBytesPerSecond,
+                "FrameMinReadRateBytesPerSecond must be greater than or equal to 0. Use 0 to disable rate enforcement.");
     }
 
     /// <inheritdoc />
@@ -885,6 +899,15 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IChannelOwner
     // Reader Thread — THE DISPATCHER (receive side)
     // Reads 8-byte header, routes payload to the correct channel.
     // =====================================================================
+    private CancellationTokenSource? CreateFrameTimeoutCts(CancellationToken ct)
+    {
+        if (_options.FrameReadTimeout == Timeout.InfiniteTimeSpan || _options.FrameReadTimeout == TimeSpan.Zero)
+            return null;
+        var frameCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        frameCts.CancelAfter(_options.FrameReadTimeout);
+        return frameCts;
+    }
+
     private async Task RunReaderLoopAsync(MuxConnection conn, CancellationToken ct)
     {
         var transport = conn.Transport ?? throw new InvalidOperationException("Transport not initialized.");
@@ -899,18 +922,38 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IChannelOwner
         {
             while (!ct.IsCancellationRequested)
             {
+                // Per-frame liveness deadline (#617): header+payload read as one
+                // frame iteration. A stalled or slow-drip peer faults with
+                // MultiplexerException(Timeout) and terminates the session via
+                // the transport-error path; oversize still throws ProtocolError
+                // at Parse below. InfiniteTimeSpan or Zero disables the deadline.
+                using var frameCts = CreateFrameTimeoutCts(ct);
+                var frameCt = frameCts?.Token ?? ct;
+
                 // 1. Read exactly 8 bytes (frame header)
-                await ReadExactAsync(readStream, headerBuf, ct);
+                try
+                {
+                    await ReadExactAsync(readStream, headerBuf, frameCt);
+                }
+                catch (OperationCanceledException) when (!ct.IsCancellationRequested)
+                {
+                    throw new MultiplexerException(ErrorCode.Timeout,
+                        $"Frame read timed out after {_options.FrameReadTimeout}.");
+                }
                 var header = FrameHeader.Parse(headerBuf);
 
                 Interlocked.Add(ref _stats._bytesReceived, FrameHeader.Size + header.PayloadLength);
 
-                // 2. Read payload — use inline buffer for small frames, rent for large
+                // 2. Read payload — inline buffer for small frames; incremental
+                // growth for large ones (#617: never Rent(declared length)
+                // before bytes arrive; rent tracks bytes received, capped at
+                // the declared PayloadLength under the single 16MB cap).
                 byte[]? rentedBuf = null;
                 byte[] payloadBuf = inlineBuf;
+                int capacity = InlineBufferSize;
                 if (header.PayloadLength > InlineBufferSize)
                 {
-                    rentedBuf = System.Buffers.ArrayPool<byte>.Shared.Rent(header.PayloadLength);
+                    rentedBuf = System.Buffers.ArrayPool<byte>.Shared.Rent(InlineBufferSize);
                     payloadBuf = rentedBuf;
                 }
 
@@ -918,7 +961,36 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IChannelOwner
                 {
                 if (header.PayloadLength > 0)
                 {
-                    await ReadExactAsync(readStream, payloadBuf.AsMemory(0, header.PayloadLength), ct);
+                    try
+                    {
+                        int received = 0;
+                        while (received < header.PayloadLength)
+                        {
+                            if (received == capacity)
+                            {
+                                int newCapacity = Math.Min(header.PayloadLength, capacity * 2);
+                                byte[] grown = System.Buffers.ArrayPool<byte>.Shared.Rent(newCapacity);
+                                Buffer.BlockCopy(payloadBuf, 0, grown, 0, received);
+                                if (rentedBuf is not null)
+                                    System.Buffers.ArrayPool<byte>.Shared.Return(rentedBuf);
+                                rentedBuf = grown;
+                                payloadBuf = grown;
+                                capacity = newCapacity;
+                            }
+                            int want = Math.Min(capacity, header.PayloadLength) - received;
+                            int read = await readStream.ReadAsync(payloadBuf.AsMemory(received, want), frameCt);
+                            if (read == 0)
+                                throw new HandshakeTransportException(
+                                    "Transport stream closed before the frame completed.",
+                                    new EndOfStreamException("Transport stream closed unexpectedly."));
+                            received += read;
+                        }
+                    }
+                    catch (OperationCanceledException) when (!ct.IsCancellationRequested)
+                    {
+                        throw new MultiplexerException(ErrorCode.Timeout,
+                            $"Frame read timed out after {_options.FrameReadTimeout}.");
+                    }
                 }
 
                 var payload = header.PayloadLength > 0
@@ -1418,7 +1490,8 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IChannelOwner
             transport,
             _conn.SessionId,
             _options.DefaultChannelOptions.SlabSize,
-            ct);
+            ct,
+            _options.FrameReadTimeout);
         _conn.RemoteSessionId = result.RemoteSessionId;
         _conn.PeerMaxRecvPayload = result.PeerMaxRecvPayload;
         return result.UseOddIndices;
@@ -1433,7 +1506,8 @@ public sealed class StreamMultiplexer : IStreamMultiplexer, IChannelOwner
             _options.DefaultChannelOptions.SlabSize,
             BuildLocalReplayPositions(),
             ApplyRemoteReplayPositions,
-            ct);
+            ct,
+            _options.FrameReadTimeout);
         _conn.PeerMaxRecvPayload = result.PeerMaxRecvPayload;
     }
 
