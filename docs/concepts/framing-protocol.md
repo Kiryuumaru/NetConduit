@@ -27,6 +27,26 @@ Limits (internal `FrameConstants` in `NetConduit.Constants`):
 | `MaxFramePayloadSize` | 16 MiB | Hard cap on a single frame's payload. |
 | `DefaultSlabSize` | 1 MiB | Default per-channel buffer (and typical frame size). |
 
+Read liveness (`MultiplexerOptions`, see [ADR-0002](../adr/0002-framing-liveness-617.md)):
+
+| Knob | Default | Meaning |
+| --- | --- | --- |
+| `FrameReadTimeout` | 30 s | Absolute per-frame deadline for one header+payload read. `Timeout.InfiniteTimeSpan` or `TimeSpan.Zero` disables. |
+| `FrameMinReadRateBytesPerSecond` | 0 (disabled) | Reserved minimum inbound rate; validated but not yet enforced. `0` disables. |
+
+## Liveness
+
+At most `MaxFramePayloadSize` bytes are ever buffered per frame, and the
+buffer grows incrementally as bytes arrive (64 KiB inline fast path, then
+doubling rents capped at the declared length) — no allocation is held for
+bytes not yet received. A frame that stalls past `FrameReadTimeout`
+terminates the session: the reader throws
+`MultiplexerException(ErrorCode.Timeout)` and the mux disconnects with
+`DisconnectReason.TransportError` (subject to the usual reconnect policy).
+A header declaring more than `MaxFramePayloadSize` still fails fast with
+`MultiplexerException(ErrorCode.ProtocolError)` before any rent. The wire
+format is unchanged: 8-byte header, flags, and limits are byte-identical.
+
 ## Frame types (`flags` byte)
 
 `flags` selects the frame type:
