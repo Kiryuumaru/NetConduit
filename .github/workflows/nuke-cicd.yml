@@ -1288,6 +1288,10 @@ jobs:
   NET_CONDUIT_PUBLISH:
     name: Publish NetConduit
     runs-on: ${{ fromJson(needs.PRE_SETUP.outputs.NUKE_PRE_SETUP_NET_CONDUIT_PUBLISH_RUNS_ON) }}
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
     steps:
     - uses: actions/checkout@v6
       with:
@@ -1318,9 +1322,17 @@ jobs:
         restore-keys: |-
           ${{ needs.PRE_SETUP.outputs.NUKE_PRE_SETUP_NET_CONDUIT_PUBLISH_CACHE_RESTORE_KEY }}
           ${{ needs.PRE_SETUP.outputs.NUKE_PRE_SETUP_NET_CONDUIT_PUBLISH_CACHE_MAIN_RESTORE_KEY }}
+    - id: nuget_login
+      name: NuGet login (OIDC)
+      uses: NuGet/login@8d196754b4036150537f80ac539e15c2f1028841 # v1.2.0
+      with:
+        user: Kiryuumaru
+      if: github.event_name == 'push'
     - id: NUKE_RUN
       name: Run Nuke net_conduit_publish
       run: ${{ needs.PRE_SETUP.outputs.NUKE_PRE_SETUP_NET_CONDUIT_PUBLISH_RUN_SCRIPT }} Run --args "net_conduit_publish"
+      env:
+        NUKE_NUGET_AUTH_TOKEN: ${{ steps.nuget_login.outputs.NUGET_API_KEY }}
     - name: Upload common publish artifacts
       uses: actions/upload-artifact@v7
       with:
@@ -1333,12 +1345,16 @@ jobs:
     - NET_CONDUIT_TEST
     - BENCHMARK_TEST
     - NET_CONDUIT_BUILD
-    if: "! failure() && ! cancelled() && needs.PRE_SETUP.outputs.NUKE_PRE_SETUP_NET_CONDUIT_PUBLISH_CONDITION == 'true' && needs.NET_CONDUIT_TEST.result == 'success' && needs.BENCHMARK_TEST.result == 'success' && needs.NET_CONDUIT_BUILD.result == 'success'"
+    if: "github.event_name == 'push' && (! failure() && ! cancelled() && needs.PRE_SETUP.outputs.NUKE_PRE_SETUP_NET_CONDUIT_PUBLISH_CONDITION == 'true' && needs.NET_CONDUIT_TEST.result == 'success' && needs.BENCHMARK_TEST.result == 'success' && needs.NET_CONDUIT_BUILD.result == 'success')"
     env:
       NUKE_PRE_SETUP: ${{ needs.PRE_SETUP.outputs.NUKE_PRE_SETUP }}
   NET_CONDUIT_TRANSIT_STREAM_PUBLISH:
     name: Publish NetConduit.Transit.Stream
     runs-on: ${{ fromJson(needs.PRE_SETUP.outputs.NUKE_PRE_SETUP_NET_CONDUIT_TRANSIT_STREAM_PUBLISH_RUNS_ON) }}
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
     steps:
     - uses: actions/checkout@v6
       with:
@@ -1369,9 +1385,17 @@ jobs:
         restore-keys: |-
           ${{ needs.PRE_SETUP.outputs.NUKE_PRE_SETUP_NET_CONDUIT_TRANSIT_STREAM_PUBLISH_CACHE_RESTORE_KEY }}
           ${{ needs.PRE_SETUP.outputs.NUKE_PRE_SETUP_NET_CONDUIT_TRANSIT_STREAM_PUBLISH_CACHE_MAIN_RESTORE_KEY }}
+    - id: nuget_login
+      name: NuGet login (OIDC)
+      uses: NuGet/login@8d196754b4036150537f80ac539e15c2f1028841 # v1.2.0
+      with:
+        user: Kiryuumaru
+      if: github.event_name == 'push'
     - id: NUKE_RUN
       name: Run Nuke net_conduit_transit_stream_publish
       run: ${{ needs.PRE_SETUP.outputs.NUKE_PRE_SETUP_NET_CONDUIT_TRANSIT_STREAM_PUBLISH_RUN_SCRIPT }} Run --args "net_conduit_transit_stream_publish"
+      env:
+        NUKE_NUGET_AUTH_TOKEN: ${{ steps.nuget_login.outputs.NUGET_API_KEY }}
     - name: Upload common publish artifacts
       uses: actions/upload-artifact@v7
       with:
@@ -1384,12 +1408,16 @@ jobs:
     - NET_CONDUIT_TRANSIT_STREAM_TEST
     - BENCHMARK_TEST
     - NET_CONDUIT_TRANSIT_STREAM_BUILD
-    if: "! failure() && ! cancelled() && needs.PRE_SETUP.outputs.NUKE_PRE_SETUP_NET_CONDUIT_TRANSIT_STREAM_PUBLISH_CONDITION == 'true' && needs.NET_CONDUIT_TRANSIT_STREAM_TEST.result == 'success' && needs.BENCHMARK_TEST.result == 'success' && needs.NET_CONDUIT_TRANSIT_STREAM_BUILD.result == 'success'"
+    if: "github.event_name == 'push' && (! failure() && ! cancelled() && needs.PRE_SETUP.outputs.NUKE_PRE_SETUP_NET_CONDUIT_TRANSIT_STREAM_PUBLISH_CONDITION == 'true' && needs.NET_CONDUIT_TRANSIT_STREAM_TEST.result == 'success' && needs.BENCHMARK_TEST.result == 'success' && needs.NET_CONDUIT_TRANSIT_STREAM_BUILD.result == 'success')"
     env:
       NUKE_PRE_SETUP: ${{ needs.PRE_SETUP.outputs.NUKE_PRE_SETUP }}
   NET_CONDUIT_TRANSIT_DUPLEX_STREAM_PUBLISH:
     name: Publish NetConduit.Transit.DuplexStream
     runs-on: ${{ fromJson(needs.PRE_SETUP.outputs.NUKE_PRE_SETUP_NET_CONDUIT_TRANSIT_DUPLEX_STREAM_PUBLISH_RUNS_ON) }}
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
     steps:
     - uses: actions/checkout@v6
       with:
@@ -1420,9 +1448,17 @@ jobs:
         restore-keys: |-
           ${{ needs.PRE_SETUP.outputs.NUKE_PRE_SETUP_NET_CONDUIT_TRANSIT_DUPLEX_STREAM_PUBLISH_CACHE_RESTORE_KEY }}
           ${{ needs.PRE_SETUP.outputs.NUKE_PRE_SETUP_NET_CONDUIT_TRANSIT_DUPLEX_STREAM_PUBLISH_CACHE_MAIN_RESTORE_KEY }}
+    - id: nuget_login
+      name: NuGet login (OIDC)
+      uses: NuGet/login@8d196754b4036150537f80ac539e15c2f1028841 # v1.2.0
+      with:
+        user: Kiryuumaru
+      if: github.event_name == 'push'
     - id: NUKE_RUN
       name: Run Nuke net_conduit_transit_duplex_stream_publish
       run: ${{ needs.PRE_SETUP.outputs.NUKE_PRE_SETUP_NET_CONDUIT_TRANSIT_DUPLEX_STREAM_PUBLISH_RUN_SCRIPT }} Run --args "net_conduit_transit_duplex_stream_publish"
+      env:
+        NUKE_NUGET_AUTH_TOKEN: ${{ steps.nuget_login.outputs.NUGET_API_KEY }}
     - name: Upload common publish artifacts
       uses: actions/upload-artifact@v7
       with:
@@ -1435,12 +1471,16 @@ jobs:
     - NET_CONDUIT_TRANSIT_DUPLEX_STREAM_TEST
     - BENCHMARK_TEST
     - NET_CONDUIT_TRANSIT_DUPLEX_STREAM_BUILD
-    if: "! failure() && ! cancelled() && needs.PRE_SETUP.outputs.NUKE_PRE_SETUP_NET_CONDUIT_TRANSIT_DUPLEX_STREAM_PUBLISH_CONDITION == 'true' && needs.NET_CONDUIT_TRANSIT_DUPLEX_STREAM_TEST.result == 'success' && needs.BENCHMARK_TEST.result == 'success' && needs.NET_CONDUIT_TRANSIT_DUPLEX_STREAM_BUILD.result == 'success'"
+    if: "github.event_name == 'push' && (! failure() && ! cancelled() && needs.PRE_SETUP.outputs.NUKE_PRE_SETUP_NET_CONDUIT_TRANSIT_DUPLEX_STREAM_PUBLISH_CONDITION == 'true' && needs.NET_CONDUIT_TRANSIT_DUPLEX_STREAM_TEST.result == 'success' && needs.BENCHMARK_TEST.result == 'success' && needs.NET_CONDUIT_TRANSIT_DUPLEX_STREAM_BUILD.result == 'success')"
     env:
       NUKE_PRE_SETUP: ${{ needs.PRE_SETUP.outputs.NUKE_PRE_SETUP }}
   NET_CONDUIT_TRANSIT_MESSAGE_PUBLISH:
     name: Publish NetConduit.Transit.Message
     runs-on: ${{ fromJson(needs.PRE_SETUP.outputs.NUKE_PRE_SETUP_NET_CONDUIT_TRANSIT_MESSAGE_PUBLISH_RUNS_ON) }}
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
     steps:
     - uses: actions/checkout@v6
       with:
@@ -1471,9 +1511,17 @@ jobs:
         restore-keys: |-
           ${{ needs.PRE_SETUP.outputs.NUKE_PRE_SETUP_NET_CONDUIT_TRANSIT_MESSAGE_PUBLISH_CACHE_RESTORE_KEY }}
           ${{ needs.PRE_SETUP.outputs.NUKE_PRE_SETUP_NET_CONDUIT_TRANSIT_MESSAGE_PUBLISH_CACHE_MAIN_RESTORE_KEY }}
+    - id: nuget_login
+      name: NuGet login (OIDC)
+      uses: NuGet/login@8d196754b4036150537f80ac539e15c2f1028841 # v1.2.0
+      with:
+        user: Kiryuumaru
+      if: github.event_name == 'push'
     - id: NUKE_RUN
       name: Run Nuke net_conduit_transit_message_publish
       run: ${{ needs.PRE_SETUP.outputs.NUKE_PRE_SETUP_NET_CONDUIT_TRANSIT_MESSAGE_PUBLISH_RUN_SCRIPT }} Run --args "net_conduit_transit_message_publish"
+      env:
+        NUKE_NUGET_AUTH_TOKEN: ${{ steps.nuget_login.outputs.NUGET_API_KEY }}
     - name: Upload common publish artifacts
       uses: actions/upload-artifact@v7
       with:
@@ -1486,12 +1534,16 @@ jobs:
     - NET_CONDUIT_TRANSIT_MESSAGE_TEST
     - BENCHMARK_TEST
     - NET_CONDUIT_TRANSIT_MESSAGE_BUILD
-    if: "! failure() && ! cancelled() && needs.PRE_SETUP.outputs.NUKE_PRE_SETUP_NET_CONDUIT_TRANSIT_MESSAGE_PUBLISH_CONDITION == 'true' && needs.NET_CONDUIT_TRANSIT_MESSAGE_TEST.result == 'success' && needs.BENCHMARK_TEST.result == 'success' && needs.NET_CONDUIT_TRANSIT_MESSAGE_BUILD.result == 'success'"
+    if: "github.event_name == 'push' && (! failure() && ! cancelled() && needs.PRE_SETUP.outputs.NUKE_PRE_SETUP_NET_CONDUIT_TRANSIT_MESSAGE_PUBLISH_CONDITION == 'true' && needs.NET_CONDUIT_TRANSIT_MESSAGE_TEST.result == 'success' && needs.BENCHMARK_TEST.result == 'success' && needs.NET_CONDUIT_TRANSIT_MESSAGE_BUILD.result == 'success')"
     env:
       NUKE_PRE_SETUP: ${{ needs.PRE_SETUP.outputs.NUKE_PRE_SETUP }}
   NET_CONDUIT_TRANSIT_DELTA_MESSAGE_PUBLISH:
     name: Publish NetConduit.Transit.DeltaMessage
     runs-on: ${{ fromJson(needs.PRE_SETUP.outputs.NUKE_PRE_SETUP_NET_CONDUIT_TRANSIT_DELTA_MESSAGE_PUBLISH_RUNS_ON) }}
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
     steps:
     - uses: actions/checkout@v6
       with:
@@ -1522,9 +1574,17 @@ jobs:
         restore-keys: |-
           ${{ needs.PRE_SETUP.outputs.NUKE_PRE_SETUP_NET_CONDUIT_TRANSIT_DELTA_MESSAGE_PUBLISH_CACHE_RESTORE_KEY }}
           ${{ needs.PRE_SETUP.outputs.NUKE_PRE_SETUP_NET_CONDUIT_TRANSIT_DELTA_MESSAGE_PUBLISH_CACHE_MAIN_RESTORE_KEY }}
+    - id: nuget_login
+      name: NuGet login (OIDC)
+      uses: NuGet/login@8d196754b4036150537f80ac539e15c2f1028841 # v1.2.0
+      with:
+        user: Kiryuumaru
+      if: github.event_name == 'push'
     - id: NUKE_RUN
       name: Run Nuke net_conduit_transit_delta_message_publish
       run: ${{ needs.PRE_SETUP.outputs.NUKE_PRE_SETUP_NET_CONDUIT_TRANSIT_DELTA_MESSAGE_PUBLISH_RUN_SCRIPT }} Run --args "net_conduit_transit_delta_message_publish"
+      env:
+        NUKE_NUGET_AUTH_TOKEN: ${{ steps.nuget_login.outputs.NUGET_API_KEY }}
     - name: Upload common publish artifacts
       uses: actions/upload-artifact@v7
       with:
@@ -1537,12 +1597,16 @@ jobs:
     - NET_CONDUIT_TRANSIT_DELTA_MESSAGE_TEST
     - BENCHMARK_TEST
     - NET_CONDUIT_TRANSIT_DELTA_MESSAGE_BUILD
-    if: "! failure() && ! cancelled() && needs.PRE_SETUP.outputs.NUKE_PRE_SETUP_NET_CONDUIT_TRANSIT_DELTA_MESSAGE_PUBLISH_CONDITION == 'true' && needs.NET_CONDUIT_TRANSIT_DELTA_MESSAGE_TEST.result == 'success' && needs.BENCHMARK_TEST.result == 'success' && needs.NET_CONDUIT_TRANSIT_DELTA_MESSAGE_BUILD.result == 'success'"
+    if: "github.event_name == 'push' && (! failure() && ! cancelled() && needs.PRE_SETUP.outputs.NUKE_PRE_SETUP_NET_CONDUIT_TRANSIT_DELTA_MESSAGE_PUBLISH_CONDITION == 'true' && needs.NET_CONDUIT_TRANSIT_DELTA_MESSAGE_TEST.result == 'success' && needs.BENCHMARK_TEST.result == 'success' && needs.NET_CONDUIT_TRANSIT_DELTA_MESSAGE_BUILD.result == 'success')"
     env:
       NUKE_PRE_SETUP: ${{ needs.PRE_SETUP.outputs.NUKE_PRE_SETUP }}
   NET_CONDUIT_TRANSPORT_TCP_PUBLISH:
     name: Publish NetConduit.Transport.Tcp
     runs-on: ${{ fromJson(needs.PRE_SETUP.outputs.NUKE_PRE_SETUP_NET_CONDUIT_TRANSPORT_TCP_PUBLISH_RUNS_ON) }}
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
     steps:
     - uses: actions/checkout@v6
       with:
@@ -1573,9 +1637,17 @@ jobs:
         restore-keys: |-
           ${{ needs.PRE_SETUP.outputs.NUKE_PRE_SETUP_NET_CONDUIT_TRANSPORT_TCP_PUBLISH_CACHE_RESTORE_KEY }}
           ${{ needs.PRE_SETUP.outputs.NUKE_PRE_SETUP_NET_CONDUIT_TRANSPORT_TCP_PUBLISH_CACHE_MAIN_RESTORE_KEY }}
+    - id: nuget_login
+      name: NuGet login (OIDC)
+      uses: NuGet/login@8d196754b4036150537f80ac539e15c2f1028841 # v1.2.0
+      with:
+        user: Kiryuumaru
+      if: github.event_name == 'push'
     - id: NUKE_RUN
       name: Run Nuke net_conduit_transport_tcp_publish
       run: ${{ needs.PRE_SETUP.outputs.NUKE_PRE_SETUP_NET_CONDUIT_TRANSPORT_TCP_PUBLISH_RUN_SCRIPT }} Run --args "net_conduit_transport_tcp_publish"
+      env:
+        NUKE_NUGET_AUTH_TOKEN: ${{ steps.nuget_login.outputs.NUGET_API_KEY }}
     - name: Upload common publish artifacts
       uses: actions/upload-artifact@v7
       with:
@@ -1588,12 +1660,16 @@ jobs:
     - NET_CONDUIT_TRANSPORT_TCP_TEST
     - BENCHMARK_TEST
     - NET_CONDUIT_TRANSPORT_TCP_BUILD
-    if: "! failure() && ! cancelled() && needs.PRE_SETUP.outputs.NUKE_PRE_SETUP_NET_CONDUIT_TRANSPORT_TCP_PUBLISH_CONDITION == 'true' && needs.NET_CONDUIT_TRANSPORT_TCP_TEST.result == 'success' && needs.BENCHMARK_TEST.result == 'success' && needs.NET_CONDUIT_TRANSPORT_TCP_BUILD.result == 'success'"
+    if: "github.event_name == 'push' && (! failure() && ! cancelled() && needs.PRE_SETUP.outputs.NUKE_PRE_SETUP_NET_CONDUIT_TRANSPORT_TCP_PUBLISH_CONDITION == 'true' && needs.NET_CONDUIT_TRANSPORT_TCP_TEST.result == 'success' && needs.BENCHMARK_TEST.result == 'success' && needs.NET_CONDUIT_TRANSPORT_TCP_BUILD.result == 'success')"
     env:
       NUKE_PRE_SETUP: ${{ needs.PRE_SETUP.outputs.NUKE_PRE_SETUP }}
   NET_CONDUIT_TRANSPORT_WEBSOCKET_PUBLISH:
     name: Publish NetConduit.Transport.WebSocket
     runs-on: ${{ fromJson(needs.PRE_SETUP.outputs.NUKE_PRE_SETUP_NET_CONDUIT_TRANSPORT_WEBSOCKET_PUBLISH_RUNS_ON) }}
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
     steps:
     - uses: actions/checkout@v6
       with:
@@ -1624,9 +1700,17 @@ jobs:
         restore-keys: |-
           ${{ needs.PRE_SETUP.outputs.NUKE_PRE_SETUP_NET_CONDUIT_TRANSPORT_WEBSOCKET_PUBLISH_CACHE_RESTORE_KEY }}
           ${{ needs.PRE_SETUP.outputs.NUKE_PRE_SETUP_NET_CONDUIT_TRANSPORT_WEBSOCKET_PUBLISH_CACHE_MAIN_RESTORE_KEY }}
+    - id: nuget_login
+      name: NuGet login (OIDC)
+      uses: NuGet/login@8d196754b4036150537f80ac539e15c2f1028841 # v1.2.0
+      with:
+        user: Kiryuumaru
+      if: github.event_name == 'push'
     - id: NUKE_RUN
       name: Run Nuke net_conduit_transport_websocket_publish
       run: ${{ needs.PRE_SETUP.outputs.NUKE_PRE_SETUP_NET_CONDUIT_TRANSPORT_WEBSOCKET_PUBLISH_RUN_SCRIPT }} Run --args "net_conduit_transport_websocket_publish"
+      env:
+        NUKE_NUGET_AUTH_TOKEN: ${{ steps.nuget_login.outputs.NUGET_API_KEY }}
     - name: Upload common publish artifacts
       uses: actions/upload-artifact@v7
       with:
@@ -1639,12 +1723,16 @@ jobs:
     - NET_CONDUIT_TRANSPORT_WEBSOCKET_TEST
     - BENCHMARK_TEST
     - NET_CONDUIT_TRANSPORT_WEBSOCKET_BUILD
-    if: "! failure() && ! cancelled() && needs.PRE_SETUP.outputs.NUKE_PRE_SETUP_NET_CONDUIT_TRANSPORT_WEBSOCKET_PUBLISH_CONDITION == 'true' && needs.NET_CONDUIT_TRANSPORT_WEBSOCKET_TEST.result == 'success' && needs.BENCHMARK_TEST.result == 'success' && needs.NET_CONDUIT_TRANSPORT_WEBSOCKET_BUILD.result == 'success'"
+    if: "github.event_name == 'push' && (! failure() && ! cancelled() && needs.PRE_SETUP.outputs.NUKE_PRE_SETUP_NET_CONDUIT_TRANSPORT_WEBSOCKET_PUBLISH_CONDITION == 'true' && needs.NET_CONDUIT_TRANSPORT_WEBSOCKET_TEST.result == 'success' && needs.BENCHMARK_TEST.result == 'success' && needs.NET_CONDUIT_TRANSPORT_WEBSOCKET_BUILD.result == 'success')"
     env:
       NUKE_PRE_SETUP: ${{ needs.PRE_SETUP.outputs.NUKE_PRE_SETUP }}
   NET_CONDUIT_TRANSPORT_UDP_PUBLISH:
     name: Publish NetConduit.Transport.Udp
     runs-on: ${{ fromJson(needs.PRE_SETUP.outputs.NUKE_PRE_SETUP_NET_CONDUIT_TRANSPORT_UDP_PUBLISH_RUNS_ON) }}
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
     steps:
     - uses: actions/checkout@v6
       with:
@@ -1675,9 +1763,17 @@ jobs:
         restore-keys: |-
           ${{ needs.PRE_SETUP.outputs.NUKE_PRE_SETUP_NET_CONDUIT_TRANSPORT_UDP_PUBLISH_CACHE_RESTORE_KEY }}
           ${{ needs.PRE_SETUP.outputs.NUKE_PRE_SETUP_NET_CONDUIT_TRANSPORT_UDP_PUBLISH_CACHE_MAIN_RESTORE_KEY }}
+    - id: nuget_login
+      name: NuGet login (OIDC)
+      uses: NuGet/login@8d196754b4036150537f80ac539e15c2f1028841 # v1.2.0
+      with:
+        user: Kiryuumaru
+      if: github.event_name == 'push'
     - id: NUKE_RUN
       name: Run Nuke net_conduit_transport_udp_publish
       run: ${{ needs.PRE_SETUP.outputs.NUKE_PRE_SETUP_NET_CONDUIT_TRANSPORT_UDP_PUBLISH_RUN_SCRIPT }} Run --args "net_conduit_transport_udp_publish"
+      env:
+        NUKE_NUGET_AUTH_TOKEN: ${{ steps.nuget_login.outputs.NUGET_API_KEY }}
     - name: Upload common publish artifacts
       uses: actions/upload-artifact@v7
       with:
@@ -1690,12 +1786,16 @@ jobs:
     - NET_CONDUIT_TRANSPORT_UDP_TEST
     - BENCHMARK_TEST
     - NET_CONDUIT_TRANSPORT_UDP_BUILD
-    if: "! failure() && ! cancelled() && needs.PRE_SETUP.outputs.NUKE_PRE_SETUP_NET_CONDUIT_TRANSPORT_UDP_PUBLISH_CONDITION == 'true' && needs.NET_CONDUIT_TRANSPORT_UDP_TEST.result == 'success' && needs.BENCHMARK_TEST.result == 'success' && needs.NET_CONDUIT_TRANSPORT_UDP_BUILD.result == 'success'"
+    if: "github.event_name == 'push' && (! failure() && ! cancelled() && needs.PRE_SETUP.outputs.NUKE_PRE_SETUP_NET_CONDUIT_TRANSPORT_UDP_PUBLISH_CONDITION == 'true' && needs.NET_CONDUIT_TRANSPORT_UDP_TEST.result == 'success' && needs.BENCHMARK_TEST.result == 'success' && needs.NET_CONDUIT_TRANSPORT_UDP_BUILD.result == 'success')"
     env:
       NUKE_PRE_SETUP: ${{ needs.PRE_SETUP.outputs.NUKE_PRE_SETUP }}
   NET_CONDUIT_TRANSPORT_IPC_PUBLISH:
     name: Publish NetConduit.Transport.Ipc
     runs-on: ${{ fromJson(needs.PRE_SETUP.outputs.NUKE_PRE_SETUP_NET_CONDUIT_TRANSPORT_IPC_PUBLISH_RUNS_ON) }}
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
     steps:
     - uses: actions/checkout@v6
       with:
@@ -1726,9 +1826,17 @@ jobs:
         restore-keys: |-
           ${{ needs.PRE_SETUP.outputs.NUKE_PRE_SETUP_NET_CONDUIT_TRANSPORT_IPC_PUBLISH_CACHE_RESTORE_KEY }}
           ${{ needs.PRE_SETUP.outputs.NUKE_PRE_SETUP_NET_CONDUIT_TRANSPORT_IPC_PUBLISH_CACHE_MAIN_RESTORE_KEY }}
+    - id: nuget_login
+      name: NuGet login (OIDC)
+      uses: NuGet/login@8d196754b4036150537f80ac539e15c2f1028841 # v1.2.0
+      with:
+        user: Kiryuumaru
+      if: github.event_name == 'push'
     - id: NUKE_RUN
       name: Run Nuke net_conduit_transport_ipc_publish
       run: ${{ needs.PRE_SETUP.outputs.NUKE_PRE_SETUP_NET_CONDUIT_TRANSPORT_IPC_PUBLISH_RUN_SCRIPT }} Run --args "net_conduit_transport_ipc_publish"
+      env:
+        NUKE_NUGET_AUTH_TOKEN: ${{ steps.nuget_login.outputs.NUGET_API_KEY }}
     - name: Upload common publish artifacts
       uses: actions/upload-artifact@v7
       with:
@@ -1741,12 +1849,16 @@ jobs:
     - NET_CONDUIT_TRANSPORT_IPC_TEST
     - BENCHMARK_TEST
     - NET_CONDUIT_TRANSPORT_IPC_BUILD
-    if: "! failure() && ! cancelled() && needs.PRE_SETUP.outputs.NUKE_PRE_SETUP_NET_CONDUIT_TRANSPORT_IPC_PUBLISH_CONDITION == 'true' && needs.NET_CONDUIT_TRANSPORT_IPC_TEST.result == 'success' && needs.BENCHMARK_TEST.result == 'success' && needs.NET_CONDUIT_TRANSPORT_IPC_BUILD.result == 'success'"
+    if: "github.event_name == 'push' && (! failure() && ! cancelled() && needs.PRE_SETUP.outputs.NUKE_PRE_SETUP_NET_CONDUIT_TRANSPORT_IPC_PUBLISH_CONDITION == 'true' && needs.NET_CONDUIT_TRANSPORT_IPC_TEST.result == 'success' && needs.BENCHMARK_TEST.result == 'success' && needs.NET_CONDUIT_TRANSPORT_IPC_BUILD.result == 'success')"
     env:
       NUKE_PRE_SETUP: ${{ needs.PRE_SETUP.outputs.NUKE_PRE_SETUP }}
   NET_CONDUIT_TRANSPORT_QUIC_PUBLISH:
     name: Publish NetConduit.Transport.Quic
     runs-on: ${{ fromJson(needs.PRE_SETUP.outputs.NUKE_PRE_SETUP_NET_CONDUIT_TRANSPORT_QUIC_PUBLISH_RUNS_ON) }}
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
     steps:
     - uses: actions/checkout@v6
       with:
@@ -1777,9 +1889,17 @@ jobs:
         restore-keys: |-
           ${{ needs.PRE_SETUP.outputs.NUKE_PRE_SETUP_NET_CONDUIT_TRANSPORT_QUIC_PUBLISH_CACHE_RESTORE_KEY }}
           ${{ needs.PRE_SETUP.outputs.NUKE_PRE_SETUP_NET_CONDUIT_TRANSPORT_QUIC_PUBLISH_CACHE_MAIN_RESTORE_KEY }}
+    - id: nuget_login
+      name: NuGet login (OIDC)
+      uses: NuGet/login@8d196754b4036150537f80ac539e15c2f1028841 # v1.2.0
+      with:
+        user: Kiryuumaru
+      if: github.event_name == 'push'
     - id: NUKE_RUN
       name: Run Nuke net_conduit_transport_quic_publish
       run: ${{ needs.PRE_SETUP.outputs.NUKE_PRE_SETUP_NET_CONDUIT_TRANSPORT_QUIC_PUBLISH_RUN_SCRIPT }} Run --args "net_conduit_transport_quic_publish"
+      env:
+        NUKE_NUGET_AUTH_TOKEN: ${{ steps.nuget_login.outputs.NUGET_API_KEY }}
     - name: Upload common publish artifacts
       uses: actions/upload-artifact@v7
       with:
@@ -1792,7 +1912,7 @@ jobs:
     - NET_CONDUIT_TRANSPORT_QUIC_TEST
     - BENCHMARK_TEST
     - NET_CONDUIT_TRANSPORT_QUIC_BUILD
-    if: "! failure() && ! cancelled() && needs.PRE_SETUP.outputs.NUKE_PRE_SETUP_NET_CONDUIT_TRANSPORT_QUIC_PUBLISH_CONDITION == 'true' && needs.NET_CONDUIT_TRANSPORT_QUIC_TEST.result == 'success' && needs.BENCHMARK_TEST.result == 'success' && needs.NET_CONDUIT_TRANSPORT_QUIC_BUILD.result == 'success'"
+    if: "github.event_name == 'push' && (! failure() && ! cancelled() && needs.PRE_SETUP.outputs.NUKE_PRE_SETUP_NET_CONDUIT_TRANSPORT_QUIC_PUBLISH_CONDITION == 'true' && needs.NET_CONDUIT_TRANSPORT_QUIC_TEST.result == 'success' && needs.BENCHMARK_TEST.result == 'success' && needs.NET_CONDUIT_TRANSPORT_QUIC_BUILD.result == 'success')"
     env:
       NUKE_PRE_SETUP: ${{ needs.PRE_SETUP.outputs.NUKE_PRE_SETUP }}
   POST_SETUP:
@@ -1883,5 +2003,4 @@ jobs:
       NUKE_RUN_RESULT_GITHUB_NET_CONDUIT_TRANSPORT_QUIC_PUBLISH: ${{ needs.NET_CONDUIT_TRANSPORT_QUIC_PUBLISH.result }}
 env:
   GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-  NUKE_NUGET_AUTH_TOKEN: ${{ secrets.NUGET_AUTH_TOKEN }}
   NUKE_GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

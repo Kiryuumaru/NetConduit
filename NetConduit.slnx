@@ -1,5 +1,6 @@
 <Solution>
   <Project Path="build/_build.csproj" />
+  <Project Path="build/WorkflowPatcher.Tests/WorkflowPatcher.Tests.csproj" />
   <Folder Name="/src/">
     <Project Path="src/NetConduit/NetConduit.csproj" />
     <Project Path="src/NetConduit.Transit.Stream/NetConduit.Transit.Stream.csproj" />
