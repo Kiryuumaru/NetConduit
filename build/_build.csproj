@@ -20,4 +20,10 @@
 		<PackageReference Include="System.Security.Cryptography.Xml" Version="10.0.14" />
 	</ItemGroup>
 
+	<ItemGroup>
+		<!-- WorkflowPatcher.Tests is a standalone xUnit project; keep its sources
+		     out of this project's default compile glob. -->
+		<Compile Remove="WorkflowPatcher.Tests/**/*.cs" />
+	</ItemGroup>
+
 </Project>
