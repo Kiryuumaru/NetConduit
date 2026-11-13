@@ -18,8 +18,20 @@ public static class UdpMultiplexer
 
     public static MultiplexerOptions CreateServerOptions(
         int listenPort,
-        ReliableUdpOptions? udpOptions = null);
+        ReliableUdpOptions? udpOptions = null,
+        UdpAcceptOptions? acceptOptions = null);
 }
+
+public sealed record UdpAcceptOptions
+{
+    public TimeSpan VerificationWindow { get; init; } = TimeSpan.FromMilliseconds(300);
+    public int MaxCandidates { get; init; } = 64;
+    public int MaxHellosPerEndpointPerSecond { get; init; } = 20;
+    public int MaxHellosGlobalPerSecond { get; init; } = 1000;
+    public UdpChallengeMode ChallengeMode { get; init; } = UdpChallengeMode.Disabled;
+}
+
+public enum UdpChallengeMode { Disabled, OptIn, Required }
 
 public sealed class ReliableUdpOptions
 {
@@ -59,6 +71,14 @@ await mux.WaitForReadyAsync();
 ## Handshake
 
 The first exchange is a small `NC_HELLO` / `NC_HELLO_ACK` to bind the server to the remote endpoint and verify the protocol version. After that, the multiplexer's normal handshake runs.
+
+### Accept hardening (Issue #616)
+
+The server accept path stays unconnected through a short bounded `VerificationWindow` (default 300 ms, ~1.5 client retry intervals) and sends `NC_HELLO_ACK` to **every** admitted claimant instead of latching the first datagram. A data-proven claimant (real stream bytes observed) wins immediately; a competing first-seen tentative is held through a bounded grace window so a live (retransmitting) competitor can migrate it while the socket is still unconnected. Rate caps (per-endpoint + global HELLO budgets, bounded LRU candidate table, default 64) apply after shape validation and before ACK-send. There is no global accept timeout: an idle server still waits on the caller's cancellation token; only per-attempt verification deadlines bound the competition window.
+
+Residual: a lone idle HELLO still commits as a singleton at its verification deadline (indistinguishable from the HELLO-alone retransmit the existing contract requires), and a rogue that stays live past the grace window still wins the race. Data-proof requires a real `FlagData` stream frame — pure ACK/FIN frames never count (an ACK-all reflector or FIN-only prober cannot win the commit). Defeating the blind-spoof shape requires proof-of-receipt, scaffolded behind `UdpAcceptOptions.ChallengeMode` (`Disabled` default = current wire bytes, old clients connect; `OptIn` accepts v1; `Required` rejects v1 `NC_HELLO` loudly with `InvalidOperationException`, tearing down that accept attempt rather than dropping-and-continuing — dropping would park the one-shot on a silent listener with no logging seam, while the loud throw keeps the rejection observable and the pinned Required tests green).
+
+Remaining HIGH residuals (no wire change in this cut): lone-HELLO-commits (singleton at deadline), after-grace rogue-wins (live past grace), ACK-all reflection (server still ACKs every admitted HELLO via unconnected `SendTo`, so a reflector can elicit ACK traffic — rate caps bound it, they do not remove it).
 
 ## Reconnectable server
 
