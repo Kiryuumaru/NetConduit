@@ -74,7 +74,8 @@ internal static class MuxHandshake
         IStreamPair transport,
         Guid localSessionId,
         int localMaxRecvPayload,
-        CancellationToken ct)
+        CancellationToken ct,
+        TimeSpan? frameReadTimeout = null)
     {
         ValidateLocalMaxRecvPayload(localMaxRecvPayload);
 
@@ -91,7 +92,7 @@ internal static class MuxHandshake
         {
             await transport.WriteStream.WriteAsync(handshake, ct);
             await transport.WriteStream.FlushAsync(ct);
-            (remoteHeader, remotePayload) = await ReadHandshakeFrameAsync(transport.ReadStream, ct);
+            (remoteHeader, remotePayload) = await ReadHandshakeFrameAsync(transport.ReadStream, ct, frameReadTimeout);
         }
         catch (HandshakeTransportException)
         {
@@ -152,7 +153,8 @@ internal static class MuxHandshake
         int localMaxRecvPayload,
         IReadOnlyList<ChannelReplayPosition> localPositions,
         Action<IReadOnlyList<ChannelReplayPosition>> applyRemotePositions,
-        CancellationToken ct)
+        CancellationToken ct,
+        TimeSpan? frameReadTimeout = null)
     {
         ValidateLocalMaxRecvPayload(localMaxRecvPayload);
 
@@ -192,7 +194,7 @@ internal static class MuxHandshake
         {
             await transport.WriteStream.WriteAsync(frame, ct);
             await transport.WriteStream.FlushAsync(ct);
-            (remoteHeader, remotePayload) = await ReadHandshakeFrameAsync(transport.ReadStream, ct);
+            (remoteHeader, remotePayload) = await ReadHandshakeFrameAsync(transport.ReadStream, ct, frameReadTimeout);
         }
         catch (HandshakeTransportException)
         {
@@ -314,24 +316,77 @@ internal static class MuxHandshake
         return trailing / ReconnectChannelEntrySize == channelCount;
     }
 
-    private static async Task<(FrameHeader Header, byte[] Payload)> ReadHandshakeFrameAsync(Stream stream, CancellationToken ct)
+    private static async Task<(FrameHeader Header, byte[] Payload)> ReadHandshakeFrameAsync(Stream stream, CancellationToken ct, TimeSpan? frameReadTimeout = null)
     {
-        byte[] headerBuffer = new byte[FrameHeader.Size];
-        await ReadExactAsync(stream, headerBuffer, ct);
-        var header = FrameHeader.Parse(headerBuffer);
-        // Initial handshake is fixed-size; reconnect handshake is variable due to the
-        // per-channel position vector, bounded by MaxPayloadLength to defend against
-        // a malformed/hostile peer driving an unbounded allocation.
-        if (header.PayloadLength != InitialPayloadLength
-            && (header.PayloadLength < ReconnectHeaderLength
-                || header.PayloadLength > MaxPayloadLength))
+        CancellationTokenSource? frameCts = null;
+        CancellationToken frameCt = ct;
+        if (frameReadTimeout.HasValue && frameReadTimeout.Value != Timeout.InfiniteTimeSpan && frameReadTimeout.Value != TimeSpan.Zero)
         {
-            return (header, []);
+            frameCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            frameCts.CancelAfter(frameReadTimeout.Value);
+            frameCt = frameCts.Token;
         }
 
-        byte[] payload = new byte[header.PayloadLength];
-        await ReadExactAsync(stream, payload, ct);
-        return (header, payload);
+        try
+        {
+            byte[] headerBuffer = new byte[FrameHeader.Size];
+            try
+            {
+                await ReadExactAsync(stream, headerBuffer, frameCt);
+            }
+            catch (OperationCanceledException) when (!ct.IsCancellationRequested)
+            {
+                throw new HandshakeTransportException(
+                    "Handshake frame read timed out.",
+                    new TimeoutException($"Handshake frame read timed out after {frameReadTimeout}."));
+            }
+            var header = FrameHeader.Parse(headerBuffer);
+            // Initial handshake is fixed-size; reconnect handshake is variable due to the
+            // per-channel position vector, bounded by MaxPayloadLength to defend against
+            // a malformed/hostile peer driving an unbounded allocation.
+            if (header.PayloadLength != InitialPayloadLength
+                && (header.PayloadLength < ReconnectHeaderLength
+                    || header.PayloadLength > MaxPayloadLength))
+            {
+                return (header, []);
+            }
+
+            // Incremental growth (#617): never allocate the declared length
+            // up front — grow the buffer as bytes arrive, capped at the
+            // declared PayloadLength under the MaxPayloadLength check above.
+            int received = 0;
+            int capacity = Math.Min(header.PayloadLength, 512);
+            byte[] payload = new byte[capacity];
+            try
+            {
+                while (received < header.PayloadLength)
+                {
+                    if (received == capacity)
+                    {
+                        capacity = Math.Min(header.PayloadLength, capacity * 2);
+                        Array.Resize(ref payload, capacity);
+                    }
+                    int want = Math.Min(capacity, header.PayloadLength) - received;
+                    int read = await stream.ReadAsync(payload.AsMemory(received, want), frameCt);
+                    if (read == 0)
+                        throw new HandshakeTransportException(
+                            "Transport stream closed before the handshake completed.",
+                            new EndOfStreamException("Transport stream closed unexpectedly."));
+                    received += read;
+                }
+            }
+            catch (OperationCanceledException) when (!ct.IsCancellationRequested)
+            {
+                throw new HandshakeTransportException(
+                    "Handshake frame read timed out.",
+                    new TimeoutException($"Handshake frame read timed out after {frameReadTimeout}."));
+            }
+            return (header, payload);
+        }
+        finally
+        {
+            frameCts?.Dispose();
+        }
     }
 
     private static async Task ReadExactAsync(Stream stream, Memory<byte> buffer, CancellationToken ct)

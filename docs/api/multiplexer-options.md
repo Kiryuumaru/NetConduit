@@ -18,6 +18,8 @@ public sealed record MultiplexerOptions
     public TimeSpan  MaxAutoReconnectDelay           { get; init; } = TimeSpan.FromSeconds(30);
     public double    AutoReconnectBackoffMultiplier  { get; init; } = 2.0;
     public TimeSpan  ConnectionTimeout               { get; init; } = TimeSpan.FromSeconds(30);
+    public TimeSpan  FrameReadTimeout                { get; init; } = TimeSpan.FromSeconds(30);
+    public int       FrameMinReadRateBytesPerSecond  { get; init; } = 0;                          // 0 = no rate floor (default)
     public DefaultChannelOptions DefaultChannelOptions { get; init; } = new();
 }
 ```
@@ -37,6 +39,8 @@ public sealed record MultiplexerOptions
 | `MaxAutoReconnectDelay` | 30 s | Cap for exponential backoff. |
 | `AutoReconnectBackoffMultiplier` | 2.0 | Multiplier applied to delay each attempt. |
 | `ConnectionTimeout` | 30 s | Per-attempt timeout passed to `StreamFactory`. |
+| `FrameReadTimeout` | 30 s | Absolute per-frame deadline for one header+payload read. Stalled/slow-drip frames throw `MultiplexerException(ErrorCode.Timeout)` and terminate the session via the transport-error path. Handshake reads inherit it. |
+| `FrameMinReadRateBytesPerSecond` | `0` | Reserved minimum inbound read rate in bytes/second. Validated but not yet enforced — liveness is currently timeout-only. `0` = no rate floor. |
 | `DefaultChannelOptions` | new | Defaults used when `ChannelOptions` aren't specified. |
 
 ## Reconnect behavior
@@ -75,3 +79,7 @@ All validation is enforced in `StreamMultiplexer.Create`; invalid values throw `
 - `MaxAutoReconnectDelay` must be greater than or equal to `AutoReconnectDelay` (the cap cannot be below the base).
 - `AutoReconnectBackoffMultiplier` must be greater than or equal to `1.0` (the term "backoff" implies non-shrinking delay). `NaN` is rejected.
 - `ConnectionTimeout` must be `Timeout.InfiniteTimeSpan`, `TimeSpan.Zero`, or positive. `InfiniteTimeSpan` and `TimeSpan.Zero` both disable per-attempt timeout enforcement.
+- `FrameReadTimeout` must be `Timeout.InfiniteTimeSpan`, `TimeSpan.Zero`, or positive (upper-bounded by the task-delay ceiling like other timing knobs). `InfiniteTimeSpan` and `TimeSpan.Zero` both disable frame-read timeout enforcement on the receive path and the handshake path alike. Negative values other than `InfiniteTimeSpan` are rejected. Warning: `FrameReadTimeout` disabled (`Zero` or `InfiniteTimeSpan`) combined with `PingInterval = Zero` (keepalive off) restores the pre-#617 unbounded hold against a stalled peer — disable one or the other, not both, unless the transport already bounds stalled reads.
+- `FrameMinReadRateBytesPerSecond` must be greater than or equal to `0`. `0` disables rate enforcement (the default; the knob is currently validated but not enforced).
+
+See [Framing protocol](../concepts/framing-protocol.md#liveness) and [ADR-0002](../adr/0002-framing-liveness-617.md).

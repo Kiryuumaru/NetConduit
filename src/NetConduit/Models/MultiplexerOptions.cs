@@ -59,6 +59,21 @@ public sealed record MultiplexerOptions
     /// </summary>
     public TimeSpan ConnectionTimeout { get; init; } = TimeSpan.FromSeconds(30);
 
+    /// <summary>
+    /// Absolute per-frame read deadline covering one header+payload frame iteration on the receive path.
+    /// A stalled or slow-drip frame exceeding this deadline terminates the session via the transport-error
+    /// path (oversize lengths still fail fast with a protocol error at header parse). Set to
+    /// <see cref="Timeout.InfiniteTimeSpan"/> or <see cref="TimeSpan.Zero"/> to disable frame-read
+    /// timeout enforcement. Negative values other than <see cref="Timeout.InfiniteTimeSpan"/> are rejected.
+    /// </summary>
+    public TimeSpan FrameReadTimeout { get; init; } = TimeSpan.FromSeconds(30);
+
+    /// <summary>
+    /// Reserved minimum inbound read rate in bytes per second. Currently validated but not enforced;
+    /// frame liveness is enforced via <see cref="FrameReadTimeout"/>. Zero disables rate enforcement.
+    /// </summary>
+    public int FrameMinReadRateBytesPerSecond { get; init; } = 0;
+
     /// <summary>Default options applied to channels that don't specify their own.</summary>
     public DefaultChannelOptions DefaultChannelOptions { get; init; } = new();
 }
